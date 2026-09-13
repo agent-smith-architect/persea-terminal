@@ -8,4 +8,4 @@
 
 ## LLM use
 
-<!-- Model(s) and reasoning effort; "none" or "unknown" is fine. -->
+<!-- Model(s) and reasoning effort. -->

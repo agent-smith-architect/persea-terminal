@@ -6,8 +6,7 @@ source, tests, examples, and reports.
 
 ## LLM use
 
-Mention the LLM model(s) and reasoning effort used in your PR. `None` or
-`unknown` is fine.
+Mention the LLM model(s) and reasoning effort used in your PR.
 
 ## Development and checks
 
