@@ -82,7 +82,7 @@ agent to work through it with you:
    through your tailnet policy. Persea Terminal also checks your configured login.
 4. **Open your terminals.** Visit the Service's HTTPS URL from an allowed device.
    In the dashboard, choose a configured Unix user and open an existing tmux
-   session—or create a new one where session creation is enabled.
+   session or create a new one.
 
 Keep your host manifest and credentials outside the repository.
 
