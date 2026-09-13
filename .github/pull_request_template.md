@@ -6,12 +6,6 @@
 
 <!-- State what you tested and the results. -->
 
-## LLM disclosure
+## LLM use
 
-<!-- List each model/version, its reasoning effort, and what it helped with.
-Write "none" if no LLM was used, or "not exposed by the tool" for unknown settings.
-See CONTRIBUTING.md for the contribution guidelines. -->
-
-- Models:
-- Reasoning effort:
-- Used for:
+<!-- Model(s) and reasoning effort; "none" or "unknown" is fine. -->

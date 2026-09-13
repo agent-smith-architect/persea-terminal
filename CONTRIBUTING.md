@@ -4,15 +4,10 @@ Keep changes bounded to one owner boundary and preserve fail-closed behavior.
 Use synthetic realm names, accounts, hosts, identities, and terminal content in
 source, tests, examples, and reports.
 
-## LLM disclosure
+## LLM use
 
-In your pull request description, list each LLM used for the contribution,
-including its model name/version, reasoning (thinking) effort level, and a brief
-description of its role, such as implementation, testing, or review. For direct
-commits, include this information in the commit message.
-
-Write `none` if you did not use an LLM. If your tool does not expose the exact
-model or effort setting, write `not exposed by the tool` rather than guessing.
+Mention the LLM model(s) and reasoning effort used in your PR. `None` or
+`unknown` is fine.
 
 ## Development and checks
 
