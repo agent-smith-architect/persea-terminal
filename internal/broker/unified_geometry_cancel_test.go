@@ -104,7 +104,20 @@ func TestCanceledBeginGeometryCannotStrandPause(t *testing.T) {
 	if err := runtime.WritePane(harness.key, []byte("AFTER-CANCEL")); err != nil {
 		t.Fatalf("write after typed refusal: %v", err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	// Flush accepted output and wait for its dispatch, without changing pause
+	// ownership. A fixed sleep can mistake a delayed worker for a stranded pause.
+	if err := runtime.Boundary(harness.key, "cancel_probe"); err != nil {
+		t.Fatalf("flush after typed refusal: %v", err)
+	}
+	dispatched, err := runtime.startDispatchFence()
+	if err != nil {
+		t.Fatalf("dispatch after typed refusal: %v", err)
+	}
+	select {
+	case <-dispatched:
+	case <-time.After(5 * time.Second):
+		t.Fatal("output dispatch after typed refusal did not settle")
+	}
 	if got := harness.down.outputText(); got != "PENDINGAFTER-CANCEL" {
 		// Restore the disposable harness before reporting the RED so its cleanup
 		// does not wait on the deliberately stranded hold.

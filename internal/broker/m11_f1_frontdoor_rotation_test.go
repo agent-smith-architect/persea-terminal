@@ -419,13 +419,20 @@ func TestM11F1AutomaticRotationFreshFrontdoorController(t *testing.T) {
 	predecessorKey = adoption.Key
 	predecessorCloseMu.Unlock()
 
+	const pressureComplete = "M11-F1-PRESSURE-COMPLETE"
 	disposable.run("send-keys", "-t", "m11_f1_live:",
-		`awk 'BEGIN { for (i=0; i<102000; i++) printf "M11-AUTO-%06d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", i; fflush() }'`, "Enter")
+		`awk 'BEGIN { for (i=0; i<102000; i++) printf "M11-AUTO-%06d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", i; print "`+pressureComplete+`"; fflush() }'`, "Enter")
 	pollUntil(t, 15*time.Second, "automatic journal pressure", func() bool {
 		effects.journalMu.Lock()
 		logical, cap := effects.realm.PaneLogical(adoption.Key)
 		effects.journalMu.Unlock()
 		return logical*4 >= cap*3
+	})
+	// Finish the pressure producer before attaching. Otherwise its remaining
+	// burst can evict the subscriber for lag while this test is specifically
+	// asserting the rotation close reason.
+	pollUntil(t, 15*time.Second, "pressure producer recorded", func() bool {
+		return bytes.Contains((&adoptionFixture{effects: effects}).journalBytes(t, adoption.Key), []byte(pressureComplete))
 	})
 
 	predecessorHandle := m11F1InventoryHandle(t, client, sessionID)
@@ -448,11 +455,14 @@ func TestM11F1AutomaticRotationFreshFrontdoorController(t *testing.T) {
 		successorKey = effects.active[sessionID]
 		return successorKey != (unifiedjournal.PaneKey{}) && successorKey != adoption.Key
 	})
-	pollUntil(t, 5*time.Second, "exact predecessor subscriber close", func() bool {
-		predecessorCloseMu.Lock()
-		defer predecessorCloseMu.Unlock()
-		return predecessorCloseCount == 1 && predecessorCloseReason == proto.SubscriberClosedGenerationRotated
-	})
+	// The active-key swap and predecessor close share the provider lock, so
+	// observing the successor above also observes the completed close.
+	predecessorCloseMu.Lock()
+	closeCount, closeReason := predecessorCloseCount, predecessorCloseReason
+	predecessorCloseMu.Unlock()
+	if closeCount != 1 || closeReason != proto.SubscriberClosedGenerationRotated {
+		t.Fatalf("predecessor subscriber closes=%d reason=%q, want one %q", closeCount, closeReason, proto.SubscriberClosedGenerationRotated)
+	}
 	_ = predecessorWS.Close()
 	pollUntil(t, 10*time.Second, "automatic rotation settlement", func() bool {
 		effects.mu.Lock()
