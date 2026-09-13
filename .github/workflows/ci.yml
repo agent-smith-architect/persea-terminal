@@ -7,6 +7,10 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 env:
   TMPDIR: /tmp
 
@@ -26,8 +30,23 @@ jobs:
       - run: CGO_ENABLED=1 go test -race ./...
 
   ui:
-    name: UI
+    name: UI (${{ matrix.name }})
     runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Contracts
+            command: npm test
+          - name: Dashboard
+            command: npm run test:browser:dashboard
+          - name: Terminal
+            command: npm run test:browser:terminal
+          - name: Controls
+            command: npm run test:browser:controls
+          - name: Workspace
+            command: npm run test:browser:workspace
     defaults:
       run:
         working-directory: ui
@@ -50,8 +69,9 @@ jobs:
         run: node test/ci_reachability.cjs
       - run: npm ci
       - run: npx --no-install playwright install --with-deps chromium webkit
-      - run: npm run test:ci
+      - run: ${{ matrix.command }}
       - name: Local runtime lifecycle
+        if: matrix.name == 'Workspace'
         run: bash ../scripts/local-runtime-test.sh
 
   deploy-checks:

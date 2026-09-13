@@ -26,6 +26,10 @@ Browser tests use the locally declared Playwright package and its installed
 browsers. `CHROME_BIN` may select an absolute Chromium-family executable for
 additional compatibility checks. Browser installation with system dependencies
 may need root; run the application and normal suites as an unprivileged user.
+The browser groups are `test:browser:dashboard`, `test:browser:terminal`,
+`test:browser:controls`, and `test:browser:workspace`; run one with `npm run`
+for focused work. CI runs them independently. `npm run test:ci` runs everything
+locally, and the reachability check prevents CI from omitting a group.
 The hermetic deployment suite creates a temporary test environment. Run it as
 a normal user with noninteractive sudo available for its scoped privilege-boundary
 checks; it must not be pointed at production.
