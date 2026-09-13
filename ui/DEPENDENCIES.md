@@ -1,26 +1,24 @@
 # Dependency maintenance
 
-The supported toolchain is Node/npm. Use the Node version in `.nvmrc` and the
-npm version in `package.json` (`packageManager`). `npm ci` consumes the committed
+Use the latest stable Node, npm and Go releases. `.nvmrc` tracks Node Current;
+CI selects Go `stable` and installs `npm@latest`. `npm ci` consumes the committed
 lockfile. The npm lifecycle policy explicitly allows esbuild's installation
 step; the project's `postinstall` applies the xterm patch and fails if it no
 longer applies. Do not bypass lifecycle scripts in a release build.
 
-Go's minimum language/toolchain baseline and selected compiler are in `go.mod`.
-Use the selected compiler in CI and release builds. Keep the baseline on a
-supported Go series; a newer selected compiler does not require raising the
-language baseline unnecessarily. An older Go launcher may download the selected
-compiler, so offline builds must provision it first.
+`go.mod` declares the minimum supported Go version, not a compiler pin.
+Install the current compiler before building; offline builds must provision
+their tools and dependencies in advance.
 
-Dependabot proposes weekly npm, Go module, and GitHub Action updates. Review and
-merge them after the normal tests, including browser and race checks. Major
-updates require release-note review. Keep exact lockfiles and pinned Action
-commits: automatic installation of `latest` makes a previously tested release
-unreproducible. Target the latest stable releases, including Node's Current
-release and the latest Go compiler; update `.nvmrc` and `go.mod` alongside the
-dependency checks. Recorded versions identify the release actually tested.
-Dependency bots do not replace compiler maintenance. Do not enable automatic
-merging of terminal-library or toolchain updates without their regression gates.
+UI development dependencies use `latest`; run `npm update` to refresh the
+lockfile, then run the normal tests, including browser checks. `npm ci` deliberately
+reproduces that recorded dependency set. Dependabot proposes weekly lockfile,
+Go module and GitHub Action updates. Actions track their stable major release,
+receiving minor and patch updates automatically. Go modules require concrete
+versions; update them with `go get -u ./...` and run the race checks.
+
+The xterm dependency remains exact because its patch is version-specific.
+Review terminal-library and major dependency changes before merging updates.
 
 `npm audit` and a current Go vulnerability scanner are useful release checks;
 zero findings means no matching advisory was found, not that the code is secure.

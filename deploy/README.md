@@ -128,8 +128,8 @@ they are not a reason to relax private state permissions.
 
 ### Build toolchain
 
-Use the Go compiler selected in `go.mod`, the Node version in `ui/.nvmrc`, and
-the npm version in `ui/package.json`. Build checks also need tmux, less, clang,
+Use the latest stable Go, Node and npm releases; `go.mod` and `ui/package.json`
+declare minimum requirements. Build checks also need tmux, less, clang,
 Python 3, and Chromium's system libraries. From a prepared checkout, install the
 OS browser libraries with `cd ui && npm ci && npx --no-install playwright install-deps chromium`
 (this step may request root). The installer downloads the locked Playwright

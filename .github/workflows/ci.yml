@@ -15,10 +15,11 @@ jobs:
     name: Go
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: stable
+          check-latest: true
           cache: true
       - run: sudo apt-get update && sudo apt-get install -y tmux less
       - run: go vet ./... && go build ./...
@@ -31,18 +32,20 @@ jobs:
       run:
         working-directory: ui
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version-file: ui/.nvmrc
+          check-latest: true
           cache: npm
           cache-dependency-path: ui/package-lock.json
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@v7
         with:
-          go-version-file: go.mod
+          go-version: stable
+          check-latest: true
       - run: sudo apt-get update && sudo apt-get install -y tmux less clang
       - name: Package manager
-        run: npm install --global "$(node -p 'require("./package.json").packageManager')"
+        run: npm install --global npm@latest
       - name: CI reachability
         run: node test/ci_reachability.cjs
       - run: npm ci
@@ -55,7 +58,7 @@ jobs:
     name: Deploy tooling
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/checkout@v7
       - run: sudo apt-get update && sudo apt-get install -y ripgrep
       - run: python3 deploy/tests/host-config-test.py
       - run: bash deploy/tests/hermetic-deploy-test.sh

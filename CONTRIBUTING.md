@@ -5,9 +5,9 @@ Use synthetic realm names, accounts, hosts, identities, and terminal content in
 source, tests, examples, and reports.
 
 Use Linux (or a Linux VM/WSL2), tmux, less, ripgrep, Python 3, a C compiler for the Go race
-detector, and the toolchain versions in `go.mod`, `ui/.nvmrc` and
-`ui/package.json`. Install the pinned npm version if your Node distribution
-ships a different one. Before submitting a change, run from the repository root:
+detector, and the latest stable Go, Node and npm releases. `go.mod` and
+`ui/package.json` declare minimum requirements; `ui/.nvmrc` tracks Node Current.
+Before submitting a change, run from the repository directory:
 
 ```sh
 umask 0022
@@ -43,7 +43,5 @@ geometry inside the same tmux transaction.
 Do not commit generated `ui/dist`, local runtime state, real usernames, tailnet
 names, credentials, cookies, capability handles, or production logs.
 
-The supported terminal is Unified. Retired implementations and tests remain in
-Git history; do not restore them as compatibility fixtures.
 See [dependency maintenance](ui/DEPENDENCIES.md)
 before changing xterm, compilers, package versions, or the lockfile.
