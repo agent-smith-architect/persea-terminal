@@ -43,7 +43,12 @@ function scan(text) {
 for (const name of scriptNames(stripComments(workflow))) visitScript(name);
 // CI may run browser groups in parallel, but it must cover the same groups
 // as the local aggregate command, along with the baseline contracts.
-for (const name of ["test", ...scriptNames(scripts["test:browser"] || "")]) {
+// These causal suites remain mandatory even when their containing groups move.
+const requiredBrowserLanes = [
+  "test:loading-state-browser", "test:ux10-browser", "test:ux11-browser",
+  "test:ux12-refit-accounting-browser",
+];
+for (const name of ["test", ...scriptNames(scripts["test:browser"] || ""), ...requiredBrowserLanes]) {
   if (!visited.has(`script:${name}`)) failures.push(`test group is unreachable from CI: ${name}`);
 }
 const harnesses = fs.readdirSync(__dirname).filter((name) => name.endsWith("_browser_harness.ts"));

@@ -138,13 +138,10 @@ assert(source.includes('/^(?:0|[1-9][0-9]*)$/'), "size inputs must use strict AS
 assert(source.includes("bindExplainedTapActivation"), "explainer controls must use the composed gesture state machine");
 assert(source.includes('this.openExplainer("select"') && source.includes('this.openExplainer("view"'), "contextual Select/Copy and moved disclosure explanations must be wired");
 assert(packageJSON.scripts?.["test:ux10-browser"]?.includes("run_ux10_browser.cjs") === true, "UX-10 browser lane must have a package script");
-assert(packageJSON.scripts?.["test:browser"]?.includes("npm run test:ux10-browser") === true, "UX-10 browser lane must belong to test:browser");
 assert(packageJSON.scripts?.["test:ux11-browser"]?.includes("run_ux11_browser.cjs") === true, "UX-11 browser lane must have a package script");
-assert(packageJSON.scripts?.["test:browser"]?.includes("npm run test:ux11-browser") === true, "UX-11 browser lane must belong to test:browser");
 assert(packageJSON.scripts?.["test:ux12-refit-accounting-browser"]?.includes("run_ux12_refit_accounting_browser.cjs") === true,
   "UX12 refit-accounting browser lane must have a package script");
-assert(packageJSON.scripts?.["test:browser"]?.includes("npm run test:ux12-refit-accounting-browser") === true,
-  "UX12 refit-accounting browser lane must belong to test:browser");
+// ci_reachability.cjs enforces these suites' transitive ownership by CI.
 assert(!ux10Browser.includes('if (false && shape.name === "desktop" && ux12CorrectionEnabled("c3"))'),
   "UX12 lifecycle coverage must not remain behind a compile-time-disabled UX10 block");
 

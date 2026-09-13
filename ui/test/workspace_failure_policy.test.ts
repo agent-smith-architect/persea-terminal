@@ -178,10 +178,9 @@ assert.ok(pageSource.includes('from "./workspace_layout"') && !pageSource.includ
 // owned by the canonical Chromium browser gate.
 const packageManifest = JSON.parse(fs.readFileSync(path.join(uiRoot, "package.json"), "utf8")) as { scripts?: Record<string, string> };
 const loadingStateScript = packageManifest.scripts?.["test:loading-state-browser"] ?? "";
-const browserScript = packageManifest.scripts?.["test:browser"] ?? "";
 assert.ok(loadingStateScript.includes("loading_state_browser_harness.ts"), "test:loading-state-browser must build the UX-7 browser harness");
 assert.ok(loadingStateScript.includes("run_loading_state_browser.cjs"), "test:loading-state-browser must run the UX-7 causal suite");
-assert.ok(browserScript.includes("npm run test:loading-state-browser"), "test:browser must include the UX-7 causal Chromium gate");
+// ci_reachability.cjs enforces this suite's transitive ownership by CI.
 
 process.stdout.write(`workspace failure policy: ${emitted.size} emitted close reasons, ${PROJECTION_PANE_STATES.length} projection states, ${PANE_STATE_KINDS.length} pane kinds — all explicit and nonblank\n`);
 declare const process: { stdout: { write(value: string): void } };

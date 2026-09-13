@@ -45,7 +45,7 @@
     "test:native-click-activation-browser": "node test/run_native_click_activation_browser.cjs",
     "test:ux18-controls-mutants": "npm run build && node test/run_ux18_controls_mutants.cjs",
     "test:width-refit-private-stack": "ux13_refit_root=$(mktemp -d \"${TMPDIR:-/tmp}/wr.XXXXXX\") && trap 'rm -rf \"$ux13_refit_root\"' EXIT && esbuild test/unified_terminal_page.test.ts --bundle --platform=node --format=cjs --outfile=\"$ux13_refit_root/test.cjs\" && CGO_ENABLED=1 PERSEA_E2E1_REPO_ROOT=$(cd .. && pwd) PERSEA_E2E1_ARTIFACT_ROOT=\"$ux13_refit_root/chromium\" PERSEA_E2E1_REFIT_ONLY=1 PERSEA_E2E1_ENGINE=chromium node \"$ux13_refit_root/test.cjs\" && CGO_ENABLED=1 PERSEA_E2E1_REPO_ROOT=$(cd .. && pwd) PERSEA_E2E1_ARTIFACT_ROOT=\"$ux13_refit_root/webkit\" PERSEA_E2E1_REFIT_ONLY=1 PERSEA_E2E1_ENGINE=webkit node \"$ux13_refit_root/test.cjs\"",
-    "test:ci": "npm test && npm run test:browser",
+    "test:ci": "node test/ci_reachability.cjs && npm test && npm run test:browser",
     "test:workspace-webkit-f11": "node test/run_workspace_webkit_f11.cjs",
     "test:unified-reopen-browser": "npm run build && node test/run_unified_reopen_browser.cjs",
     "test:dashboard-navigation-browser": "npm run build && node test/run_dashboard_navigation_browser.cjs",
