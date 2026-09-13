@@ -1,0 +1,11 @@
+.scrollback-control { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; min-width: 0; font: 13px/1.4 system-ui, sans-serif; }
+.scrollback-control__caption { display: grid; gap: .1rem; }
+.scrollback-control__caption small { font-size: 11px; opacity: .8; }
+.scrollback-control select { min-width: 0; width: auto; max-width: 100%; min-height: 44px; padding: .4rem .65rem; border: 1px solid #596171; border-radius: .6rem; font: 16px/1.4 system-ui, sans-serif; color: inherit; background: transparent; }
+.dashboard .scrollback-control { color: var(--dashboard-muted); }
+.dashboard .scrollback-control select { width: auto; }
+.persea-unified-sheet__scrollback { display: grid; gap: .6rem; padding-top: .8rem; margin-top: .8rem; border-top: 1px solid #596171; }
+.persea-unified-sheet__scrollback .scrollback-control { justify-content: space-between; }
+.persea-unified-sheet__scrollback p, .persea-unified-sheet__scrollback output { margin: 0; font: 12px/1.45 system-ui, sans-serif; }
+.persea-unified-sheet__scrollback output:empty { display: none; }
+.persea-unified-sheet__scrollback > button { justify-self: start; }

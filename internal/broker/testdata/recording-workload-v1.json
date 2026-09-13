@@ -1,0 +1,99 @@
+{
+  "schema": "persea.recording-workload/1",
+  "seed": 20260911,
+  "execution": {
+    "source": "private tmux only",
+    "network_lane": "local hermetic browser origin; no artificial delay or loss",
+    "geometry": {"columns": 80, "rows": 24},
+    "requested_history_rows": 1000,
+    "tmux_history_limit_rows": 30000,
+    "batch_bytes": 65536,
+    "batch_delay_ns": 16000000,
+    "measure_clock": "shared harness monotonic timeline; browser clock calibration required for paint",
+    "quick_duration_ns": 60000000000,
+    "soak_min_duration_ns": 3600000000000,
+    "soak_min_completed_rotations_per_active_source": 2
+  },
+  "payload": {
+    "generator": "byte[i] = 32 + ((seed + source_index*17 + event_index*31 + i*13) % 95), indexes zero based; then overwrite prefix/suffix as declared",
+    "plain_suffix_hex": "0d0a",
+    "ansi_event_modulus": 4,
+    "ansi_event_remainder": 0,
+    "ansi_prefix_hex": "1b5b324b0d",
+    "size_includes_prefix_and_suffix": true,
+    "encoding": "raw bytes, not a shell command"
+  },
+  "growth": {
+    "prior_record_counts": [100, 1000, 10000, 32000],
+    "prior_record_payload_bytes": 256,
+    "prior_payload_byte_hex": "68",
+    "prefill_commit_schedule": "all prior appends, one sync and commit covering the last record",
+    "new_payload_bytes": 65536,
+    "new_payload_byte_hex": "6e",
+    "new_commits": 1,
+    "read_allowance_bytes": 69632,
+    "measure": ["all journal read API bytes", "decoded records", "allocated bytes", "real elapsed nanoseconds"],
+    "allocation_measurement_scope": "one isolated package run, no parallel tests; report process noise separately"
+  },
+  "lanes": [
+    {"id": "nominal_plain", "class": "nominal", "sources": 8, "events_per_second_per_source": 40, "payload_bytes": 128, "ansi": false, "source_phase_ns": 3125000, "readers_per_source": 1},
+    {"id": "nominal_redraw", "class": "nominal", "sources": 8, "events_per_second_per_source": 40, "payload_bytes": 128, "ansi": true, "source_phase_ns": 3125000, "readers_per_source": 1},
+    {"id": "idle_siblings", "class": "nominal", "sources": 8, "active_source_indexes": [0], "events_per_second_per_source": 40, "payload_bytes": 128, "ansi": true, "source_phase_ns": 3125000, "readers_per_source": 1},
+    {"id": "large_events", "class": "calibration", "sources": 8, "events_per_second_per_source": 40, "payload_bytes": 4096, "ansi": true, "source_phase_ns": 3125000, "readers_per_source": 1},
+    {
+      "id": "bounded_burst", "class": "calibration", "sources": 8, "events_per_second_per_source": 400,
+      "payload_bytes": 128, "ansi": true, "source_phase_ns": 312500, "readers_per_source": 1,
+      "burst_duration_ns": 1000000000, "after_burst_events_per_second_per_source": 40,
+      "after_burst_source_phase_ns": 3125000, "candidate_max_drain_ns": 500000000,
+      "payload_event_index": "continuous_per_source_across_segments",
+      "segments": [
+        {"start_ns": 0, "end_ns": 1000000000, "events_per_second_per_source": 400, "source_phase_ns": 312500},
+        {"start_ns": 1000000000, "end_ns": 60000000000, "events_per_second_per_source": 40, "source_phase_ns": 3125000}
+      ]
+    },
+    {"id": "deliberate_overload", "class": "overload", "sources": 8, "events_per_second_per_source": 1000, "payload_bytes": 65536, "ansi": false, "source_phase_ns": 125000, "readers_per_source": 1, "duration_ns": 2000000000},
+    {"id": "slow_readers", "class": "overload", "sources": 8, "events_per_second_per_source": 40, "payload_bytes": 4096, "ansi": true, "source_phase_ns": 3125000, "readers_per_source": 4, "reader_stall_ns": 10000000000, "concurrent_snapshot_builders": 8},
+    {"id": "reader_cap", "class": "overload", "sources": 8, "events_per_second_per_source": 40, "payload_bytes": 128, "ansi": true, "source_phase_ns": 3125000, "front_connection_limit": 256, "readers_per_source": 32, "concurrent_snapshot_builders": 32, "reader_stall_ns": 10000000000}
+  ],
+  "schedule": {
+    "constant_rate_lanes": "event time = event_index*(1000000000/events_per_second_per_source) + source_index*source_phase_ns; emit while time < lane duration; default duration is execution.quick_duration_ns",
+    "piecewise_lanes": "segments are authoritative when present; within each segment, event time = start_ns + segment_event_index*(1000000000/events_per_second_per_source) + source_index*source_phase_ns; emit only start_ns <= event time < end_ns",
+    "segment_event_index": "starts at zero separately for each source in each segment; phase is relative to that segment start",
+    "boundary_rule": "start inclusive, end exclusive; a source-zero event exactly at 1000000000 ns belongs only to the second burst segment",
+    "payload_event_index": "continuous zero-based count per source across all emitted segments; bounded_burst first second-segment payload index is 400",
+    "bounded_burst_duration": "segments fix this quick calibration lane at 60000000000 ns; longer qualification repetitions repeat the entire lane with a fresh lane origin and payload indexes"
+  },
+  "generation_overlap": {"active_successors_per_source": 1, "held_predecessors_per_source": 1, "single_rotation_owner_per_realm": true, "hold_ns": 1000000000, "release_required_before_settlement": true},
+  "current_limits": {"pane_logical_bytes": 8388608, "realm_logical_bytes": 67108864, "pane_physical_bytes": 25165824, "journal_tmpfs_bytes": 100663296, "cgroup_memory_high_bytes": 891289600, "cgroup_memory_max_bytes": 1073741824, "runtime_generations": 64, "runtime_commands": 131072, "runtime_envelopes": 262144, "ingress_bytes": 67108864, "outbox_bytes": 134217728, "subscriber_event_slots": 64, "maximum_configured_front_connections": 256},
+  "candidate_budget": {
+    "status": "targets to reconcile with measured ownership in phase 3; not enforced by phase 0",
+    "unit": "MiB (1048576 bytes)",
+    "journal_tmpfs": 96,
+    "committed_payload_pages": 64,
+    "record_indexes": 64,
+    "accepted_payloads": 8,
+    "outbox_payloads": 16,
+    "snapshot_work_and_retained_pages": 32,
+    "subscriber_queued_payloads": 32,
+    "observer_transport_and_stacks": 96,
+    "commands_envelopes_transitions_and_diagnostics": 32,
+    "allocator_gc_and_unattributed_headroom": 200,
+    "combined_target": 640,
+    "per_source_ingress_bytes": 1048576,
+    "per_source_outbox_bytes": 2097152,
+    "per_subscriber_queued_bytes": 1048576,
+    "ordinary_sources_supported_initially": 8,
+    "cleanup_reserve": "separate accounting before ordinary acceptance; numerical command/envelope reserve must preserve existing funded generation/fault/close paths"
+  },
+  "acceptance": {
+    "nominal": {"output_loss": 0, "unplanned_generation_failures": 0, "recovery_loops": 0, "steadily_increasing_queue_age": false},
+    "candidate_local_paint_p95_ns": 100000000,
+    "candidate_local_paint_p99_ns": 500000000,
+    "candidate_warm_reopen_p95_ns": 1000000000,
+    "candidate_reconstructed_admission_p95_ns": 2000000000,
+    "latency_status": "proposed goals; must calibrate full decode-to-paint clock and include all failures/timeouts/max lag",
+    "overload": "bounded acceptance, explicit continuity break, valid committed content retained, source unchanged, eventual exactly-once settlement after held work is released",
+    "stalled_work": "independent diagnostics remain readable; no deadline-implies-cleanup or late successful readiness",
+    "release_claim": false
+  }
+}

@@ -1,0 +1,43 @@
+[Unit]
+Description=Persea Terminal isolated Tailscale Service sidecar
+Requires=persea-terminal-front.service
+After=persea-terminal-front.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/sbin/tailscaled --state=/var/lib/persea-terminal-tailscale/tailscaled.state --statedir=/var/lib/persea-terminal-tailscale --socket=/run/persea-terminal-tailscale/tailscaled.sock --tun=userspace-networking --port=0
+Restart=on-failure
+RestartSec=2s
+StateDirectory=persea-terminal-tailscale
+StateDirectoryMode=0700
+RuntimeDirectory=persea-terminal-tailscale
+RuntimeDirectoryMode=0700
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_NET_ADMIN CAP_NET_RAW
+AmbientCapabilities=
+PrivateDevices=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+ReadWritePaths=/var/lib/persea-terminal-tailscale /run/persea-terminal-tailscale
+InaccessiblePaths=/run/tailscale /var/lib/tailscale
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,22 @@
+.persea-unified-sheet--menu { max-height: 85%; padding: 10px 12px 14px; }
+.persea-unified-sheet--menu [hidden] { display: none !important; }
+.persea-unified-sheet__menu-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 10px; }
+.persea-unified-sheet__menu-heading h2 { margin: 0; font: 650 18px/1.3 system-ui, sans-serif; }
+.persea-unified-sheet--menu .persea-unified-sheet__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.persea-unified-sheet--menu .persea-unified-sheet__tile {
+  display: grid; grid-template-columns: 26px minmax(0, 1fr); align-content: center;
+  justify-content: start; justify-items: start; gap: 3px 8px;
+  min-height: 52px; padding: 9px 10px; text-align: left;
+}
+.persea-unified-sheet--menu .persea-unified-sheet__label { width: 100%; white-space: normal; overflow: visible; font: 500 13px/1.3 system-ui, sans-serif; color: inherit; }
+.persea-unified-sheet--menu .persea-unified-sheet__glyph { justify-self: center; font-size: 19px; }
+.persea-unified-sheet--menu .persea-unified-sheet__reason { grid-column: 2; text-align: left; font: 11px/1.3 system-ui, sans-serif; }
+.persea-unified-sheet--menu .persea-unified-sheet__heading { font: 600 11px/1.3 system-ui, sans-serif; letter-spacing: .04em; margin-bottom: 6px; }
+.persea-unified-sheet--menu .persea-unified-sheet__section ~ .persea-unified-sheet__section { margin-top: 12px; padding-top: 12px; }
+.persea-unified-sheet__menu-heading .persea-unified-sheet__tile { grid-template-columns: 20px auto; min-height: 44px; padding: 7px 10px; border-color: transparent; background: transparent; color: inherit; }
+.persea-unified-sheet__advanced { margin-top: 12px; border-top: 1px solid #596171; }
+.persea-unified-sheet__advanced summary { min-height: 44px; padding: 12px 4px; cursor: pointer; font: 13px/1.4 system-ui, sans-serif; }
+.persea-unified-sheet__advanced > button { width: 100%; }
+@media (min-width: 800px) {
+  .persea-unified-sheet--menu { align-self: flex-end; width: min(440px, 100%); border: 1px solid #596171; border-radius: 12px; margin: 8px; }
+}

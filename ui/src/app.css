@@ -1,0 +1,67 @@
+html,
+body,
+#app {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  overflow: hidden;
+  background: #0b0f14;
+}
+
+/* E-P5's three page tokens. Theme choice is a closed data attribute, so a
+   live switch needs no inline style, no new style node and no CSP exception. */
+body,
+.persea-unified-terminal[data-theme="default"] {
+  --persea-page-bg: #0b0f14;
+  --persea-terminal-bg: #111318;
+  --persea-chrome-bg: #1b1e25;
+  --persea-chrome-fg: #f3f4f6;
+  --persea-accent: #8fc7ff;
+}
+body[data-persea-theme="rose-pine"],
+.persea-unified-terminal[data-theme="rose-pine"] { --persea-page-bg: #12101c; --persea-terminal-bg: #191724; --persea-chrome-bg: #26233a; --persea-chrome-fg: #e0def4; --persea-accent: #c4a7e7; }
+body[data-persea-theme="rose-pine-dawn"],
+.persea-unified-terminal[data-theme="rose-pine-dawn"] { --persea-page-bg: #f2e9e1; --persea-terminal-bg: #faf4ed; --persea-chrome-bg: #fffaf3; --persea-chrome-fg: #575279; --persea-accent: #286983; }
+body[data-persea-theme="solarized-dark"],
+.persea-unified-terminal[data-theme="solarized-dark"] { --persea-page-bg: #001f27; --persea-terminal-bg: #002b36; --persea-chrome-bg: #073642; --persea-chrome-fg: #eee8d5; --persea-accent: #2aa198; }
+body[data-persea-theme="gruvbox-dark"],
+.persea-unified-terminal[data-theme="gruvbox-dark"] { --persea-page-bg: #1d2021; --persea-terminal-bg: #282828; --persea-chrome-bg: #3c3836; --persea-chrome-fg: #ebdbb2; --persea-accent: #fabd2f; }
+body[data-persea-theme="one-dark"],
+.persea-unified-terminal[data-theme="one-dark"] { --persea-page-bg: #21252b; --persea-terminal-bg: #282c34; --persea-chrome-bg: #2f343f; --persea-chrome-fg: #e6e6e6; --persea-accent: #61afef; }
+body[data-persea-theme="dracula"],
+.persea-unified-terminal[data-theme="dracula"] { --persea-page-bg: #1f2029; --persea-terminal-bg: #282a36; --persea-chrome-bg: #343746; --persea-chrome-fg: #f8f8f2; --persea-accent: #bd93f9; }
+body[data-persea-theme="catppuccin-mocha"],
+.persea-unified-terminal[data-theme="catppuccin-mocha"] { --persea-page-bg: #181825; --persea-terminal-bg: #1e1e2e; --persea-chrome-bg: #313244; --persea-chrome-fg: #cdd6f4; --persea-accent: #cba6f7; }
+
+/* Derived semantic chrome tokens (J-EP5-1 / UX18-R5). Secondary text and the preference
+   notice used fixed colours picked for a dark chrome, so the one light theme
+   in the catalogue rendered them at 1.4:1. They are computed from whichever
+   chrome pair the active theme declared above, which is what keeps a new
+   palette from having to restate them: muted text holds at least 4.84:1 and
+   the notice at least 6.03:1 against its own chrome across the eight themes
+   (measured per theme in test/run_unified_ergonomics_browser.cjs). */
+body,
+.persea-unified-terminal[data-theme] {
+  --persea-chrome-muted-fg: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 85%, var(--persea-chrome-bg, #1b1e25));
+  --persea-chrome-notice-fg: color-mix(in srgb, var(--persea-accent, #8fc7ff) 60%, var(--persea-chrome-fg, #f3f4f6));
+  /* A normal control needs a non-text boundary, not merely a different RGB
+     tuple. Every curated accent is at least 4.1:1 against its chrome surface;
+     the subtle fill stays independently theme-derived while the accent border
+     keeps enabled component edges above the binding 3:1 floor. */
+  --persea-chrome-control-border: var(--persea-accent);
+  --persea-chrome-control-bg: color-mix(in srgb, var(--persea-accent) 12%, var(--persea-chrome-bg));
+}
+
+body[data-persea-theme] { background: var(--persea-page-bg, #0b0f14); }
+
+.persea-terminal-fatal {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 1rem;
+  color: #ffb4ab;
+  font: 14px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  white-space: pre-wrap;
+}

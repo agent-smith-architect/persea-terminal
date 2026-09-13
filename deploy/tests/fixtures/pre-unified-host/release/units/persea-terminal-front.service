@@ -1,0 +1,42 @@
+[Unit]
+Description=Persea Terminal trusted AF_UNIX front door
+Wants=persea-terminal-broker-desk-a7.service persea-terminal-broker-lab-k4.service
+After=persea-terminal-broker-desk-a7.service persea-terminal-broker-lab-k4.service
+
+[Service]
+Type=simple
+User=termop_q7
+Group=termshare_x9
+WorkingDirectory=/opt/persea-terminal/current
+ExecStart=/opt/persea-terminal/current/bin/persea-terminal front --config /opt/persea-terminal/current/config/front.json --static-dir ui
+Restart=on-failure
+RestartSec=2s
+RuntimeDirectory=persea-terminal
+RuntimeDirectoryMode=0700
+StateDirectory=persea-terminal
+StateDirectoryMode=0700
+UMask=0077
+ReadWritePaths=/var/lib/persea-terminal
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ProtectControlGroups=yes
+ProtectKernelModules=yes
+ProtectKernelTunables=yes
+ProtectKernelLogs=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_UNIX
+IPAddressDeny=any
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

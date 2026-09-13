@@ -1,0 +1,62 @@
+/* Workspace document (M9 W1b): the landing card and the runtime host.
+ * Class-based only — no style attributes, no CSSOM writes. */
+
+body.ws-document { margin: 0; background: #081018; color: #e8f0f5; }
+.ws-document__root { display: block; width: 100%; height: 100dvh; min-height: 0; overflow: hidden; }
+/* Preserve the base root rule; the later declaration composes the durable
+ * header/editor rows without changing the landing-only baseline. */
+.ws-document__root { display: grid; grid-template-rows: auto auto minmax(0, 1fr); }
+.ws-layout-host { grid-row: 3; min-width: 0; min-height: 0; overflow: hidden; }
+.ws-layout-host:only-child { grid-row: 1 / -1; }
+.ws-workspace-header { grid-row: 1; box-sizing: border-box; display: flex; align-items: center; gap: .55rem; min-height: 42px; padding: .25rem .65rem; border-bottom: 1px solid #27485c; background: #08131c; }
+.ws-workspace-title { flex: 1 1 auto; min-width: 0; margin: 0; color: #eef8ff; font-size: 1rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-workspace-header button, .ws-workspace-header a { box-sizing: border-box; min-height: 32px; border: 1px solid #36566a; border-radius: .45rem; padding: .3rem .65rem; color: #eef8ff; background: #122533; font: inherit; text-decoration: none; }
+.ws-editor { grid-row: 2; box-sizing: border-box; display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: .6rem; max-height: min(52dvh, 32rem); padding: .7rem; overflow: auto; border-bottom: 1px solid #27485c; background: #0a1721; }
+.ws-editor[hidden] { display: none; }
+.ws-editor__heading, .ws-editor__status, .ws-editor__panes, .ws-editor__splits, .ws-editor__add { grid-column: 1 / -1; }
+.ws-editor__heading { margin: 0; font-size: 1rem; }
+.ws-editor__field { display: grid; gap: .25rem; color: #b9d8e8; font-size: .8rem; }
+.ws-editor__input, .ws-editor__select { box-sizing: border-box; min-width: 0; min-height: 36px; border: 1px solid #36566a; border-radius: .4rem; padding: .35rem .55rem; color: #eef8ff; background: #07131b; font: inherit; }
+.ws-editor button { box-sizing: border-box; min-height: 36px; border: 1px solid #36566a; border-radius: .4rem; padding: .35rem .65rem; color: #eef8ff; background: #122533; font: inherit; }
+.ws-editor__actions { display: flex; align-items: end; gap: .45rem; }
+.ws-editor__save { border-color: #28755b !important; background: #15503d !important; }
+.ws-editor__cancel, .ws-editor__remove { color: #ffc5c1 !important; }
+.ws-editor__add { display: flex; flex-wrap: wrap; align-items: center; gap: .45rem; margin: 0; border: 1px solid #27485c; border-radius: .45rem; }
+.ws-editor__panes { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(19rem, 100%), 1fr)); gap: .45rem; margin: 0; padding: 0; list-style: none; }
+.ws-editor__pane { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; border: 1px solid #27485c; border-radius: .45rem; padding: .45rem; }
+.ws-editor__pane-name { flex: 1 1 8rem; min-width: 0; overflow-wrap: anywhere; }
+.ws-editor__alias { display: flex; flex: 1 1 100%; align-items: center; gap: .4rem; color: #b9d8e8; font-size: .78rem; }
+.ws-editor__alias .ws-editor__input { flex: 1 1 auto; }
+.ws-editor__splits { display: grid; gap: .35rem; }
+.ws-editor__unsplit { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; color: #b9d8e8; font-size: .78rem; }
+.ws-editor__status { min-height: 1.2em; margin: 0; color: #ffcf8e; font-size: .82rem; }
+.ws-editor__conflict { grid-column: 1 / -1; display: flex; gap: .45rem; border-left: 3px solid #e8a85d; padding: .45rem; background: #1d1a12; }
+/* A mounted unified page fills its cell instead of the viewport. */
+.ws-cell__mount .persea-unified-terminal { height: 100%; }
+.ws-cell[data-ws-designated="true"] { border-color: #66d4ff; }
+.ws-cell[data-ws-designated="true"] .ws-cell__header { background: #0f2230; }
+.ws-cell[data-ws-designated="true"] .ws-cell__header::before { content: ""; flex: 0 0 6px; width: 6px; height: 6px; border-radius: 50%; background: #66d4ff; }
+
+.ws-landing { box-sizing: border-box; display: flex; flex-direction: column; gap: .75rem; max-width: 44rem; margin: 0 auto; padding: 1.5rem 1rem 2rem; }
+.ws-landing__eyebrow { margin: 0; font: 700 .72rem/1.4 ui-monospace, monospace; letter-spacing: .08em; text-transform: uppercase; color: #7f98a6; }
+.ws-landing__title { margin: 0; font-size: 1.5rem; line-height: 1.25; color: #eef8ff; overflow-wrap: anywhere; }
+.ws-landing__notice { margin: 0; font-size: .95rem; line-height: 1.5; color: #b7cbe0; }
+.ws-landing__filter { box-sizing: border-box; width: 100%; min-height: 44px; padding: .4rem .7rem; border: 1px solid #36566a; border-radius: .5rem; color: #eef8ff; background: #0d1b25; font: inherit; }
+.ws-landing__sessions { display: flex; flex-direction: column; gap: .35rem; margin: 0; padding: 0; list-style: none; }
+.ws-landing__session { border: 1px solid #27485c; border-radius: .5rem; background: #0d1b25; }
+.ws-landing__session-label { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .7rem; min-height: 44px; padding: .4rem .7rem; cursor: pointer; }
+.ws-landing__session--unresolved { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .7rem; min-height: 44px; padding: .4rem .7rem; border-style: dashed; }
+.ws-landing__session-box { width: 20px; height: 20px; margin: 0; }
+.ws-landing__session-name { font-weight: 700; color: #eef8ff; overflow-wrap: anywhere; }
+.ws-landing__session-scope { color: #7f98a6; font: 600 .72rem/1.3 ui-monospace, monospace; }
+.ws-landing__session-state { margin-left: auto; color: #b9d8e8; font: 700 .68rem/1.4 ui-monospace, monospace; text-transform: uppercase; }
+.ws-landing__status { margin: 0; min-height: 1.2em; font-size: .85rem; color: #ffcf8e; }
+.ws-landing__actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; }
+.ws-landing__open { box-sizing: border-box; min-height: 44px; padding: .5rem 1.1rem; border: 1px solid #3b9ad1; border-radius: .6rem; color: #08141c; background: #66d4ff; font: inherit; font-weight: 700; cursor: pointer; }
+.ws-landing__open:disabled { color: #7f98a6; background: #162d3b; border-color: #27485c; cursor: default; }
+.ws-landing__open:focus-visible, .ws-landing__dashboard:focus-visible { outline: 3px solid #66d4ff; outline-offset: 2px; }
+.ws-landing__dashboard { display: inline-flex; align-items: center; min-height: 44px; color: #9fd4ff; }
+
+@media (pointer: coarse) {
+  .ws-workspace-header button, .ws-workspace-header a, .ws-editor button, .ws-editor__input, .ws-editor__select { min-height: 44px; }
+}

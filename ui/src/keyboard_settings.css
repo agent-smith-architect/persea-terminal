@@ -1,0 +1,74 @@
+.keyboard-settings {
+  --keys-bg: #171c24; --keys-surface: #222a35; --keys-border: #3c4655;
+  --keys-text: #edf1f7; --keys-muted: #aebaca;
+  color: var(--keys-text); background: var(--keys-bg); border: 1px solid var(--keys-border);
+  border-radius: 16px; width: min(680px, calc(100vw - 32px)); max-width: none;
+  height: min(850px, calc(100dvh - 40px)); max-height: none; padding: 0;
+  box-sizing: border-box; overflow: hidden; font: 14px/1.45 system-ui, sans-serif;
+  box-shadow: 0 20px 80px #0008;
+}
+.keyboard-settings[open] { display: flex; flex-direction: column; }
+.keyboard-settings::backdrop { background: #080c13bb; }
+.keyboard-settings *, .keyboard-settings *::before, .keyboard-settings *::after { box-sizing: border-box; }
+.keyboard-settings button, .keyboard-settings select, .keyboard-settings input {
+  font: inherit; color: inherit; border: 1px solid var(--keys-border); background: var(--keys-surface);
+  border-radius: 8px; min-height: 44px; padding: 7px 11px; touch-action: manipulation;
+}
+.keyboard-settings button { cursor: pointer; }
+.keyboard-settings button:disabled { opacity: .45; cursor: default; }
+.keyboard-settings :is(button, select, input, summary):focus-visible { outline: 2px solid #91b9e5; outline-offset: 2px; }
+.keyboard-settings button[aria-pressed="true"] { background: #33445a; border-color: #7393b5; }
+.keyboard-settings__header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px 4px; flex: none; }
+.keyboard-settings__header h2 { margin: 0; font-size: 22px; font-weight: 650; }
+.keyboard-settings__header button { font-size: 25px; background: transparent; border-color: transparent; width: 44px; padding: 0; }
+.keyboard-settings__scope { display: flex; gap: 5px; margin: 8px 20px 0; padding: 4px; background: #10151c; border-radius: 10px; flex: none; }
+.keyboard-settings__scope button { flex: 1; border-color: transparent; background: transparent; }
+.keyboard-settings__scope-note { color: var(--keys-muted); margin: 8px 20px 12px; font-size: 13px; flex: none; }
+.keyboard-settings__body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 20px 20px; }
+.keyboard-settings__preview { background: #10151c; border: 1px solid #303b49; border-radius: 10px; padding: 10px; margin-bottom: 18px; }
+.keyboard-settings__eyebrow { display: block; color: var(--keys-muted); font-size: 10px; font-weight: 650; letter-spacing: .09em; margin-bottom: 8px; }
+.keyboard-settings__preview-row { display: flex; gap: 3px; min-width: 0; }
+.keyboard-settings__preview-keys { display: flex; flex: 1; gap: 3px; min-width: 0; overflow-x: auto; padding-bottom: 2px; }
+.keyboard-settings__key { display: flex; align-items: center; justify-content: center; min-width: 42px; min-height: 40px; padding: 4px 7px; border: 1px solid #3c4655; border-radius: 6px; background: #29323e; white-space: nowrap; font: 600 12px/1.2 system-ui, sans-serif; }
+.keyboard-settings__key--modifier { color: #d9d0bc; background: #303038; }
+.keyboard-settings__key--navigation { flex: none; color: #c7d9ee; background: #2a384a; }
+.keyboard-settings__key[data-key-glyph="true"] { font-size: 18px; }
+.keyboard-settings__tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--keys-border); margin-bottom: 10px; padding-bottom: 8px; }
+.keyboard-settings__tabs button { flex: 1; background: transparent; border-color: transparent; }
+.keyboard-settings__note { margin: 10px 0; color: var(--keys-muted); font-size: 13px; }
+.keyboard-settings__list-tools { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0; }
+.keyboard-settings__list-tools > * { flex: 1; min-width: 0; }
+.keyboard-settings__list { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 6px; }
+.keyboard-settings__row { display: flex; align-items: center; gap: 5px; border-bottom: 1px solid #303a47; padding: 5px 0; }
+.keyboard-settings__key-name { flex: 1; min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.keyboard-settings__row button { min-width: 44px; padding: 6px; background: transparent; }
+.keyboard-settings__row button:last-child { color: var(--keys-muted); border-color: transparent; }
+.keyboard-settings__footer { flex: none; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; padding: 10px 20px max(12px, env(safe-area-inset-bottom)); border-top: 1px solid var(--keys-border); background: #1b222c; }
+.keyboard-settings .keyboard-settings__restore { border: none; background: transparent; color: var(--keys-muted); font-size: 12px; padding-inline: 0; margin-top: 12px; }
+.keyboard-settings__footer .keyboard-settings__save { background: #325578; border-color: #668db6; color: #fff; font-weight: 600; }
+.keyboard-settings__status { flex-basis: 100%; margin: 0; font-size: 12px; color: #c7d9ee; }
+.keyboard-settings__status:empty { display: none; }
+.keyboard-settings__help { color: var(--keys-muted); font-size: 12px; margin-top: 20px; }
+.keyboard-settings__help summary { min-height: 44px; display: list-item; align-content: center; cursor: pointer; }
+.keyboard-settings__inheritance { padding-bottom: 12px; display: grid; gap: 8px; }
+.keyboard-settings__inheritance label { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.keyboard-settings__inheritance input { min-height: 20px; width: 20px; height: 20px; }
+.keyboard-settings__inheritance button { justify-self: start; }
+.keyboard-settings__notice { background: #3c3325; border: 1px solid #826b45; padding: 12px; border-radius: 8px; margin-bottom: 12px; }
+.keyboard-settings__notice p { margin: 0 0 8px; }
+.keyboard-settings__notice button { margin: 8px 6px 0 0; }
+.keyboard-settings__catalog { background: #10151c; border: 1px solid #414d5e; border-radius: 10px; padding: 10px; margin-bottom: 12px; }
+.keyboard-settings__catalog-controls { display: flex; gap: 5px; flex-wrap: wrap; margin-bottom: 8px; }
+.keyboard-settings__catalog-controls select { flex: 1; min-width: 130px; }
+.keyboard-settings__catalog-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(44px, 1fr)); gap: 5px; margin-top: 8px; }
+.keyboard-settings .keyboard-settings__modifier[aria-pressed="true"] { color: #ffe0a1; background: #51432e; border-color: #ae905c; }
+@media (max-width: 600px) {
+  .keyboard-settings { width: 100%; height: 100dvh; margin: 0; border: 0; border-radius: 0; }
+  .keyboard-settings__header { padding: max(10px, env(safe-area-inset-top)) 14px 2px; }
+  .keyboard-settings__scope { margin-inline: 14px; }
+  .keyboard-settings__scope-note { margin-inline: 14px; }
+  .keyboard-settings__body { padding-inline: 14px; }
+  .keyboard-settings__footer { padding-inline: 14px; }
+  .keyboard-settings__footer .keyboard-settings__save { flex: 1; }
+  .keyboard-settings input { font-size: 16px; }
+}

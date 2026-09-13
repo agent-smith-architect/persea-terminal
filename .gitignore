@@ -1,0 +1,18 @@
+ui/node_modules/
+ui/dist/
+static/app.js*
+bin/
+.env
+.DS_Store
+__pycache__/
+*.pyc
+
+# Generated run output and local evidence are never preservation inputs.
+evidence/
+compass-out/
+graphify-out/
+
+# Machine-local notes for a coding agent. The tracked AGENTS.md is the shared
+# contract; anything specific to one operator's environment belongs here.
+CLAUDE.local.md
+AGENTS.local.md

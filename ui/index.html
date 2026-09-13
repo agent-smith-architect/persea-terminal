@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="persea-style-nonce" content="__PERSEA_STYLE_NONCE__">
+    <title>Persea Terminal</title>
+    <!-- E-P6: installable shell only. There is no service worker and no
+         offline cache: an offline terminal would be a lie. -->
+    <link rel="manifest" href="/manifest.webmanifest">
+    <link rel="icon" href="/icon-192.png" sizes="192x192" type="image/png">
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <meta name="theme-color" content="#081018">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-title" content="Persea">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <link rel="stylesheet" href="/xterm.css">
+    <link rel="stylesheet" href="/app.css">
+  </head>
+  <body>
+    <main id="app" aria-label="Persea Terminal"></main>
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+/* Harness-only styles: host sizing presets for the cell-resize storm and the
+ * dummy pane's presentation-only fit classes. Class-based, like the shell. */
+html, body { margin: 0; height: 100%; background: #081018; color: #e8f0f5; font-family: Inter, ui-sans-serif, system-ui, sans-serif; }
+.harness-host { display: block; box-sizing: border-box; overflow: hidden; }
+.harness-host--full { width: 100vw; height: 100vh; }
+.harness-host--narrow { width: 60vw; height: 100vh; }
+.harness-host--short { width: 100vw; height: 55vh; }
+.harness-host--tiny { width: 45vw; height: 45vh; }
+.harness-pane { display: flex; flex-direction: column; min-width: 0; min-height: 0; height: 100%; padding: .3rem .5rem; box-sizing: border-box; }
+.harness-pane__label { margin: 0 0 .2rem; font-size: .75rem; color: #9db3c0; }
+.harness-pane__grid { margin: 0; overflow: auto; flex: 1 1 0; min-height: 0; font: 12px/1.2 ui-monospace, monospace; color: #6f8a99; }
+.harness-fit-xs { font-size: 9px; }
+.harness-fit-s { font-size: 10px; }
+.harness-fit-m { font-size: 12px; }
+.harness-fit-l { font-size: 14px; }

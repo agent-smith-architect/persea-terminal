@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "front": {
+    "user": "termop_q7",
+    "uid": 42001,
+    "group": "termshare_x9",
+    "gid": 42003,
+    "image_upload_max_bytes": 10485760
+  },
+  "ingress": {
+    "canonical_host": "terminal.sample-tailnet.ts.net",
+    "operator_login": "operator-q7@example.invalid",
+    "max_connections": 64
+  },
+  "tailscale": {
+    "service": "svc:terminal",
+    "sidecar_hostname": "terminal-sidecar",
+    "sidecar_tag": "tag:terminal-service",
+    "tailnet_suffix": "sample-tailnet.ts.net",
+    "protected_main_dns_name": "console.sample-tailnet.ts.net"
+  },
+  "realms": [
+    {
+      "id": "desk-a7",
+      "display_name": "Operator Q7",
+      "user": "termop_q7",
+      "uid": 42001,
+      "servers": [
+        {
+          "label": "primary",
+          "socket_name": "main-a7"
+        }
+      ],
+      "session_create": {
+        "enabled": true,
+        "servers": [
+          "primary"
+        ],
+        "name_pattern": "^[a-z][a-z0-9-]{0,20}$",
+        "max_sessions": 8,
+        "start_directory": "/srv/example-project"
+      },
+      "unified_terminal_dev": {
+        "enabled": true,
+        "server": "primary",
+        "session": "unified-dev",
+        "observer_session": "observer-main"
+      },
+      "image_staging": true
+    },
+    {
+      "id": "lab-k4",
+      "display_name": "Automation K4",
+      "user": "tmuxbot_k4",
+      "uid": 42002,
+      "servers": [
+        {
+          "label": "primary",
+          "socket_name": "main-k4"
+        },
+        {
+          "label": "isolated",
+          "socket_path": "/srv/tmux-k4/isolated.sock"
+        }
+      ],
+      "session_create": {
+        "enabled": true,
+        "servers": ["primary", "isolated"],
+        "name_pattern": "^[a-z][a-z0-9-]{0,20}$",
+        "max_sessions": 8,
+        "start_directory": "/srv/example-project"
+      },
+      "unified_terminal_dev": {
+        "enabled": true,
+        "server": "primary",
+        "session": "unified-dev",
+        "observer_session": "observer-lab"
+      }
+    }
+  ]
+}

@@ -1,0 +1,3015 @@
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  background: #081018;
+  color: #e6edf3;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app { margin: 0; width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; overscroll-behavior: none; background: #081018; }
+
+.attachment-page {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  height: 100vh;
+  height: 100dvh;
+  /* Set by AttachmentPage while the visual viewport is unzoomed, so the on-screen
+     keyboard cannot cover the caret row. Falls back to dvh when absent. */
+  height: var(--persea-visual-viewport-height, 100dvh);
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  /* There are no fixed-position descendants; each overlay is anchored by its
+     own positioned page descendant, so this compositor-only origin correction
+     cannot change the terminal's layout or fit inputs. */
+  transform: translateY(var(--persea-visual-viewport-offset, 0px));
+  background: #081018;
+}
+
+/* Mobile first. The resident bar is one line; the action controls live in a panel
+   that is collapsed by default and only ever expanded deliberately, so a phone
+   spends its vertical space on the terminal. The wide breakpoint below restores a
+   single always-visible row and hides the disclosure entirely. */
+/* The header is exactly one line at every width. The terminal is the product, so
+   chrome does not get to grow: the action panel is an overlay, not a row, and
+   costs zero layout height when closed. This also gives desktop and mobile one
+   mental model instead of two. */
+.attachment-page__header {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .5rem;
+  padding: .4rem .6rem;
+  border-bottom: 1px solid #273444;
+  background: #0d1620;
+}
+
+.attachment-page__bar {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: .3rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Dropdown, anchored under the disclosure. Scrolls internally rather than
+   growing, so a long menu never pushes the terminal off screen. */
+.attachment-page__actions {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + .3rem);
+  right: .6rem;
+  left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: .6rem;
+  min-width: min(22rem, calc(100vw - 1.2rem));
+  max-width: calc(100vw - 1.2rem);
+  max-height: min(70vh, 30rem);
+  overflow-y: auto;
+  padding: .7rem;
+  border: 1px solid #2b4055;
+  border-radius: .6rem;
+  background: #101d29;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 55%);
+}
+
+.attachment-page__header[data-actions-expanded="false"] .attachment-page__actions { display: none; }
+.attachment-page__disclosure { margin-left: auto; flex: 0 0 auto; white-space: nowrap; min-height: 34px; }
+.attachment-page__disclosure::before { content: "\2261\00a0"; }
+
+.attachment-page__title {
+  margin: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .95rem;
+}
+/* Capability and connection state are safety information and never shrink. The
+   identity yields first, while its title routes preserve the full labels. */
+.attachment-page__identity { display: flex; flex: 1 1 0; align-items: center; gap: .35rem; min-width: 0; overflow: hidden; }
+.attachment-page__identity[hidden] { display: none; }
+.attachment-page__session, .attachment-page__alias {
+  flex: 0 0 auto;
+  max-width: 20ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  padding: .2rem .5rem;
+  font: 600 .74rem/1.35 ui-monospace, monospace;
+}
+.attachment-page__session { flex: 1 1 auto; min-width: 2.5rem; background: #16324a; color: #9fd4ff; }
+.attachment-page__alias { background: #2c2416; color: #ffc77d; }
+.attachment-page__status, .attachment-page__mode, .attachment-page__history, .attachment-page__control-navigation-status { font: 600 .72rem/1.35 ui-monospace, monospace; letter-spacing: .04em; }
+.attachment-page__status, .attachment-page__mode {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: #b7cbe0;
+}
+@media (max-width: 430px) { .attachment-page__alias { display: none; } }
+.attachment-page__title[hidden] { display: none; }
+/* Menu contents grouped by intent, with the groups visibly separated. */
+.attachment-page__group { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.attachment-page__actions .attachment-page__group + .attachment-page__group { padding-top: .6rem; border-top: 1px solid #1c2b3a; }
+.attachment-page__history { display: grid; align-self: flex-start; flex: 1 1 18rem; gap: .25rem; min-width: min(18rem, 100%); color: #b7cbe0; font: 600 .8rem/1.35 ui-monospace, monospace; letter-spacing: .02em; }
+.attachment-page__history-primary { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.attachment-page__history-primary label { color: #e6edf3; font-size: 1rem; }
+.attachment-page__history select {
+  max-width: 100%;
+  min-height: 34px;
+  border: 1px solid #41617e;
+  border-radius: .3rem;
+  padding: .28rem .35rem;
+  background: #081018;
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+}
+.attachment-page__history-loaded { color: #9fb4c6; }
+.attachment-page__history output { max-width: 24rem; color: #9fd4ff; }
+.attachment-page__history output[data-state="pending-reader"] { color: #ffd479; }
+.attachment-page__history output[data-state^="failed"] { color: #ffaaa5; }
+.attachment-page__history output[data-state="effective-split"] { color: #d1b5ff; }
+.attachment-page__history-omission { color: #8298aa; font-size: .68rem; font-weight: 500; }
+.attachment-page__history-omission[hidden] { display: none; }
+.attachment-page__button { border: 1px solid #41617e; border-radius: .35rem; padding: .32rem .55rem; background: #142536; color: inherit; text-decoration: none; font: inherit; }
+.attachment-page__button:disabled { cursor: wait; opacity: .65; }
+.attachment-page__button[hidden] { display: none; }
+.attachment-page__control-navigation-status { max-width: 24rem; color: #b7cbe0; }
+.attachment-page__control-navigation-status[hidden] { display: none; }
+.attachment-page__dashboard { white-space: nowrap; }
+.attachment-page__geometry { display: inline-flex; align-self: flex-start; align-items: center; gap: .3rem; white-space: nowrap; }
+.attachment-page__geometry[hidden] { display: none; }
+.attachment-page__geometry input {
+  width: 4.4rem;
+  border: 1px solid #41617e;
+  border-radius: .3rem;
+  padding: .28rem .35rem;
+  background: #081018;
+  color: inherit;
+  font: 600 .72rem/1 ui-monospace, monospace;
+}
+.attachment-page__geometry button {
+  border: 1px solid #41617e;
+  border-radius: .3rem;
+  padding: .28rem .48rem;
+  background: #142536;
+  color: inherit;
+}
+.attachment-page__geometry output { max-width: 18rem; font: 600 .72rem/1 ui-monospace, monospace; color: #b7cbe0; }
+
+.attachment-page__settings {
+  position: absolute;
+  z-index: 30;
+  top: 3.25rem;
+  right: .6rem;
+  width: min(28rem, calc(100% - 1.2rem));
+  max-height: min(75%, 34rem);
+  overflow-y: auto;
+  padding: .8rem;
+  border: 1px solid #2b4055;
+  border-radius: .6rem;
+  background: #101d29;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 55%);
+}
+.attachment-page__settings[hidden] { display: none; }
+.attachment-page__settings h2 { margin: 0 8rem .75rem 0; font-size: 1rem; }
+.attachment-page__settings-close { position: absolute; top: .6rem; right: .6rem; }
+.attachment-page__settings fieldset { margin: 0 0 .75rem; border: 1px solid #2b4055; border-radius: .4rem; padding: .6rem; }
+.attachment-page__settings legend { padding: 0 .25rem; font: 600 .8rem/1.35 ui-monospace, monospace; }
+.attachment-page__settings-choices { display: flex; gap: .5rem; }
+.attachment-page__settings-choices .attachment-page__button[aria-pressed="true"] { border-color: #e6edf3; background: #1d3348; }
+.attachment-page__settings-status,
+.attachment-page__settings-record { display: block; margin-top: .65rem; color: #b7cbe0; font: 600 .72rem/1.4 ui-monospace, monospace; }
+.attachment-page__settings-record { max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+@media (min-width: 641px) {
+  /* More breathing room, same single-line rule. The disclosure is NOT hidden on
+     desktop: one behaviour at every width is easier to reason about than two, and
+     it keeps the terminal's height independent of how many controls exist. */
+  .attachment-page__header { padding: .5rem .75rem; }
+  .attachment-page__actions { min-width: 26rem; }
+}
+
+.attachment-page__stage {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  /* The Composer is painted above the dock, but its committed inset is real
+     layout space.  This keeps the scroller's box equal to the visible band. */
+  margin-bottom: var(--persea-composer-inset, 0px);
+  overflow: hidden;
+}
+
+/* Sits where the terminal would be, because that is where the operator is looking
+   when nothing appears. Centred and above the aggregates, so a retained reader is
+   never covered — it is only ever raised when the stage is otherwise empty. */
+.attachment-page__notice {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .4rem;
+  padding: 1.5rem;
+  text-align: center;
+  background: #081018;
+}
+.attachment-page__notice[hidden] { display: none; }
+.attachment-page__notice-headline { margin: 0; font-size: 1.05rem; font-weight: 600; color: #e6edf3; }
+.attachment-page__notice-detail { margin: 0; max-width: 34rem; font-size: .9rem; line-height: 1.45; color: #b7cbe0; }
+/* The machine code stays visible. Replacing it with prose would trade this
+   operator's confusion for the next person's undiagnosable bug report. */
+.attachment-page__notice-code { margin: .4rem 0 0; font: 600 .7rem/1 ui-monospace, monospace; letter-spacing: .04em; color: #6f8599; }
+
+.attachment-page__aggregate {
+  display: flex;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.attachment-page__aggregate > .continuous-surface { width: 100%; min-width: 0; min-height: 0; }
+
+/* `visibility: hidden` is load-bearing and must NOT be "optimised" to
+   `display: none`. A hidden aggregate still needs to lay out, because the surface
+   converges its font fit while hidden and then presents an already-settled grid —
+   that is what stops the operator seeing the font walk 14px down to 7px on screen.
+   A display:none element has no boxes, so every measurement reads zero and the fit
+   silently converges on nothing. The symptom would appear in the surface, nowhere
+   near this rule. */
+.attachment-page__aggregate--candidate,
+.attachment-page__aggregate--logical-hidden {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.attachment-page__aggregate--frozen { pointer-events: auto; }
+
+.continuous-surface-scroller { overscroll-behavior: contain; touch-action: pan-x pan-y; }
+
+.continuous-surface-live-host { position: relative; }
+.continuous-surface-selection-live-overlay {
+  position: absolute;
+  overflow: hidden;
+  z-index: 10;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.continuous-surface-selection-live-segment {
+  position: absolute;
+  background: rgba(71, 132, 194, .58);
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.continuous-surface-history ::selection,
+.continuous-surface-bridge ::selection {
+  color: inherit;
+  background: rgba(71, 132, 194, .58);
+}
+
+/* The only in-flow trailing content is the baseline scrollbar/thumb gutter. The
+   Composer reserve belongs to the stage box above, so every surface consumer sees
+   the same reduced client height. */
+.continuous-surface-scroller::after {
+  content: "";
+  display: block;
+  height: var(--persea-scroller-gutter, .5rem);
+}
+
+/* The dock's only in-flow child is the accessory key row. The page is pinned to
+   the visual viewport, so being the last child puts it on the keyboard's top edge
+   no positioning arithmetic. It costs the terminal height only while the terminal
+   has focus — the reader never pays for it. */
+.attachment-page__dock {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.attachment-page__keybar {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: .3rem;
+  padding: .35rem .4rem calc(.35rem + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid #273444;
+  background: #0d1620;
+}
+.attachment-page__keybar[hidden] { display: none; }
+
+/* Out of flow in BOTH states, so it never costs the terminal a row. The first
+   version was a full-width row of its own, which spent height to save height and
+   still spent it once collapsed. Anchored above the bar rather than inside it: it
+   overlaps a few pixels of terminal at the right edge, where a tab belongs, and it
+   can never cover a key. */
+.attachment-page__keybar-handle {
+  position: absolute;
+  bottom: 100%;
+  right: .5rem;
+  min-height: 20px;
+  padding: 0 .7rem;
+  border: 1px solid #273444;
+  border-bottom: 0;
+  border-radius: .35rem .35rem 0 0;
+  background: #0d1620;
+  color: #8ba6bd;
+  font: 600 .72rem/1 ui-monospace, monospace;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.attachment-page__keybar-handle:active { background: #1d3348; }
+.attachment-page__keybar[data-collapsed="true"] .attachment-page__keybar-row { display: none; }
+/* Collapsed height is the safe-area inset and nothing else — the rows are gone and
+   the handle is out of flow, so the terminal gets every pixel back. */
+.attachment-page__keybar[data-collapsed="true"] {
+  gap: 0;
+  border-top: 0;
+  padding: 0 0 env(safe-area-inset-bottom, 0px);
+}
+
+.attachment-page__keybar-row { display: flex; gap: .3rem; }
+.attachment-page__keybar-row--overflow { justify-content: flex-start; overflow-x: auto; }
+.attachment-page__keybar-row--overflow[hidden] { display: none; }
+
+/* Equal flex so the arrow cluster lands in predictable places under the thumb:
+   a key whose position shifts with its label length is a key you have to look at.
+   44px is the minimum comfortable touch target. */
+.attachment-page__keybar-key {
+  flex: 1 1 0;
+  min-width: 2.2rem;
+  min-height: 40px;
+  border: 1px solid #41617e;
+  border-radius: .4rem;
+  padding: .2rem .1rem;
+  background: #142536;
+  color: #e6edf3;
+  font: 600 .88rem/1 ui-monospace, monospace;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.attachment-page__keybar-key:active { background: #1d3348; }
+/* The latch must be unmistakable: an armed modifier that looks unarmed sends the
+   operator's next keystroke somewhere they did not intend. */
+.attachment-page__keybar-key--latch[data-latched="true"] {
+  border-color: #ffc77d;
+  background: #4a3a18;
+  color: #ffc77d;
+}
+
+.attachment-page__compose-tab,
+.attachment-page__composer {
+  position: absolute;
+  z-index: 15;
+  bottom: 100%;
+}
+
+.attachment-page__compose-tab {
+  display: block;
+  left: .5rem;
+  min-height: 20px;
+  padding: 0 .7rem;
+  border: 1px solid #273444;
+  border-bottom: 0;
+  border-radius: .35rem .35rem 0 0;
+  background: #0d1620;
+  color: #8ba6bd;
+  font: 600 .72rem/1 ui-monospace, monospace;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.attachment-page__compose-tab:active { background: #1d3348; }
+.attachment-page__compose-tab[hidden] { display: none; }
+
+.attachment-page__composer {
+  left: .4rem;
+  right: .4rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(24px, 1fr) auto auto;
+  min-width: 0;
+  gap: .4rem;
+  max-height: min(
+    calc(var(--persea-visual-viewport-height, 100dvh) - 6rem),
+    var(--persea-composer-inset-budget, 100dvh)
+  );
+  overflow: hidden;
+  padding: .5rem;
+  border: 1px solid #2b4055;
+  border-radius: .6rem .6rem 0 0;
+  background: #101d29;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 55%);
+}
+.attachment-page__composer[hidden] { display: none; }
+.attachment-page__composer-header,
+.attachment-page__composer-footer,
+.attachment-page__composer-header-actions,
+.attachment-page__composer-mode,
+.attachment-page__composer-guard-actions {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+}
+.attachment-page__composer-header { min-height: 28px; }
+.attachment-page__composer-label {
+  flex: 0 0 auto;
+  font: 600 .72rem/1 ui-monospace, monospace;
+  letter-spacing: .04em;
+}
+.attachment-page__composer-mode { margin-right: auto; }
+.attachment-page__composer-mode .attachment-page__button,
+.attachment-page__composer-header-actions .attachment-page__button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: .2rem .35rem;
+}
+.attachment-page__composer-mode .attachment-page__button[aria-pressed="true"] {
+  border-color: #e6edf3;
+  background: #1d3348;
+}
+.attachment-page__composer-grip {
+  position: relative;
+  z-index: 1;
+  width: 3rem;
+  height: 24px;
+  overflow: hidden;
+  margin: -.5rem auto -.35rem;
+  outline-offset: -3px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.attachment-page__composer-grip::after {
+  content: "";
+  display: block;
+  width: 3rem;
+  height: 4px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: #41617e;
+  pointer-events: none;
+}
+.attachment-page__composer-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: max(1lh, 24px);
+  max-height: min(7.5rem, 100%);
+  resize: none;
+  overscroll-behavior: contain;
+  border: 1px solid #2b4055;
+  border-radius: .4rem;
+  padding: .45rem .5rem;
+  background: #081018;
+  color: #e6edf3;
+  caret-color: #9fd4ff;
+  font: 16px/1.4 ui-monospace, monospace;
+}
+.attachment-page__composer[data-size="expanded"] .attachment-page__composer-textarea {
+  max-height: min(100%, calc(var(--persea-visual-viewport-height, 100dvh) * .55));
+}
+
+.attachment-page[data-composer-density="compact"] .attachment-page__composer {
+  gap: .3rem;
+  padding: .35rem;
+}
+.attachment-page[data-composer-density="compact"] .attachment-page__composer-grip {
+  margin: -.35rem auto -.25rem;
+}
+.attachment-page[data-composer-density="compact"] .attachment-page__composer-textarea {
+  max-height: min(6rem, 100%);
+  padding: .25rem .4rem;
+  font: 16px/1.2 ui-monospace, monospace;
+}
+.attachment-page[data-composer-density="compact"] .attachment-page__composer[data-size="expanded"] .attachment-page__composer-textarea {
+  max-height: min(100%, calc(var(--persea-visual-viewport-height, 100dvh) * .4));
+}
+.attachment-page[data-composer-density="compact"] .attachment-page__composer button { min-height: 40px; }
+.attachment-page__composer-footer {
+  min-height: 44px;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  padding-right: 2rem;
+}
+/* UX-16 §16.2: the status is a conditional line (hidden while empty). */
+.attachment-page__composer .attachment-page__composer-status[hidden] { display: none; }
+.attachment-page__composer-status {
+  font: 600 .72rem/1.35 ui-monospace, monospace;
+  letter-spacing: .04em;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #b7cbe0;
+}
+.attachment-page__composer[data-content="guard"] .attachment-page__composer-status,
+.attachment-page__composer[data-content="blocked"] .attachment-page__composer-status { color: #ffb4ab; }
+.attachment-page__composer[data-content="sent"] {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  padding-block: .35rem;
+}
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-grip,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-label,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-mode,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-size,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-textarea,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-guard-actions,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-fix,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-clear,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-send {
+  display: none;
+}
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-header,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-header-actions {
+  display: contents;
+}
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-footer {
+  order: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  flex-wrap: nowrap;
+}
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-status {
+  display: block;
+}
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-close {
+  order: 2;
+  flex: 0 0 auto;
+}
+.attachment-page__composer[data-content="sent"][data-sent-reopened="true"]:not([hidden]) {
+  display: grid;
+}
+.attachment-page__composer[data-content="sent"][data-sent-reopened="true"] .attachment-page__composer-header {
+  display: flex;
+}
+.attachment-page__composer[data-content="sent"][data-sent-reopened="true"] .attachment-page__composer-header-actions {
+  display: flex;
+  margin-left: auto;
+}
+.attachment-page__composer[data-content="sent"][data-sent-reopened="true"] .attachment-page__composer-close {
+  order: initial;
+}
+.attachment-page__composer[data-content="sent"][data-sent-reopened="true"] .attachment-page__composer-textarea {
+  display: block;
+}
+.attachment-page__composer[hidden] {
+  display: none;
+  visibility: hidden;
+  pointer-events: none;
+}
+.attachment-page__composer-guard-actions:empty,
+.attachment-page__composer-guard-actions:has(> [hidden] + [hidden]) { display: none; }
+.attachment-page__composer-send {
+  min-width: 5.5rem;
+  min-height: 44px;
+  border-color: #3f86c4;
+  background: #1d4f7a;
+  color: #eaf5ff;
+}
+.attachment-page__composer-send:disabled {
+  cursor: default;
+  opacity: 1;
+  border-color: #2b4055;
+  background: #142536;
+  color: #6f8599;
+}
+/* Image chip strip. The row exists as a grid item only while attachments
+   exist (data-attachments gates the 6-row template), so a composer with no
+   images keeps today's 5-row layout byte for byte. */
+.attachment-page__composer[data-attachments] {
+  grid-template-rows: auto auto auto minmax(24px, 1fr) auto auto;
+}
+.attachment-page__composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.attachment-page__composer-chips[hidden] { display: none; }
+.attachment-page__composer-chip {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  min-width: 0;
+  max-width: 100%;
+  padding: .15rem .3rem;
+  border: 1px solid #2b4055;
+  border-radius: .4rem;
+  background: #142536;
+  color: #b7cbe0;
+  font: 600 .72rem/1.35 ui-monospace, monospace;
+}
+.attachment-page__composer-chip[data-status="uploading"] { opacity: .85; }
+.attachment-page__composer-chip[data-status="failed"] { border-color: #7a3b3b; color: #ffb4ab; }
+.attachment-page__composer-chip-label,
+.attachment-page__composer-chip-note {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-page__composer-chip-label { max-width: 12rem; }
+.attachment-page__composer-chip-size { flex: 0 0 auto; color: #7f98ab; }
+.attachment-page__composer-chip-button {
+  flex: 0 0 auto;
+  min-width: 28px;
+  min-height: 28px;
+  padding: .1rem .25rem;
+  border: 1px solid #2b4055;
+  border-radius: .35rem;
+  background: #101d29;
+  color: #b7cbe0;
+  font: 600 .72rem/1 ui-monospace, monospace;
+  touch-action: manipulation;
+}
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-chips,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-attach {
+  display: none;
+}
+.attachment-page__dock[data-keybar="hidden"] .attachment-page__composer {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
+}
+.attachment-page__dock[data-keybar="hidden"] .attachment-page__compose-tab {
+  margin-bottom: calc(.5rem + env(safe-area-inset-bottom, 0px));
+}
+[data-composer="open"] .attachment-page__keybar-handle { display: none; }
+
+@media (pointer: coarse) {
+  /* Keep the key-bar handle reachable above the Composer in both states. The
+     Composer keeps its full width, and neither key rows nor actions need to
+     reserve a horizontal notch for the out-of-flow handle. */
+  .attachment-page[data-keyboard="open"] .attachment-page__dock[data-composer="open"] .attachment-page__keybar .attachment-page__keybar-handle {
+    display: block;
+    top: auto;
+    bottom: calc(100% + var(--persea-composer-inset) + 1px);
+  }
+}
+
+@media (min-width: 641px) {
+  .attachment-page__composer {
+    right: auto;
+    left: .6rem;
+    width: min(48rem, calc(100% - 1.2rem));
+  }
+  .attachment-page__composer-textarea { max-height: min(9rem, 100%); }
+  .attachment-page__composer[data-size="expanded"] .attachment-page__composer-textarea {
+    max-height: min(100%, calc(var(--persea-visual-viewport-height, 100dvh) * .6));
+  }
+  .attachment-page[data-composer-density="compact"] .attachment-page__composer-textarea { max-height: min(7.5rem, 100%); }
+  .attachment-page[data-composer-density="compact"] .attachment-page__composer[data-size="expanded"] .attachment-page__composer-textarea {
+    max-height: min(100%, calc(var(--persea-visual-viewport-height, 100dvh) * .5));
+  }
+}
+
+@media (max-width: 640px) {
+  .attachment-page__composer-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+@media (pointer: coarse) {
+  /* iOS zooms the visual viewport when a focused text field computes below 16px. */
+  .attachment-page__compose-tab { font-size: 16px; }
+  .attachment-page__compose-tab:not([hidden]) { display: block; }
+  .attachment-page__composer {
+    /* Preserve the frozen viewport-only projection, then add the live
+       terminal-space budget as the governing declaration. */
+    max-height: max(0px, min(
+      calc(var(--persea-visual-viewport-height, 100dvh) * .5),
+      calc(var(--persea-visual-viewport-height, 100dvh) - 6rem)
+    ));
+    max-height: max(0px, min(
+      calc(var(--persea-visual-viewport-height, 100dvh) * .5),
+      calc(var(--persea-visual-viewport-height, 100dvh) - 6rem),
+      var(--persea-composer-inset-budget, 100dvh)
+    ));
+  }
+  .attachment-page__composer[data-size="expanded"] .attachment-page__composer-textarea {
+    max-height: min(100%, max(24px, calc(var(--persea-visual-viewport-height, 100dvh) * .5 - 8rem)));
+  }
+  .attachment-page[data-composer-density="compact"] .attachment-page__composer[data-size="expanded"] .attachment-page__composer-textarea {
+    max-height: min(100%, max(24px, calc(var(--persea-visual-viewport-height, 100dvh) * .4 - 8rem)));
+  }
+  .attachment-page__composer,
+  .attachment-page__composer button,
+  .attachment-page__composer output {
+    font-size: 16px;
+  }
+}
+
+.attachment-page[data-composer-font-experiment="15px"] .attachment-page__composer-textarea {
+  font-size: 15px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .attachment-page__composer { transition: opacity 120ms ease, transform 120ms ease; }
+}
+
+@media (pointer: coarse) {
+  /* Thumb room as well as scrollbar clearance. With the keyboard down the caret row
+     would otherwise sit behind the home indicator, so the safe-area inset is added
+     only in that state — the visual viewport already excludes the keyboard, and
+     adding the inset while typing would cost a terminal row for nothing. */
+  .attachment-page { --persea-scroller-gutter: .75rem; }
+  .attachment-page[data-keyboard="closed"] { --persea-scroller-gutter: calc(.75rem + env(safe-area-inset-bottom, 0px)); }
+}
+
+
+.continuous-surface-history, .continuous-surface-live-host { min-width: 100%; width: max-content; }
+.continuous-surface-toolbar { position: static; display: flex; flex-wrap: wrap; gap: .35rem; }
+.continuous-surface-display-controls { display: flex; align-items: center; flex-wrap: nowrap; gap: .35rem; }
+.continuous-surface-display-controls button { border: 1px solid #41617e; border-radius: .3rem; padding: .28rem .48rem; background: #142536; color: inherit; }
+.continuous-surface-display-readout {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 6.5rem;
+}
+.continuous-surface-display-status {
+  min-width: 100%;
+  font: 600 .72rem/1 ui-monospace, monospace;
+  text-align: center;
+}
+.continuous-surface-interaction-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+/* This inherited the page's 16px sans and so rendered LARGER than the controls it
+   describes — on a phone it was the biggest text on screen, above the terminal,
+   saying that nothing was wrong. It gets the same compact treatment as every other
+   status in the header. */
+.continuous-surface-interaction-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  transform: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 .72rem/1 ui-monospace, monospace;
+  text-align: center;
+  letter-spacing: .04em;
+  color: #b7cbe0;
+  background: #111923;
+  pointer-events: none;
+}
+.continuous-surface-interaction-status[data-state="control-enabled"],
+.continuous-surface-interaction-status[data-state="control-disabled"],
+.continuous-surface-interaction-status[data-state="control-pending"],
+.continuous-surface-interaction-status[data-state="observe-read-only"] {
+  visibility: hidden;
+  transform: translateY(-100%);
+}
+.continuous-surface-display-readout:has(> .continuous-surface-interaction-status:not([data-state="control-enabled"]):not([data-state="control-disabled"]):not([data-state="control-pending"]):not([data-state="observe-read-only"])) > .continuous-surface-display-status {
+  visibility: hidden;
+}
+.continuous-surface-live-host--local-select { touch-action: none !important; }
+
+@media (max-width: 640px) {
+  .attachment-page__stage { min-height: 0; }
+  /* Interim compaction while the toolbar is restructured. Measured from a phone
+     screenshot, chrome above the terminal was five rows deep — header, zoom, mode
+     and clipboard, selection, status — leaving the terminal well under half the
+     screen with a keyboard up. Tightening type and padding does not fix the real
+     problem, which is that rarely-used controls are inline at all, but it buys
+     back roughly a row and a half now rather than after the restructure. */
+  .continuous-surface-toolbar { padding: 4px 6px; }
+  .continuous-surface-toolbar button {
+    padding: .2rem .4rem;
+    font-size: .78rem;
+    line-height: 1.15;
+  }
+  .continuous-surface-display-status { font-size: .68rem; }
+  .continuous-surface-interaction-status { font-size: .68rem; }
+  .continuous-surface-interaction-controls { gap: 4px; }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .attachment-page__stage { min-height: 0; }
+}
+/* The trailing rows are the composer dock and the mobile key bar; hidden or
+   empty they contribute nothing, so a fine-pointer layout with the composer
+   closed is byte-for-byte the old two-row grid. */
+.persea-unified-terminal {
+  display: grid;
+  /* toolbar, connection strip, failure notice, viewport, composer dock, key bar */
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto auto auto;
+  /* The explicit column caps the track at the container. Left implicit, the
+     auto track sizes to the toolbar's min-content width, and on a phone every
+     row — the key bar included — stretches past the viewport and is clipped. */
+  grid-template-columns: minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: #111318;
+  color: #f3f4f6;
+}
+
+/* Placement is explicit because auto-placement is positional over the
+   children that GENERATE BOXES: a display:none row (the empty connection
+   strip, the hidden notice) does not occupy a track, so relying on child
+   order would slide the later rows forward — dropping the viewport into an
+   auto track and crushing whichever row inherits the 1fr track to nothing. */
+.persea-unified-toolbar { grid-row: 1; }
+.persea-unified-connection { grid-row: 2; }
+.persea-unified-notice { grid-row: 3; }
+.persea-unified-stage { grid-row: 4; }
+.persea-unified-composer-dock { grid-row: 5; }
+.persea-terminal-keys { grid-row: 6; }
+.persea-unified-keybar { grid-row: 7; }
+
+/* The stage is the viewport's track: one grid cell the scroller fills, with
+   the quick-actions sheet positioned inside it. Its bottom edge is
+   the top of whichever bottom rows are showing (composer dock, key bar), so
+   "docked above the bar" is a fact of composition — nothing is measured and
+   no offset is published. The sheet is out of flow: opening it
+   changes no box the ResizeObserver watches. */
+.persea-unified-stage {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Initial replay honesty. This is an inert overlay in the stage, not a grid
+   row, so it cannot move the toolbar, change the Fit measurement, focus the
+   terminal or intercept input. E-P5 supplies these custom properties; their
+   fallbacks are the existing terminal/chrome colours on this base. */
+.persea-unified-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  box-sizing: border-box;
+  padding: 1rem;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  background: var(--persea-terminal-bg, #111318);
+  color: var(--persea-chrome-fg, #f3f4f6);
+  text-align: center;
+}
+.persea-unified-loading[hidden] { display: none; }
+.persea-unified-loading__identity { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 0.82rem/1.3 ui-monospace, monospace; }
+.persea-unified-loading__detail { opacity: 0.72; font-size: 0.78rem; line-height: 1.3; }
+
+/* Touch selection is a frozen, selectable sibling above xterm. It owns the
+   only scroll surface while active; the live viewport stays the same size
+   underneath and is inert/aria-hidden, so entering Select cannot resize or
+   feed input to the terminal. */
+.persea-unified-select {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--persea-terminal-bg, #111318);
+  color: var(--persea-terminal-fg, #f3f4f6);
+}
+.persea-unified-select[hidden] { display: none; }
+.persea-unified-select__status {
+  position: absolute;
+  z-index: 1;
+  inset: 0.35rem 0.5rem auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.25rem 0.4rem;
+  border-radius: 0.3rem;
+  background: var(--persea-chrome-bg, #1b1e25);
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font-size: 0.76rem;
+}
+.persea-unified-select__status:empty { display: none; }
+.persea-unified-select__body {
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0.25rem 0.4rem max(1rem, env(safe-area-inset-bottom));
+  white-space: pre;
+  font-family: var(--persea-terminal-font-family, ui-monospace, monospace);
+  font-size: var(--persea-terminal-font-size, 14px);
+  line-height: var(--persea-terminal-row-height, 1.2em);
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+.persea-unified-select__row {
+  display: block;
+  min-height: var(--persea-terminal-row-height, 1.2em);
+  line-height: var(--persea-terminal-row-height, 1.2em);
+  white-space: pre;
+}
+.persea-unified-select__cell { white-space: pre; }
+.persea-unified-select__cell--blink {
+  animation: persea-frozen-cell-blink 1s steps(1, end) infinite;
+}
+@keyframes persea-frozen-cell-blink { 50% { opacity: 0; } }
+
+.persea-unified-connection {
+  padding: 0.4rem 0.75rem;
+  background: #3a2d12;
+  border-bottom: 1px solid #5c4a1e;
+  color: #ffd9a0;
+  font-size: 0.85rem;
+}
+
+.persea-unified-connection:empty { display: none; }
+
+.persea-unified-notice {
+  margin: 1.2rem auto 0;
+  max-width: 34rem;
+  width: calc(100% - 2rem);
+  box-sizing: border-box;
+  padding: 1rem 1.25rem;
+  border: 1px solid #4a3d57;
+  border-radius: 0.5rem;
+  background: #1d1a24;
+}
+
+.persea-unified-notice[hidden] { display: none; }
+.persea-unified-notice__headline { margin: 0 0 0.4rem; font-size: 1.05rem; }
+.persea-unified-notice__detail { margin: 0 0 0.5rem; color: #c9cedd; }
+.persea-unified-notice__code { margin: 0 0 0.8rem; color: #8b93a7; font: 0.78rem/1.4 ui-monospace, monospace; }
+.persea-unified-notice__actions { display: flex; align-items: center; gap: 0.6rem; }
+
+.persea-unified-notice__take-control,
+.persea-unified-notice__reconnect {
+  color: inherit;
+  background: #14503d;
+  border: 1px solid #28755b;
+  border-radius: 0.35rem;
+  padding: 0.45rem 0.75rem;
+}
+
+.persea-unified-notice__take-control[hidden],
+.persea-unified-notice__reconnect[hidden] { display: none; }
+.persea-unified-notice__dashboard { color: #9fd1ff; }
+
+/* A control row never scrolls. Overflow is resolved by priority, never by
+   scrolling or wrapping (wrapping changes the row's height, and every
+   box-height change is a font-refit flicker risk): buttons and the readout
+   are flex:none and keep their width; the selection status yields first
+   (capped, then ellipsized), the caption label next (it takes only leftover
+   space); and below the phone breakpoint the secondary controls collapse
+   under one ⋯ toggle into a popover anchored to this row, so the essential
+   controls — the geometry readout with its ↕ action and the ✎ composer
+   toggle — always sit inside the viewport, tappable. The popover is
+   positioned, never in flow: opening it changes no box the ResizeObserver
+   watches, so it cannot refit the font. */
+.persea-unified-toolbar {
+  position: relative;
+  /* The toolbar is its own size container: its breakpoint is judged against
+     the row's inline size, not the viewport, so a page mounted in a workspace
+     cell collapses the same way a page on a narrow viewport does. */
+  container-type: inline-size;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  background: #1b1e25;
+  border-bottom: 1px solid #343844;
+  min-width: 0;
+}
+
+.persea-unified-toolbar button {
+  flex: none;
+  white-space: nowrap;
+  color: inherit;
+  background: #282d38;
+  border: 1px solid #596171;
+  border-radius: 0.35rem;
+  padding: 0.35rem 0.65rem;
+}
+
+.persea-unified-toolbar button.persea-unified-copy[data-selection="ready"] {
+  border-color: var(--persea-chrome-fg, #e6edf3);
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 26%, var(--persea-chrome-bg, #1b1e25));
+}
+
+/* Copy outcomes are painted on the control, never injected beside it. The
+   fixed glyph slot makes ⎘/✓/✗ an exact box-preserving swap. The success and
+   failure pairs are opaque rather than theme-mixed, so their contrast is
+   stable across all eight chrome themes. */
+.persea-copy-feedback__glyph {
+  display: inline-block;
+  box-sizing: border-box;
+  inline-size: 1.6em;
+  text-align: center;
+}
+.persea-copy-feedback__label { margin-inline-start: 0.25rem; }
+button[data-copy-state="ready"] {
+  border-color: var(--persea-chrome-fg, #e6edf3);
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 26%, var(--persea-chrome-bg, #1b1e25));
+}
+button[data-copy-state="done"] {
+  border-color: #d8fbe2 !important;
+  background: #237a3b !important;
+  color: #ffffff !important;
+}
+button[data-copy-state="failed"] {
+  border-color: #ffe2df !important;
+  background: #b42318 !important;
+  color: #ffffff !important;
+}
+
+.persea-unified-preference {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  color: inherit;
+  font-size: 0.8rem;
+}
+.persea-unified-preference__label { white-space: nowrap; }
+.persea-unified-preference__theme,
+.persea-unified-preference__composer-font {
+  box-sizing: border-box;
+  min-height: 2.25rem;
+  max-width: 10.5rem;
+  padding: 0.3rem 1.8rem 0.3rem 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--persea-accent, #8fc7ff) 55%, #596171);
+  border-radius: 0.35rem;
+  background: #1b1e25;
+  color: var(--persea-chrome-fg, #f3f4f6);
+  font: inherit;
+}
+.persea-unified-preference-status {
+  flex: 0 1 12rem;
+  overflow: hidden;
+  /* The accent alone is not legible on every chrome (Solarized Dark reached
+     4.12:1) and this status also renders inside the sheet. */
+  color: var(--persea-chrome-notice-fg, #8fc7ff);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.persea-unified-preference-status[hidden] { display: none; }
+
+/* The session tag (U3). It replaces the build caption in the row's leading
+   slot: a status dot whose colour is the page's connection state and the
+   session name (plus its alias) in a code face. It shrinks to an ellipsis
+   rather than wrapping — the control row never gains a line — and it survives
+   every width, including the phone, which is the device this is mostly used
+   on and the one where the row is the only place the session is named.
+   At 390 pt the essential controls fill the row to its edge, so the width the
+   tag needs is taken from the one-time fit hint (see the phone breakpoint
+   below); the alias is dropped there and the name ellipsises. */
+.persea-unified-identity {
+  display: flex;
+  align-items: center;
+  /* The first thing in the row to give up width, and the only one allowed to
+     go below its content: everything else in the row is a target. */
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.persea-unified-toolbar button.persea-unified-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 20rem;
+  overflow: hidden;
+  padding: 0.3rem 0.5rem;
+  font: 0.78rem/1.3 ui-monospace, monospace;
+}
+
+/* The three states. A single value per state has to clear 3:1 against every
+   chrome in the catalogue, and the catalogue has both a light chrome
+   (rose-pine-dawn #fffaf3, relative luminance .9610) and a fairly light dark
+   chrome (gruvbox-dark #3c3836, .0406). That pins each fill into a narrow
+   luminance band: at least 3 x (.0406 + .05) - .05 = .2217 to clear the
+   darkest end, at most (.9610 + .05)/3 - .05 = .2870 to clear the lightest.
+   The worst-case ratio is maximised at the luminance where the two ends meet,
+   L = sqrt(.0906 x 1.0110) - .05 = .2527, which yields 3.34 -- the best any
+   single value can do here. All three fills are placed on that band:
+
+     live    #2e9e4f  L .2560  worst 3.30 (rose-pine-dawn)
+     pending #ad8408  L .2540  worst 3.33 (rose-pine-dawn)
+     down    #ee554f  L .2524  worst 3.34 (gruvbox-dark)
+
+   The previous red (#d94a3d, L .1999) was below the band and measured 2.76 on
+   gruvbox-dark, 2.81 on dracula, 2.97 on one-dark and 2.99 on catppuccin-mocha
+   -- and the sweep never caught it, because a live committed page is always in
+   the `live` state, so only the green was ever measured. The sweep now forces
+   each state onto the dot before measuring, and asserts the three fills differ.
+   Colour is still never the only carrier: the tag's accessible name says the
+   state in words. */
+.persea-unified-tag__dot {
+  flex: none;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #ad8408;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 35%, transparent);
+}
+.persea-unified-tag__dot[data-state="live"] { background: #2e9e4f; }
+.persea-unified-tag__dot[data-state="pending"] { background: #ad8408; }
+.persea-unified-tag__dot[data-state="down"] { background: #ee554f; }
+
+.persea-unified-tag__name,
+.persea-unified-tag__alias {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.persea-unified-tag__alias {
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+}
+.persea-unified-tag__alias[hidden] { display: none; }
+.persea-unified-tag__alias::before { content: "\00b7"; margin-right: 0.3rem; }
+
+/* The details the tag does not have room for. Positioned, never in flow: it
+   is not a grid row and changes no box the ResizeObserver watches, exactly
+   like the overflow popover beside it. */
+.persea-unified-identity__details {
+  position: absolute;
+  top: 100%;
+  left: 0.5rem;
+  z-index: 10;
+  box-sizing: border-box;
+  max-width: calc(100% - 1rem);
+  width: min(28rem, calc(100% - 1rem));
+  max-height: min(70vh, 32rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  margin: 0.25rem 0 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #343844;
+  border-radius: 0.4rem;
+  background: #1b1e25;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+  font-size: 0.78rem;
+}
+.persea-unified-identity__details[hidden] { display: none; }
+.persea-unified-identity__facts { margin: 0; }
+.persea-unified-identity__session-status {
+  min-height: 1.2em;
+  margin: 0.45rem 0 0;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+}
+.persea-unified-identity__sessions[hidden] { display: none; }
+.persea-unified-identity__session-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.3rem;
+  margin-block: 0.35rem;
+}
+.persea-unified-identity__session-actions button { min-height: 44px; }
+.persea-unified-identity__row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+}
+.persea-unified-identity__row + .persea-unified-identity__row { margin-top: 0.2rem; }
+.persea-unified-identity__row dt {
+  flex: none;
+  min-width: 5.5rem;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+}
+.persea-unified-identity__row dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, monospace;
+}
+
+.persea-unified-toolbar__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Inline on a wide viewport: the secondary controls are the row's own flex
+   items, so the status among them takes part in the row's shrink order. */
+.persea-unified-toolbar__secondary { display: contents; }
+
+.persea-unified-toolbar button.persea-unified-toolbar__more { display: none; }
+.persea-unified-toolbar button.persea-unified-phone-view,
+.persea-unified-geometry--phone { display: none; }
+
+/* U1: readiness is the button's own state, so the row carries no text that
+   can appear and disappear. The glyph is fixed width, so the box never moves
+   when a selection is made or cleared. */
+.persea-unified-toolbar button.persea-unified-copy {
+  inline-size: 5.5rem;
+  min-width: 5.5rem;
+  font: 600 0.75rem/1 ui-monospace, monospace;
+}
+.persea-unified-toolbar button.persea-unified-copy[data-select-state="selecting"] {
+  border-color: var(--persea-chrome-fg, #e6edf3);
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 26%, var(--persea-chrome-bg, #1b1e25));
+}
+/* UX14: the Paste slot carries the copy outcome. Its box is fixed like the
+   Select box, so Paste → Copy → Copied ✓ → Paste never moves a neighbour. */
+.persea-unified-toolbar button.persea-unified-toolbar-paste {
+  inline-size: 4.75rem;
+  min-width: 4.75rem;
+  font: 600 0.75rem/1 ui-monospace, monospace;
+}
+.persea-unified-toolbar button.persea-unified-toolbar-paste[data-paste-state="copy"] {
+  border-color: var(--persea-chrome-fg, #e6edf3);
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 26%, var(--persea-chrome-bg, #1b1e25));
+}
+.persea-unified-toolbar button.persea-unified-toolbar-paste[data-paste-state="copied"] {
+  border-color: #2f6f45;
+  background: #143822;
+  color: #d8ffe4;
+}
+.persea-unified-toolbar button.persea-unified-toolbar-paste[data-paste-state="failed"] {
+  border-color: #8a3b3b;
+  background: #3a1616;
+  color: #ffd9d9;
+}
+.persea-unified-toolbar button.persea-unified-copy .persea-copy-feedback__glyph {
+  inline-size: auto;
+  min-inline-size: 4ch;
+}
+
+/* A six-pane workspace keeps the full contextual Select/Copy box. Give the
+   real toolbar enough of its cell header to carry that fixed box plus Paste,
+   View, quick actions and Composer without squeezing the session tag into the
+   control row. The tag's details stay positioned by the toolbar rather than
+   its deliberately shrinking identity flex item, so the session list remains
+   a usable pane-local popover. These selectors are more specific than the
+   workspace compaction defaults because the attachment toolbar owns the new
+   controls and their constant geometry. */
+@media (pointer: fine), (pointer: none) {
+  .ws-cell .ws-cell__header { padding-right: min(22rem, 90%); }
+  .ws-cell .ws-cell__mount .persea-unified-toolbar { width: min(22rem, 90%); }
+  /* UX14: the Paste slot is a fixed box now (it has to hold "Copied ✓"), so
+     a cell's bar trims both fixed boxes to what their widest word needs at
+     the cell's fine-pointer padding — Select/Selecting at 5rem, Paste/Copy/
+     Copied ✓/Copy ✗ at 4.5rem — and the row is back inside the budget the
+     comment in workspace.css measures. Boxes stay constant across states. */
+  .ws-cell .ws-cell__mount .persea-unified-toolbar button.persea-unified-copy { inline-size: 5rem; min-width: 5rem; padding-inline: 0.3rem; }
+  .ws-cell .ws-cell__mount .persea-unified-toolbar button.persea-unified-toolbar-paste { inline-size: 4.5rem; min-width: 4.5rem; padding-inline: 0.3rem; }
+  .ws-cell__mount .persea-unified-terminal .persea-unified-identity {
+    position: static;
+    z-index: 1;
+  }
+}
+.persea-unified-toolbar button.persea-unified-explainer-info {
+  min-width: 40px;
+  min-height: 40px;
+  padding-inline: 0.35rem;
+}
+.persea-unified-explainer {
+  position: absolute;
+  z-index: 15;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  width: min(25rem, calc(100% - 0.5rem));
+  max-height: min(28rem, 70vh);
+  box-sizing: border-box;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 45%, var(--persea-chrome-bg, #1b1e25));
+  border-radius: 0.55rem;
+  background: var(--persea-chrome-bg, #1b1e25);
+  color: var(--persea-chrome-fg, #f3f4f6);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+}
+.persea-unified-explainer[hidden] { display: none; }
+.persea-unified-explainer__heading { margin: 0 0 0.45rem; font-size: 0.9rem; }
+.persea-unified-explainer__body p { margin: 0; font-size: 0.78rem; line-height: 1.45; }
+.persea-unified-explainer__tools { display: grid; gap: 0.35rem; margin: 0.7rem 0 0; padding-top: 0.55rem; border-top: 1px solid color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 30%, var(--persea-chrome-bg, #1b1e25)); }
+.persea-unified-toolbar button.persea-unified-explainer__tool { min-height: 2.75rem; height: 2.75rem; width: auto; max-width: none; justify-self: start; padding: 0.2rem 0.85rem; white-space: nowrap; }
+.persea-unified-explainer__tool-note { color: var(--persea-chrome-muted-fg, #c5d5ec); font-size: 0.74rem; line-height: 1.4; }
+.persea-unified-explainer__list { margin: 0; }
+.persea-unified-explainer__list dt { margin-top: 0.55rem; font-weight: 700; }
+.persea-unified-explainer__list dt:first-child { margin-top: 0; }
+.persea-unified-explainer__list dd { margin: 0.1rem 0 0; color: var(--persea-chrome-muted-fg, #c5d5ec); font-size: 0.76rem; line-height: 1.4; }
+.persea-explainer-enabled { -webkit-touch-callout: none; }
+
+/* The copy OUTCOME, announced and never painted. Out of the row's layout
+   entirely: an absolutely positioned 1px box generates no flex item, so the
+   control row's height is identical whether it is empty or not. */
+.persea-unified-copy-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip: rect(0px, 0px, 0px, 0px);
+  clip-path: inset(50%);
+}
+
+/* The inline row's fixed controls need ~640px; below 720 they collapse. */
+@container (max-width: 719px) {
+  /* U3 survives the phone. The tag is the only thing in this row that says
+     WHICH session is on screen, so it stays: the dot at full size, the name
+     truncated with an ellipsis, the alias dropped. It cannot add a line —
+     every button here is `flex: none; white-space: nowrap`, and the only two
+     items allowed to shrink are the tag and the one-time fit hint.
+     The width comes from that hint and from nothing else. The hint is
+     transient, the action it names is the ↕ standing next to it, its whole
+     box is the dismiss target, and its full sentence stays in its accessible
+     name — so an ellipsis there costs a word the operator has already read,
+     while the alternative costs the session's identity on the device that
+     needs it most. The geometry readout keeps its slot: it is the subject of
+     an E-P4 assertion that reads rendered text, and the arithmetic does not
+     need it. */
+  .persea-unified-toolbar { gap: 0.4rem; }
+  .persea-unified-toolbar button.persea-unified-tag { max-width: 10rem; }
+  .persea-unified-tag__alias { display: none; }
+  .persea-unified-toolbar button.persea-unified-fit-hint {
+    flex: 0 1 auto;
+    min-width: 3.25rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .persea-unified-toolbar button.persea-unified-explainer-info { display: none; }
+  .persea-unified-toolbar__controls { flex: 1 1 auto; }
+  /* The readout and its ↕ pair up at the left; ✎ and ⋯ at the right. */
+  .persea-unified-toolbar button.persea-unified-fit-height { margin-right: auto; }
+  .persea-unified-toolbar button.persea-unified-toolbar__more { display: inline-block; }
+  .persea-unified-toolbar__secondary {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0.5rem;
+    z-index: 10;
+    box-sizing: border-box;
+    max-width: calc(100% - 1rem);
+    margin-top: 0.25rem;
+    padding: 0.5rem;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    border: 1px solid #343844;
+    border-radius: 0.4rem;
+    background: #1b1e25;
+    box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+  }
+  .persea-unified-toolbar__secondary[data-open="true"] { display: flex; }
+  .persea-unified-toolbar__secondary button { min-height: 40px; }
+}
+
+/* The floor under the phone rule above. Below about 320 CSS px — narrower than
+   any phone this ships to, and the width the scroll-geometry suite uses to
+   prove the key row scrolls inside itself — the row's fixed 44 px targets and
+   the geometry readout already consume the viewport, and adding a 44 px chip
+   makes the PAGE scroll sideways. That is the harder failure: horizontal
+   overflow breaks the terminal's whole geometry contract, while a missing chip
+   costs a name that the reconnect strip, the failure notice and the sheet still
+   carry. So the tag stands down here, and only here. */
+@container (max-width: 319px) {
+  .persea-unified-identity { display: none; }
+}
+
+/* On a coarse pointer the sheet is the one control surface: the ⋯ toggle and
+   its popover go, and every toolbar button is a 44px target. A fine pointer
+   keeps the toolbar and its ⋯ exactly as they were. */
+@media (pointer: coarse) {
+  .persea-unified-toolbar button.persea-unified-toolbar__more { display: none; }
+  .persea-unified-toolbar__secondary[data-open] { display: none; }
+  .persea-unified-toolbar button { min-width: 44px; min-height: 44px; }
+  .persea-unified-toolbar button.persea-unified-explainer-info { min-width: 44px; min-height: 44px; }
+  /* Restated at the tag's own specificity: the tag opts out of the row's
+     min-width so it can ellipsise, and a touch target may not. */
+  .persea-unified-toolbar button.persea-unified-tag { min-width: 44px; }
+  .persea-unified-preference__theme,
+  .persea-unified-preference__composer-font { min-height: 44px; }
+}
+@media (pointer: coarse) {
+  @container (max-width: 719px) {
+    .persea-unified-toolbar {
+      gap: 4px;
+      padding-inline: 0.75rem;
+    }
+    .persea-unified-toolbar__controls { gap: 4px; }
+    /* UX15 §15.1 row budget at phone-360: 24 padding + 88 tag + 4 gap +
+       (48 + 48 + 44 + 44 + 44 + 4×4 gaps) = 360. The tag gives 8px so the two
+       word-bearing controls can hold "Select", "Copied" and "Failed" as words
+       (the operator asked for words, not glyphs). The padding is one token for
+       every control in the row (UX-13 law); the widths are per control. */
+    .persea-unified-toolbar button.persea-unified-tag {
+      min-width: 76px;
+      max-width: none;
+      flex: 1 1 auto;
+    }
+    /* Specificity (0,3,1): the shared control token further down the sheet
+       (`.persea-unified-toolbar button.persea-unified-copy`, (0,2,1)) sets
+       padding 0.35rem and would otherwise win by source order. */
+    .persea-unified-toolbar .persea-unified-toolbar__controls > button:not(.persea-unified-fit-hint) {
+      box-sizing: border-box;
+      width: 44px;
+      min-width: 44px;
+      max-width: 44px;
+      padding-inline: 0.1rem;
+    }
+    /* 54px: the Linux phone faces set "Copied" at ~46.5px (iOS's is narrower);
+       the row budget on a 360px phone is 24 + 76 (tag) + 4 + (54 + 54 + 44 +
+       44 + 44 + 16 gaps). */
+    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-copy,
+    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-toolbar-paste {
+      width: 54px;
+      min-width: 54px;
+      max-width: 54px;
+    }
+    .persea-unified-toolbar button.persea-unified-fit-height { margin-right: 0; }
+    .persea-unified-toolbar button.persea-unified-fit-hint { display: none; }
+    .persea-unified-toolbar > .persea-unified-toolbar__controls > .persea-unified-geometry:not(.persea-unified-geometry--phone) {
+      display: none;
+    }
+    .persea-unified-toolbar button.persea-unified-phone-view { display: inline-block; }
+    .persea-unified-toolbar__secondary[data-open="true"] { display: flex; }
+    .persea-unified-toolbar__secondary .persea-unified-geometry--phone { display: inline-block; }
+  }
+}
+@media (pointer: coarse) {
+  @container (min-width: 720px) {
+    /* A wide coarse pointer (tablet) keeps the secondary controls inline. */
+    .persea-unified-toolbar__secondary[data-open] { display: contents; }
+  }
+}
+
+/* The one-time fit hint beside ↕: dismiss-only (its tap retires it; it never
+   emits a resize). Quiet colours, one line, never wraps the toolbar. */
+.persea-unified-toolbar button.persea-unified-fit-hint {
+  min-height: 2.75rem;
+  padding: 0.35rem 0.6rem;
+  border-color: #5c4a1e;
+  background: #3a2d12;
+  color: #ffd9a0;
+  font-size: 0.8125rem;
+}
+.persea-unified-toolbar button.persea-unified-fit-hint::after { content: " \00d7"; color: #c9a96a; }
+.persea-unified-toolbar button.persea-unified-fit-hint[hidden] { display: none; }
+
+/* The geometry readout stays quiet. Explicit row changes are also available
+   in the shared Terminal size controller; width remains E-P2 refit authority. */
+.persea-unified-geometry {
+  flex: none;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.persea-unified-size {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(4.5rem, 1fr));
+  gap: 0.4rem;
+  width: 100%;
+  min-width: min(18rem, 100%);
+}
+.persea-unified-size__readout {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font: 0.78rem/1.3 ui-monospace, monospace;
+}
+.persea-unified-size__width {
+  grid-column: 1 / -1;
+  margin: 0;
+  align-self: end;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font: 0.72rem/1.25 ui-monospace, monospace;
+  white-space: nowrap;
+}
+.persea-unified-size label {
+  display: grid;
+  gap: 0.2rem;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font-size: 0.75rem;
+}
+.persea-unified-size input {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid #596171;
+  border-radius: 0.35rem;
+  padding: 0.35rem 0.45rem;
+  background: #12151b;
+  color: var(--persea-chrome-fg, #f3f4f6);
+  font: 16px/1.2 ui-monospace, monospace;
+}
+.persea-unified-size input:disabled { opacity: 0.65; }
+.persea-unified-size button { min-height: 40px; }
+@media (pointer: coarse) {
+  .persea-unified-size input,
+  .persea-unified-size button { min-height: 44px; }
+}
+
+.persea-unified-toolbar button.persea-unified-fit-height,
+.persea-unified-toolbar button.persea-unified-composer-toggle,
+.persea-unified-toolbar button.persea-unified-toolbar__more {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0.25rem 0.5rem;
+  line-height: 1;
+  font-size: 1rem;
+}
+
+.persea-unified-toolbar button.persea-unified-fit-height[aria-disabled="true"] {
+  opacity: 0.55;
+}
+
+.persea-unified-toolbar button.persea-unified-composer-toggle[aria-expanded="true"] {
+  border-color: #e6edf3;
+  background: #38404f;
+}
+
+.persea-unified-scroll {
+  position: relative;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+}
+
+/* The range spacer owns the scrollable area on both axes; the host is
+   projected inside it and never stretched to the scroller's own box. */
+.persea-unified-scroll-range {
+  position: relative;
+  min-height: 100%;
+  min-width: 100%;
+}
+
+.persea-unified-xterm {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 0.5rem;
+  background: var(--persea-terminal-bg, #111318);
+}
+
+/* xterm remains the renderer, but its pinned 6.0.0 custom scrollbar is not an
+   input or presentation surface. The product-owned outer overflow is both. */
+.persea-unified-xterm .xterm-scrollable-element > .scrollbar {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+/* iOS Safari auto-zooms when a focused input's font is under 16px, then pans
+   toward the element — and xterm's hidden helper textarea is parked at the
+   caret cell with the UA's DEFAULT textarea font (~13px monospace; xterm's
+   own font rule covers only .xterm-rows). Focus therefore zoomed and panned
+   toward the cursor column, and Safari can fail to restore on keyboard
+   close, leaving the page stuck zoomed and shifted. Same 16px class as the
+   history select fix. The textarea is invisible (opacity 0, overflow
+   hidden) and nothing measures its font: cell metrics size it outside
+   composition, and the composition view's rect sizes it during. */
+@media (pointer: coarse) {
+  .persea-unified-xterm .xterm-helper-textarea { font-size: 16px; }
+}
+
+/* The mobile key bar. In flow as the grid's last row so it sits on the
+   software keyboard's top edge without positioning arithmetic. */
+.persea-unified-keybar {
+  display: flex;
+  flex-direction: row;
+  gap: .2rem;
+  min-width: 0;
+  padding: .3rem .25rem calc(.3rem + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid #343844;
+  background: #1b1e25;
+}
+.persea-unified-keybar[hidden] { display: none; }
+
+/* A stable core can scroll on narrow screens while Keys stays fixed. */
+.persea-unified-keybar-row { display: flex; flex: 1; gap: .2rem; min-width: 0; overflow-x: auto; }
+.persea-unified-keybar-row[hidden] { display: none; }
+
+/* Equal flex so the arrow cluster lands in predictable places under the thumb:
+   a key whose position shifts with its label length is a key you have to look
+   at. 44px both ways is the touch-target law on a coarse pointer. */
+.persea-unified-keybar-key {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  box-sizing: border-box;
+  border: 1px solid #596171;
+  border-radius: .4rem;
+  padding: .2rem 0;
+  background: #282d38;
+  color: #f3f4f6;
+  font: 600 .88rem/1 ui-monospace, monospace;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.persea-unified-keybar-key:active { background: #38404f; }
+/* Narrow screens reduce gaps, never the 44px touch targets. */
+@media (max-width: 389px) {
+  .persea-unified-keybar, .persea-unified-keybar-row { gap: 2px; }
+}
+.persea-unified-keybar-key--bank {
+  flex: 0 0 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border-color: color-mix(in srgb, var(--persea-chrome-muted-fg, #aeb9cc) 40%, transparent);
+  background: var(--persea-chrome-bg, #1b1e25);
+}
+.persea-unified-keybar-key--bank[aria-pressed="true"] {
+  border-width: 1px;
+  color: var(--persea-chrome-fg, #e6edf3);
+}
+/* The latch must be unmistakable: an armed modifier that looks unarmed sends
+   the operator's next keystroke somewhere they did not intend. */
+.persea-unified-keybar-key--latch[data-latched="true"] {
+  border-color: #ffc77d;
+  background: #4a3a18;
+  color: #ffc77d;
+}
+
+/* The compact composer. The legacy Composer component docked as an in-flow
+   grid row above the key bar: where the legacy page floats the panel over the
+   terminal's bottom edge and publishes an overlay inset, here the grid row
+   takes real height, the viewport shrinks, and the ResizeObserver's
+   coarse-pointer height-only gate keeps the change out of fitFont. Everything
+   below is an ancestor-scoped compact restyle of the shared component. */
+.persea-unified-composer-dock {
+  min-width: 0;
+}
+
+/* The legacy edge tab is replaced by the key-bar and toolbar toggles; if it
+   rendered here, the "closed" dock row would gain height. */
+.persea-unified-composer-dock .attachment-page__compose-tab { display: none; }
+
+.persea-unified-composer-dock .attachment-page__composer {
+  position: static;
+  z-index: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  /* One chrome row instead of two: the header's symbolic buttons sit beside
+     the footer. The header takes the first, content-sized column so that the
+     footer — whose ➤ is the row's rightmost primary — owns the flexible
+     remainder. The explicit placements below are inert in the sent state,
+     which switches the panel to flex. */
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto;
+  gap: .25rem .35rem;
+  max-height: var(--persea-composer-inset-budget, 20rem);
+  padding: .3rem .4rem;
+  border: 0;
+  border-top: 1px solid #343844;
+  border-radius: 0;
+  background: #1b1e25;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+/* With the key bar row hidden (keyboard down) the panel is the shell's bottom
+   edge; keep it above the iPhone home indicator. While the keyboard is up the
+   layout-viewport safe area sits underneath the keyboard, so the pad must not
+   apply then — hence the :has gate rather than an unconditional pad. */
+.persea-unified-terminal:has(.persea-unified-keybar[hidden]) .attachment-page__composer {
+  padding-bottom: calc(.3rem + env(safe-area-inset-bottom, 0px));
+}
+
+.persea-unified-composer-dock .attachment-page__composer-grip {
+  grid-row: 1;
+  grid-column: 1 / -1;
+  height: 14px;
+  margin: -.3rem auto -.2rem;
+}
+.persea-unified-composer-dock .attachment-page__composer-grip::after {
+  margin-top: 5px;
+  background: #596171;
+}
+
+.persea-unified-composer-dock .attachment-page__composer-textarea {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  /* No percentage term here. Auto-grow sets the textarea's inline height to
+     its full scrollHeight and relies on this clamp; a percentage max-height
+     cannot resolve while the auto row is being intrinsically sized, so the
+     browser sizes the row to the unclamped height (a long dictated draft:
+     hundreds of pixels) and the chrome row with ⊕ ⌫ ➤ lands below the
+     keyboard. An absolute clamp sizes the row to the clamp. */
+  max-height: 6rem;
+  padding: .25rem .4rem;
+  border-color: #596171;
+  background: #10131a;
+  /* The operator's composer face (C1), defaulted one step below the 14px this
+     rule used to hardcode for a fine pointer. The coarse-pointer floor below
+     is not negotiable by this preference. */
+  font: var(--persea-composer-font-size, 11px)/1.2 ui-monospace, monospace;
+}
+.persea-unified-composer-dock .attachment-page__composer[data-size="expanded"] .attachment-page__composer-textarea {
+  /* Both terms matter. The first is the share of the VISIBLE band an expanded
+     composer may take — the page publishes that band now, so it is no longer
+     silently 100dvh, which is what let the panel grow under the keyboard. The
+     second is the panel's whole allowance measured by the page (viewport top
+     to the lowest visible edge, less the key bar and four terminal rows); the
+     textarea may never claim all of it, because the chrome row with ⊕ ⌫ ➤
+     lives inside the same box. */
+  max-height: min(
+    calc(var(--persea-visual-viewport-height, 100dvh) * .4),
+    calc(var(--persea-composer-inset-budget, 100dvh) - 4rem)
+  );
+}
+/* UX15 §15.5 / UX15-R1: no coarse floor. The composer face is the operator's
+   chosen size on every pointer. The iOS focus zoom is prevented at the
+   composer (composer.ts: a 16px face for the instant of focus on a coarse
+   pointer), never by a viewport zoom cap — `maximum-scale` / `user-scalable=no`
+   would defeat page zoom (WCAG 1.4.4). */
+
+.persea-unified-composer-dock .attachment-page__composer-guard-actions {
+  grid-row: 3;
+  grid-column: 1 / -1;
+}
+
+/* The chrome row never scrolls. Three zones: the counter/status text, which
+   yields (ellipsis, then hidden below 360px); the optional Fix/Restore word
+   buttons, which yield next; and the ⊕ ⌫ ➤ actions, which are flex:none and
+   geometrically incapable of being pushed out — ➤ is the row's right edge.
+   overflow:hidden rather than auto: a control that needs scrolling to reach
+   is a control the operator cannot find. */
+.persea-unified-composer-dock .attachment-page__composer-header {
+  grid-row: 4;
+  grid-column: 1;
+  min-height: 40px;
+}
+.persea-unified-composer-dock .attachment-page__composer-footer {
+  grid-row: 4;
+  grid-column: 2;
+  min-height: 40px;
+  min-width: 0;
+  padding-right: 0;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+/* Word chrome goes; the aria labels carry the semantics. */
+.persea-unified-composer-dock .attachment-page__composer-label { display: none; }
+
+/* 40px both ways on a fine pointer; 44px — the touch-target law — on a
+   coarse one (below). Three header controls plus ⊕ ⌫ ➤ at 44px fit 390pt
+   with the text zone on its own line (the narrow-width rules below). */
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__button {
+  min-width: 40px;
+  min-height: 40px;
+  padding: .2rem .35rem;
+  border-color: #596171;
+  background: #282d38;
+}
+.persea-unified-composer-dock .attachment-page__composer-typography {
+  position: relative;
+  flex: none;
+}
+.persea-unified-composer-dock .attachment-page__composer-typography-trigger {
+  font: 700 .8rem/1 ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover {
+  position: fixed;
+  z-index: 80;
+  display: grid;
+  width: min(15rem, calc(100vw - 1rem));
+  box-sizing: border-box;
+  gap: .45rem;
+  padding: .65rem;
+  border: 1px solid var(--persea-chrome-control-border);
+  border-radius: .55rem;
+  background: var(--persea-chrome-bg);
+  color: var(--persea-chrome-fg);
+  box-shadow: 0 14px 36px rgb(0 0 0 / 55%);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover[hidden] { display: none; }
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button {
+  min-width: 40px;
+  min-height: 40px;
+  padding: .2rem .35rem;
+  border-color: var(--persea-chrome-control-border);
+  background: var(--persea-chrome-control-bg);
+  color: var(--persea-chrome-fg);
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: .65;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover[aria-busy="true"] .attachment-page__button[aria-disabled="true"] {
+  cursor: wait;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-label {
+  font: 700 .78rem/1.2 ui-monospace, monospace;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-stepper,
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-actions {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-current {
+  flex: 1 1 auto;
+  min-width: 3.5rem;
+  text-align: center;
+  font: 700 .82rem/1 ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-actions .attachment-page__button {
+  flex: 1 1 0;
+  white-space: nowrap;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-status {
+  min-height: 1em;
+  color: var(--persea-chrome-muted-fg);
+  font: 600 .68rem/1.3 ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-status[hidden] { display: none; }
+.persea-unified-terminal > .attachment-page__composer-typography-popover:is(
+  [data-status="conflict"], [data-status="unavailable"], [data-status="refused"]
+) {
+  border-color: var(--persea-chrome-notice-fg);
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover:is(
+  [data-status="conflict"], [data-status="unavailable"], [data-status="refused"]
+) .attachment-page__composer-typography-status {
+  color: var(--persea-chrome-notice-fg);
+}
+/* Hide is neutral navigation, not a mode or resize choice. Its box is 44px on
+   every pointer so the internal and external ways out have equal reach. */
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-close {
+  border-color: transparent;
+  background: transparent;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+}
+/* The semantic marker makes the same target law independently testable
+   without applying the unified dock's presentation to the legacy host. */
+.attachment-page__composer.attachment-page__composer--symbolic .attachment-page__composer-header-actions .attachment-page__composer-close {
+  min-width: 44px;
+  min-height: 44px;
+}
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-close:hover {
+  border-color: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 32%, transparent);
+  background: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 8%, transparent);
+}
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-close:focus-visible {
+  outline: 2px solid var(--persea-accent, #8fc7ff);
+  outline-offset: 2px;
+  border-color: var(--persea-accent, #8fc7ff);
+}
+/* Scoped to the unified dock: the legacy page keeps its pinned compact
+   header geometry and presentation. */
+@media (pointer: coarse) {
+  /* The typography panel is a page-owned portal, not a dock descendant. Keep
+     every one of its enabled and disabled actions inside the same 44px target
+     law as the composer header controls. */
+  .persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .persea-unified-composer-dock .attachment-page__composer .attachment-page__button,
+  .persea-unified-composer-dock .attachment-page__composer-mode .attachment-page__button,
+  .persea-unified-composer-dock .attachment-page__composer-header-actions .attachment-page__button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .persea-unified-composer-dock .attachment-page__composer-header,
+  .persea-unified-composer-dock .attachment-page__composer-footer,
+  .persea-unified-composer-dock .attachment-page__composer-actions { min-height: 44px; }
+  /* The text box is a target too: tall enough to land a caret in. */
+  .persea-unified-composer-dock .attachment-page__composer-textarea { min-height: 44px; }
+  /* The grip is a drag target: 24px tall, visibly, with no negative margin
+     eating the box. */
+  .persea-unified-composer-dock .attachment-page__composer-grip {
+    height: 24px;
+    margin: 0 auto;
+  }
+  .persea-unified-composer-dock .attachment-page__composer-grip::after { margin-top: 10px; }
+}
+
+/* The status line at phone widths: its own full-width line above the button
+   row, never sharing a row with the buttons or the counter. The footer
+   dissolves (`display: contents`) so the status and the action group become
+   grid items of the panel: status on its own row spanning both columns, the
+   action group beside the header on the row below. Guard/blocked colours are
+   the same selectors as before and keep applying. */
+.attachment-page__composer-actions { display: contents; }
+@media (max-width: 719px) {
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]) {
+    grid-template-rows: auto auto auto auto auto;
+  }
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]) .attachment-page__composer-footer {
+    display: contents;
+  }
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]) .attachment-page__composer-status {
+    grid-row: 4;
+    grid-column: 1 / -1;
+    min-width: 0;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    padding: .1rem .15rem 0;
+  }
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]) .attachment-page__composer-header {
+    grid-row: 5;
+  }
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]) .attachment-page__composer-actions {
+    grid-row: 5;
+    grid-column: 2;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: .35rem;
+    min-width: 0;
+    min-height: 40px;
+    overflow: hidden;
+  }
+  /* With the chip strip present the rows renumber once more. */
+  .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]) {
+    grid-template-rows: auto auto auto auto auto auto;
+  }
+  .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]) .attachment-page__composer-status {
+    grid-row: 5;
+  }
+  .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]) .attachment-page__composer-header,
+  .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]) .attachment-page__composer-actions {
+    grid-row: 6;
+  }
+  /* UX-16 §16.2: with no status to show, the chrome row moves up so the
+     empty status track costs no gap. */
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]):has(.attachment-page__composer-status[hidden]) {
+    grid-template-rows: auto auto auto auto;
+  }
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]):has(.attachment-page__composer-status[hidden]) .attachment-page__composer-header,
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]):has(.attachment-page__composer-status[hidden]) .attachment-page__composer-actions {
+    grid-row: 4;
+  }
+  .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]):has(.attachment-page__composer-status[hidden]) {
+    grid-template-rows: auto auto auto auto auto;
+  }
+  .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]):has(.attachment-page__composer-status[hidden]) .attachment-page__composer-header,
+  .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]):has(.attachment-page__composer-status[hidden]) .attachment-page__composer-actions {
+    grid-row: 5;
+  }
+}
+/* The word buttons stay whole while the text zone is there to yield (a
+   "Fix" squeezed to "F…" is no button); below the 360px floor, with the
+   text gone, they are the row's only give and ellipsize before the actions,
+   which never yield. */
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-fix,
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-restore {
+  flex: 0 0 auto;
+  /* UX-16: the touch-target law applies to the word buttons too — "Fix"
+     measured 35px wide before (the ergonomics census never saw it). They
+     may still ellipsize below the 360 floor, never below 44px. */
+  min-width: 44px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 359px) {
+  .persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-fix,
+  .persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-restore { flex-shrink: 1; }
+}
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-attach,
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-clear,
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-send {
+  flex: none;
+}
+.persea-unified-composer-dock .attachment-page__composer-mode .attachment-page__button[aria-pressed="true"] {
+  border-color: #e6edf3;
+  background: #38404f;
+}
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-send {
+  min-width: 2.75rem;
+  border-color: #3f86c4;
+  background: #1d4f7a;
+  color: #eaf5ff;
+}
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-send:disabled {
+  border-color: #596171;
+  background: #1b1e25;
+  color: #6f8599;
+}
+
+.persea-unified-composer-dock .attachment-page__composer-status {
+  font-size: .68rem;
+}
+
+/* The chip strip in the unified dock's explicitly-placed grid: with
+   attachments present the rows renumber (grip, chips, textarea, guard,
+   chrome); without, the base 4-row placement stands untouched. */
+.persea-unified-composer-dock .attachment-page__composer[data-attachments] {
+  grid-template-rows: auto auto auto auto auto;
+}
+.persea-unified-composer-dock .attachment-page__composer[data-attachments] .attachment-page__composer-chips {
+  grid-row: 2;
+  grid-column: 1 / -1;
+}
+.persea-unified-composer-dock .attachment-page__composer[data-attachments] .attachment-page__composer-textarea {
+  grid-row: 3;
+}
+.persea-unified-composer-dock .attachment-page__composer[data-attachments] .attachment-page__composer-guard-actions {
+  grid-row: 4;
+}
+.persea-unified-composer-dock .attachment-page__composer[data-attachments] .attachment-page__composer-footer,
+.persea-unified-composer-dock .attachment-page__composer[data-attachments] .attachment-page__composer-header {
+  grid-row: 5;
+}
+.persea-unified-composer-dock .attachment-page__composer-chip {
+  border-color: #596171;
+  background: #282d38;
+  color: #f3f4f6;
+}
+.persea-unified-composer-dock .attachment-page__composer-chip[data-status="failed"] {
+  border-color: #7a3b3b;
+  color: #ffb4ab;
+}
+.persea-unified-composer-dock .attachment-page__composer-chip-button {
+  border-color: #596171;
+  background: #1b1e25;
+  color: #f3f4f6;
+}
+
+/* Operational refusals: a passing notice over the terminal, out of the grid
+   flow so it never changes the viewport height the Fit measures. */
+.persea-unified-terminal { position: relative; }
+.persea-unified-refusal {
+  position: absolute;
+  top: 3.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  max-width: calc(100% - 1.5rem);
+  box-sizing: border-box;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid #5c4a1e;
+  border-radius: 0.4rem;
+  background: #3a2d12;
+  color: #ffd9a0;
+  font-size: 0.85rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+}
+.persea-unified-refusal[hidden] { display: none; }
+
+/* --- Quick actions: the bottom sheet ---------------------------------------
+   The sheet is the control surface both pointers share, opened by the one
+   toolbar button (U5). Class-styled only (no inline style attributes, so
+   nothing here depends on the unified route's style-src-attr relaxation). It
+   lives in the dock — a column overlaying the stage that takes no pointer
+   events itself — so its bottom edge is already above the composer dock and
+   the key bar. The safe-area inset applies only when no bottom row is showing
+   (the :has gate, same reasoning as the composer's). */
+.persea-unified-quick {
+  position: absolute;
+  inset: 0;
+  /* The menu remains usable above frozen terminal selection (layer 8). */
+  z-index: 9;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: flex-end;
+  pointer-events: none;
+}
+/* The opener is a toolbar button, so its open state is a toolbar affordance
+   like the composer toggle's: same construction, restated after the closed
+   theme rule below. */
+.persea-unified-toolbar button.persea-unified-quick-actions {
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.persea-unified-toolbar button.persea-unified-quick-actions[data-open="true"] {
+  border-color: var(--persea-chrome-fg, #e6edf3);
+  background: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 16%, var(--persea-chrome-bg, #1b1e25));
+}
+
+.persea-unified-sheet {
+  flex: 0 1 auto;
+  align-self: stretch;
+  min-height: 0;
+  pointer-events: auto;
+  box-sizing: border-box;
+  max-height: 50%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0.5rem 0.6rem 0.6rem;
+  border-top: 1px solid #4a5263;
+  border-radius: 0.8rem 0.8rem 0 0;
+  background: #1b1e25;
+  color: #f3f4f6;
+  box-shadow: 0 -10px 30px rgb(0 0 0 / 45%);
+}
+.persea-unified-sheet[hidden] { display: none; }
+.persea-unified-terminal:has(.persea-unified-keybar[hidden]):has(.persea-unified-composer-dock[data-composer="closed"]) .persea-unified-sheet {
+  padding-bottom: calc(0.6rem + env(safe-area-inset-bottom, 0px));
+}
+/* Landscape phones: two rows of tiles at most, capped a little higher. */
+@media (orientation: landscape) and (max-height: 520px) {
+  .persea-unified-sheet { max-height: 60%; }
+}
+.persea-unified-sheet__status {
+  min-height: 1.2em;
+  margin: 0 0 0.25rem;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font-size: 0.8rem;
+}
+.persea-unified-sheet__status:empty { display: none; }
+/* UX-16 §16.6: every section after the first reads as its own block — a
+   hairline and clear space above the heading. The general sibling
+   combinator survives the hidden session-list div between Sessions and
+   Image, which defeated the old adjacent-sibling rule. */
+.persea-unified-sheet__section ~ .persea-unified-sheet__section {
+  margin-top: 0.7rem;
+  padding-top: 0.6rem;
+  border-top: 1px solid color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 14%, transparent);
+}
+.persea-unified-saved-text {
+  margin: 0.35rem 0 0;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font: 0.68rem/1.3 ui-monospace, monospace;
+}
+.persea-unified-sheet__heading {
+  margin: 0 0 0.3rem;
+  color: var(--persea-chrome-muted-fg, #9aa6ba);
+  font: 600 0.72rem/1.2 ui-monospace, monospace;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+.persea-unified-sheet__grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(64px, 1fr));
+  gap: 0.35rem;
+}
+.persea-unified-preference--sheet,
+.persea-unified-preference-status--sheet {
+  grid-column: 1 / -1;
+}
+/* U4: the theme control is a sheet control, so it lines up with the tiles
+   and headings on the section's left edge rather than being pushed to the
+   opposite side of the row from its own caption. */
+.persea-unified-preference--sheet {
+  box-sizing: border-box;
+  justify-content: flex-start;
+  gap: 0.5rem;
+  min-height: 44px;
+  padding: 0.25rem;
+}
+.persea-unified-preference--sheet .persea-unified-preference__theme,
+.persea-unified-preference--sheet .persea-unified-preference__composer-font {
+  min-height: 44px;
+  max-width: min(15rem, 70%);
+}
+.persea-unified-preference-status--sheet {
+  min-height: 0;
+  white-space: normal;
+}
+
+/* Closed theme overrides are appended so the legacy/default declarations above
+   remain byte-for-byte effective when no unified theme attribute is present. */
+.persea-unified-terminal[data-theme] {
+  background: var(--persea-terminal-bg, #111318);
+  color: var(--persea-chrome-fg, #f3f4f6);
+}
+.persea-unified-terminal[data-theme] .persea-unified-toolbar,
+.persea-unified-terminal[data-theme] .persea-unified-keybar {
+  background: var(--persea-chrome-bg, #1b1e25);
+}
+.persea-unified-terminal[data-theme] .persea-unified-toolbar button,
+.persea-unified-terminal[data-theme] .persea-unified-preference__theme,
+.persea-unified-terminal[data-theme] .persea-unified-preference__composer-font {
+  background: var(--persea-chrome-bg, #1b1e25);
+  color: var(--persea-chrome-fg, #f3f4f6);
+}
+.persea-unified-terminal[data-theme] .attachment-page__composer-chip-button {
+  background: var(--persea-chrome-bg, #1b1e25);
+  color: var(--persea-chrome-fg, #f3f4f6);
+}
+/* State affordances outrank the closed theme surface. The button rule above
+   repaints every toolbar button from the chrome pair, so these two must be
+   restated after it or they flatten into ordinary buttons. The one-time hint
+   keeps its own amber pair, which is legible on every chrome; the open
+   composer toggle is derived from the theme, because a near-white state border
+   is invisible on a light chrome (1.14:1 on Rose Pine Dawn). */
+.persea-unified-terminal[data-theme] .persea-unified-toolbar button.persea-unified-fit-hint {
+  border-color: #5c4a1e;
+  background: #3a2d12;
+  color: #ffd9a0;
+}
+.persea-unified-terminal[data-theme] .persea-unified-toolbar button.persea-unified-composer-toggle[aria-expanded="true"] {
+  border-color: var(--persea-chrome-fg, #e6edf3);
+  background: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 16%, var(--persea-chrome-bg, #1b1e25));
+}
+/* "A selection is ready to copy" (U1). Same construction as the open composer
+   toggle — the boundary is the chrome foreground, which is the one colour
+   guaranteed legible against this chrome — over an accent-tinted fill, so the
+   two state affordances are distinguishable from each other and both from a
+   plain button. Stated after the closed-theme button rule for the same reason
+   the toggle is: that rule repaints every toolbar button. */
+.persea-unified-terminal[data-theme] .persea-unified-toolbar button.persea-unified-copy[data-selection="ready"] {
+  border-color: var(--persea-chrome-fg, #e6edf3);
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 26%, var(--persea-chrome-bg, #1b1e25));
+}
+/* The sheet is the whole control surface on a phone, and ruling J-EP5-1 names
+   it explicitly: it takes the same chrome pair as the toolbar, so the
+   preference status inside it is measured against a themed background rather
+   than a fixed dark one. The tiles keep their own opaque pair. */
+.persea-unified-terminal[data-theme] .persea-unified-identity__details {
+  border-color: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 45%, var(--persea-chrome-bg, #1b1e25));
+  background: var(--persea-chrome-bg, #1b1e25);
+  color: var(--persea-chrome-fg, #f3f4f6);
+}
+.persea-unified-terminal[data-theme] .persea-unified-sheet {
+  border-top-color: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 45%, var(--persea-chrome-bg, #1b1e25));
+  background: var(--persea-chrome-bg, #1b1e25);
+  color: var(--persea-chrome-fg, #f3f4f6);
+}
+/* At phone widths the secondary controls move into a popover that paints its
+   own surface, so the status and the readout inside it are measured against
+   THAT surface rather than the toolbar's. Scoped to the same container query
+   as the popover itself: on a wide toolbar the group is display: contents and
+   paints nothing. */
+@container (max-width: 719px) {
+  .persea-unified-terminal[data-theme] .persea-unified-toolbar__secondary {
+    border-color: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 45%, var(--persea-chrome-bg, #1b1e25));
+    background: var(--persea-chrome-bg, #1b1e25);
+  }
+}
+.persea-unified-sheet__tile {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  box-sizing: border-box;
+  min-width: 44px;
+  min-height: 52px;
+  padding: 0.3rem 0.2rem;
+  border: 1px solid #596171;
+  border-radius: 0.5rem;
+  background: #282d38;
+  color: #f3f4f6;
+  font: inherit;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.persea-unified-sheet__tile:active { background: #38404f; }
+.persea-unified-sheet__tile:disabled { opacity: 0.55; }
+.persea-unified-sheet__tile--function-keys { grid-column: span 2; }
+.persea-unified-sheet__tile--latch[data-latched="true"] {
+  border-color: #ffc77d;
+  background: #4a3a18;
+  color: #ffc77d;
+}
+.persea-unified-sheet__tile--select[data-select-state="on"] {
+  border-color: #51a36a;
+  background: #183c24;
+  color: #e3ffea;
+}
+.persea-unified-sheet__glyph { font: 600 1rem/1 ui-monospace, monospace; }
+.persea-unified-sheet__label {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.68rem;
+  color: #c5d5ec;
+}
+.persea-unified-sheet__reason {
+  max-width: 100%;
+  font-size: 0.6rem;
+  line-height: 1.15;
+  color: #ffd9a0;
+  text-align: center;
+}
+.persea-unified-sheet__reason:empty { display: none; }
+
+/* E-P3: the Snippets / Clips list, inline under the section's three tiles.
+   It lives inside the sheet, which is an absolute overlay column, so opening
+   a list never changes the terminal's box — no modal, no layout shift. */
+.persea-unified-snips {
+  margin-top: 0.4rem;
+  padding: 0.4rem;
+  border: 1px solid #4a5263;
+  border-radius: 0.5rem;
+  background: #15181e;
+}
+.persea-unified-snips[hidden] { display: none; }
+.persea-unified-snips__head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin-bottom: 0.35rem;
+}
+.persea-unified-snips__title {
+  margin: 0;
+  color: #c5d5ec;
+  font: 600 0.74rem/1.2 ui-monospace, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.persea-unified-snips__count {
+  color: #8a95a8;
+  font: 400 0.68rem/1.2 ui-monospace, monospace;
+}
+.persea-unified-snips__count:empty { display: none; }
+.persea-unified-snips__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  margin-bottom: 0.4rem;
+}
+.persea-unified-snips__action {
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid #596171;
+  border-radius: 0.4rem;
+  background: #282d38;
+  color: #f3f4f6;
+  font: 500 0.74rem/1.2 ui-monospace, monospace;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.persea-unified-snips__action--lines { flex: 0 0 auto; }
+.persea-unified-snips__action:active { background: #38404f; }
+.persea-unified-snips__action:disabled { opacity: 0.55; }
+.persea-unified-snips__list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.persea-unified-snips__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.3rem;
+  align-items: stretch;
+}
+.persea-unified-snips__row[data-pending="true"] { opacity: 0.6; }
+.persea-unified-snips__row[data-osc="true"] .persea-unified-snips__label { color: #ffd9a0; }
+.persea-unified-snips__insert,
+.persea-unified-snips__ghost {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 0.1rem;
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0.25rem 0.45rem;
+  border: 1px solid #596171;
+  border-radius: 0.4rem;
+  background: #232832;
+  color: #f3f4f6;
+  font: inherit;
+  text-align: left;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.persea-unified-snips__insert:active { background: #38404f; }
+.persea-unified-snips__insert:disabled { opacity: 0.55; }
+.persea-unified-snips__label,
+.persea-unified-snips__preview {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.persea-unified-snips__label { font: 600 0.76rem/1.25 ui-monospace, monospace; color: #dce6f5; }
+.persea-unified-snips__preview { font: 400 0.68rem/1.25 ui-monospace, monospace; color: #93a0b4; }
+.persea-unified-snips__pending { font: 400 0.62rem/1.2 ui-monospace, monospace; color: #ffd9a0; }
+.persea-unified-snips__reason { font: 400 0.6rem/1.15 ui-monospace, monospace; color: #ffd9a0; }
+.persea-unified-snips__reason:empty { display: none; }
+.persea-unified-snips__act {
+  box-sizing: border-box;
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border: 1px solid #596171;
+  border-radius: 0.4rem;
+  background: #282d38;
+  color: #c5d5ec;
+  font: 600 0.95rem/1 ui-monospace, monospace;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.persea-unified-snips__act:active { background: #38404f; }
+.persea-unified-snips__act:disabled { opacity: 0.55; }
+.persea-unified-snips__act[data-pinned="true"] { color: #ffc77d; border-color: #7a6636; }
+.persea-unified-snips__notice {
+  margin: 0 0 6px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  border: 1px solid rgba(224, 178, 74, 0.45);
+  background: rgba(224, 178, 74, 0.12);
+  color: #e6c579;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.persea-unified-snips__empty {
+  margin: 0.2rem 0 0;
+  color: #8a95a8;
+  font-size: 0.7rem;
+  line-height: 1.3;
+}
+.persea-unified-snips__empty[hidden] { display: none; }
+.persea-session-switcher {
+  margin-top: 0.45rem;
+  padding-top: 0.45rem;
+  border-top: 1px solid #3f4654;
+}
+.persea-session-switcher[hidden] { display: none; }
+.persea-session-switcher__controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  gap: 0.35rem;
+}
+.persea-session-switcher__search,
+.persea-session-switcher__refresh {
+  box-sizing: border-box;
+  min-height: 44px;
+  border: 1px solid #596171;
+  border-radius: 0.45rem;
+  background: #20242d;
+  color: #f3f4f6;
+  font: inherit;
+}
+.persea-session-switcher__search { min-width: 0; padding: 0.45rem 0.6rem; }
+.persea-session-switcher__refresh { min-width: 44px; touch-action: manipulation; }
+.persea-session-switcher__list {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.35rem;
+}
+.persea-session-switcher__group,
+.persea-session-switcher__server { display: grid; gap: 0.25rem; min-width: 0; }
+.persea-session-switcher__group-heading,
+.persea-session-switcher__server-heading {
+  margin: 0;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font: 600 0.72rem/1.2 system-ui, sans-serif;
+}
+.persea-session-switcher__server-heading { padding-inline-start: 0.35rem; font-size: 0.66rem; }
+.persea-session-switcher__row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.1rem;
+  align-items: start;
+  box-sizing: border-box;
+  min-height: 44px;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid #4b5361;
+  border-radius: 0.45rem;
+  background: #242933;
+  color: #f3f4f6;
+  text-align: left;
+  touch-action: pan-y;
+}
+.persea-session-switcher__row[data-current="true"] { border-color: #6fb0e8; color: #b9dcff; }
+.persea-session-switcher__row:disabled { opacity: 0.68; }
+.persea-session-switcher__name {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 0.78rem/1.2 system-ui, sans-serif;
+}
+.persea-session-switcher__session-name { overflow: hidden; text-overflow: ellipsis; font-family: ui-monospace, monospace; }
+.persea-session-switcher__alias { overflow: hidden; text-overflow: ellipsis; color: #aeb9cc; font-weight: 500; }
+.persea-session-switcher__meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #aeb9cc; font-size: 0.68rem; text-align: left; }
+.persea-session-switcher__empty { margin: 0.35rem 0; color: #aeb9cc; font-size: 0.75rem; }
+
+/* Keep the familiar session rows, with search visible while the list scrolls. */
+.persea-unified-identity__details {
+  display: flex;
+  flex-direction: column;
+  max-height: min(80dvh, 38rem);
+  overflow: hidden;
+}
+.persea-unified-identity__current-details { flex: 0 0 auto; min-width: 0; }
+.persea-unified-identity__current-details > summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--persea-chrome-muted-fg, #c5d5ec); }
+.persea-unified-identity__current-details > summary::before { content: "▸"; margin-right: .5rem; }
+.persea-unified-identity__current-details[open] > summary::before { content: "▾"; }
+.persea-unified-identity__facts { padding-bottom: .5rem; max-height: 25dvh; overflow: auto; }
+.persea-unified-identity__session-status:empty { display: none; }
+.persea-unified-identity__sessions { display: flex; flex-direction: column; min-height: 0; }
+.persea-unified-identity__sessions > div:not(.persea-unified-identity__session-actions) { display: flex; flex-direction: column; min-height: 0; }
+.persea-unified-identity__session-actions { order: 2; flex: 0 0 auto; margin: .5rem 0 0; }
+.persea-unified-identity__sessions .persea-session-switcher { display: flex; flex-direction: column; min-height: 0; }
+.persea-unified-identity__sessions .persea-session-switcher__controls { flex: 0 0 auto; }
+.persea-unified-identity__sessions .persea-session-switcher__list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.persea-session-switcher__row { min-height: 64px; }
+.persea-session-switcher__meta { font-size: .75rem; white-space: normal; overflow-wrap: anywhere; }
+.persea-session-switcher__row[data-current="true"]:disabled { opacity: 1; }
+
+/* Transient, non-blocking notices — same posture as the refusal strip. */
+.persea-unified-toast {
+  position: absolute;
+  top: 3.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  max-width: calc(100% - 1.5rem);
+  box-sizing: border-box;
+  padding: 0.45rem 0.8rem;
+  border: 1px solid #28755b;
+  border-radius: 0.4rem;
+  background: #14503d;
+  color: #d9ffe9;
+  font-size: 0.85rem;
+  line-height: 1.35;
+  width: max-content;
+  white-space: normal;
+  overflow-wrap: anywhere;
+  pointer-events: none;
+}
+.persea-unified-toast[hidden] { display: none; }
+
+/* UX-11: the top bar is one compact disclosure row at every width. View,
+   geometry and appearance keep their existing controllers, but render once
+   in the positioned panel owned by the committed-size button. */
+.persea-unified-toolbar {
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+}
+.persea-unified-toolbar__controls {
+  flex: none;
+  gap: 0.35rem;
+}
+.persea-unified-toolbar button.persea-unified-view-disclosure {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  min-width: 4.2rem;
+  min-height: 2.25rem;
+  padding-inline: 0.45rem;
+}
+.persea-unified-toolbar button.persea-unified-copy,
+.persea-unified-toolbar button.persea-unified-toolbar-paste,
+.persea-unified-toolbar button.persea-unified-view-disclosure,
+.persea-unified-toolbar button.persea-unified-quick-actions,
+.persea-unified-toolbar button.persea-unified-composer-toggle,
+.persea-unified-toolbar button.persea-unified-fit-height,
+.persea-unified-toolbar button.persea-unified-toolbar__more,
+.persea-unified-toolbar button.persea-unified-phone-view {
+  min-height: 44px;
+  padding: 0.3rem 0.35rem;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+}
+.persea-unified-toolbar button.persea-unified-copy[data-select-state="selecting"],
+.persea-unified-toolbar button.persea-unified-view-disclosure[aria-expanded="true"],
+.persea-unified-toolbar button.persea-unified-quick-actions[aria-expanded="true"],
+.persea-unified-toolbar button.persea-unified-composer-toggle[aria-expanded="true"],
+.persea-unified-toolbar button.persea-unified-toolbar__more[aria-expanded="true"],
+.persea-unified-toolbar button.persea-unified-phone-view[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--persea-accent, #8fc7ff) 30%, var(--persea-chrome-fg, #e6edf3));
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 18%, var(--persea-chrome-bg, #1b1e25));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--persea-accent, #8fc7ff) 48%, transparent);
+}
+.persea-unified-view-popover {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  right: 0.5rem;
+  z-index: 12;
+  display: grid;
+  box-sizing: border-box;
+  width: min(19rem, calc(100% - 1rem), calc(100vw - 1rem));
+  max-width: min(calc(100% - 1rem), calc(100vw - 1rem));
+  max-height: min(16.25rem, calc(100vh - 1rem));
+  overflow: auto;
+  overscroll-behavior: contain;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 72%, var(--persea-chrome-bg, #1b1e25));
+  border-radius: 0.5rem;
+  background: var(--persea-chrome-bg, #1b1e25);
+  color: var(--persea-chrome-fg, #f3f4f6);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+}
+.persea-unified-view-popover[hidden] { display: none; }
+.persea-unified-view-popover__zoom {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(6rem, 1fr) 2.25rem;
+  justify-content: center;
+  gap: 0.3rem;
+}
+.persea-unified-view-popover__zoom button {
+  min-width: 0;
+  min-height: 2rem;
+  height: 2rem;
+  padding: 0.2rem 0.45rem;
+}
+.persea-unified-view-popover__zoom-symbol { font-size: 0; }
+.persea-unified-view-popover__zoom-symbol::before { font-size: 0.8rem; line-height: 1; }
+.persea-unified-view-popover__zoom-out::before { content: "−"; }
+.persea-unified-view-popover__zoom-in::before { content: "+"; }
+.persea-unified-view-popover .persea-unified-size {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  width: auto;
+  min-width: 0;
+  gap: 0.3rem;
+  padding-block: 0.35rem 0;
+  /* UX-16 §16.5: the size block closes the card since UX-15 moved theme and
+     composer text size to the dashboard — a top divider only. */
+  border-block-start: 1px solid color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 34%, transparent);
+}
+/* UX14 §14.1: two rows, read top-down. First the fit-to-view actions, then
+   the explicit form with both numbers side by side and one Apply. Every
+   action stays under the 132px coarse / 120px fine ceiling from UX13. */
+.persea-unified-view-popover .persea-unified-size label { min-width: 0; }
+.persea-unified-view-popover .persea-unified-size__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 8.25rem));
+  gap: 0.35rem;
+  min-width: 0;
+}
+/* One flex row: each label is a real box (caption + input) so the card's
+   containment probes can measure it; Apply closes the row. */
+.persea-unified-view-popover .persea-unified-size__form {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.persea-unified-view-popover .persea-unified-size__form label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+/* UX-16 §16.5: three digits wide, 16px text (the iOS focus-zoom floor),
+   40px tall on a fine pointer and the 44px touch law on a coarse one. */
+.persea-unified-view-popover .persea-unified-size__form input { flex: 0 0 3.4rem; }
+.persea-unified-view-popover .persea-unified-size__caption {
+  white-space: nowrap;
+  font-size: 0.8125rem;
+}
+.persea-unified-view-popover .persea-unified-size input {
+  box-sizing: border-box;
+  inline-size: 3.4rem;
+  width: 3.4rem;
+  min-width: 0;
+  padding: 0.2rem 0.4rem;
+  text-align: end;
+}
+.persea-unified-view-popover .persea-unified-size button {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  height: 2.75rem;
+  width: auto;
+  max-width: 7.5rem;
+  padding: 0.2rem 0.55rem;
+  white-space: nowrap;
+}
+.persea-unified-view-popover .persea-unified-size__actions button {
+  width: 100%;
+  max-width: 8.25rem;
+}
+.persea-unified-view-popover .persea-unified-size__form button { flex: 0 0 auto; }
+.persea-unified-view-popover .persea-unified-size__reason {
+  grid-column: 1 / -1;
+  margin: 0;
+  min-height: 1.25rem;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font: 0.75rem/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.persea-unified-view-popover .persea-unified-size__reason[hidden] { display: none; }
+.persea-unified-view-popover__appearance {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 0.35rem;
+}
+.persea-unified-view-popover .persea-unified-preference {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.persea-unified-view-popover .persea-unified-preference__label {
+  white-space: nowrap;
+}
+.persea-unified-view-popover .persea-unified-preference select {
+  justify-self: stretch;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  min-height: 2rem;
+  height: 2rem;
+}
+.persea-unified-preference-status--view {
+  grid-column: 1 / -1;
+  max-width: none;
+  margin: 0;
+}
+
+@media (pointer: fine) {
+  .persea-unified-toolbar__controls > button {
+    min-height: 36px !important;
+    height: 36px;
+    padding-block: 0.25rem;
+  }
+}
+
+/* Open is semantic state, not focus. The border width never changes, so the
+   shared treatment cannot move a toolbar or sheet box. */
+.persea-unified-terminal :is(
+  .persea-unified-tag[aria-expanded="true"],
+  .persea-unified-view-disclosure[aria-expanded="true"],
+  .persea-unified-quick-actions[aria-expanded="true"],
+  .persea-unified-composer-toggle[aria-expanded="true"],
+  .persea-unified-keybar-key--bank[aria-pressed="true"],
+  .attachment-page__composer-typography-trigger[aria-expanded="true"],
+  .persea-unified-sheet__tile[aria-expanded="true"],
+  .persea-unified-sheet__tile--select[aria-pressed="true"]
+) {
+  border-color: color-mix(in srgb, var(--persea-accent, #8fc7ff) 30%, var(--persea-chrome-fg, #f3f4f6));
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 18%, var(--persea-chrome-bg, #1b1e25));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--persea-accent, #8fc7ff) 48%, transparent);
+  color: var(--persea-chrome-fg, #f3f4f6);
+}
+/* Keep open controls visibly highlighted after the theme-specific toolbar
+   and keybar rules, with the same treatment for composer and function bank. */
+.persea-unified-terminal[data-theme] .persea-unified-toolbar button.persea-unified-composer-toggle[aria-expanded="true"],
+.persea-unified-terminal[data-theme] .persea-unified-keybar button.persea-unified-keybar-key--bank[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--persea-accent, #8fc7ff) 30%, var(--persea-chrome-fg, #f3f4f6));
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 18%, var(--persea-chrome-bg, #1b1e25));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--persea-accent, #8fc7ff) 48%, transparent);
+  color: var(--persea-chrome-fg, #f3f4f6);
+}
+
+@media (pointer: coarse) {
+  .persea-unified-toolbar button.persea-unified-view-disclosure {
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+    min-height: 44px;
+  }
+  .persea-unified-view-popover__zoom button,
+  .persea-unified-view-popover .persea-unified-size input,
+  .persea-unified-view-popover .persea-unified-size button,
+  .persea-unified-view-popover .persea-unified-preference select { min-height: 44px; }
+  .persea-unified-view-popover__zoom button,
+  .persea-unified-view-popover .persea-unified-size button,
+  .persea-unified-view-popover .persea-unified-preference select { height: 44px; }
+  .persea-unified-view-popover__zoom {
+    grid-template-columns: 44px minmax(6rem, 1fr) 44px;
+  }
+  .persea-unified-view-popover__zoom button,
+  .persea-unified-view-popover .persea-unified-size button { min-width: 44px; }
+  .persea-unified-view-popover {
+    max-height: min(18.75rem, calc(100vh - 1rem));
+  }
+}
+
+@media (pointer: coarse) and (max-width: 719px) {
+  .persea-unified-toolbar,
+  .persea-unified-toolbar__controls { gap: 4px; }
+  .persea-unified-view-popover .persea-unified-size input { inline-size: 4rem; }
+}
+
+/* A workspace folds the real toolbar into the pane header. Keep its opened
+   popover above xterm's layered screen without changing either box. */
+.ws-cell:has(.persea-unified-view-popover:not([hidden])) {
+  z-index: 7;
+  overflow: visible;
+}
+.ws-cell .persea-unified-view-popover {
+  width: min(22rem, calc(100% - 1rem), calc(100vw - 1rem));
+}
+.ws-cell:has(.persea-unified-view-popover:not([hidden])) .persea-unified-toolbar {
+  z-index: 20 !important;
+}
+.ws-cell:has(.persea-unified-view-popover:not([hidden])) .persea-unified-xterm {
+  z-index: 0;
+}
+
+/* UX15 §15.2: tap feedback. A press dims-then-flashes so the operator sees
+   that the tap registered even when the action's own result is elsewhere
+   (a size change, a copy, a fit). Disabled controls are visibly dimmed and
+   never flash. Reduced motion keeps a static highlight. */
+@keyframes persea-tap {
+  0% { box-shadow: 0 0 0 0.5rem color-mix(in srgb, var(--persea-accent, #8fc7ff) 60%, transparent); filter: brightness(1.7); }
+  100% { box-shadow: 0 0 0 0 transparent; filter: brightness(1); }
+}
+.persea-unified-terminal button.persea-tapped,
+.persea-unified-sheet button.persea-tapped,
+.persea-unified-view-popover button.persea-tapped,
+.persea-unified-explainer button.persea-tapped { animation: persea-tap 340ms ease-out; }
+.persea-unified-terminal button:active:not(:disabled):not([aria-disabled="true"]),
+.persea-unified-view-popover button:active:not(:disabled):not([aria-disabled="true"]) { filter: brightness(1.45); transform: scale(0.96); }
+.persea-unified-toolbar button:disabled,
+.persea-unified-view-popover button:disabled,
+.persea-unified-size button:disabled,
+.persea-unified-view-popover button[aria-disabled="true"],
+.persea-unified-size button[aria-disabled="true"] { opacity: 0.45; cursor: help; }
+@media (prefers-reduced-motion: reduce) {
+  .persea-unified-terminal button.persea-tapped,
+  .persea-unified-sheet button.persea-tapped,
+  .persea-unified-view-popover button.persea-tapped,
+  .persea-unified-explainer button.persea-tapped { animation: none; filter: brightness(1.5); }
+  .persea-unified-terminal button:active:not(:disabled):not([aria-disabled="true"]),
+  .persea-unified-view-popover button:active:not(:disabled):not([aria-disabled="true"]) { transform: none; }
+}
+
+/* Keys reserves a local grid row above the keyboard strip. Its measured
+   budget depends only on the available shell band, never remote geometry. */
+.persea-terminal-keys {
+  min-width: 0;
+  min-height: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--persea-border, #596171);
+  background: var(--persea-chrome-bg, #1b1e25);
+  color: inherit;
+  scrollbar-width: thin;
+}
+.persea-terminal-keys[hidden] { display: none; }
+.persea-terminal-keys button {
+  min-width: 44px;
+  min-height: 44px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--persea-chrome-muted-fg, #aeb9cc) 30%, transparent);
+  border-radius: .4rem;
+  padding: 4px 6px;
+  color: inherit;
+  background: var(--persea-control-bg, #282d38);
+  font: 600 13px/1.15 system-ui, sans-serif;
+  touch-action: pan-y;
+}
+.persea-terminal-keys button:focus-visible { outline: 2px solid var(--persea-accent, #8fc7ff); outline-offset: -3px; }
+.persea-terminal-keys button[aria-pressed="true"] { border-color: #7594b5; background: #33455a; color: #e3edf9; }
+.persea-terminal-keys button[aria-disabled="true"] { opacity: .4; }
+.persea-terminal-keys__nav, .persea-terminal-keys__options {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  overflow-x: auto;
+}
+.persea-terminal-keys__nav button { flex: 1 0 auto; border-color: transparent; background: transparent; }
+.persea-terminal-keys__nav .persea-terminal-keys__utility { display: flex; align-items: center; justify-content: center; flex: 0 0 44px; color: var(--persea-chrome-muted-fg, #aeb9cc); padding: 0; }
+.persea-terminal-keys__nav .persea-terminal-keys__utility:first-of-type { margin-left: auto; }
+.persea-terminal-keys__options button { flex: 0 0 auto; touch-action: pan-x pan-y; }
+.persea-terminal-keys .persea-terminal-keys__picker-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 120px; }
+.persea-terminal-keys__options .persea-terminal-keys__picker-trigger { flex: 1 0 120px; }
+.persea-terminal-keys__picker-trigger[aria-expanded="true"] { border-color: #7594b5; background: #33455a; color: #e3edf9; }
+.persea-terminal-keys__picker-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.persea-terminal-keys__options { padding-top: 0; }
+.persea-terminal-keys .persea-terminal-keys__modifier { color: var(--persea-chrome-muted-fg, #c4ccd9); background: color-mix(in srgb, var(--persea-control-bg, #282d38) 85%, #bcb2a0); }
+.persea-terminal-keys .persea-terminal-keys__modifier[aria-pressed="true"] { background: #51432e; color: #ffe0a1; border-color: #ae905c; }
+.persea-terminal-keys[data-view="Fn"] .persea-terminal-keys__options { justify-content: flex-start; }
+.persea-terminal-keys__body { padding: 0 4px 4px; }
+.persea-terminal-keys__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(52px, 1fr)); gap: 4px; }
+.persea-terminal-keys[data-view="Fn"] .persea-terminal-keys__grid { grid-template-columns: repeat(6, minmax(44px, 1fr)); }
+.persea-terminal-keys[data-group="Letters"] .persea-terminal-keys__grid,
+.persea-terminal-keys[data-group="Symbols"] .persea-terminal-keys__grid { grid-template-columns: repeat(auto-fit, minmax(44px, 1fr)); }
+.persea-terminal-keys .persea-terminal-keys__grid.persea-terminal-keys__choices { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+.persea-terminal-keys__choices button { overflow-wrap: anywhere; }
+.persea-terminal-keys__grid button[data-key-kind="special"] { background: color-mix(in srgb, var(--persea-control-bg, #282d38) 90%, var(--persea-chrome-muted-fg, #aeb9cc)); }
+.persea-terminal-keys__status:empty { display: none; }
+.persea-terminal-keys__status { padding: 4px 8px; font-size: .85rem; }
+.persea-terminal-keys__status[data-announcement-only="true"] { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.persea-terminal-keys p { margin: 4px; font-size: .85rem; }
+.persea-unified-keybar-key { white-space: nowrap; padding-inline: 5px; font-size: 13px; }
+.persea-unified-terminal[data-theme] .persea-unified-keybar button.persea-unified-keybar-key--bank { box-shadow: none; border-width: 1px; border-color: color-mix(in srgb, var(--persea-chrome-muted-fg, #aeb9cc) 40%, transparent); }
+.persea-unified-terminal[data-theme] .persea-unified-keybar button.persea-unified-keybar-key--bank[aria-pressed="true"] { background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 12%, var(--persea-chrome-bg, #1b1e25)); box-shadow: none; }
+
+/* In a short visible band the disclosure occupies the existing strip. The
+   fixed Keys button closes it, and every catalog control remains scrollable. */
+.persea-unified-keybar-row[hidden] { display: none; }
+.persea-terminal-keys[data-compact="true"] {
+  display: flex;
+  flex: 1 1 0;
+  height: 44px;
+  border: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  scrollbar-gutter: auto;
+  touch-action: pan-x;
+}
+.persea-terminal-keys[data-compact="true"][hidden] { display: none; }
+.persea-unified-keybar:has(.persea-terminal-keys[data-compact="true"]:not([hidden])) { padding-top: 0; }
+.persea-terminal-keys[data-compact="true"] :is(.persea-terminal-keys__nav, .persea-terminal-keys__body, .persea-terminal-keys__options, .persea-terminal-keys__grid) {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+}
+.persea-terminal-keys[data-compact="true"] button { flex: 0 0 auto; height: 44px; white-space: nowrap; touch-action: pan-x; }
+.persea-terminal-keys[data-compact="true"] .persea-terminal-keys__picker-trigger[aria-expanded="true"] { flex: 0 0 44px; min-width: 44px; justify-content: center; }
+.persea-terminal-keys[data-compact="true"] .persea-terminal-keys__picker-trigger[aria-expanded="true"] .persea-terminal-keys__picker-label { display: none; }
+.persea-terminal-keys[data-compact="true"] .persea-terminal-keys__choices button { min-width: 76px; }
+.persea-terminal-keys[data-compact="true"] :is(p, .persea-terminal-keys__status) { flex: 0 0 220px; max-height: 44px; overflow-y: auto; }
+
+/* Short screens keep navigation above a horizontally scrollable key row.
+   With a composer sharing an exceptionally short band, the keys use one row. */
+.persea-terminal-keys[data-compact="true"][data-compact-rows="2"] { height: 92px; flex-direction: column; gap: 4px; overflow: hidden; }
+.persea-terminal-keys[data-compact="true"][data-compact-rows="2"] :is(.persea-terminal-keys__nav, .persea-terminal-keys__body) { flex: 0 0 44px; width: 100%; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.persea-terminal-keys[data-compact="true"][data-compact-rows="2"] .persea-terminal-keys__nav button { min-width: 44px; padding-inline: 5px; }
+.persea-unified-keybar:has(.persea-terminal-keys[data-compact="true"][data-compact-rows="2"]:not([hidden])) .persea-unified-keybar-key--bank { align-self: flex-end; height: 44px; }
+.persea-terminal-keys[data-compact="true"][data-compact-rows="1"] .persea-terminal-keys__nav { order: 2; }
+.persea-terminal-keys[data-compact="true"][data-compact-rows="1"] .persea-terminal-keys__options { display: contents; }
+.persea-terminal-keys[data-compact="true"][data-compact-rows="1"] .persea-terminal-keys__grid { order: 1; }
+.persea-terminal-keys[data-compact="true"][data-compact-rows="1"] .persea-terminal-keys__picker-trigger[aria-expanded="false"] { order: 2; }
+.persea-unified-keybar-key[data-key-glyph="true"],
+.persea-terminal-keys [data-key-control="modifier:shift"],
+.persea-terminal-keys__grid :is([data-key-control^="key:tab:"], [data-key-control^="key:enter:"], [data-key-control^="key:backspace:"], [data-key-control^="key:delete:"], [data-key-control^="key:arrow-"]) { font-size: 18px; }
+@keyframes persea-key-tap { from { filter: brightness(1.15); } to { filter: brightness(1); } }
+.persea-unified-terminal .persea-unified-keybar button.persea-tapped,
+.persea-unified-terminal .persea-terminal-keys button.persea-tapped { animation: persea-key-tap 180ms ease-out; box-shadow: none; }
+@media (prefers-reduced-motion: reduce) {
+  .persea-unified-terminal .persea-unified-keybar button.persea-tapped,
+  .persea-unified-terminal .persea-terminal-keys button.persea-tapped { animation: none; filter: brightness(1.1); }
+}

@@ -1,0 +1,273 @@
+/* Workspace shell (M9 W1a) — presentation-only split layout.
+ *
+ * Everything here is class-based: weights map onto the closed .ws-w-1 … .ws-w-100
+ * class set (the model's integer range), so no element ever carries a style
+ * attribute or a CSSOM property write. The shell therefore renders under the
+ * base nonce'd CSP without style-src-attr, and a track size can only ever be
+ * one of the hundred reviewed values.
+ *
+ * Nothing in this file touches terminal geometry: a cell resize reaches the
+ * unified page's own ResizeObserver, which refits the font (packet §2b).
+ */
+
+.ws-root { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; color: #e8f0f5; background: #081018; }
+.ws-root > .ws-track { flex: 1 1 0; }
+
+.ws-split { display: flex; min-width: 0; min-height: 0; overflow: hidden; }
+.ws-split--row { flex-direction: row; }
+.ws-split--column { flex-direction: column; }
+.ws-track { min-width: 0; min-height: 0; flex-shrink: 1; flex-basis: 0; overflow: hidden; }
+
+/* Dividers: an 8 px visual line; on coarse pointers the hit box grows to 44 px
+ * through symmetric negative margins so the panes keep their space. */
+.ws-divider { position: relative; z-index: 2; flex: 0 0 8px; box-sizing: content-box; background: #1c3446; background-clip: content-box; touch-action: none; user-select: none; outline: none; }
+.ws-divider--row { cursor: col-resize; }
+.ws-divider--column { cursor: row-resize; }
+.ws-divider:hover, .ws-divider:focus-visible, .ws-divider[data-ws-dragging="true"] { background-color: #3b6f8f; }
+/* The active divider stacks above its neighbours so its grip is never painted over by a perpendicular divider crossing it at the midpoint. */
+.ws-divider:hover, .ws-divider:focus-within, .ws-divider[data-ws-dragging="true"] { z-index: 3; }
+.ws-divider:focus-visible { box-shadow: inset 0 0 0 2px #66d4ff; }
+.ws-divider__grip { position: absolute; top: 50%; left: 50%; display: flex; gap: 2px; transform: translate(-50%, -50%); visibility: hidden; }
+.ws-divider:hover .ws-divider__grip, .ws-divider:focus-within .ws-divider__grip, .ws-divider[data-ws-dragging="true"] .ws-divider__grip { visibility: visible; }
+.ws-divider__nudge { box-sizing: border-box; min-width: 24px; min-height: 24px; padding: 0 .35rem; border: 1px solid #36566a; border-radius: .4rem; color: #eef8ff; background: #122533; font: 700 .85rem/1 ui-monospace, monospace; cursor: pointer; }
+.ws-divider__nudge:focus-visible { outline: 3px solid #66d4ff; outline-offset: 1px; }
+
+/* Cells: header + mount + state slot. The header is always populated, so a cell
+ * is never blank even before anything is mounted. */
+.ws-cell { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid #27485c; border-radius: .4rem; background: #0d1b25; overflow: hidden; }
+.ws-cell__header { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: .25rem .6rem; min-height: 1.9rem; padding: .2rem .55rem; border-bottom: 1px solid #1c3446; background: #0a1721; font-size: .8rem; line-height: 1.3; }
+.ws-cell__header:focus-visible { outline: 2px solid #66d4ff; outline-offset: -2px; }
+.ws-cell__name { font-weight: 700; color: #eef8ff; overflow-wrap: anywhere; }
+.ws-cell__hint { color: #9fd4ff; overflow-wrap: anywhere; }
+.ws-cell__scope { color: #7f98a6; font: 600 .7rem/1.3 ui-monospace, monospace; overflow-wrap: anywhere; }
+.ws-cell__badge { margin-left: auto; border-radius: 999px; padding: .1rem .5rem; background: #162d3b; color: #b9d8e8; font: 700 .68rem/1.4 ui-monospace, monospace; text-transform: uppercase; white-space: nowrap; }
+.ws-cell[data-ws-tone="live"] .ws-cell__badge { background: #123a2a; color: #8ef0be; }
+.ws-cell[data-ws-state="live"] .ws-cell__badge { display: none; }
+.ws-cell[data-ws-tone="waiting"] .ws-cell__badge { background: #2c2f14; color: #f0e28e; }
+.ws-cell[data-ws-tone="blocked"] .ws-cell__badge { background: #3a2a14; color: #ffcf8e; }
+.ws-cell[data-ws-tone="failed"] .ws-cell__badge { background: #34171d; color: #ffc5c1; }
+.ws-cell__body { position: relative; display: flex; flex: 1 1 0; min-width: 0; min-height: 0; }
+.ws-cell__mount { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
+.ws-cell__state { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: .45rem; padding: .8rem 1rem; overflow: auto; background: rgb(8 16 24 / 92%); }
+.ws-cell__state[hidden] { display: none; }
+.ws-cell__state-headline { margin: 0; font-size: 1rem; font-weight: 700; color: #eef8ff; overflow-wrap: anywhere; }
+.ws-cell__state-detail { margin: 0; max-width: 34rem; font-size: .85rem; line-height: 1.45; color: #b7cbe0; overflow-wrap: anywhere; }
+.ws-cell__state-code { margin: 0; font: 600 .72rem/1.4 ui-monospace, monospace; color: #7f98a6; overflow-wrap: anywhere; }
+.ws-cell[data-ws-tone="failed"] .ws-cell__state { border-left: 3px solid #e85d67; }
+.ws-cell[data-ws-tone="blocked"] .ws-cell__state { border-left: 3px solid #e8a85d; }
+.ws-cell__state-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
+.ws-cell__state-actions[hidden] { display: none; }
+/* A live pane hides both of its state carriers — the overlay (so the terminal
+ * stays visible) and the header badge (rule above) — so an inventory detail
+ * gets its own notice. It is absolutely positioned inside the cell body: the
+ * mount keeps its exact box, the terminal never refits, and presentation
+ * spends no RESIZE. It takes no pointer input either: a status strip must
+ * never swallow a click or a selection meant for the live terminal under it.
+ *
+ * It is also BOUNDED. Wrapping made it grow as the cell narrowed — measured at
+ * up to three quarters of a small cell — which covers the key bar and the
+ * composer of the very terminal it describes, and a status line that hides the
+ * thing it is about is the same defect this notice exists to fix. One line, at
+ * most a quarter of the cell body, clipped rather than wrapped; the sentence
+ * itself stays reachable through the title and the accessible name, which no
+ * width can truncate. Both limits are asserted by the layout gate. */
+.ws-cell__notice { position: absolute; right: 0; bottom: 0; left: 0; z-index: 9; display: flex; flex-wrap: nowrap; align-items: baseline; gap: .5rem; max-height: min(2rem, 25%); overflow: hidden; padding: .3rem .6rem; border-top: 1px solid #4a3a1c; border-left: 3px solid #e8a85d; background: rgb(29 26 18 / 94%); color: #ffe0b2; font-size: .78rem; line-height: 1.35; white-space: nowrap; pointer-events: none; }
+.ws-cell__notice[hidden] { display: none; }
+.ws-cell__notice-badge { border-radius: 999px; padding: .05rem .45rem; background: #2c2f14; color: #f0e28e; font: 700 .68rem/1.4 ui-monospace, monospace; text-transform: uppercase; white-space: nowrap; }
+.ws-cell__notice-detail { flex: 0 1 auto; margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ws-cell__action { box-sizing: border-box; min-height: 32px; border: 1px solid #36566a; border-radius: .5rem; padding: .35rem .8rem; color: #eef8ff; background: #122533; font: inherit; font-size: .85rem; text-decoration: none; cursor: pointer; }
+.ws-cell__action:focus-visible { outline: 3px solid #66d4ff; outline-offset: 2px; }
+
+/* Fine-pointer compaction folds the actual UnifiedTerminalPage toolbar over
+ * the cell header. No clone or proxy is created: the same nodes, listeners,
+ * enabled state, ARIA state and popover remain owned by the terminal page. */
+@media (pointer: fine), (pointer: none) {
+  .ws-cell__header { flex-wrap: nowrap; min-height: 2.75rem; padding-right: min(17.5rem, 72%); }
+  .ws-cell__name, .ws-cell__hint, .ws-cell__scope { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* The floating bar reserves the right of this row, so inside what is left the
+     name is what survives. The scope flexes from a zero basis: it takes only
+     the room the name and the hint leave, and it is the first to ellipsise. */
+  .ws-cell__scope { flex: 1 1 0; }
+  .ws-cell__mount, .ws-cell__mount .persea-unified-terminal { overflow: visible; }
+  .ws-cell__mount .persea-unified-terminal { position: relative; grid-template-rows: 0 auto auto minmax(0, 1fr) auto auto; }
+  .ws-cell__mount .persea-unified-toolbar {
+    position: absolute; top: -2.75rem; right: .25rem; z-index: 8;
+    box-sizing: border-box; width: min(17.5rem, 72%); height: 2.75rem; min-height: 0;
+    gap: .25rem; padding: .1rem .2rem; border: 0; background: transparent;
+  }
+  /* With six panes on screen the one thing a pane must say is which session it
+     is showing, so the tag takes the geometry readout's slot. The figure the
+     readout printed is the tag's own popover Size row, and every workspace
+     probe that reads the readout reads its textContent, which survives
+     display:none. The name ellipsises; the alias is dropped. */
+  .ws-cell__mount .persea-unified-geometry { display: none; }
+  /* The one-time fit nudge is a sentence, and the row below is budgeted to the
+     pixel. It belongs to the full page; a cell drops it rather than let it push
+     a control on to the tag. */
+  .ws-cell__mount .persea-unified-toolbar button.persea-unified-fit-hint { display: none; }
+  /* The toolbar is its own size container, and the attachment stylesheet puts a
+     319px floor under the tag because a 280px PAGE cannot hold it without
+     scrolling sideways. A cell's bar is not a page: it has dropped the readout
+     and the nudge, and it is sized to hold the rest. Measured at 17.5rem: five
+     controls (2 x 44px + 3 x 36px) plus four .2rem gaps is 208.8px, the toolbar
+     gap is 4px and a four-character tag is 54.6px, against a 273.6px content
+     box. The floor is lifted only above a 16rem (256px) box, so a split narrow
+     enough to break that budget hides the tag instead of letting the control
+     row, which comes later in document order, paint over it. The identity also
+     takes its own stacking context, so it cannot be overpainted at all. */
+  @container (min-width: 16rem) {
+    .ws-cell__mount .persea-unified-identity { display: flex; position: relative; z-index: 1; }
+  }
+  /* In this row the tag is the item that yields. The controls carry the pane's
+     actions and keep their whole content box; the tag shrinks and ellipsises
+     into whatever the row has left, down to the dot plus a character or two.
+     Neither can be pushed out of the bar, which is what the F1 probe reads. */
+  .ws-cell__mount .persea-unified-toolbar button.persea-unified-tag { flex: 0 1 auto; min-width: 2.5rem; max-width: 7rem; }
+  .ws-cell__mount .persea-unified-tag__alias { display: none; }
+  .ws-cell__mount .persea-unified-toolbar__controls { flex: 0 0 auto; justify-content: flex-end; gap: .2rem; }
+  /* The ↕ and ✎ boxes stay at 44px, which is what the workspace F15 pin
+     measures. ⇄, ☰ and ⋯ are single glyphs behind a fine pointer, where the
+     44px touch law does not apply, and the 8px each gives back is what buys the
+     tag its place in the row. */
+  .ws-cell__mount .persea-unified-toolbar button { min-width: 36px; min-height: 44px; padding: .1rem .3rem; }
+  .ws-cell__mount .persea-unified-toolbar button.persea-unified-fit-height,
+  .ws-cell__mount .persea-unified-toolbar button.persea-unified-composer-toggle { min-width: 44px; }
+  .ws-cell__mount .persea-unified-toolbar__secondary { display: none; position: absolute; top: 100%; right: 0; z-index: 12; max-width: min(28rem, calc(100vw - 2rem)); padding: .45rem; flex-wrap: wrap; border: 1px solid #343844; border-radius: .4rem; background: #1b1e25; box-shadow: 0 10px 28px rgb(0 0 0 / 45%); }
+  .ws-cell__mount .persea-unified-toolbar__secondary[data-open="true"] { display: flex; }
+  .ws-cell__mount .persea-unified-toolbar button.persea-unified-toolbar__more { display: inline-block; }
+  .ws-cell:focus-within { z-index: 7; overflow: visible; }
+}
+
+/* Honest phone-class state (packet §6, M5): name, notice, one link per leaf,
+ * zero cells, zero transports. */
+.ws-phone { display: flex; flex-direction: column; gap: .8rem; padding: 1rem; color: #e8f0f5; background: #081018; }
+.ws-phone__eyebrow { margin: 0; font: 700 .7rem/1.3 ui-monospace, monospace; letter-spacing: .08em; color: #7f98a6; text-transform: uppercase; }
+.ws-phone__title { margin: 0; font-size: 1.4rem; overflow-wrap: anywhere; }
+.ws-phone__notice { margin: 0; padding: .6rem .8rem; border-left: 3px solid #e8a85d; background: #1d1a12; color: #ffe0b2; line-height: 1.45; }
+.ws-phone__leaves { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+.ws-phone__leaf { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .8rem; min-height: 44px; border: 1px solid #27485c; border-radius: .65rem; padding: .4rem .7rem; background: #0d1b25; }
+.ws-phone__leaf-name { font-weight: 700; overflow-wrap: anywhere; }
+.ws-phone__leaf-scope { color: #7f98a6; font: 600 .7rem/1.3 ui-monospace, monospace; }
+.ws-phone__leaf-state { margin-left: auto; color: #b9d8e8; font-size: .8rem; }
+.ws-phone__leaf-link { box-sizing: border-box; display: inline-flex; align-items: center; min-height: 44px; border: 1px solid #36566a; border-radius: .55rem; padding: .5rem .9rem; color: #eef8ff; background: #122533; text-decoration: none; }
+.ws-phone__leaf-link:focus-visible, .ws-phone__dashboard:focus-visible { outline: 3px solid #66d4ff; outline-offset: 2px; }
+.ws-phone__dashboard { align-self: flex-start; color: #9fd4ff; }
+
+/* Workspace-level failure: full surface, visible copy, a way back. */
+.ws-unavailable { display: flex; flex-direction: column; gap: .6rem; padding: 1.2rem; color: #e8f0f5; background: #081018; }
+.ws-unavailable__headline { margin: 0; font-size: 1.3rem; }
+.ws-unavailable__detail { margin: 0; max-width: 34rem; line-height: 1.45; color: #b7cbe0; }
+.ws-unavailable__code { margin: 0; font: 600 .72rem/1.4 ui-monospace, monospace; color: #7f98a6; }
+.ws-unavailable__dashboard { align-self: flex-start; color: #9fd4ff; }
+
+@media (pointer: coarse) {
+  .ws-divider--row { margin: 0 -18px; padding: 0 18px; }
+  .ws-divider--column { margin: -18px 0; padding: 18px 0; }
+  .ws-divider__grip { visibility: visible; }
+  .ws-divider__nudge { min-width: 44px; min-height: 44px; }
+  .ws-cell__action { min-width: 44px; min-height: 44px; }
+  .ws-phone__dashboard, .ws-unavailable__dashboard { display: inline-flex; align-items: center; min-height: 44px; }
+}
+
+/* Weight classes: flex-grow carries the integer weight; every child of a split
+ * has flex-basis 0, so the tracks divide the axis in exact proportion. */
+.ws-w-1 { flex-grow: 1; }
+.ws-w-2 { flex-grow: 2; }
+.ws-w-3 { flex-grow: 3; }
+.ws-w-4 { flex-grow: 4; }
+.ws-w-5 { flex-grow: 5; }
+.ws-w-6 { flex-grow: 6; }
+.ws-w-7 { flex-grow: 7; }
+.ws-w-8 { flex-grow: 8; }
+.ws-w-9 { flex-grow: 9; }
+.ws-w-10 { flex-grow: 10; }
+.ws-w-11 { flex-grow: 11; }
+.ws-w-12 { flex-grow: 12; }
+.ws-w-13 { flex-grow: 13; }
+.ws-w-14 { flex-grow: 14; }
+.ws-w-15 { flex-grow: 15; }
+.ws-w-16 { flex-grow: 16; }
+.ws-w-17 { flex-grow: 17; }
+.ws-w-18 { flex-grow: 18; }
+.ws-w-19 { flex-grow: 19; }
+.ws-w-20 { flex-grow: 20; }
+.ws-w-21 { flex-grow: 21; }
+.ws-w-22 { flex-grow: 22; }
+.ws-w-23 { flex-grow: 23; }
+.ws-w-24 { flex-grow: 24; }
+.ws-w-25 { flex-grow: 25; }
+.ws-w-26 { flex-grow: 26; }
+.ws-w-27 { flex-grow: 27; }
+.ws-w-28 { flex-grow: 28; }
+.ws-w-29 { flex-grow: 29; }
+.ws-w-30 { flex-grow: 30; }
+.ws-w-31 { flex-grow: 31; }
+.ws-w-32 { flex-grow: 32; }
+.ws-w-33 { flex-grow: 33; }
+.ws-w-34 { flex-grow: 34; }
+.ws-w-35 { flex-grow: 35; }
+.ws-w-36 { flex-grow: 36; }
+.ws-w-37 { flex-grow: 37; }
+.ws-w-38 { flex-grow: 38; }
+.ws-w-39 { flex-grow: 39; }
+.ws-w-40 { flex-grow: 40; }
+.ws-w-41 { flex-grow: 41; }
+.ws-w-42 { flex-grow: 42; }
+.ws-w-43 { flex-grow: 43; }
+.ws-w-44 { flex-grow: 44; }
+.ws-w-45 { flex-grow: 45; }
+.ws-w-46 { flex-grow: 46; }
+.ws-w-47 { flex-grow: 47; }
+.ws-w-48 { flex-grow: 48; }
+.ws-w-49 { flex-grow: 49; }
+.ws-w-50 { flex-grow: 50; }
+.ws-w-51 { flex-grow: 51; }
+.ws-w-52 { flex-grow: 52; }
+.ws-w-53 { flex-grow: 53; }
+.ws-w-54 { flex-grow: 54; }
+.ws-w-55 { flex-grow: 55; }
+.ws-w-56 { flex-grow: 56; }
+.ws-w-57 { flex-grow: 57; }
+.ws-w-58 { flex-grow: 58; }
+.ws-w-59 { flex-grow: 59; }
+.ws-w-60 { flex-grow: 60; }
+.ws-w-61 { flex-grow: 61; }
+.ws-w-62 { flex-grow: 62; }
+.ws-w-63 { flex-grow: 63; }
+.ws-w-64 { flex-grow: 64; }
+.ws-w-65 { flex-grow: 65; }
+.ws-w-66 { flex-grow: 66; }
+.ws-w-67 { flex-grow: 67; }
+.ws-w-68 { flex-grow: 68; }
+.ws-w-69 { flex-grow: 69; }
+.ws-w-70 { flex-grow: 70; }
+.ws-w-71 { flex-grow: 71; }
+.ws-w-72 { flex-grow: 72; }
+.ws-w-73 { flex-grow: 73; }
+.ws-w-74 { flex-grow: 74; }
+.ws-w-75 { flex-grow: 75; }
+.ws-w-76 { flex-grow: 76; }
+.ws-w-77 { flex-grow: 77; }
+.ws-w-78 { flex-grow: 78; }
+.ws-w-79 { flex-grow: 79; }
+.ws-w-80 { flex-grow: 80; }
+.ws-w-81 { flex-grow: 81; }
+.ws-w-82 { flex-grow: 82; }
+.ws-w-83 { flex-grow: 83; }
+.ws-w-84 { flex-grow: 84; }
+.ws-w-85 { flex-grow: 85; }
+.ws-w-86 { flex-grow: 86; }
+.ws-w-87 { flex-grow: 87; }
+.ws-w-88 { flex-grow: 88; }
+.ws-w-89 { flex-grow: 89; }
+.ws-w-90 { flex-grow: 90; }
+.ws-w-91 { flex-grow: 91; }
+.ws-w-92 { flex-grow: 92; }
+.ws-w-93 { flex-grow: 93; }
+.ws-w-94 { flex-grow: 94; }
+.ws-w-95 { flex-grow: 95; }
+.ws-w-96 { flex-grow: 96; }
+.ws-w-97 { flex-grow: 97; }
+.ws-w-98 { flex-grow: 98; }
+.ws-w-99 { flex-grow: 99; }
+.ws-w-100 { flex-grow: 100; }

@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "maximum_scalars": 128,
+  "control_ranges": [
+    { "first": 0, "last": 31 },
+    { "first": 127, "last": 159 }
+  ],
+  "cases": [
+    { "id": "ascii", "value": "Ops", "valid": true, "normalized_name": "ops" },
+    { "id": "turkish_capital_i_dot", "value": "İ", "valid": true, "normalized_name": "i" },
+    { "id": "empty", "value": "", "valid": false },
+    { "id": "c1_nel", "value": "", "valid": false },
+    { "id": "leading_nbsp", "value": " Ops", "valid": false },
+    { "id": "trailing_ideographic_space", "value": "Ops　", "valid": false },
+    { "id": "padded_alias", "value": " alias ", "valid": false },
+    { "id": "maximum_emoji", "repeat": "😀", "count": 128, "valid": true },
+    { "id": "too_many_scalars", "repeat": "a", "count": 129, "valid": false },
+    { "id": "invalid_utf8", "utf8_hex": "ff", "valid": false },
+    { "id": "ill_formed_surrogate", "utf8_hex": "eda080", "utf16_units": [55296], "valid": false }
+  ]
+}

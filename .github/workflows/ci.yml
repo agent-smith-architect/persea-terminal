@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+env:
+  TMPDIR: /tmp
+
+jobs:
+  go:
+    name: Go
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: sudo apt-get update && sudo apt-get install -y tmux less
+      - run: go vet ./... && go build ./...
+      - run: CGO_ENABLED=1 go test -race ./...
+
+  ui:
+    name: UI
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: ui/.nvmrc
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+      - run: sudo apt-get update && sudo apt-get install -y tmux less clang
+      - name: Package manager
+        run: npm install --global "$(node -p 'require("./package.json").packageManager')"
+      - name: CI reachability
+        run: node test/ci_reachability.cjs
+      - run: npm ci
+      - run: npx --no-install playwright install --with-deps chromium webkit
+      - run: npm run test:ci
+      - name: Local runtime lifecycle
+        run: bash ../scripts/local-runtime-test.sh
+
+  deploy-checks:
+    name: Deploy tooling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - run: sudo apt-get update && sudo apt-get install -y ripgrep
+      - run: python3 deploy/tests/host-config-test.py
+      - run: bash deploy/tests/hermetic-deploy-test.sh
+      - name: Shell syntax
+        run: for f in deploy/*.sh scripts/*.sh deploy/tests/*.sh; do bash -n "$f"; done
