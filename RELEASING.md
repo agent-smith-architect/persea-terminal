@@ -10,12 +10,13 @@ interfaces have a settled compatibility commitment; thereafter, breaking changes
 require a major release.
 
 1. Add user-facing changes under `Unreleased` in [CHANGELOG.md](CHANGELOG.md).
-2. For a release, replace that heading with the version and release date, remove
-   the planning note, and add a fresh `Unreleased` section. Commit the changelog.
+2. Move the released entries under their version and release date, leaving a
+   fresh `Unreleased` section. Commit the changelog.
 3. Wait for CI on that commit. Create an annotated `vX.Y.Z` tag at the tested
    commit and push it. Published tags are immutable; corrections get a new version.
 4. Create the GitHub release from that tag, using its changelog section as the
-   release notes. Mark 0.x releases as pre-releases while the interfaces evolve.
+   release notes. Use pre-release status for preview versions such as
+   `0.2.0-rc.1`; ordinary 0.x releases can be marked as the latest release.
 
 Keep dependency maintenance separate from product versions. Before release,
 refresh dependencies, test the recorded lockfile, and retain any required xterm

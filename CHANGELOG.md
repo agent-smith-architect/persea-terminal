@@ -4,7 +4,9 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
-First public release: **0.1.0**.
+## 0.1.0 — 2026-09-13
+
+First public release.
 
 ### Added
 
