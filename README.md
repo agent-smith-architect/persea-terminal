@@ -108,6 +108,7 @@ before sharing logs.
 
 - [Contributing and tests](CONTRIBUTING.md) · [Agent instructions](AGENTS.md)
 - [Dependency updates and the xterm patch](ui/DEPENDENCIES.md)
+- [Changelog](CHANGELOG.md) · [Releases](RELEASING.md)
 - [Security and vulnerability reporting](SECURITY.md)
 
 ## License

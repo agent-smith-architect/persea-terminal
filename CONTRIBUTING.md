@@ -45,3 +45,5 @@ names, credentials, cookies, capability handles, or production logs.
 
 See [dependency maintenance](ui/DEPENDENCIES.md)
 before changing xterm, compilers, package versions, or the lockfile.
+Record user-facing changes in [CHANGELOG.md](CHANGELOG.md); see
+[release instructions](RELEASING.md) for versioning and publication.

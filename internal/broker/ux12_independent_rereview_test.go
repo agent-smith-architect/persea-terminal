@@ -325,20 +325,23 @@ func TestUX12RereviewRealDispositionAndUnlinkMatrix(t *testing.T) {
 						_, oldRetirement := fixture.registry.retention.durableRetires[capturedOld]
 						_, newRetirement := fixture.registry.retention.durableRetires[capturedNew]
 						pUsed, qUsed := fixture.registry.retention.pUsed, fixture.registry.retention.qUsed
-						fixture.registry.retention.mu.Unlock()
 						oldRetained, newRetained := oldGeneration != nil, newGeneration != nil
 						oldDurable := oldGeneration != nil && oldGeneration.durableRequested
 						newDurable := newGeneration != nil && newGeneration.durableRequested
+						fixture.registry.retention.mu.Unlock()
+						fixture.effects.journalMu.Lock()
 						logical, logicalReserved, _ := fixture.effects.realm.LogicalBudget()
 						physical, physicalReserved, _ := fixture.effects.realm.PhysicalBudget()
+						slots := fixture.effects.realm.AvailableCompletePaneSlots()
+						fixture.effects.journalMu.Unlock()
 						files := fixture.journalFileCount(t)
-						if !newRetained || (cut.name == "pre_registry" && !oldRetained) || fixture.effects.realm.AvailableCompletePaneSlots() > slotsBefore || fixture.journalFileCount(t) < filesBefore {
-							t.Fatalf("uncertain state not retained: old=%t new=%t slots=%d before=%d files=%d beforeFiles=%d", oldRetained, newRetained, fixture.effects.realm.AvailableCompletePaneSlots(), slotsBefore, fixture.journalFileCount(t), filesBefore)
+						if !newRetained || (cut.name == "pre_registry" && !oldRetained) || slots > slotsBefore || files < filesBefore {
+							t.Fatalf("uncertain state not retained: old=%t new=%t slots=%d before=%d files=%d beforeFiles=%d", oldRetained, newRetained, slots, slotsBefore, files, filesBefore)
 						}
 						if oldRetirement || newRetirement || oldDurable || newDurable {
 							t.Fatalf("uncertain owner elected durable cleanup: retirements=%t/%t durable=%t/%t", oldRetirement, newRetirement, oldDurable, newDurable)
 						}
-						fingerprint := fmt.Sprintf("old=%t new=%t old_durable=%t new_durable=%t old_retire=%t new_retire=%t slots=%d files=%d logical=%d/%d physical=%d/%d p=%d q=%d", oldRetained, newRetained, oldDurable, newDurable, oldRetirement, newRetirement, fixture.effects.realm.AvailableCompletePaneSlots(), files, logical, logicalReserved, physical, physicalReserved, pUsed, qUsed)
+						fingerprint := fmt.Sprintf("old=%t new=%t old_durable=%t new_durable=%t old_retire=%t new_retire=%t slots=%d files=%d logical=%d/%d physical=%d/%d p=%d q=%d", oldRetained, newRetained, oldDurable, newDurable, oldRetirement, newRetirement, slots, files, logical, logicalReserved, physical, physicalReserved, pUsed, qUsed)
 						fingerprintKey := cut.name + "/" + disposition.name
 						if unlinkMode == "success" {
 							uncertainFingerprints[fingerprintKey] = fingerprint
@@ -349,21 +352,29 @@ func TestUX12RereviewRealDispositionAndUnlinkMatrix(t *testing.T) {
 					}
 					deadline := time.Now().Add(10 * time.Second)
 					for {
+						// Cleanup runs on the retention dispatcher. Sample its journal
+						// ledgers under the same lock used by the production writer.
+						fixture.effects.journalMu.Lock()
 						logical, logicalReserved, logicalCap := fixture.effects.realm.LogicalBudget()
 						physical, physicalReserved, physicalCap := fixture.effects.realm.PhysicalBudget()
-						if fixture.effects.realm.AvailableCompletePaneSlots() == initialSlots && fixture.journalFileCount(t) == 0 && logical == initialLogical && logicalReserved == initialLogicalReserved && physical == initialPhysical && physicalReserved == initialPhysicalReserved {
+						slots := fixture.effects.realm.AvailableCompletePaneSlots()
+						fixture.effects.journalMu.Unlock()
+						fileCount := fixture.journalFileCount(t)
+						if slots == initialSlots && fileCount == 0 && logical == initialLogical && logicalReserved == initialLogicalReserved && physical == initialPhysical && physicalReserved == initialPhysicalReserved {
 							break
 						}
 						if time.Now().After(deadline) {
 							fixture.registry.retention.mu.Lock()
 							generations, durable, pUsed, qUsed := len(fixture.registry.retention.generations), len(fixture.registry.retention.durableRetires), fixture.registry.retention.pUsed, fixture.registry.retention.qUsed
 							fixture.registry.retention.mu.Unlock()
+							fixture.effects.journalMu.Lock()
 							files, _ := rotationJournalFiles(fixture.runtimeDir)
 							oldLogical, _ := fixture.effects.realm.PaneLogical(capturedOld)
 							newLogical, _ := fixture.effects.realm.PaneLogical(capturedNew)
 							oldPhysical, _ := fixture.effects.realm.PanePhysical(capturedOld)
 							newPhysical, _ := fixture.effects.realm.PanePhysical(capturedNew)
-							t.Fatalf("cleanup did not converge: slots=%d initial=%d files=%v logical=%d/%d/%d physical=%d/%d/%d generations=%d durable=%d pUsed=%d qUsed=%d old=%d/%d new=%d/%d", fixture.effects.realm.AvailableCompletePaneSlots(), initialSlots, files, logical, logicalReserved, logicalCap, physical, physicalReserved, physicalCap, generations, durable, pUsed, qUsed, oldLogical, oldPhysical, newLogical, newPhysical)
+							fixture.effects.journalMu.Unlock()
+							t.Fatalf("cleanup did not converge: slots=%d initial=%d files=%v logical=%d/%d/%d physical=%d/%d/%d generations=%d durable=%d pUsed=%d qUsed=%d old=%d/%d new=%d/%d", slots, initialSlots, files, logical, logicalReserved, logicalCap, physical, physicalReserved, physicalCap, generations, durable, pUsed, qUsed, oldLogical, oldPhysical, newLogical, newPhysical)
 						}
 						time.Sleep(25 * time.Millisecond)
 					}
