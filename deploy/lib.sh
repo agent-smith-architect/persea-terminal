@@ -762,10 +762,30 @@ persea_run_without_lock() {
   # after launcher death. close_fds revokes every inherited non-stdio descriptor
   # before runuser or build code runs, including copies made by enclosing shells.
   /usr/bin/python3 -c '
+import signal
 import subprocess
 import sys
-result = subprocess.run(sys.argv[1:], close_fds=True)
-sys.exit(result.returncode if result.returncode >= 0 else 128 - result.returncode)
+child = None
+pending = []
+def forward(sig, frame):
+    if child is None:
+        pending.append(sig)
+    else:
+        child.send_signal(sig)
+for sig in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
+    signal.signal(sig, forward)
+# Stay in the callers process group: group cancellation already reaches the
+# child. Forward only to the direct child, never back into our own group.
+child = subprocess.Popen(sys.argv[1:], close_fds=True)
+for sig in pending:
+    child.send_signal(sig)
+while True:
+    try:
+        status = child.wait()
+        break
+    except InterruptedError:
+        continue
+sys.exit(status if status >= 0 else 128 - status)
 ' "$@"
 }
 
