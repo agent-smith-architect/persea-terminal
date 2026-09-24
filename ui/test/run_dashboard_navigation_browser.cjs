@@ -775,7 +775,10 @@ async function main() {
       deltaX: 0,
       deltaY: 500,
     });
-    await delay(250);
+    // CDP acknowledges wheel dispatch before the compositor applies scrolling.
+    // Observe consumption of this gesture; do not send a second gesture.
+    await waitFor(`document.scrollingElement.scrollTop > ${dashboardScrollBefore.rootTop}
+      && window.scrollY === document.scrollingElement.scrollTop`);
     const dashboardScrollAfter = await evaluate(`(() => {
       const root = document.scrollingElement;
       return {
