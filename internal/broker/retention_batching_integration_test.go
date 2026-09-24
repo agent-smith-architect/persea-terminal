@@ -716,6 +716,7 @@ func TestRetentionR5PreFeedResultDispatcherReentryAndDrainerProgress(t *testing.
 	clock := newRetentionManualClock()
 	callbackEntered := make(chan struct{})
 	cleanupEntered := make(chan struct{})
+	cleanupDone := make(chan struct{})
 	callbackRelease := make(chan struct{})
 	releaseCallback := sync.OnceFunc(func() { close(callbackRelease) })
 	defer releaseCallback()
@@ -737,6 +738,9 @@ func TestRetentionR5PreFeedResultDispatcherReentryAndDrainerProgress(t *testing.
 				default:
 					close(cleanupEntered)
 				}
+			}
+			if point == "after_cleanup" {
+				close(cleanupDone)
 			}
 		},
 		beforeObserve: func(event string) {
@@ -772,7 +776,9 @@ func TestRetentionR5PreFeedResultDispatcherReentryAndDrainerProgress(t *testing.
 		t.Fatal("pre-feed drainer handed off to or waited for the result callback")
 	}
 	releaseCallback()
-	effects.waitObservation("fault_cleanup", 1)
+	// Reentry can queue a discard before cleanup and retire the empty pane.
+	// Cleanup still completes, but has no pane left to emit fault_cleanup for.
+	<-cleanupDone
 	if err := registry.Close(); err == nil {
 		t.Fatal("Close lost classified pre-feed failure")
 	}
