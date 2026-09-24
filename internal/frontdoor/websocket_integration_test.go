@@ -712,23 +712,16 @@ func TestWebSocketControlLeaseObservePolicyAndByteTransparency(t *testing.T) {
 	_ = observe.Close()
 
 	_ = control.Close()
-	deadline := time.Now().Add(3 * time.Second)
-	for {
-		nextHandle, err := front.handles.mint(a)
-		if err != nil {
-			t.Fatal(err)
-		}
-		next := dialTerminalWS(t, front, addr, nextHandle, "control")
-		message := readWSAttachment(t, next)
-		if message.Type == terminal.FrameLive {
-			_ = next.Close()
-			break
-		}
-		_ = next.Close()
-		if time.Now().After(deadline) {
-			t.Fatalf("close did not release lease: %+v", message)
-		}
-		time.Sleep(20 * time.Millisecond)
+	// Client close returns before the server's lease-release defer runs.
+	waitForNoLease(t, front.leases, a)
+	nextHandle, err := front.handles.mint(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	next := dialTerminalWS(t, front, addr, nextHandle, "control")
+	defer next.Close()
+	if message := readWSAttachment(t, next); message.Type != terminal.FrameLive {
+		t.Fatalf("close did not release lease: %+v", message)
 	}
 }
 
