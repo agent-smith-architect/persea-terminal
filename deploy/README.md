@@ -244,7 +244,16 @@ user or run build code use a trusted waiting process that retains the lock but
 closes all non-stdio descriptors for its child. Unprivileged build code cannot
 unlock the deployment or retain its descriptor in a detached process. Killing
 the launcher cannot unlock a build step still in progress: the trusted waiter
-holds exclusion until that step exits. Services started by systemd do not
+holds exclusion until its direct child exits and is reaped. INT, TERM and HUP
+delivered to the waiter are forwarded to that child while the waiter keeps
+waiting, even if the child ignores cancellation. The child stays in the
+transaction's process group, so group cancellation also reaches its descendants;
+forwarding targets only the direct child to avoid signalling the waiter again.
+SIGKILL of the trusted waiter itself cannot be handled: if the launcher and all
+other trusted lock holders have also exited, exclusion ends even while the
+wrapped child remains alive. Detached build descendants cannot hold the lock;
+the waiter tracks the wrapped command, not processes that outlive that command.
+Services started by systemd do not
 inherit the lock. A surviving trusted step can keep a later deployment waiting,
 with a diagnostic, until it exits. Do not run older deploy tooling concurrently.
 
