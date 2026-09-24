@@ -9,6 +9,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -226,6 +227,80 @@ class RetentionFaultTests(unittest.TestCase):
         target = self.assert_inventory_refusal(link)
         self.assertEqual((target / "host.json").stat().st_nlink, 2)
         self.assertEqual((self.outside / "alias").read_text(), "fixture\n")
+
+    def test_parent_mutation_after_file_open_forces_rescan(self):
+        original = os.open
+        added = None
+        def inject(name, flags, *args, **kwargs):
+            nonlocal added
+            fd = original(name, flags, *args, **kwargs)
+            if name == "host.json" and flags & os.O_PATH and added is None:
+                parent = Path(os.readlink(f'/proc/self/fd/{kwargs["dir_fd"]}'))
+                added = parent / "addition"
+                added.write_text("preserve\n")
+                added.chmod(0o444)
+            return fd
+        with patch.object(os, "open", inject), self.assertRaises((ValueError, OSError)):
+            self.prune()
+        self.assertIsNotNone(added)
+        self.assertEqual(added.read_text(), "preserve\n")
+        self.assertEqual((added.parent / "host.json").read_text(), "fixture\n")
+
+    def test_child_metadata_change_without_parent_mutation_is_refused(self):
+        original = os.open
+        target = None
+        def inject(name, flags, *args, **kwargs):
+            nonlocal target
+            if name == "host.json" and flags & os.O_PATH and target is None:
+                parent = Path(os.readlink(f'/proc/self/fd/{kwargs["dir_fd"]}'))
+                target = parent / name
+                before = self.helper.witness(parent.stat())
+                os.link(target, self.outside / "alias")
+                self.assertEqual(self.helper.witness(parent.stat()), before)
+            return original(name, flags, *args, **kwargs)
+        with patch.object(os, "open", inject), self.assertRaises((ValueError, OSError)):
+            self.prune()
+        self.assertIsNotNone(target)
+        self.assertEqual(target.read_text(), "fixture\n")
+        self.assertEqual((self.outside / "alias").read_text(), "fixture\n")
+
+    def test_wide_directory_has_bounded_metadata_work(self):
+        # Bound filesystem work rather than wall time, which varies under CI
+        # load. Also report the same widths as the standalone timing benchmark.
+        for size in (500, 1000, 2000):
+            with self.subTest(entries=size):
+                case = RetentionFaultTests()
+                case.setUp()
+                try:
+                    case.victim.chmod(0o755)
+                    folder = case.victim / "ui"
+                    folder.mkdir()
+                    manifest = case.victim / "MANIFEST.sha256"
+                    manifest.chmod(0o644)
+                    with manifest.open("a") as stream:
+                        for i in range(size):
+                            item = folder / f"asset-{i:06}.txt"
+                            item.write_text("x")
+                            item.chmod(0o444)
+                            stream.write(hashlib.sha256(b"x").hexdigest() + "  ui/" + item.name + "\n")
+                    manifest.chmod(0o444)
+                    folder.chmod(0o555)
+                    case.victim.chmod(0o555)
+                    count = 0
+                    original = os.stat
+                    def counted(*args, **kwargs):
+                        nonlocal count
+                        count += 1
+                        return original(*args, **kwargs)
+                    start = time.monotonic()
+                    with patch.object(os, "stat", counted):
+                        case.prune()
+                    elapsed = time.monotonic() - start
+                    print(f"width={size} stat_calls={count} seconds={elapsed:.3f}", flush=True)
+                    self.assertFalse(case.victim.exists())
+                    self.assertLess(count, 30 * size, "repeated sibling scans grow quadratically")
+                finally:
+                    case.tearDown()
 
     def mount_case(self, after_mount_check):
         if not MOUNT_WORKER:

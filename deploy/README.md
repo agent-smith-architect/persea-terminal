@@ -263,10 +263,14 @@ It renames the candidate relative to opened directory descriptors into a fresh
 owner-only `.prune-<random>` quarantine inside `releases/`, then rechecks its
 identity. All permission changes and recursive deletion use those descriptors.
 Validation records every descendant's type, device, inode, owner, group and mode,
-each file's link count, and every directory's entry set. Removal compares opened
-objects and entry sets with that record before changing permissions, descending
-or unlinking; only permission and entry changes made by removal itself are
-allowed. Substituted directories or files and added entries are refused, even
+each file's link count, and every directory's entry set. Removal checks the full
+entry set when entering a directory and rescans if its mutation witness changes
+unexpectedly. Each opened object is compared with its recorded identity and
+security metadata before changing permissions, descending or unlinking, even
+when the parent witness is unchanged. Only permission and entry changes made
+by removal itself are allowed. This keeps ordinary removal linear in directory
+width rather than scanning all remaining siblings twice per unlink.
+Substituted directories or files and added entries are refused, even
 when their ownership and modes match the original release.
 The helper checks `/proc/self/mountinfo` immediately before deletion and checks
 device and Linux mount IDs on opened descendants; same-filesystem bind mounts
