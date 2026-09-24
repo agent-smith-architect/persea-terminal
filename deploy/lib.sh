@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # shellcheck disable=SC2034
 
-# Shared, side-effect-free constants and candidate generation for Slice 2.4.
+# Shared, side-effect-free constants and deployment configuration generation.
 # Executable entry points source this file; it must not be run directly.
 
 # Tailscale compatibility policy: a minimum version floor plus a capability

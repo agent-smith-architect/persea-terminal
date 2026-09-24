@@ -236,7 +236,7 @@ run_build /bin/bash -c 'cd "$1" && CGO_ENABLED=1 CC=/usr/bin/clang "$2" build -t
 
 # Revoke the build UID's pathname access before root validates or imports artifacts.
 chmod 0700 -- "$build_root"
-# The UI payload THIS tree produces. The installable-shell assets (E-P6) belong
+# The UI payload THIS tree produces. The installable-shell assets (session memory) belong
 # to a new release only: the legacy rollback bridge below still copies the old
 # release's own four assets, because a release is judged by its own artifacts and
 # must never be asked for files it never shipped.

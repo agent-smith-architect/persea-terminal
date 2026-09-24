@@ -84,7 +84,7 @@ if [[ ${1:-} == run && ${2:-} == build ]]; then
   printf '.xterm{}\n' >dist/xterm.css
   printf 'synthetic license notice\n' >dist/THIRD_PARTY_NOTICES.txt
   for asset in app.js app.css xterm.css; do gzip -n -c "dist/$asset" >"dist/$asset.gz"; done
-  # E-P6 installable shell. The fake build emits them because install.sh
+  # Installable browser shell. The fake build emits them because install.sh
   # requires the current tree's UI payload to be complete and regular.
   printf '{"start_url":"/?resume=1"}\n' >dist/manifest.webmanifest
   printf 'icon-192\n' >dist/icon-192.png
@@ -947,7 +947,7 @@ assert front["keyboard_preferences_store_path"] == home + "/keyboard-v1.json", f
 PY
 pass 'rendered front config places the preferences and snippet stores beside the alias store'
 [[ $(wc -l <"$ROOT/opt/persea-terminal/$current_before/MANIFEST.sha256") == 25 ]] || fail 'immutable release manifest does not cover the exact portable payload inventory'
-# E-P6: the installable shell is release payload, not a runtime download. Each
+# The installable shell is release payload, not a runtime download. Each
 # asset must be a regular file whose bytes the release manifest covers.
 for pwa_asset in ui/manifest.webmanifest ui/icon-192.png ui/icon-512.png ui/apple-touch-icon.png; do
   [[ -f "$ROOT/opt/persea-terminal/$current_before/$pwa_asset" && ! -L "$ROOT/opt/persea-terminal/$current_before/$pwa_asset" ]] ||
@@ -1356,17 +1356,17 @@ cmp -s "$ROOT/opt/persea-terminal/$topology_current/units/persea-terminal-tailsc
 ! grep -q '^MAIN_MUTATE ' "$FAKE_STATE/tailscale.log" || fail 'sidecar install reached a main-daemon mutation sentinel'
 pass 'explicit sidecar installer preserves the three-unit application lifecycle and verifies NeedsLogin-capable runtime'
 
-# M11LF-F5A..F5D: rollback owns the reverse-dependent sidecar lifecycle on
+# rollback..F5D: rollback owns the reverse-dependent sidecar lifecycle on
 # success, restoration, signals, and terminal sidecar failures.
 f5_source=$(readlink -- "$ROOT/opt/persea-terminal/current")
 f5_target=$(readlink -- "$ROOT/opt/persea-terminal/previous")
 f5_source_front_hash=$(sha256sum "$ROOT/etc/systemd/system/persea-terminal-front.service" | awk '{print $1}')
 
 assert_f5_source_restored() {
-  [[ $(readlink -- "$ROOT/opt/persea-terminal/current") == "$f5_source" ]] || fail 'M11LF-F5 restoration changed the source pointer'
-  [[ $(sha256sum "$ROOT/etc/systemd/system/persea-terminal-front.service" | awk '{print $1}') == "$f5_source_front_hash" ]] || fail 'M11LF-F5 restoration changed source unit bytes'
-  [[ -e $FAKE_STATE/active/persea-terminal-tailscaled.service && -e $FAKE_STATE/enabled/persea-terminal-tailscaled.service ]] || fail 'M11LF-F5 restoration lost sidecar active/enabled intent'
-  env "${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$ROOT" "$DEPLOY_DIR/verify.sh" --require-active --require-sidecar >/dev/null || fail 'M11LF-F5 restored source failed sidecar-required verification'
+  [[ $(readlink -- "$ROOT/opt/persea-terminal/current") == "$f5_source" ]] || fail 'rollback restoration changed the source pointer'
+  [[ $(sha256sum "$ROOT/etc/systemd/system/persea-terminal-front.service" | awk '{print $1}') == "$f5_source_front_hash" ]] || fail 'rollback restoration changed source unit bytes'
+  [[ -e $FAKE_STATE/active/persea-terminal-tailscaled.service && -e $FAKE_STATE/enabled/persea-terminal-tailscaled.service ]] || fail 'rollback restoration lost sidecar active/enabled intent'
+  env "${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$ROOT" "$DEPLOY_DIR/verify.sh" --require-active --require-sidecar >/dev/null || fail 'rollback restored source failed sidecar-required verification'
 }
 
 assert_f5_start_order() {
@@ -1376,65 +1376,65 @@ assert_f5_start_order() {
   front=$(grep -n '^start persea-terminal-front.service$' "$log" | tail -1 | cut -d: -f1)
   sidecar=$(grep -n '^start persea-terminal-tailscaled.service$' "$log" | tail -1 | cut -d: -f1)
   [[ -n $first_broker && -n $last_broker && -n $front && -n $sidecar && $last_broker -lt $front && $front -lt $sidecar ]] ||
-    fail "M11LF-F5 start order is not brokers -> front -> sidecar: $(tr '\n' ';' <"$log")"
+    fail "rollback start order is not brokers -> front -> sidecar: $(tr '\n' ';' <"$log")"
 }
 
 : >"$FAKE_STATE/systemctl.log"
-env "${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$ROOT" "$DEPLOY_DIR/rollback.sh" --activate-local >"$TMP/m11lf-f5-normal.out"
-[[ $(readlink -- "$ROOT/opt/persea-terminal/current") == "$f5_target" ]] || fail 'M11LF-F5A did not select rollback target'
-[[ -e $FAKE_STATE/active/persea-terminal-tailscaled.service && -e $FAKE_STATE/enabled/persea-terminal-tailscaled.service ]] || fail 'M11LF-F5A did not restore sidecar lifecycle'
+env "${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$ROOT" "$DEPLOY_DIR/rollback.sh" --activate-local >"$TMP/rollback-normal.out"
+[[ $(readlink -- "$ROOT/opt/persea-terminal/current") == "$f5_target" ]] || fail 'rollback did not select rollback target'
+[[ -e $FAKE_STATE/active/persea-terminal-tailscaled.service && -e $FAKE_STATE/enabled/persea-terminal-tailscaled.service ]] || fail 'rollback did not restore sidecar lifecycle'
 assert_f5_start_order "$FAKE_STATE/systemctl.log"
-env "${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$ROOT" "$DEPLOY_DIR/verify.sh" --require-active --require-sidecar >/dev/null || fail 'M11LF-F5A final verification failed'
-grep -Fq "CURRENT=$f5_target" "$TMP/m11lf-f5-normal.out" || fail 'M11LF-F5A omitted its verified success receipt'
+env "${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$ROOT" "$DEPLOY_DIR/verify.sh" --require-active --require-sidecar >/dev/null || fail 'rollback final verification failed'
+grep -Fq "CURRENT=$f5_target" "$TMP/rollback-normal.out" || fail 'rollback omitted its verified success receipt'
 env "${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$ROOT" "$DEPLOY_DIR/rollback.sh" --to-release "$f5_source" --activate-local >/dev/null
 assert_f5_source_restored
-pass 'M11LF-F5A normal rollback restores sidecar after front and verifies it'
+pass 'rollback normal rollback restores sidecar after front and verifies it'
 
 rm -f -- "$FAKE_STATE/fail-start-once-persea-terminal-front.service"
 : >"$FAKE_STATE/systemctl.log"
 if env "${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$ROOT" FAKE_FAIL_START_ONCE=persea-terminal-front.service \
-  "$DEPLOY_DIR/rollback.sh" --activate-local >"$TMP/m11lf-f5-error.out" 2>&1; then
-  fail 'M11LF-F5B accepted an injected post-stop activation failure'
+  "$DEPLOY_DIR/rollback.sh" --activate-local >"$TMP/rollback-error.out" 2>&1; then
+  fail 'rollback accepted an injected post-stop activation failure'
 fi
 assert_f5_source_restored
 assert_f5_start_order "$FAKE_STATE/systemctl.log"
-! grep -q '^CURRENT=' "$TMP/m11lf-f5-error.out" || fail 'M11LF-F5B printed a success receipt after restoration'
-pass 'M11LF-F5B error restoration restores pointers, units, front, and sidecar intent'
+! grep -q '^CURRENT=' "$TMP/rollback-error.out" || fail 'rollback printed a success receipt after restoration'
+pass 'rollback error restoration restores pointers, units, front, and sidecar intent'
 
 run_f5_signal() {
   local label=$1 expected=$2; shift 2
   rm -f -- "$FAKE_STATE"/signal-stop-* "$FAKE_STATE"/signal-start-* "$FAKE_STATE/daemon-signal-sent"
   : >"$FAKE_STATE/systemctl.log"
   local status=0
-  env "${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$ROOT" "$@" "$DEPLOY_DIR/rollback.sh" --activate-local >"$TMP/m11lf-f5-signal-$label.out" 2>&1 || status=$?
-  [[ $status == "$expected" ]] || fail "M11LF-F5C $label returned $status instead of $expected"
+  env "${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$ROOT" "$@" "$DEPLOY_DIR/rollback.sh" --activate-local >"$TMP/rollback-signal-$label.out" 2>&1 || status=$?
+  [[ $status == "$expected" ]] || fail "rollback $label returned $status instead of $expected"
   assert_f5_source_restored
-  ! grep -q '^CURRENT=' "$TMP/m11lf-f5-signal-$label.out" || fail "M11LF-F5C $label printed a success receipt"
-  [[ -z $(find "$ROOT/opt/persea-terminal" "$ROOT/etc/persea-terminal" -maxdepth 1 -name '.*rollback.*' -print -quit) ]] || fail "M11LF-F5C $label left a temporary rollback target"
+  ! grep -q '^CURRENT=' "$TMP/rollback-signal-$label.out" || fail "rollback $label printed a success receipt"
+  [[ -z $(find "$ROOT/opt/persea-terminal" "$ROOT/etc/persea-terminal" -maxdepth 1 -name '.*rollback.*' -print -quit) ]] || fail "rollback $label left a temporary rollback target"
 }
 run_f5_signal pre_pointer 130 FAKE_SIGNAL_STOP_UNIT=persea-terminal-front.service FAKE_SIGNAL_KIND=INT
 run_f5_signal post_pointer 143 FAKE_SIGNAL_DAEMON_RELOAD=TERM
 run_f5_signal post_front_start 129 FAKE_SIGNAL_START_UNIT=persea-terminal-front.service FAKE_SIGNAL_KIND=HUP
-pass 'M11LF-F5C INT TERM and HUP restore sidecar state before returning signal status'
+pass 'rollback INT TERM and HUP restore sidecar state before returning signal status'
 
 rm -f -- "$FAKE_STATE/fail-start-once-persea-terminal-tailscaled.service"
 if env "${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$ROOT" FAKE_FAIL_START_ONCE=persea-terminal-tailscaled.service \
-  "$DEPLOY_DIR/rollback.sh" --activate-local >"$TMP/m11lf-f5-sidecar-once.out" 2>&1; then
-  fail 'M11LF-F5D accepted a sidecar start failure'
+  "$DEPLOY_DIR/rollback.sh" --activate-local >"$TMP/rollback-sidecar-once.out" 2>&1; then
+  fail 'rollback accepted a sidecar start failure'
 fi
 assert_f5_source_restored
-grep -Fqi 'sidecar recovery' "$TMP/m11lf-f5-sidecar-once.out" || fail 'M11LF-F5D sidecar start failure was not named'
-! grep -q '^CURRENT=' "$TMP/m11lf-f5-sidecar-once.out" || fail 'M11LF-F5D printed success after sidecar start failure'
+grep -Fqi 'sidecar recovery' "$TMP/rollback-sidecar-once.out" || fail 'rollback sidecar start failure was not named'
+! grep -q '^CURRENT=' "$TMP/rollback-sidecar-once.out" || fail 'rollback printed success after sidecar start failure'
 
 if env "${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$ROOT" FAKE_PID_EXEC_DRIFT=persea-terminal-tailscaled.service \
-  "$DEPLOY_DIR/rollback.sh" --activate-local >"$TMP/m11lf-f5-sidecar-verify.out" 2>&1; then
-  fail 'M11LF-F5D accepted sidecar verification drift'
+  "$DEPLOY_DIR/rollback.sh" --activate-local >"$TMP/rollback-sidecar-verify.out" 2>&1; then
+  fail 'rollback accepted sidecar verification drift'
 fi
-[[ $(readlink -- "$ROOT/opt/persea-terminal/current") == "$f5_source" ]] || fail 'M11LF-F5D verifier failure did not restore source pointer'
-[[ -e $FAKE_STATE/active/persea-terminal-tailscaled.service ]] || fail 'M11LF-F5D verifier failure left sidecar inactive'
-grep -Fqi 'sidecar' "$TMP/m11lf-f5-sidecar-verify.out" || fail 'M11LF-F5D verifier failure did not name the sidecar'
-! grep -q '^CURRENT=' "$TMP/m11lf-f5-sidecar-verify.out" || fail 'M11LF-F5D verifier failure printed success'
-pass 'M11LF-F5D sidecar start and verification failures are terminal and visible'
+[[ $(readlink -- "$ROOT/opt/persea-terminal/current") == "$f5_source" ]] || fail 'rollback verifier failure did not restore source pointer'
+[[ -e $FAKE_STATE/active/persea-terminal-tailscaled.service ]] || fail 'rollback verifier failure left sidecar inactive'
+grep -Fqi 'sidecar' "$TMP/rollback-sidecar-verify.out" || fail 'rollback verifier failure did not name the sidecar'
+! grep -q '^CURRENT=' "$TMP/rollback-sidecar-verify.out" || fail 'rollback verifier failure printed success'
+pass 'rollback sidecar start and verification failures are terminal and visible'
 
 sidecar_version_hash=$(sha256sum "$ROOT/etc/systemd/system/persea-terminal-tailscaled.service" | awk '{print $1}')
 if env "${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$ROOT" FAKE_TSD_VERSION=1.102.1 "$DEPLOY_DIR/install-tailscale-sidecar.sh" >"$TMP/sidecar-version-fail.out" 2>&1; then
