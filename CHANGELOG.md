@@ -4,6 +4,10 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+### Fixed
+
+- Fit the terminal font to the admitted session geometry on first open while preserving explicit font preferences.
+
 ## 0.1.0 — 2026-09-13
 
 First public release.
