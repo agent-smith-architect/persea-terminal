@@ -497,7 +497,7 @@ async function main() {
     // --- R12 subscriber_lagged: a typed subscriber close re-attaches, never a dead end
     // The broker evicts a journal subscriber that fell behind the committed
     // stream and ends that attachment with the typed reason subscriber_lagged
-    // (advisor B1); the front door closes the socket with it. The page must
+    // and the front door closes the socket with it. The page must
     // classify it reconnectable: re-mint once on the same session, land back
     // in live CONTROL with no operator action, show the reconnecting strip
     // meanwhile, and deliver input on the new attachment. A terminal notice

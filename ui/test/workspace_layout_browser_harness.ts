@@ -1,4 +1,4 @@
-// M9 W1a — browser harness for the workspace layout shell (FW3 layout storm,
+// Browser harness for the workspace layout shell (FW3 layout storm,
 // FW-blank per-pane states, coarse-pointer touch targets, and the honest
 // phone-class posture). No attachment, no transport, no terminal: each cell
 // hosts a dummy pane that owns a stub send port. The stub is the FW3 sentinel:
@@ -29,14 +29,14 @@ for (const type of ["pointerdown", "pointermove", "pointerup", "pointercancel"] 
 document.addEventListener("securitypolicyviolation", (event) => {
   sentinel.cspViolations.push(`${event.violatedDirective}:${event.blockedURI}:${event.sourceFile ?? ""}:${event.lineNumber}`);
 });
-// FW-M5 wire witness: no transport may be constructed on any shell path.
+// Transport construction witness: no transport may be constructed on any shell path.
 const NativeWebSocket = window.WebSocket;
 (window as unknown as { WebSocket: unknown }).WebSocket = class CountingSocket {
   constructor(..._args: unknown[]) { sentinel.webSockets += 1; throw new Error("the workspace shell must not open a transport"); }
   static readonly CONNECTING = NativeWebSocket.CONNECTING;
 };
 
-// A dummy pane: what the unified page will occupy in W1b, reduced to the two
+// A dummy pane: what the unified page occupies at runtime, reduced to the two
 // things FW3 cares about — a ResizeObserver that refits presentation only, and
 // a send port that layout must never reach.
 class DummyPane {
@@ -73,7 +73,7 @@ function session(name: string): DashboardSession {
 }
 
 const TREE: WorkspaceNode = split("row", [
-  leaf({ realm: "main", server: "default", name: "qt20" }, "offer", "meta-advisor"),
+  leaf({ realm: "main", server: "default", name: "qt20" }, "offer", "primary-terminal"),
   split("column", [leaf({ realm: "main", server: "default", name: "build" }, "create"), leaf({ realm: "main", server: "default", name: "scratch" }, "skip")]),
   split("column", [leaf({ realm: "main", server: "default", name: "logs" }), split("row", [leaf({ realm: "main", server: "default", name: "deploy" }), leaf({ realm: "main", server: "default", name: "watch" })])]),
 ], [2, 1, 1]);

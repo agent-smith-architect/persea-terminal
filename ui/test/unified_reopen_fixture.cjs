@@ -272,7 +272,7 @@ function cookieCSRF(request) {
 // ring with a 30-minute default and protected extended retention, the internal
 // server-owned `osc52` record plus its ordinary canonical clipboard item,
 // body-revision CAS on PATCH/DELETE, strong decimal `If-Match` on the OSC
-// upsert, and the M4 route contract on every method: identity/CSRF on every
+// upsert, and the shared route contract on every method: identity/CSRF on every
 // mutation, same-origin only, strict method, exact JSON content type, a
 // bounded body read BEFORE the decode, a closed field set, bounded fixed
 // error text that never echoes a body, and `Cache-Control: no-store`
@@ -1147,7 +1147,7 @@ function startFixture(ui, options = {}) {
       response.end(JSON.stringify({ items: [] }));
       return;
     }
-    // W2 adds the durable-workspace inventory to every dashboard load. This
+    // Every dashboard load includes the durable-workspace inventory. This
     // reopen fixture owns no saved workspaces, so model the production API's
     // empty successful result instead of leaking a test-only 404 to Chromium.
     if (request.method === "GET" && url.pathname === "/api/workspaces") {

@@ -13,7 +13,7 @@ const assert = {
 };
 
 // TERMINAL: typed refusals of this attachment — the page must stop the retry
-// loop and render the reason. This is the orchestrator ruling: ALL
+// loop and render the reason. ALL
 // broker/front-door-typed refusals are terminal — including the attachment
 // protocol violations the front closes deterministically (F3): bad_liveness,
 // bad_attachment, observe_mode, websocket_message_type, and the client-side

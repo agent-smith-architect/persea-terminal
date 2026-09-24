@@ -321,7 +321,7 @@ async function main() {
     // pair and the composer toggle. This context is the 1280x800 desktop one,
     // so the opener is present here; the phone context below never sees it.
     //
-    // Updated again for terminal topbar FOLLOW-UP 2: the session tag is a real control in
+    // The session tag is a real control in
     // this row too -- it opens the identity popover -- and it is the row's
     // first element, so it is the first stop. Its expected name is read from
     // the tag the page rendered rather than hardcoded, because the session

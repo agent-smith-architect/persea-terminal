@@ -1,4 +1,4 @@
-// M9 W1b — regression test W1B-F13: exhaustive, nonblank per-pane failure policy.
+// pane-failure-isolation: exhaustive, nonblank per-pane failure policy.
 //
 // The workspace renders pane state through the SHARED projection type and the
 // SHARED close policy (imported, never re-declared). This fence enumerates

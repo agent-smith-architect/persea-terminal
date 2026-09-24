@@ -1,10 +1,10 @@
 "use strict";
 
-// Workspace fixture (M9 W1b): an in-process front door + unified broker double
+// Workspace fixture: an in-process front door + unified broker double
 // hosting N SESSIONS, each with its own one-time handles, control lease,
 // takeover offers, source binding, journal output, and broker automaton. The
 // reopen fixture (unified_reopen_fixture.cjs) models one session; this one
-// reproduces the same front-door semantics per session so the W1b gate can
+// reproduces the same front-door semantics per session so the workspace runtime gate can
 // drive the REAL bundled /workspace document against six independent
 // attachments and inject per-session outcomes: adoptable, missing, blocked
 // projections, a foreign lease holder (lease_held → takeover), typed

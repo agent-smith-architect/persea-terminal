@@ -1,4 +1,4 @@
-// The per-pane unified attachment controller (M9 W1b, packet §3c / §8a).
+// The per-pane unified attachment controller.
 //
 // This is the one-pane closure that used to live inline in app.ts's unified
 // boot branch, extracted so the single terminal and a workspace share ONE

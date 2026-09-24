@@ -1,4 +1,4 @@
-// Workspace layout model (M9 W1a) — the §2a split tree, pure and DOM-free.
+// Workspace layout model — the split tree, pure and DOM-free.
 //
 // A workspace arrangement is a recursive split tree whose leaves name tmux
 // sessions by selector (realm, server, name). Weights size CELLS only: they

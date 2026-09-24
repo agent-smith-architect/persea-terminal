@@ -1,8 +1,8 @@
-// M9 W1b — browser harness for the REAL workspace page (W1B-F14): the page
+// Browser harness for the REAL workspace page (structural-update-preservation): the page
 // class, its inventory, its per-pane controllers, and real attachments to the
 // fixture, with one extra seam a product document does not expose — a
-// structural `updateTree` call. W2's edit mode will drive that method from
-// the UI; W1b's gate drives it from here and judges what the page preserves
+// structural `updateTree` call. Workspace edit mode drives that method from
+// the UI; the runtime gate drives it from here and checks what the page preserves
 // across it: cell elements, controllers and their sockets, focus, selection,
 // and the designated pane.
 import { DEFAULT_HISTORY_CHOICE } from "../src/dashboard";

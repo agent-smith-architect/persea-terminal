@@ -797,9 +797,9 @@ export class Dashboard {
     }
   }
 
-  // a phone-class device opens no workspace view (M5), so the
+  // a phone-class device opens no workspace view, so the
   // dashboard must not offer a create affordance the same device then refuses.
-  // The M5 notice takes the form's place — the operator reads the refusal
+  // The workspace access notice takes the form's place — the operator reads the refusal
   // before producing a record for it, rather than after. Existing records stay
   // listed exactly as before: each one keeps its row, and the /workspace
   // landing keeps its "Open as a single terminal" link per leaf. The posture

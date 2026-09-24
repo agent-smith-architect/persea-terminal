@@ -78,7 +78,7 @@ async function boot(): Promise<void> {
   const root = document.querySelector<HTMLElement>("#app");
   if (!root) return;
   const styleNonce = documentStyleNonce();
-  // The workspace document (M9 W1b) is decided BEFORE the terminal fragment
+  // The workspace document is decided BEFORE the terminal fragment
   // self-heal below: its fragment contract is {name} only, `engine` in a
   // workspace fragment is a typed refusal, and a workspace is never redirected
   // to /terminal.

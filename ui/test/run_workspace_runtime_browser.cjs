@@ -1,10 +1,10 @@
 "use strict";
 
-// M9 W1b workspace runtime gate: the REAL bundled /workspace document in real
+// Workspace runtime gate: the REAL bundled /workspace document in real
 // Chromium against the workspace fixture (six independent sessions with the
 // front door's one-time handles, per-session leases, takeover offers, source
-// bindings, and broker automata). regression tests W1B-F1…F15 in their fixture
-// form; the real-stack forms (tmux geometry witness, front-door CSP on both
+// bindings, and broker automata). These checks use fixtures;
+// the real-stack forms (tmux geometry witness, front-door CSP on both
 // engines, B1 eviction on a real broker) live in run_workspace_stack_browser.
 //
 // Every scenario records its receipts into the evidence JSON; a failed
@@ -373,7 +373,7 @@ async function main() {
     const serialized = JSON.parse(arrangementFor(names));
     await control({ workspace: { name: workspace, tree: serialized.root } });
     await tab.navigate(`${origin}/`);
-    // Contradictory W1 bytes remain present but are not workspace authority.
+    // Contradictory ephemeral bytes remain present but are not workspace authority.
     const ephemeral = arrangementFor([...names].reverse());
     await tab.evaluate(`sessionStorage.setItem(${JSON.stringify(`persea-workspace-ephemeral-v1:${workspace}`)}, ${JSON.stringify(ephemeral)})`);
   };
@@ -418,22 +418,22 @@ async function main() {
   const clearHolds = async () => { for (const name of SESSIONS) await control({ session: name, holdPrepareMs: 0 }); };
 
   const scenarios = [];
-    // W1B-F1 — strict route branch and B3 non-mutation.
-    scenarios.push(["F1", async () => {
-      const id = "W1B-F1";
+    // strict-workspace-route — strict route branch and B3 non-mutation.
+    scenarios.push(["strict-workspace-route", async () => {
+      const id = "strict-workspace-route";
       await control({ reset: true, sessions: SESSIONS });
       begin(id);
-      const tab = await openTab("f1");
+      const tab = await openTab("strict_route");
       const landings = [];
       // (a) direct navigation with no durable record fails visibly before
-      // inventory/attachment work. W2 never falls back to sessionStorage.
+      // inventory/attachment work. Durable workspace loading never falls back to sessionStorage.
       let inventoryBefore = (await snapshot()).counters.inventory;
       let s = await landOn(tab, workspaceURL(), "resume");
       await delay(300);
       landings.push({ url: "missing", unavailable: s.unavailable, landing: s.landing, xterms: s.xtermCount, inventoryFetches: (await snapshot()).counters.inventory - inventoryBefore });
       check(id, s.unavailable === "workspace_not_found", "missing durable workspace did not fail closed", s);
       // (a2) the durable store's typed limiter refusal is visible and does not
-      // fall back to the contradictory W1 bytes or begin inventory/transport.
+      // fall back to the contradictory ephemeral bytes or begin inventory/transport.
       await seedArrangement(tab, SESSIONS);
       await delay(300); // let the dashboard document finish its own list fetch
       await control({ rateLimit: { path: "/api/workspaces", count: 1 } });
@@ -442,7 +442,7 @@ async function main() {
       await delay(100);
       landings.push({ url: "rate_limited", unavailable: s.unavailable, landing: s.landing, xterms: s.xtermCount, inventoryFetches: (await snapshot()).counters.inventory - inventoryBefore });
       check(id, s.unavailable === "workspace_rate_limited" && s.xtermCount === 0 && s.cells.length === 0, "workspace-store 429 did not render a typed non-attaching refusal", s);
-      // (b) a durable record with contradictory W1 sessionStorage: the
+      // (b) a durable record with contradictory ephemeral sessionStorage: the
       // durable tree alone supplies the resume landing.
       await seedArrangement(tab, SESSIONS);
       inventoryBefore = (await snapshot()).counters.inventory;
@@ -496,19 +496,19 @@ async function main() {
       const live = await waitLive(tab);
       snap = await snapshot();
       check(id, snap.counters.websockets === 6 && snap.attachments.length === 6 && new Set(snap.attachments.map((a) => a.session)).size === 6, "trusted open must produce six attachments on six sessions", snap.counters);
-      await tab.screenshot("f1_six_panes_desktop.png");
+      await tab.screenshot("strict_route_six_panes_desktop.png");
       record(id, { landings, refusals, healed: healed.state !== null, afterTap: snap.counters, cells: live.cells.map((c) => [c.session, c.state, c.badge]) });
       await tab.close(debugPort);
     }]);
-    // W1B-F2 — one controller per pane, zero pre-grant input, permuted COMMIT order and outcomes.
-    // W1B-F9 — focus is a monotone veto: designated pane holds focus; six MODE_REQUESTs and grants.
-    scenarios.push(["F2", async () => {
-      begin("W1B-F2/F9");
+    // pane-controller-isolation — one controller per pane, zero pre-grant input, permuted COMMIT order and outcomes.
+    // designated-focus-policy — focus is a monotone veto: designated pane holds focus; six MODE_REQUESTs and grants.
+    scenarios.push(["pane-controller-isolation", async () => {
+      begin("pane-controller-isolation/designated-focus-policy");
       const runs = [];
       for (const order of permutations) {
         await control({ reset: true, sessions: SESSIONS });
         await holdOrder(order);
-        const tab = await openTab("f2");
+        const tab = await openTab("pane_controllers");
         await seedArrangement(tab, SESSIONS);
         await landOn(tab, workspaceURL(), "resume");
         await trustedOpen(tab);
@@ -527,20 +527,20 @@ async function main() {
         const cell = live.cells.map((c) => ({ session: c.session, state: c.state, xterm: c.xterm, pages: c.pages }));
         const designated = live.cells.find((c) => c.designated);
         runs.push({ order: order.map((i) => SESSIONS[i]), perPane, activeCell: live.activeCell, activeTag: live.activeTag, designated: designated && designated.session });
-        check("W1B-F2", perPane.every((p) => p.attachments === 1 && p.mode === "CONTROL" && p.modeIndex >= 0 && (p.inputIndex === -1 || p.inputIndex > p.modeIndex) && p.resizeIndex === -1),
+        check("pane-controller-isolation", perPane.every((p) => p.attachments === 1 && p.mode === "CONTROL" && p.modeIndex >= 0 && (p.inputIndex === -1 || p.inputIndex > p.modeIndex) && p.resizeIndex === -1),
           "every pane must hold exactly one attachment with its own CONTROL grant and no INPUT/RESIZE before its MODE_REQUEST", perPane);
-        check("W1B-F2", live.xtermCount === 6 && live.pageCount === 6 && cell.every((c) => c.xterm && c.pages === 1), "six distinct page/xterm instances, one per cell", { xterms: live.xtermCount, pages: live.pageCount, cell });
-        check("W1B-F9", live.activeCell === SESSIONS[0] && live.activeTag === "TEXTAREA" && designated && designated.session === SESSIONS[0],
+        check("pane-controller-isolation", live.xtermCount === 6 && live.pageCount === 6 && cell.every((c) => c.xterm && c.pages === 1), "six distinct page/xterm instances, one per cell", { xterms: live.xtermCount, pages: live.pageCount, cell });
+        check("designated-focus-policy", live.activeCell === SESSIONS[0] && live.activeTag === "TEXTAREA" && designated && designated.session === SESSIONS[0],
           `designated pane ${SESSIONS[0]} must hold focus after every COMMIT order`, { order: order.map((i) => SESSIONS[i]), activeCell: live.activeCell, designated: designated && designated.session });
         await tab.close(debugPort);
       }
       await clearHolds();
-      record("W1B-F2", { runs });
-      record("W1B-F9", { runs: runs.map((r) => ({ order: r.order, activeCell: r.activeCell, designated: r.designated })) });
+      record("pane-controller-isolation", { runs });
+      record("designated-focus-policy", { runs: runs.map((r) => ({ order: r.order, activeCell: r.activeCell, designated: r.designated })) });
     }]);
-    // W1B-F2 (outcomes) / W1B-F13 — every connection outcome renders in its own pane; siblings stay live.
-    scenarios.push(["F2", async () => {
-      const id = "W1B-F13";
+    // pane-controller-isolation (outcomes) / pane-failure-isolation — every connection outcome renders in its own pane; siblings stay live.
+    scenarios.push(["pane-controller-isolation", async () => {
+      const id = "pane-failure-isolation";
       begin(id);
       await control({ reset: true, sessions: SESSIONS });
       await control({ session: "ws02", projection: "adoptable", adopted: false });
@@ -548,7 +548,7 @@ async function main() {
       await control({ session: "ws04", projection: "blocked_alt_screen" });
       await control({ session: "ws05", foreignHolder: true });
       await control({ session: "ws06", closeOnAttach: "stale_target" });
-      const tab = await openTab("f13");
+      const tab = await openTab("pane_failures");
       await seedArrangement(tab, SESSIONS);
       await landOn(tab, workspaceURL(), "resume");
       await trustedOpen(tab);
@@ -583,18 +583,18 @@ async function main() {
       const ended = await tab.waitUntil((x) => cellOf(x, "ws05")?.state !== "live", 5_000);
       check(id, ended.state !== null && cellOf(ended.state, "ws05").headline.length > 0 && cellOf(ended.state, "ws05").badge.length > 0 && ["ws01", "ws02", "ws03"].every((n) => cellOf(ended.state, n).state === "live"),
         "an in-band END must end the pane through the shared policy and leave siblings live", ended.last && ended.last.cells.map((c) => [c.session, c.state, c.code]));
-      await tab.screenshot("f13_mixed_outcomes_desktop.png");
+      await tab.screenshot("pane_failures_mixed_outcomes_desktop.png");
       record(id, { cells: s.cells.map((c) => [c.session, c.state, c.code, c.actions.map((a) => a.affordance)]), counters: after.counters });
       await tab.close(debugPort);
     }]);
-    // W1B-F3 — input and action isolation; W1B-F10 (fixture form) — ↕ per pane, zero implicit resize.
-    // W1B-F15 — divider commits mutate nothing; hidden action container; 44×44 census on coarse.
-    scenarios.push(["F3", async () => {
-      begin("W1B-F3/F10/F15");
+    // pane-input-isolation — input and action isolation; explicit-pane-row-fit (fixture form) — ↕ per pane, zero implicit resize.
+    // layout-and-touch-targets — divider commits mutate nothing; hidden action container; 44×44 census on coarse.
+    scenarios.push(["pane-input-isolation", async () => {
+      begin("pane-input-isolation/explicit-pane-row-fit/layout-and-touch-targets");
       await control({ reset: true, sessions: SESSIONS });
       // 80×60 sessions: in a cell the presentation fit lands below 60 rows, so an explicit ↕ has a real request to make.
       for (const name of SESSIONS) await control({ session: name, rows: 60 });
-      const tab = await openTab("f3");
+      const tab = await openTab("pane_input");
       await seedArrangement(tab, SESSIONS);
       await landOn(tab, workspaceURL(), "resume");
       await trustedOpen(tab);
@@ -605,15 +605,15 @@ async function main() {
         await tab.trustedClick({ x: cell.screen.x, y: cell.screen.y });
         await delay(60);
         const focused = await tab.state();
-        check("W1B-F3", focused.activeCell === name, `clicking pane ${name} must move focus there`, { activeCell: focused.activeCell });
+        check("pane-input-isolation", focused.activeCell === name, `clicking pane ${name} must move focus there`, { activeCell: focused.activeCell });
         await tab.typeText(`t-${name};`);
         typed[name] = `t-${name};`;
       }
       await delay(300);
       let snap = await snapshot();
       const inputs = Object.fromEntries(SESSIONS.map((name) => [name, inputsOf(snap, name).join("")]));
-      check("W1B-F3", SESSIONS.every((name) => inputs[name] === typed[name]), "INPUT must appear only on the focused pane's own socket", inputs);
-      check("W1B-F3", snap.attachments.length === 6 && snap.attachments.every((a) => a.live), "focus moves must not reconnect any pane", snap.attachments.map((a) => [a.id, a.session, a.live]));
+      check("pane-input-isolation", SESSIONS.every((name) => inputs[name] === typed[name]), "INPUT must appear only on the focused pane's own socket", inputs);
+      check("pane-input-isolation", snap.attachments.length === 6 && snap.attachments.every((a) => a.live), "focus moves must not reconnect any pane", snap.attachments.map((a) => [a.id, a.session, a.live]));
       // Composer injection on one pane.
       s = await tab.state();
       const target = cellOf(s, "ws04");
@@ -629,12 +629,12 @@ async function main() {
           snap = await snapshot();
           const others = SESSIONS.filter((n) => n !== "ws04").map((n) => inputsOf(snap, n).join(""));
           const composerState = cellOf(await tab.state(), "ws04");
-          check("W1B-F3", inputsOf(snap, "ws04").join("").includes("composer-ws04") && others.every((v) => !v.includes("composer")), "composer injection must land on its own pane only", { ws04: inputsOf(snap, "ws04").join(""), others, insert, composer: composerState.composer, activeCell: composerState.activeCell });
+          check("pane-input-isolation", inputsOf(snap, "ws04").join("").includes("composer-ws04") && others.every((v) => !v.includes("composer")), "composer injection must land on its own pane only", { ws04: inputsOf(snap, "ws04").join(""), others, insert, composer: composerState.composer, activeCell: composerState.activeCell });
         } else {
-          fail("W1B-F3", "the composer textarea did not render inside the pane's cell", cellOf(await tab.state(), "ws04").composer);
+          fail("pane-input-isolation", "the composer textarea did not render inside the pane's cell", cellOf(await tab.state(), "ws04").composer);
         }
       }
-      // Fixture-form F10: layout storm → zero RESIZE_REQUEST; then ↕ per pane → exactly one each, columns unchanged.
+      // Fixture row-fit: layout storm → zero RESIZE_REQUEST; then ↕ per pane → exactly one each, columns unchanged.
       s = await tab.state();
       const resizeBefore = snap.attachments.map((a) => a.resizes);
       for (const divider of s.dividers) {
@@ -655,22 +655,22 @@ async function main() {
       await delay(150);
       snap = await snapshot();
       const afterState = await tab.state();
-      check("W1B-F10", snap.attachments.every((a, i) => a.resizes === resizeBefore[i]) && snap.attachments.every((a) => a.frames.every((f) => !f.startsWith("RESIZE_REQUEST"))), "layout storm emitted a RESIZE_REQUEST", snap.attachments.map((a) => [a.session, a.resizes]));
-      check("W1B-F15", snap.counters.requests === requestsBeforeStorm && afterState.ephemeral === ephemeralBefore && snap.attachments.every((a) => a.live),
+      check("explicit-pane-row-fit", snap.attachments.every((a, i) => a.resizes === resizeBefore[i]) && snap.attachments.every((a) => a.frames.every((f) => !f.startsWith("RESIZE_REQUEST"))), "layout storm emitted a RESIZE_REQUEST", snap.attachments.map((a) => [a.session, a.resizes]));
+      check("layout-and-touch-targets", snap.counters.requests === requestsBeforeStorm && afterState.ephemeral === ephemeralBefore && snap.attachments.every((a) => a.live),
         "divider commits must perform no network, attachment, or persistence mutation", { requestsBefore: requestsBeforeStorm, requestsAfter: snap.counters.requests, ephemeralChanged: afterState.ephemeral !== ephemeralBefore });
-      check("W1B-F15", afterState.cells.every((c) => c.state !== "live" || (c.actionsHiddenAttr === true && c.actionsHiddenDisplay === "none")), "a hidden state-action container must compute display:none", afterState.cells.map((c) => [c.session, c.actionsHiddenAttr, c.actionsHiddenDisplay]));
-      check("W1B-F15", afterState.resizeCount > 0, "the window resize storm must have fired resize events (witness)", { resizeCount: afterState.resizeCount });
+      check("layout-and-touch-targets", afterState.cells.every((c) => c.state !== "live" || (c.actionsHiddenAttr === true && c.actionsHiddenDisplay === "none")), "a hidden state-action container must compute display:none", afterState.cells.map((c) => [c.session, c.actionsHiddenAttr, c.actionsHiddenDisplay]));
+      check("layout-and-touch-targets", afterState.resizeCount > 0, "the window resize storm must have fired resize events (witness)", { resizeCount: afterState.resizeCount });
       const fits = [];
       for (const name of SESSIONS) {
         const st = await tab.state();
         let cell = cellOf(st, name);
-        assert(cell.viewPoint, `W1B-F10: View and appearance is not available on live pane ${name}`);
+        assert(cell.viewPoint, `explicit-pane-row-fit: View and appearance is not available on live pane ${name}`);
         await tab.trustedClick(cell.viewPoint);
         await delay(100);
         cell = cellOf(await tab.state(), name);
-        assert(cell.fitPoint, `W1B-F10: ↕ is not available on live pane ${name}: ${JSON.stringify({ disabled: cell.fitDisabled })}`);
+        assert(cell.fitPoint, `explicit-pane-row-fit: ↕ is not available on live pane ${name}: ${JSON.stringify({ disabled: cell.fitDisabled })}`);
         if (name === SESSIONS[0]) await tab.screenshot("view_disclosure_workspace_view_popover.png");
-        assert(cell.fitHit, `W1B-F10: ↕ is covered by ${cell.fitHitBy} before activation on live pane ${name}: ${JSON.stringify(cell.fitDiagnostics)}`);
+        assert(cell.fitHit, `explicit-pane-row-fit: ↕ is covered by ${cell.fitHitBy} before activation on live pane ${name}: ${JSON.stringify(cell.fitDiagnostics)}`);
         await tab.trustedClick(cell.fitPoint);
         await delay(150);
         const sn = await snapshot();
@@ -679,38 +679,38 @@ async function main() {
       }
       snap = await snapshot();
       const resizeFrames = Object.fromEntries(SESSIONS.map((n) => [n, attachmentsOf(snap, n)[0].frames.filter((f) => f.startsWith("RESIZE_REQUEST"))]));
-      check("W1B-F10", SESSIONS.every((n) => attachmentsOf(snap, n)[0].resizes === 1 && resizeFrames[n].length === 1 && resizeFrames[n][0].startsWith("RESIZE_REQUEST:80x")), "each ↕ must produce exactly one RESIZE_REQUEST on its own pane with columns unchanged", resizeFrames);
-      record("W1B-F3", { inputs, attachments: snap.attachments.map((a) => [a.id, a.session, a.live]) });
-      record("W1B-F10", { fixtureForm: true, resizeFrames, fits, storm: { dividers: s.dividers.length, resizeEvents: afterState.resizeCount } });
-      // Coarse-pointer census on a tablet after the live mount (F15), with the sheet open on one pane.
+      check("explicit-pane-row-fit", SESSIONS.every((n) => attachmentsOf(snap, n)[0].resizes === 1 && resizeFrames[n].length === 1 && resizeFrames[n][0].startsWith("RESIZE_REQUEST:80x")), "each ↕ must produce exactly one RESIZE_REQUEST on its own pane with columns unchanged", resizeFrames);
+      record("pane-input-isolation", { inputs, attachments: snap.attachments.map((a) => [a.id, a.session, a.live]) });
+      record("explicit-pane-row-fit", { fixtureForm: true, resizeFrames, fits, storm: { dividers: s.dividers.length, resizeEvents: afterState.resizeCount } });
+      // Coarse-pointer census on a tablet after the live mount, with the sheet open on one pane.
       await tab.emulate(TABLET, true);
       await delay(300);
       const tablet = await tab.state();
       const small = tablet.touchTargets.filter((t) => (t.w < 44 || t.h < 44) && !/xterm/.test(t.cls));
-      check("W1B-F15", tablet.cells.length === 6 && tablet.xtermCount === 6, "a coarse tablet keeps the six live panes", { cells: tablet.cells.length, xterms: tablet.xtermCount, phone: tablet.phone });
-      check("W1B-F15", small.filter((t) => /^ws-/.test(t.cls)).length === 0, "every workspace coarse-pointer control must measure >= 44x44 after the live mount", small);
-      // W1B-R4: the state-action census is causal only when state actions are
+      check("layout-and-touch-targets", tablet.cells.length === 6 && tablet.xtermCount === 6, "a coarse tablet keeps the six live panes", { cells: tablet.cells.length, xterms: tablet.xtermCount, phone: tablet.phone });
+      check("layout-and-touch-targets", small.filter((t) => /^ws-/.test(t.cls)).length === 0, "every workspace coarse-pointer control must measure >= 44x44 after the live mount", small);
+      // The state-action census is causal only when state actions are
       // VISIBLE. Under the same coarse profile, end two panes into visible
       // action states (a typed failure with Retry/Dashboard, a displacement
       // with Take control) and measure every visible .ws-cell__action.
       await control({ session: "ws06", closeLive: "stale_target" });
       await control({ session: "ws05", closeLive: "control_displaced" });
       const acted = await tab.waitUntil((x) => cellOf(x, "ws06")?.state === "failed" && cellOf(x, "ws05")?.state === "displaced" && cellOf(x, "ws06").actions.length > 0 && cellOf(x, "ws05").actions.length > 0, 8_000);
-      assert(acted.state, `W1B-F15: panes did not reach visible action states: ${JSON.stringify(acted.last && acted.last.cells.map((c) => [c.session, c.state, c.actions.length]))}`);
+      assert(acted.state, `layout-and-touch-targets: panes did not reach visible action states: ${JSON.stringify(acted.last && acted.last.cells.map((c) => [c.session, c.state, c.actions.length]))}`);
       const actionTargets = acted.state.touchTargets.filter((t) => t.cls === "ws-cell__action");
       const smallActions = actionTargets.filter((t) => t.w < 44 || t.h < 44);
-      check("W1B-F15", actionTargets.length >= 3 && smallActions.length === 0, "every VISIBLE state action on a coarse pointer must measure >= 44x44", { visibleActions: actionTargets.map((t) => [t.label, t.w, t.h]), small: smallActions });
-      check("W1B-F15", acted.state.cells.filter((c) => c.state === "live").every((c) => c.actionsHiddenAttr === true && c.actionsHiddenDisplay === "none"), "live panes keep their action container hidden with display:none", acted.state.cells.map((c) => [c.session, c.state, c.actionsHiddenDisplay]));
-      record("W1B-F15", { requestsDuringStorm: snap.counters.requests - requestsBeforeStorm, coarseCensusUnder44: small, coarseTargets: tablet.touchTargets.length, visibleStateActions: actionTargets.map((t) => [t.label, Math.round(t.w), Math.round(t.h)]) });
-      await tab.screenshot("f15_tablet_coarse_six_panes.png");
+      check("layout-and-touch-targets", actionTargets.length >= 3 && smallActions.length === 0, "every VISIBLE state action on a coarse pointer must measure >= 44x44", { visibleActions: actionTargets.map((t) => [t.label, t.w, t.h]), small: smallActions });
+      check("layout-and-touch-targets", acted.state.cells.filter((c) => c.state === "live").every((c) => c.actionsHiddenAttr === true && c.actionsHiddenDisplay === "none"), "live panes keep their action container hidden with display:none", acted.state.cells.map((c) => [c.session, c.state, c.actionsHiddenDisplay]));
+      record("layout-and-touch-targets", { requestsDuringStorm: snap.counters.requests - requestsBeforeStorm, coarseCensusUnder44: small, coarseTargets: tablet.touchTargets.length, visibleStateActions: actionTargets.map((t) => [t.label, Math.round(t.w), Math.round(t.h)]) });
+      await tab.screenshot("touch_targets_tablet_coarse_six_panes.png");
       await tab.close(debugPort);
     }]);
-    // W1B-F4 (fixture form) — typed lag eviction on one pane: exactly one reattach, siblings untouched, sentinels in order.
-    scenarios.push(["F4", async () => {
-      const id = "W1B-F4";
+    // lag-eviction-reconnect (fixture form) — typed lag eviction on one pane: exactly one reattach, siblings untouched, sentinels in order.
+    scenarios.push(["lag-eviction-reconnect", async () => {
+      const id = "lag-eviction-reconnect";
       begin(id);
       await control({ reset: true, sessions: SESSIONS });
-      const tab = await openTab("f4");
+      const tab = await openTab("lag_reconnect");
       await seedArrangement(tab, SESSIONS);
       await landOn(tab, workspaceURL(), "resume");
       await trustedOpen(tab);
@@ -742,12 +742,12 @@ async function main() {
       check(id, ws04[1].mintedBy === "attachment-handles" && snapshotFetches(after) === snapshotFetches(before), "a source-bound reattach must mint from its own binding and not touch the shared inventory snapshot", { mintedBy: ws04[1].mintedBy, snapshotsBefore: snapshotFetches(before), snapshotsAfter: snapshotFetches(after) });
       await tab.close(debugPort);
     }]);
-    // W1B-F5 — pinned identity: A dies, same-name B appears, automatic reconnect ends session_gone; B is never attached.
-    scenarios.push(["F5", async () => {
-      const id = "W1B-F5";
+    // pinned-session-identity — pinned identity: A dies, same-name B appears, automatic reconnect ends session_gone; B is never attached.
+    scenarios.push(["pinned-session-identity", async () => {
+      const id = "pinned-session-identity";
       begin(id);
       await control({ reset: true, sessions: SESSIONS });
-      const tab = await openTab("f5");
+      const tab = await openTab("pinned_identity");
       await seedArrangement(tab, SESSIONS);
       await landOn(tab, workspaceURL(), "resume");
       await trustedOpen(tab);
@@ -778,21 +778,21 @@ async function main() {
       record(id, { pinnedKey, decoyKey, decoyBeforeRetry: decoy, cellAfterAuto: cellOf(ended.state, "ws03").code, inventoryRequests: after.counters.inventory - before.counters.inventory });
       await tab.close(debugPort);
     }]);
-    // W1B-F6 — a second tab takes over every pane exactly once; the first tab is displaced and never counter-takes.
-    scenarios.push(["F6", async () => {
-      const id = "W1B-F6";
+    // cross-tab-takeover — a second tab takes over every pane exactly once; the first tab is displaced and never counter-takes.
+    scenarios.push(["cross-tab-takeover", async () => {
+      const id = "cross-tab-takeover";
       begin(id);
       const runs = [];
       for (const order of permutations.slice(0, 2)) {
         await control({ reset: true, sessions: SESSIONS });
-        const tabA = await openTab("f6a");
+        const tabA = await openTab("takeover_original");
         await seedArrangement(tabA, SESSIONS);
         await landOn(tabA, workspaceURL(), "resume");
         await trustedOpen(tabA);
         await waitLive(tabA);
         const mid = await snapshot();
         await holdOrder(order, 80);
-        const tabB = await openTab("f6b");
+        const tabB = await openTab("takeover_successor");
         await seedArrangement(tabB, SESSIONS);
         await landOn(tabB, workspaceURL(), "resume");
         await trustedOpen(tabB);
@@ -819,12 +819,12 @@ async function main() {
       }
       record(id, { runs });
     }]);
-    // W1B-F7 — single-flight inventory after sleep; lease_held ×6; adoption ×6; one injected 429 delays one pane only.
-    scenarios.push(["F7", async () => {
-      const id = "W1B-F7";
+    // single-flight-inventory — single-flight inventory after sleep; lease_held ×6; adoption ×6; one injected 429 delays one pane only.
+    scenarios.push(["single-flight-inventory", async () => {
+      const id = "single-flight-inventory";
       begin(id);
       await control({ reset: true, sessions: SESSIONS });
-      const tab = await openTab("f7");
+      const tab = await openTab("shared_inventory");
       await seedArrangement(tab, SESSIONS);
       await landOn(tab, workspaceURL(), "resume");
       await trustedOpen(tab);
@@ -853,7 +853,7 @@ async function main() {
       await control({ reset: true, sessions: SESSIONS });
       for (const name of SESSIONS) await control({ session: name, projection: "adoptable", adopted: false, foreignHolder: true });
       await control({ rateLimit: { path: "/api/session-adoptions", session: "ws05", count: 1 } });
-      const tab2 = await openTab("f7b");
+      const tab2 = await openTab("shared_inventory_cold");
       await seedArrangement(tab2, SESSIONS);
       // The dashboard visit above fetched its own inventory; the workspace's
       // single snapshot is the delta from here.
@@ -872,12 +872,12 @@ async function main() {
       record(id, { sleep, cold: { counters: cold.counters, perSession, rateLimitedSeen: sawRateLimited.state !== null, elapsedMs: Date.now() - t0 } });
       await tab2.close(debugPort);
     }]);
-    // W1B-F9 (coarse half) — on a coarse pointer the designated policy never PROMOTES focus: terminal's pointer rule vetoes first.
-    scenarios.push(["F9", async () => {
-      const id = "W1B-F9";
+    // designated-focus-policy (coarse half) — on a coarse pointer the designated policy never PROMOTES focus: terminal's pointer rule vetoes first.
+    scenarios.push(["designated-focus-policy", async () => {
+      const id = "designated-focus-policy";
       begin(id);
       await control({ reset: true, sessions: SESSIONS });
-      const tab = await openTab("f9c");
+      const tab = await openTab("designated_focus_coarse");
       await tab.emulate(TABLET, true);
       await seedArrangement(tab, SESSIONS);
       await landOn(tab, workspaceURL(), "resume");
@@ -905,12 +905,12 @@ async function main() {
         "clicking another pane transfers focus without reconnecting and input stays on its own Control socket", { activeCell: moved.activeCell, attachments: after.attachments.length, inputs: after.sessions.map((x) => [x.name, inputsOf(after, x.name).join("")]) });
       await tab.close(debugPort);
     }]);
-    // W1B-F11 (fixture form) — one document nonce, six xterms, zero CSP violations, no unnonced style/script.
-    scenarios.push(["F11", async () => {
-      const id = "W1B-F11";
+    // document-csp-nonce (fixture form) — one document nonce, six xterms, zero CSP violations, no unnonced style/script.
+    scenarios.push(["document-csp-nonce", async () => {
+      const id = "document-csp-nonce";
       begin(id);
       await control({ reset: true, sessions: SESSIONS });
-      const tab = await openTab("f11");
+      const tab = await openTab("csp_nonce");
       await seedArrangement(tab, SESSIONS);
       await landOn(tab, workspaceURL(), "resume");
       await trustedOpen(tab);
@@ -924,13 +924,13 @@ async function main() {
       record(id, { fixtureForm: true, metaNonces: s.metaNonces, styleNodes: s.styleNodes.length, nonced, applied, violations: s.cspViolations, inlineStyleAttrs: s.inlineStyleAttrs });
       await tab.close(debugPort);
     }]);
-    // W1B-F12 — honest phone posture and keyboard stability.
-    scenarios.push(["F12", async () => {
-      const id = "W1B-F12";
+    // phone-keyboard-stability — honest phone posture and keyboard stability.
+    scenarios.push(["phone-keyboard-stability", async () => {
+      const id = "phone-keyboard-stability";
       begin(id);
       await control({ reset: true, sessions: SESSIONS });
       await control({ session: "ws03", projection: "missing" });
-      const tab = await openTab("f12");
+      const tab = await openTab("phone_keyboard");
       await tab.emulate(PHONE, true);
       await seedArrangement(tab, SESSIONS);
       let s = await landOn(tab, workspaceURL(), "phone");
@@ -941,11 +941,11 @@ async function main() {
       check(id, s.phoneLeaves.filter((l) => singleTerminalLink(l.href)).length === 5 && s.phoneLeaves.find((l) => l.session === "ws03").state === "missing" && s.phoneLeaves.find((l) => l.session === "ws03").href === null,
         "each resolved leaf links to its single terminal; the missing leaf shows its state and no dead link", s.phoneLeaves);
       check(id, s.phoneLeaves.every((l) => l.href === null || l.linkHeight >= 44), "phone links must be >= 44 px tall", s.phoneLeaves.map((l) => l.linkHeight));
-      // J-W1B-2: a card on the honest-state page never carries a transport
+      // A card on the honest-state page never carries a transport
       // state that does not exist; a linkable session says it is not opened here.
       check(id, s.phoneLeaves.every((l) => !/connect|attach|live|reattach/i.test(l.stateText) && !/connecting|live|reconnecting|reattaching/.test(l.state)) && s.phoneLeaves.filter((l) => l.href !== null).every((l) => l.state === "not_opened"),
         "phone cards must show the honest posture, never a transport state", s.phoneLeaves.map((l) => [l.session, l.state, l.stateText]));
-      await tab.screenshot("f12_phone_honest_state.png");
+      await tab.screenshot("phone_keyboard_phone_honest_state.png");
       // Rotation keeps the phone posture; a fine pointer at phone width is desktop; a coarse tablet is desktop.
       await tab.emulate(PHONE_LANDSCAPE, true);
       await delay(200);
@@ -980,10 +980,10 @@ async function main() {
       check(id, !after.phone && after.xtermCount === 6 && after.cells.length === 6 && snap.counters.websockets === stable.counters.websockets && snap.attachments.every((a) => a.live) && after.cells.every((c) => c.state === "live"),
         "keyboard/viewport/orientation changes must neither tear down nor instantiate controllers", { phone: after.phone, xterms: after.xtermCount, wsBefore: stable.counters.websockets, wsAfter: snap.counters.websockets, cells: after.cells.map((c) => c.state) });
       record(id, { phoneLeaves: s.phoneLeaves, rotationKeepsPhone: rotated.phone, keyboard: { wsBefore: stable.counters.websockets, wsAfter: snap.counters.websockets, xterms: after.xtermCount } });
-      await tab.screenshot("f12_tablet_after_keyboard_storm.png");
+      await tab.screenshot("phone_keyboard_tablet_after_keyboard_storm.png");
       await tab.close(debugPort);
     }]);
-    // workspace rotationA/F3B/F3C — inventory detail reaches the exact mounted
+    // Workspace rotation — inventory detail reaches the exact mounted
     // controller as presentation only, clears without transport action, and
     // the ordinary typed rotation close still causes one reattach.
     scenarios.push(["workspace rotation", async () => {
@@ -1100,18 +1100,18 @@ async function main() {
       record(id, { before: before.counters, deferred: { badge: deferred.badge, controller: panes }, after: fixtureState.counters, initialControllers: beforePanes, presentationPollPeriods: heldPeriods, documentPollRequests: pollRequests, pollPaneCount: beforePanes.length });
       await tab.close(debugPort);
     }]);
-    // SEAM1-F1 — rotation's rotation detail, session switch's in-place switch and loading state's
+    // switched-pane-projection — rotation's rotation detail, session switch's in-place switch and loading state's
     // loading surface meet on ONE pane. After a pane switches session in
     // place: the shared presentation refresh must reach the session the pane
     // NOW runs and never the one its durable leaf still names, and the pane
     // must show the honest loading surface from the switch commit until the
     // new session's first COMMIT.
-    scenarios.push(["SEAM1", async () => {
-      const id = "SEAM1-F1";
+    scenarios.push(["switched-pane-projection", async () => {
+      const id = "switched-pane-projection";
       begin(id);
       const leaves = ["ws01", "ws02", "ws03"];
       await control({ reset: true, sessions: [...leaves, "ws07"] });
-      const tab = await openTab("seam1");
+      const tab = await openTab("switched_pane_projection");
       await tab.navigate(`${origin}/workspace-harness`);
       const ready = await tab.waitUntil((s) => s.harnessReady, 8_000);
       assert(ready.state, `${id}: the workspace page harness never became ready`);
@@ -1164,7 +1164,7 @@ async function main() {
       check(id, cellOf(committed.state, "ws03").loading?.hidden === true,
         "the loading surface survived the new session's COMMIT", cellOf(committed.state, "ws03").loading);
 
-      // rotation F3 through the switched pane: the detail of the session it NOW
+      // Rotation through the switched pane: the detail of the session it NOW
       // runs reaches it, although its leaf still names the old one.
       const beforeProjection = await snapshot();
       await control({ session: "ws07", detail: "rotation_deferred_alt_screen" });
@@ -1197,17 +1197,17 @@ async function main() {
         "a switched pane's projection changed a sibling", stale.cells.map((cell) => [cell.session, cell.badge]));
       record(id, { before: before.counters, after: afterProjection.counters, panes: projectedPanes, stalePanes,
         loading: { switching: loading.state && cellOf(loading.state, "ws03").loading, committed: cellOf(committed.state, "ws03").loading } });
-      await tab.screenshot("seam1_switched_pane_projection.png");
+      await tab.screenshot("switched_pane_projection.png");
       await tab.close(debugPort);
     }]);
-    // W1B-F14 — a structural update through the real page: surviving cells,
+    // structural-update-preservation — a structural update through the real page: surviving cells,
     // controllers, sockets, focus, selection, and the designated pane persist;
     // only the added leaf attaches and only the removed leaf retires.
-    scenarios.push(["F14", async () => {
-      const id = "W1B-F14";
+    scenarios.push(["structural-update-preservation", async () => {
+      const id = "structural-update-preservation";
       begin(id);
       await control({ reset: true, sessions: SESSIONS });
-      const tab = await openTab("f14");
+      const tab = await openTab("structural_update");
       await tab.navigate(`${origin}/workspace-harness`);
       const ready = await tab.waitUntil((s) => s.harnessReady, 8_000);
       assert(ready.state, `${id}: the workspace page harness never became ready: ${JSON.stringify(ready.last && ready.last.fatal)}`);
@@ -1219,7 +1219,7 @@ async function main() {
       // and restores window selection ranges across an update).
       const s0 = await tab.state();
       await tab.trustedClick({ x: cellOf(s0, "ws02").screen.x, y: cellOf(s0, "ws02").screen.y });
-      await tab.typeText("f14;");
+      await tab.typeText("structural-update;");
       await tab.evaluate(`(() => { document.querySelectorAll(".ws-cell").forEach((c) => { c.dataset.wsStamp = "keep"; }); const name = document.querySelector('.ws-cell[data-ws-session="ws02"] .ws-cell__name'); const range = document.createRange(); range.selectNodeContents(name); const sel = getSelection(); sel.removeAllRanges(); sel.addRange(range); return String(sel); })()`);
       const pre = await tab.state();
       check(id, pre.activeCell === "ws02" && cellOf(pre, "ws02").designated, "the focused pane must be designated before the update", { activeCell: pre.activeCell, designated: pre.cells.map((c) => [c.session, c.designated]) });
@@ -1239,7 +1239,7 @@ async function main() {
       await tab.typeText("after;");
       await delay(200);
       const typed = await snapshot();
-      check(id, inputsOf(typed, "ws02").join("").includes("f14;after;") && four.filter((n) => n !== "ws02").every((n) => !inputsOf(typed, n).join("").includes("after")), "typing after the update must reach the same pane's own socket only", Object.fromEntries(four.map((n) => [n, inputsOf(typed, n).join("")])));
+      check(id, inputsOf(typed, "ws02").join("").includes("structural-update;after;") && four.filter((n) => n !== "ws02").every((n) => !inputsOf(typed, n).join("").includes("after")), "typing after the update must reach the same pane's own socket only", Object.fromEntries(four.map((n) => [n, inputsOf(typed, n).join("")])));
       // Structural update 2: remove ws01; its controller retires, siblings stay.
       const removed = await tab.evaluate(`window.__wsPage.updateTree(${JSON.stringify(arrangementFor(["ws02", "ws03", "ws04"]))})`);
       check(id, removed === true, "the page must accept a removal update", { removed });
@@ -1252,7 +1252,7 @@ async function main() {
       const refused = await tab.evaluate(`window.__wsPage.updateTree(${JSON.stringify(JSON.stringify({ version: 1, root: { kind: "split", direction: "row", weights: [1], children: [] } }))})`);
       const s3 = await tab.state();
       check(id, refused === false && s3.cells.length === 3, "an invalid tree must be refused without touching the layout", { refused, cells: s3.cells.length });
-      await tab.screenshot("f14_structural_update_desktop.png");
+      await tab.screenshot("structural_update_structural_update_desktop.png");
       record(id, { before: before.counters, after: after.counters, selection: [pre.selectionText, post.selectionText], active: post.activeDetail });
       await tab.close(debugPort);
     }]);
@@ -1498,21 +1498,21 @@ async function main() {
       await tab.close(debugPort);
     }]);
 
-    // W2-F4/F6-F10/F14 — the durable editor is a local draft until one
+    // durable-editor-commit — the durable editor is a local draft until one
     // explicit Save.  Surviving panes keep their real controller, socket,
     // toolbar DOM, focus surface and geometry authority through the commit;
     // a conflicting Save retires nothing.
-    scenarios.push(["W2", async () => {
-      const id = "W2-F4/F6/F7/F8/F9/F10/F14";
+    scenarios.push(["durable-editor-commit", async () => {
+      const id = "durable-editor-commit";
       begin(id);
       await control({ reset: true, sessions: SESSIONS });
-      const tab = await openTab("w2-durable-editor");
+      const tab = await openTab("durable-editor");
       await seedArrangement(tab, SESSIONS);
       let s = await landOn(tab, workspaceURL(), "resume");
       check(id, s.landingBoxes.map((box) => box.session).join(",") === SESSIONS.join(","), "durable tree must win over the contradictory reversed sessionStorage record", { durable: s.landingBoxes.map((box) => box.session), ephemeral: s.ephemeral });
       await trustedOpen(tab);
       s = await waitLive(tab);
-      await tab.evaluate(`document.querySelectorAll(".persea-unified-toolbar").forEach((node, index) => { node.dataset.wsToolbarStamp = "w2-toolbar-" + index; })`);
+      await tab.evaluate(`document.querySelectorAll(".persea-unified-toolbar").forEach((node, index) => { node.dataset.wsToolbarStamp = "editor-toolbar-" + index; })`);
       const beforeState = await tab.state();
       const beforeFixture = await snapshot();
       const beforeAttachments = new Map(SESSIONS.map((name) => [name, liveAttachmentOf(beforeFixture, name)?.id]));
@@ -1675,7 +1675,7 @@ async function main() {
       const draftState = await tab.state();
       check(id, draftState.cells.length === 6 && liveAttachmentOf(draftFixture, "ws01")?.id === beforeAttachments.get("ws01"), "draft removal must not retire or rebuild a pane", { cells: draftState.cells.length, ws01: liveAttachmentOf(draftFixture, "ws01") });
       check(id, draftFixture.counters.workspaceWrites === beforeFixture.counters.workspaceWrites, "draft alias/remove/rename must perform zero durable writes", { before: beforeFixture.counters.workspaceWrites, draft: draftFixture.counters.workspaceWrites });
-      await tab.screenshot("w2_workspace_editor_desktop.png");
+      await tab.screenshot("workspace_editor_desktop.png");
       await tab.evaluate(`document.querySelector(".ws-editor__save").click()`);
       const saved = await tab.waitUntil((state) => !state.editing && state.cells.length === 5 && state.workspaceTitle === "Ops New", 8_000).then((result) => result.state);
       assert(saved, `${id}: explicit Save did not publish the durable tree`);
@@ -1683,7 +1683,7 @@ async function main() {
       assert(afterSave, `${id}: removed controller did not retire after successful Save`);
       check(id, afterSave.counters.workspaceWrites === beforeFixture.counters.workspaceWrites + 1, "Save must issue exactly one PUT", { before: beforeFixture.counters, after: afterSave.counters });
       check(id, SESSIONS.slice(1).every((name) => liveAttachmentOf(afterSave, name)?.id === beforeAttachments.get(name)), "successful Save must preserve every surviving controller/socket", afterSave.attachments.map((attachment) => [attachment.session, attachment.id, attachment.live]));
-      check(id, saved.cells.every((cell) => cell.toolbarStamp === `w2-toolbar-${SESSIONS.indexOf(cell.session)}` && cell.toolbarCount === 1 && cell.geometryCount === 1 && cell.fitCount === 1 && cell.composeCount === 1 && cell.moreCount === 0 && cell.quickActionsCount === 1), "compaction and Save must preserve the original real toolbar nodes, committed geometry disclosure, and unique controls", saved.cells);
+      check(id, saved.cells.every((cell) => cell.toolbarStamp === `editor-toolbar-${SESSIONS.indexOf(cell.session)}` && cell.toolbarCount === 1 && cell.geometryCount === 1 && cell.fitCount === 1 && cell.composeCount === 1 && cell.moreCount === 0 && cell.quickActionsCount === 1), "compaction and Save must preserve the original real toolbar nodes, committed geometry disclosure, and unique controls", saved.cells);
       check(id, cellOf(saved, "ws02").alias === "Primary shell" && /#name=Ops\+New$/.test(saved.href), "saved alias and canonical renamed URL must publish only after commit", { alias: cellOf(saved, "ws02").alias, href: saved.href });
       check(id, afterSave.attachments.every((attachment) => attachment.resizes === 0), "workspace editor actions must emit zero resize frames", afterSave.attachments.map((attachment) => [attachment.session, attachment.resizes]));
 
@@ -1705,22 +1705,22 @@ async function main() {
       await tab.evaluate(`document.querySelector(".ws-editor__keep-editing").click(); document.querySelector(".ws-editor__cancel").click()`);
       const finalState = await tab.waitUntil((state) => !state.editing, 5_000).then((result) => result.state);
       assert(finalState, `${id}: conflict Cancel did not restore the durable view`);
-      await tab.screenshot("w2_durable_editor_desktop.png");
+      await tab.screenshot("durable_editor_desktop.png");
       record(id, {
         writes: { before: beforeFixture.counters.workspaceWrites, afterDrag: afterDragFixture.counters.workspaceWrites, afterSave: afterSave.counters.workspaceWrites, afterConflict: afterConflict.counters.workspaceWrites },
         sockets: Object.fromEntries(SESSIONS.slice(1).map((name) => [name, liveAttachmentOf(afterConflict, name)?.id])),
         toolbarStamps: finalState.cells.map((cell) => [cell.session, cell.toolbarStamp]),
         compactGeometry: { desktop: beforeState.cells.map((cell) => ({ session: cell.session, header: cell.header, toolbar: cell.toolbar, viewportHeight: cell.viewportHeight, rows: cell.rowCount })), wide: wideState.cells.map((cell) => ({ session: cell.session, header: cell.header, toolbar: cell.toolbar })), narrow: narrowState.cells.map((cell) => ({ session: cell.session, header: cell.header, toolbar: cell.toolbar })) },
         divider: { durable: durableDividerValue, dragged: dragged.dividers[0].value, cancelled: cancelled.dividers[0].value },
-        screenshots: ["w2_workspace_editor_desktop.png", "w2_durable_editor_desktop.png"],
+        screenshots: ["workspace_editor_desktop.png", "durable_editor_desktop.png"],
       });
       await tab.close(debugPort);
     }]);
 
-    // shared-switch-inventory/F7 — six pane-local switch owners share one inventory request,
+    // shared-switch-inventory — six pane-local switch owners share one inventory request,
     // and switching C in place cannot disturb any sibling controller/socket.
     scenarios.push(["session switch", async () => {
-      const id = "shared-switch-inventory/F7";
+      const id = "shared-switch-inventory";
       begin(id);
       const candidates = [...SESSIONS, "ws07"];
       await control({ reset: true, sessions: candidates });
@@ -1808,7 +1808,7 @@ async function main() {
       check(id, after.attachments.filter((a) => a.live).length === 6 && after.attachments.filter((a) => a.resizes > 0).length === 0,
         "workspace switch must retain six live sockets and emit zero resize frames", after.attachments.map((a) => [a.session, a.live, a.resizes]));
       record(id, { inventory: [inventoryBefore, afterSharedFetch.counters.inventory], before: before.attachments, after: after.attachments, siblings: siblingNames });
-      await tab.screenshot("session_switch_f6_workspace_switch.png");
+      await tab.screenshot("session_switch_workspace_switch.png");
       await tab.close(debugPort);
 
       // C3: C's held reconnect belongs to C while B switches. A module-global
@@ -1841,7 +1841,7 @@ async function main() {
       check(id, tokenAfter.attachments.filter((entry) => entry.live).length === 6 && liveAttachmentOf(tokenAfter, "ws07") !== undefined,
         "the adverse token matrix must settle with six live pane-owned sockets", tokenAfter.attachments.map((entry) => [entry.session, entry.live, entry.mintedBy]));
       record(id, { controllerToken: { before: tokenBefore.attachments, after: tokenAfter.attachments, cRemintHandles } });
-      await tokenTab.screenshot("session_switch_f7_controller_token.png");
+      await tokenTab.screenshot("session_switch_controller_token.png");
       await tokenTab.close(debugPort);
     }]);
 
