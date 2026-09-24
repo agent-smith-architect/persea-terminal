@@ -1,0 +1,65 @@
+name: Bug report
+description: Report incorrect or unexpected behavior.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Report security vulnerabilities privately through the security policy, not here.
+        Remove real user names, host names, tailnet names, credentials, and terminal
+        content from logs and screenshots before you post them.
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened
+      description: Describe the problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open ...
+        2. Select ...
+        3. See ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: Release tag or commit you run.
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Dashboard
+        - Terminal
+        - Workspace
+        - Keyboard or input
+        - Clipboard or selection
+        - Deployment or installer
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Server Linux distribution, tmux version, client browser and device.
+      placeholder: |
+        Server: Ubuntu 24.04, tmux 3.4
+        Client: Safari on iOS 19
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs or diagnostics
+      description: Relevant, redacted output. It is formatted as code.
+      render: text
