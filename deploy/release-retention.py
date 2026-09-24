@@ -5,14 +5,16 @@ import json
 import os
 from pathlib import Path
 import re
-import shutil
 import stat
 import sys
 import tempfile
+import secrets
 
 
 RELEASE = re.compile(r"[0-9a-f]{40}-[0-9a-f]{16}")
 ORDER = ".release-order.json"
+QUARANTINE = re.compile(r"\.prune-[0-9a-f]{32}")
+DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 
 
 def witness(info: os.stat_result) -> tuple:
@@ -82,10 +84,7 @@ def release_metadata(path: Path, uid: int, gid: int, device: int) -> os.stat_res
     return top
 
 
-def snapshot(root: Path, uid: int, gid: int) -> tuple[dict, set, dict]:
-    metadata(root, uid, gid, 0o755, True)
-    releases = root / "releases"
-    device = metadata(releases, uid, gid, 0o755, True).st_dev
+def require_no_mounts(path: Path) -> None:
     # st_dev alone cannot detect a bind mount of another directory on the same
     # filesystem. Do not traverse a mounted subtree even when its modes match.
     for line in Path("/proc/self/mountinfo").read_text(encoding="ascii").splitlines():
@@ -93,13 +92,32 @@ def snapshot(root: Path, uid: int, gid: int) -> tuple[dict, set, dict]:
         require(len(fields) >= 6, "cannot inspect mount boundaries")
         mountpoint = Path(re.sub(r"\\([0-7]{3})",
                                 lambda match: chr(int(match[1], 8)), fields[4]))
-        require(not mountpoint.is_relative_to(releases) or mountpoint == releases,
+        require(not mountpoint.is_relative_to(path),
                 "release subtree contains a mount point")
+
+
+def snapshot(root: Path, uid: int, gid: int) -> tuple[dict, set, dict]:
+    metadata(root, uid, gid, 0o755, True)
+    releases = root / "releases"
+    device = metadata(releases, uid, gid, 0o755, True).st_dev
     entries = {}
     for path in releases.iterdir():
+        if QUARANTINE.fullmatch(path.name):
+            info = metadata(path, uid, gid, 0o700, True)
+            require(info.st_dev == device, "quarantine crosses a filesystem boundary")
+            print(f"persea-terminal deploy: warning: retained quarantine {path}; "
+                  "operator inspection required", file=sys.stderr)
+            continue
         require(RELEASE.fullmatch(path.name) is not None,
                 "unexpected release entry or unfinished stage; retaining all releases")
+        require_no_mounts(path)
         entries[path.name] = release_metadata(path, uid, gid, device)
+    protected, pointers = protected_pointers(root, uid, entries)
+    return entries, protected, pointers
+
+
+def protected_pointers(root: Path, uid: int, entries: dict) -> tuple[set, dict]:
+    releases = root / "releases"
     protected = set()
     pointers = {}
     for path in root.iterdir():
@@ -116,7 +134,111 @@ def snapshot(root: Path, uid: int, gid: int) -> tuple[dict, set, dict]:
         protected.add(target.name)
         pointers[path.name] = os.readlink(path)
     require("current" in pointers, "current release pointer is missing")
-    return entries, protected, pointers
+    return protected, pointers
+
+
+def identity(info: os.stat_result) -> tuple[int, int]:
+    return info.st_dev, info.st_ino
+
+
+def mount_id(fd: int) -> str:
+    # Unlike st_dev, Linux mount IDs distinguish same-filesystem bind mounts.
+    # Inspect the opened object, not a pathname that can resolve differently.
+    for line in Path(f"/proc/self/fdinfo/{fd}").read_text(encoding="ascii").splitlines():
+        if line.startswith("mnt_id:"):
+            value = line.split()[1]
+            require(value.isdecimal(), "cannot identify directory mount")
+            return value
+    raise ValueError("cannot identify directory mount")
+
+
+def remove_tree(fd: int, device: int, mount: str, uid: int, gid: int) -> None:
+    info = os.fstat(fd)
+    require(info.st_dev == device and mount_id(fd) == mount,
+            "removal crosses a mount boundary")
+    require((info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) == (uid, gid, 0o555),
+            "directory changed before removal")
+    # This changes only the opened, checked directory; no pathname chmod walk.
+    os.fchmod(fd, 0o755)
+    for name in os.listdir(fd):
+        before = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        require(before.st_dev == device and (before.st_uid, before.st_gid) == (uid, gid),
+                "entry changed before removal")
+        if stat.S_ISDIR(before.st_mode):
+            child = os.open(name, DIRECTORY_FLAGS, dir_fd=fd)
+            try:
+                require(identity(os.fstat(child)) == identity(before),
+                        "directory replaced before removal")
+                remove_tree(child, device, mount, uid, gid)
+                require(identity(os.stat(name, dir_fd=fd, follow_symlinks=False)) == identity(before),
+                        "directory replaced during removal")
+                os.rmdir(name, dir_fd=fd)
+            finally:
+                os.close(child)
+        else:
+            require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
+                    and stat.S_IMODE(before.st_mode) in (0o444, 0o555),
+                    "unexpected file during removal")
+            # O_PATH does not read contents or block on a substituted special file.
+            child = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
+            try:
+                require(witness(os.fstat(child)) == witness(before) and mount_id(child) == mount,
+                        "file replaced or mounted during removal")
+                os.unlink(name, dir_fd=fd)
+            finally:
+                os.close(child)
+
+
+def remove_release(root: Path, parent: int, name: str, expected: os.stat_result,
+                   entries: dict, pointers: dict, uid: int, gid: int) -> None:
+    victim = os.open(name, DIRECTORY_FLAGS, dir_fd=parent)
+    quarantine = None
+    quarantine_fd = None
+    try:
+        require(witness(os.fstat(victim)) == witness(expected), "release changed before removal")
+        require(mount_id(victim) == mount_id(parent), "release crosses a mount boundary")
+        quarantine = ".prune-" + secrets.token_hex(16)
+        os.mkdir(quarantine, mode=0o700, dir_fd=parent)
+        quarantine_fd = os.open(quarantine, DIRECTORY_FLAGS, dir_fd=parent)
+        qinfo = os.fstat(quarantine_fd)
+        require((qinfo.st_uid, qinfo.st_gid, stat.S_IMODE(qinfo.st_mode)) == (uid, gid, 0o700)
+                and qinfo.st_dev == expected.st_dev and mount_id(quarantine_fd) == mount_id(parent),
+                "unsafe quarantine directory")
+        # Re-read all pointers for every victim, after opening it and immediately
+        # before detaching its name. Cooperating transactions hold the same lock.
+        protected, fresh_pointers = protected_pointers(root, uid, entries)
+        require(name not in protected and fresh_pointers == pointers,
+                "release pointers changed before removal")
+        require(witness(os.stat(name, dir_fd=parent, follow_symlinks=False)) == witness(expected),
+                "release replaced before quarantine")
+        # Moving a directory between parents requires owner write permission to
+        # update '..' when exercising this same path without root in tests.
+        os.fchmod(victim, 0o755)
+        require(witness(os.stat(name, dir_fd=parent, follow_symlinks=False)) == witness(os.fstat(victim)),
+                "release replaced before quarantine rename")
+        os.rename(name, name, src_dir_fd=parent, dst_dir_fd=quarantine_fd)
+        require(identity(os.stat(name, dir_fd=quarantine_fd, follow_symlinks=False)) == identity(expected),
+                "quarantined release identity changed")
+        require(identity(os.fstat(victim)) == identity(expected), "opened release identity changed")
+        os.fchmod(victim, 0o555)
+        _, fresh_pointers = protected_pointers(root, uid, entries)
+        require(fresh_pointers == pointers, "release pointers changed during quarantine")
+        require_no_mounts(root / "releases" / quarantine)
+        remove_tree(victim, expected.st_dev, mount_id(parent), uid, gid)
+        require(identity(os.stat(name, dir_fd=quarantine_fd, follow_symlinks=False)) == identity(expected),
+                "quarantined release replaced during removal")
+        os.rmdir(name, dir_fd=quarantine_fd)
+        require(identity(os.stat(quarantine, dir_fd=parent, follow_symlinks=False)) == identity(qinfo),
+                "quarantine replaced during removal")
+        os.rmdir(quarantine, dir_fd=parent)
+        quarantine = None
+    finally:
+        os.close(victim)
+        if quarantine_fd is not None:
+            os.close(quarantine_fd)
+        if quarantine is not None:
+            print(f"persea-terminal deploy: warning: retained quarantine "
+                  f"{root / 'releases' / quarantine}; operator inspection required", file=sys.stderr)
 
 
 def write_order(root: Path, order: list[str]) -> None:
@@ -145,14 +267,13 @@ def prune(root: Path, keep: int, uid: int, gid: int, live_binaries: list[str]) -
     require(sys.version_info >= (3, 11), "release retention requires Python 3.11 or later")
     require(root.is_absolute() and root.resolve(strict=True) == root,
             "install root contains a symlink or ambiguous path")
-    require(shutil.rmtree.avoids_symlink_attacks, "safe recursive removal is unavailable")
     entries, protected, pointers = snapshot(root, uid, gid)
     running = set()
-    for identity in live_binaries:
+    for binary_identity in live_binaries:
         matches = []
         for name in entries:
             info = (root / "releases" / name / "bin/persea-terminal").stat()
-            if identity == f"{info.st_dev}:{info.st_ino}":
+            if binary_identity == f"{info.st_dev}:{info.st_ino}":
                 matches.append(name)
         require(len(matches) == 1, "running executable does not identify exactly one release")
         running.update(matches)
@@ -195,16 +316,13 @@ def prune(root: Path, keep: int, uid: int, gid: int, live_binaries: list[str]) -
             fresh_protected | running == protected and fresh_pointers == pointers,
             "release tree or pointers changed during retention")
     releases = root / "releases"
-    fd = os.open(releases, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    parent_info = metadata(releases, uid, gid, 0o755, True)
+    fd = os.open(releases, DIRECTORY_FLAGS)
     try:
+        require(identity(os.fstat(fd)) == identity(parent_info), "releases directory changed")
         for name in victims:
-            require(witness(os.stat(name, dir_fd=fd, follow_symlinks=False)) == witness(entries[name]),
-                    "release changed before removal")
-            # Only validated directories gain owner write access. Files stay
-            # read-only; no chmod follows links or touches hardlinked contents.
-            for parent, directories, _ in os.walk(releases / name, followlinks=False):
-                os.chmod(parent, 0o755, follow_symlinks=False)
-            shutil.rmtree(name, dir_fd=fd)
+            require(identity(releases.lstat()) == identity(parent_info), "releases directory replaced")
+            remove_release(root, fd, name, entries[name], entries, pointers, uid, gid)
     finally:
         os.close(fd)
     write_order(root, [name for name in order if name in survivors])

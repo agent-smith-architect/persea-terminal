@@ -243,10 +243,23 @@ the lock directly. Its synchronous steps inherit it so killing the launcher
 cannot unlock a step still in progress. Services started by systemd do not
 inherit it; any deliberately detached child must close its copy. A surviving
 child can keep a later deployment waiting, with a diagnostic, until it exits.
-Do not run older deploy tooling concurrently. Deletion uses Python's symlink-resistant, directory-FD
-relative removal (Python 3.11 or later; older Python skips pruning with a warning).
-Durable front stores and activation evidence are outside the
-release tree and are never pruned.
+Do not run older deploy tooling concurrently.
+
+Before each removal, pruning opens the candidate without following symlinks,
+checks its validated device/inode identity, and rechecks protected pointers.
+It renames the candidate relative to opened directory descriptors into a fresh
+owner-only `.prune-<random>` quarantine inside `releases/`, then rechecks its
+identity. All permission changes and recursive deletion use those descriptors.
+The helper checks `/proc/self/mountinfo` immediately before deletion and checks
+device and Linux mount IDs on opened descendants; same-filesystem bind mounts
+are refused too. A mismatch stops pruning and reports the retained quarantine
+for operator inspection. Later runs report and leave recognized quarantines
+alone, while still allowing safe pruning of ordinary releases. Inspect any
+mounts and retained contents before manually removing a quarantine.
+
+Retention requires Python 3.11 or later and Linux mount metadata; if these are
+unavailable it skips deletion with a warning. Durable front stores and
+activation evidence are outside the release tree and are never pruned.
 
 ### Shared clipboard and rollback
 
