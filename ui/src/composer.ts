@@ -1289,7 +1289,10 @@ export class Composer {
   }
 
   private scheduleAutoGrow(): void {
-    if (this.destroyed || !this.openState || this.measureFrame !== undefined) return;
+    if (this.destroyed || !this.openState) return;
+    // An inset-only frame shares this slot. Content changes must upgrade it
+    // to a full measurement rather than lose the requested auto-grow.
+    if (this.measureFrame !== undefined) window.cancelAnimationFrame(this.measureFrame);
     this.measureFrame = window.requestAnimationFrame(() => {
       this.measureFrame = undefined;
       if (this.destroyed || !this.openState) return;
