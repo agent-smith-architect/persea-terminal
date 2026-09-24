@@ -3,6 +3,7 @@
 const fs=require("fs"),path=require("path"),crypto=require("crypto");
 const playwright=require(process.env.PERSEA_PLAYWRIGHT_MODULE||require.resolve("playwright"));
 const {startClipboardFixture,installClipboardMock,PNG}=require("./clipboard_fixture.cjs");
+const {expectedClipboardDiagnostics}=require("./clipboard_diagnostics.cjs");
 const UI=path.resolve(__dirname,"..");
 const ROOT=process.env.PERSEA_CLIPBOARD_EVIDENCE||"/tmp/agent_logs/persea-clipboard-browser";
 const ENGINE=process.env.PERSEA_CLIPBOARD_ENGINE||"chromium";
@@ -372,19 +373,7 @@ async function main(){
       }catch(error){if(activePage&&!activePage.isClosed()){await shot(activePage,"failure");evidence.visible=await activePage.locator("body").innerText();evidence.selects=await activePage.locator(".persea-clipboard__item").evaluateAll(rows=>rows.map(row=>({id:row.dataset.clipboardItem,options:[...row.querySelectorAll("option")].map(o=>({value:o.value,disabled:o.disabled,selected:o.selected}))})));}throw error;}finally{for(const context of contexts)await context.close();}
     }
     const diagnostics=evidence.pages.flatMap(page=>[...page.console,...page.pageerrors]);
-    evidence.expectedDiagnostics=diagnostics.filter(message=>(message.phase==="disconnect invalidates an already open row Paste action"&&/WebSocket.*410/.test(message.text))||(message.phase==="cached text remains locally copyable during server outage"&&/status of 503/.test(message.text)&&/\/api\/(snippets|clipboard\/images(?:\/[0-9a-f]{32})?)$/.test(message.url||"")));
-    // WebKit can deliver a resource console message after the test phase has
-    // advanced. Match each late message to one explicitly injected response.
-    for(const page of evidence.pages){
-      const responses=[...page.outageResponses];
-      for(const message of page.console){
-        if(!/status of 503/.test(message.text))continue;
-        const index=responses.findIndex(response=>response.url===message.url);
-        if(index<0)continue;
-        responses.splice(index,1);
-        if(!evidence.expectedDiagnostics.includes(message))evidence.expectedDiagnostics.push(message);
-      }
-    }
+    evidence.expectedDiagnostics=expectedClipboardDiagnostics(evidence.pages);
     const unexpected=diagnostics.filter(message=>!evidence.expectedDiagnostics.includes(message));assert(!unexpected.length,`Browser diagnostics: ${JSON.stringify(unexpected)}`);
     evidence.pass=true;
   }catch(error){evidence.pass=false;evidence.failure={phase,error:String(error),stack:error.stack};if(activePage&&!activePage.isClosed()){await activePage.screenshot({path:path.join(directory,"failure.png"),fullPage:true}).catch(()=>{});evidence.failure.visible=await activePage.locator("body").innerText().catch(()=>"");}throw error;}
