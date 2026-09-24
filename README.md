@@ -11,6 +11,19 @@ when you close the browser or lose your connection.
 - **Use your existing workflow.** Native tmux clients can stay attached. Opening a browser does not resize your session.
 - **Work from a phone.** Touch controls, a text composer, and a terminal key row keep common actions close.
 
+<img src="docs/images/workspace-desktop.png" alt="A workspace with three terminals side by side: a shell, a log tail, and an editor" width="100%">
+
+<table>
+  <tr>
+    <td width="62%"><img src="docs/images/dashboard-desktop.png" alt="The dashboard listing tmux sessions for two Unix users, alice and build, with output previews and Open buttons"></td>
+    <td width="38%"><img src="docs/images/terminal-phone.png" alt="A tmux session on a phone, with the text composer open below the terminal"></td>
+  </tr>
+  <tr>
+    <td align="center">Sessions for each configured Unix user</td>
+    <td align="center">The same sessions from a phone</td>
+  </tr>
+</table>
+
 ## How it works
 
 ```mermaid
