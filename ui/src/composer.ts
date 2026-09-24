@@ -1728,6 +1728,12 @@ export class Composer {
       this.focusZoomGuardRelease = undefined;
     }
     this.textarea.style.removeProperty("font-size");
+    // Auto-grow may have measured the temporary 16px focus face. Replace
+    // any pending inset-only frame with a measurement of the chosen face;
+    // auto-grow also publishes the resulting inset.
+    if (this.measureFrame !== undefined) window.cancelAnimationFrame(this.measureFrame);
+    this.measureFrame = undefined;
+    this.scheduleAutoGrow();
   }
   private readonly onTextareaPointerDown: EventListener = (event) => {
     this.textareaPointers.add((event as PointerEvent).pointerId);
