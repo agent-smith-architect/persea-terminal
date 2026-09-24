@@ -94,6 +94,23 @@ persea_init_root() {
   else
     [[ -z $PERSEA_ROOT_PREFIX ]] || persea_die 'alternate roots require PERSEA_DEPLOY_HERMETIC=1'
   fi
+  if [[ ${1:-} == locked ]]; then
+    persea_require_root
+    persea_lock_deployment
+  fi
+  if [[ ${2:-} == public ]]; then
+    local installed current_target
+    installed=$(persea_path "$PERSEA_INSTALL_ROOT")
+    if [[ -e $installed/current || -L $installed/current ]]; then
+      persea_require_safe_directory "$(dirname -- "$installed")"
+      persea_require_safe_directory "$installed"
+      persea_require_safe_directory "$installed/releases"
+      [[ -L $installed/current ]] || persea_die 'unsafe pre-existing current target'
+      current_target=$(readlink -- "$installed/current")
+      [[ $current_target == releases/* && $current_target != *'..'* ]] || persea_die 'unsafe current symlink target'
+      persea_require_public_release "$installed/$current_target"
+    fi
+  fi
   persea_load_host_manifest
 }
 
@@ -717,6 +734,68 @@ persea_require_public_release() {
     [[ -f $release/$relative && ! -L $release/$relative ]] ||
       persea_die 'install predates the first public release (0.1.0) or lacks its required release shape; unsupported'
   done
+}
+
+# Serialize release readers that can change pointers with pruning. The lock is
+# outside releases so a fresh install need not create an install root early.
+persea_lock_deployment() {
+  local runtime lock owner group
+  runtime=$(persea_path /run)
+  persea_require_safe_directory "$runtime"
+  lock="$runtime/persea-terminal-deploy.lock"
+  owner=$(persea_expected_root_owner)
+  group=0
+  [[ $PERSEA_HERMETIC == 1 ]] && group=$(id -g)
+  if [[ -e $lock || -L $lock ]]; then
+    [[ -f $lock && ! -L $lock && $(stat -c '%u:%g:%a:%h' -- "$lock") == "$owner:$group:600:1" ]] ||
+      persea_die 'deployment lock is unsafe'
+  fi
+  [[ ${PERSEA_DEPLOY_LOCK_PID:-} == "$$" ]] && return 0
+  # flock owns the descriptor in the supervisor, not in build/service children.
+  # Re-exec before loading host data so a waiter reads the committed snapshot.
+  exec /bin/bash -c 'umask 0077; exec flock --exclusive --close -- "$@"' persea-lock \
+    "$lock" /bin/bash -c 'export PERSEA_DEPLOY_LOCK_PID=$$; exec "$@"' persea-deploy \
+    "$0" "${PERSEA_DEPLOY_ARGUMENTS[@]}"
+}
+
+persea_validate_keep_releases() {
+  [[ $1 == 0 || $1 =~ ^([2-9]|[1-9][0-9]{1,8})$ ]] ||
+    persea_die 'keep-releases must be an integer of at least 2 (or 0 to disable pruning)'
+}
+
+# Pruning is maintenance after a committed transaction. Its refusal or failure
+# must never trigger install/rollback restoration or change their exit status.
+persea_prune_releases() {
+  local keep=$1 root group=0 unit pid identity
+  local -a retention_units=() live_binaries=()
+  root=$(persea_path "$PERSEA_INSTALL_ROOT")
+  [[ $PERSEA_HERMETIC == 1 ]] && group=$(id -g)
+  if ! (
+    persea_require_safe_directory "$(dirname -- "$root")"
+    persea_require_safe_directory "$root"
+    persea_require_safe_directory "$root/releases"
+    live_binaries=()
+    persea_read_release_inventory "$root/current" retention_units
+    [[ $PERSEA_HERMETIC != 1 ]] || persea_require_hermetic_mocks systemctl
+    for unit in "${retention_units[@]}"; do
+      pid=$(systemctl show "$unit" --property=MainPID --value) || exit 1
+      [[ $pid =~ ^[0-9]+$ ]] || exit 1
+      [[ $pid != 0 ]] || continue
+      if [[ $PERSEA_HERMETIC == 1 ]]; then
+        persea_require_hermetic_mocks persea-process-metadata
+        identity=$(persea-process-metadata "$unit" "$pid" "$root/current/bin/persea-terminal") || exit 1
+        identity=${identity#*:}
+      else
+        identity=$(stat -Lc '%d:%i' -- "/proc/$pid/exe") || exit 1
+      fi
+      [[ $identity =~ ^[0-9]+:[0-9]+$ ]] || exit 1
+      live_binaries+=("$identity")
+    done
+    python3 "$SCRIPT_DIR/release-retention.py" "$root" "$keep" "$(persea_expected_root_owner)" "$group" "${live_binaries[@]}"
+  ); then
+    printf 'persea-terminal deploy: warning: release pruning skipped or incomplete; deployment succeeded\n' >&2
+  fi
+  return 0
 }
 
 persea_verify_release() {

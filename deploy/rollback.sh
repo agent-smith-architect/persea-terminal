@@ -6,15 +6,22 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 source "$SCRIPT_DIR/lib.sh"
 
 target=
+# Used by lib.sh when re-executing under the deployment lock.
+# shellcheck disable=SC2034
+PERSEA_DEPLOY_ARGUMENTS=("$@")
 activate_local=0
+keep_releases=${PERSEA_KEEP_RELEASES:-5}
 while (($#)); do
   case $1 in
     --to-release) [[ $# -ge 2 ]] || persea_die 'missing --to-release value'; target=$2; shift 2 ;;
     --activate-local) activate_local=1; shift ;;
+    --keep-releases) [[ $# -ge 2 ]] || persea_die 'missing --keep-releases value'; keep_releases=$2; shift 2 ;;
+    --no-prune) keep_releases=0; shift ;;
     *) persea_die "unknown argument: $1" ;;
   esac
 done
-persea_init_root
+persea_validate_keep_releases "$keep_releases"
+persea_init_root locked
 persea_require_root
 if [[ $PERSEA_HERMETIC == 1 ]]; then persea_require_hermetic_mocks systemctl; fi
 
@@ -202,4 +209,5 @@ if ((activate_local)); then
   fi
 fi
 trap - ERR INT TERM HUP
+persea_prune_releases "$keep_releases"
 printf 'CURRENT=%s\nRECOVERABLE_RELEASE=%s\nALIAS_STORE_PRESERVED=%s\nACTIVATION_EVIDENCE_PRESERVED=%s\n' "$target" "$current" "$(persea_path "$PERSEA_STATE_ROOT/aliases.json")" "$(persea_path "$PERSEA_EVIDENCE_ROOT")"
