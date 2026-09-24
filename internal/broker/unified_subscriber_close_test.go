@@ -17,7 +17,7 @@ import (
 	"persea-terminal/internal/unifiedjournal"
 )
 
-// Advisor falsifiers B1 and S1 (2026-08-27 M9 review).
+// Subscriber lifetime and transport-close regressions.
 //
 // The subscriber channel a unified attachment tails is the only thing that
 // carries committed output to the browser. Evicting a lagged/full subscriber
@@ -226,9 +226,9 @@ func b1SubscriberOf(effects *UnifiedDevPaneEffects, key unifiedjournal.PaneKey) 
 	return nil
 }
 
-// TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable is falsifier
+// TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable is regression test
 // B1 verbatim, with S1's publication-latency bound and sibling subscriber
-// count assertions folded in (the advisor ruled the B1 test is the required
+// count assertions folded in (the lifetime test supplies the required
 // FW2 form). At e52703d the wedged attachment gets neither the triggering
 // event nor a close: step 4 times out waiting for the typed close.
 func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T) {

@@ -47,7 +47,7 @@ and skip when captures are unavailable. Synthetic retention, ordering, crash,
 and batching tests run without private data. Never commit captured operator
 terminal content to make those optional cases portable.
 
-Behavior changes need a positive acceptance case and a falsifier that proves
+Behavior changes need a positive acceptance case and a regression test that proves
 the relevant bypass or mutation fails. Security-critical tmux operations must
 pin the exact server process, session, window, pane, process start time, and
 geometry inside the same tmux transaction.

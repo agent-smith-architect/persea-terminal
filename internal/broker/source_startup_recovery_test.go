@@ -16,7 +16,7 @@ import (
 	"persea-terminal/internal/unifiedjournal"
 )
 
-func m11StartupWitness() startupPaneWitness {
+func rotationStartupWitness() startupPaneWitness {
 	return startupPaneWitness{
 		server: "main", session: "$1", window: "@2", pane: "%3",
 		socket:        terminal.SocketIdentity{Path: "/run/tmux/main", Device: 11, Inode: 12},
@@ -26,8 +26,8 @@ func m11StartupWitness() startupPaneWitness {
 	}
 }
 
-func TestM11D11StartupIdentityUsesOriginalAndChecksFinalGeometry(t *testing.T) {
-	live := m11StartupWitness()
+func TestSourceStartupIdentityUsesOriginalAndChecksFinalGeometry(t *testing.T) {
+	live := rotationStartupWitness()
 	initial := unifiedjournal.Geometry{Columns: 80, Rows: 24}
 	final := live.geometry
 	recovery := unifiedjournal.Recovery{
@@ -162,7 +162,7 @@ func TestSourceStartupGeometryAmbiguityKeepsReconstructionAdmission(t *testing.T
 	second.abandonAdoption(adoption)
 }
 
-func TestM11D6StartupRecoveryRecordIsTypedBoundedAndPathRedacted(t *testing.T) {
+func TestSourceStartupRecoveryRecordIsTypedBoundedAndPathRedacted(t *testing.T) {
 	record := startupRecoveryRecord(unifiedjournal.Recovery{
 		Key:      unifiedjournal.PaneKey{Server: "main", Session: "$1", Window: "@2", Pane: "%3", ControlGeneration: 7},
 		Decision: unifiedjournal.RecoveryRetainAmbiguous, Outcome: unifiedjournal.RecoveryRetainedAmbiguous,
@@ -183,7 +183,7 @@ func TestM11D6StartupRecoveryRecordIsTypedBoundedAndPathRedacted(t *testing.T) {
 	}
 }
 
-func m11StartRecoveryBroker(t *testing.T, cfg config.Broker, effects *UnifiedDevPaneEffects) (net.Listener, <-chan error) {
+func rotationStartRecoveryBroker(t *testing.T, cfg config.Broker, effects *UnifiedDevPaneEffects) (net.Listener, <-chan error) {
 	t.Helper()
 	listener, err := net.Listen("unix", filepath.Join(shortSocketDir(t), "broker.sock"))
 	if err != nil {
@@ -194,7 +194,7 @@ func m11StartRecoveryBroker(t *testing.T, cfg config.Broker, effects *UnifiedDev
 	return listener, done
 }
 
-func m11StopRecoveryBroker(t *testing.T, listener net.Listener, done <-chan error, effects *UnifiedDevPaneEffects) {
+func rotationStopRecoveryBroker(t *testing.T, listener net.Listener, done <-chan error, effects *UnifiedDevPaneEffects) {
 	t.Helper()
 	_ = listener.Close()
 	select {
@@ -210,7 +210,7 @@ func m11StopRecoveryBroker(t *testing.T, listener net.Listener, done <-chan erro
 	effects.journalMu.Unlock()
 }
 
-func m11RecoveryAuthority(t *testing.T, cfg config.Broker, server config.TmuxServer, sessionID string) proto.Authority {
+func rotationRecoveryAuthority(t *testing.T, cfg config.Broker, server config.TmuxServer, sessionID string) proto.Authority {
 	t.Helper()
 	detail, err := details(server, sessionID)
 	if err != nil {
@@ -224,23 +224,23 @@ func m11RecoveryAuthority(t *testing.T, cfg config.Broker, server config.TmuxSer
 	return authority
 }
 
-func TestM11D11FitRestartKeepsExactGenerationAndFreshInput(t *testing.T) {
+func TestSourceFitRestartKeepsExactGenerationAndFreshInput(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real tmux fit/restart falsifier")
+		t.Skip("real tmux fit/restart regression test")
 	}
 	disposable := newDisposable(t)
 	server := config.TmuxServer{Label: "main", SocketPath: disposable.path}
 	runtimeDir := t.TempDir()
 	cfg := unifiedAdoptionDevConfig(t, server, runtimeDir, 4)
-	disposable.run("new-session", "-d", "-s", "m11_d11_fit", "-x", "80", "-y", "24", "sh", "-c", "stty -echo; printf 'D11-BEFORE\\n'; exec sh")
-	sessionID := strings.TrimSpace(disposable.run("display-message", "-p", "-t", "=m11_d11_fit:", "#{session_id}"))
-	authority := m11RecoveryAuthority(t, cfg, server, sessionID)
+	disposable.run("new-session", "-d", "-s", "startup_fit", "-x", "80", "-y", "24", "sh", "-c", "stty -echo; printf 'D11-BEFORE\\n'; exec sh")
+	sessionID := strings.TrimSpace(disposable.run("display-message", "-p", "-t", "=startup_fit:", "#{session_id}"))
+	authority := rotationRecoveryAuthority(t, cfg, server, sessionID)
 
 	first, err := NewUnifiedDevPaneEffects(cfg)
 	if err != nil {
 		t.Fatal(err)
 	}
-	firstListener, firstDone := m11StartRecoveryBroker(t, cfg, first)
+	firstListener, firstDone := rotationStartRecoveryBroker(t, cfg, first)
 	adoption, err := first.AdoptSession(context.Background(), sessionID)
 	if err != nil {
 		t.Fatal(err)
@@ -262,7 +262,7 @@ func TestM11D11FitRestartKeepsExactGenerationAndFreshInput(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	m11StopRecoveryBroker(t, firstListener, firstDone, first)
+	rotationStopRecoveryBroker(t, firstListener, firstDone, first)
 
 	second, err := NewUnifiedDevPaneEffects(cfg)
 	if err != nil {
@@ -304,7 +304,7 @@ func TestM11D11FitRestartKeepsExactGenerationAndFreshInput(t *testing.T) {
 		t.Fatalf("exact journal changed err=%v", err)
 	}
 
-	secondListener, secondDone := m11StartRecoveryBroker(t, cfg, second)
+	secondListener, secondDone := rotationStartRecoveryBroker(t, cfg, second)
 	readopted, err := second.AdoptSession(context.Background(), sessionID)
 	if err != nil {
 		t.Fatal(err)
@@ -319,19 +319,19 @@ func TestM11D11FitRestartKeepsExactGenerationAndFreshInput(t *testing.T) {
 	unifiedE2E1FitInput(t, fresh, freshPrepared, "printf 'D11-AFTER-RESTART\\n'\n")
 	unifiedE2E1AwaitPaneText(t, disposable, sessionID, "D11-AFTER-RESTART")
 	_ = fresh.Close()
-	m11StopRecoveryBroker(t, secondListener, secondDone, second)
+	rotationStopRecoveryBroker(t, secondListener, secondDone, second)
 }
 
-func TestM11D11ChangedPaneProcessIsReplacement(t *testing.T) {
+func TestSourceChangedPaneProcessIsReplacement(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real tmux replacement falsifier")
+		t.Skip("real tmux replacement regression test")
 	}
 	disposable := newDisposable(t)
 	server := config.TmuxServer{Label: "main", SocketPath: disposable.path}
 	runtimeDir := t.TempDir()
 	cfg := unifiedAdoptionDevConfig(t, server, runtimeDir, 4)
-	disposable.run("new-session", "-d", "-s", "m11_d11_replacement", "-x", "80", "-y", "24", "sh", "-c", "printf 'D11-OLD\\n'; exec sh")
-	sessionID := strings.TrimSpace(disposable.run("display-message", "-p", "-t", "=m11_d11_replacement:", "#{session_id}"))
+	disposable.run("new-session", "-d", "-s", "startup_replacement", "-x", "80", "-y", "24", "sh", "-c", "printf 'D11-OLD\\n'; exec sh")
+	sessionID := strings.TrimSpace(disposable.run("display-message", "-p", "-t", "=startup_replacement:", "#{session_id}"))
 
 	first, err := NewUnifiedDevPaneEffects(cfg)
 	if err != nil {

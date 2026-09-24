@@ -76,8 +76,8 @@ func prepareRecordingProviderForTest(t *testing.T, effects *UnifiedDevPaneEffect
 }
 
 // These two tests preserve the real adoption and creation witnesses from the
-// baseline falsifiers. Their hold is a storage dependency, not a timing guess.
-func TestRecordingFalsifierAdoptionWaitsForInitialCommit(t *testing.T) {
+// baseline regression tests. Their hold is a storage dependency, not a timing guess.
+func TestRecordingRegressionAdoptionWaitsForInitialCommit(t *testing.T) {
 	f := newAdoptionFixture(t, 0)
 	session := f.startPaneCommand(t, "recording-initial", "printf 'synthetic initial state\\n'; exec sleep 600")
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -130,7 +130,7 @@ func TestRecordingFalsifierAdoptionWaitsForInitialCommit(t *testing.T) {
 	}
 }
 
-func TestRecordingFalsifierCreationWaitsForInitialCommit(t *testing.T) {
+func TestRecordingRegressionCreationWaitsForInitialCommit(t *testing.T) {
 	realm := openRetentionRealm(t, "initial-birth")
 	entered, release := make(chan struct{}), make(chan struct{})
 	var once, releaseOnce sync.Once
@@ -213,7 +213,7 @@ func startRecordingInitialForTest(t *testing.T, registry *paneRegistry, witness 
 	return op
 }
 
-func TestRecordingFalsifierLaterBoundaryIsNotInitialReceipt(t *testing.T) {
+func TestRecordingRegressionLaterBoundaryIsNotInitialReceipt(t *testing.T) {
 	for _, stage := range []string{"append", "sync", "commit"} {
 		for failedChunk := 1; failedChunk <= 3; failedChunk++ {
 			t.Run(fmt.Sprintf("%s/chunk-%d", stage, failedChunk), func(t *testing.T) {

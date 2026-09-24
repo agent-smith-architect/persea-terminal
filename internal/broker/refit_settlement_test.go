@@ -21,9 +21,9 @@ import (
 // still an exact-owner post-PONR failure. The correction contract requires the
 // possible successor generation and its charge to remain until authoritative
 // source reconciliation; transport loss alone cannot queue successor cleanup.
-func TestUX12RereviewPostRegistryTransportLossRetainsUncertainSuccessor(t *testing.T) {
+func TestRefitSettlementPostRegistryTransportLossRetainsUncertainSuccessor(t *testing.T) {
 	fixture := newAdoptionFixture(t, 4)
-	sessionID := fixture.startPaneCommand(t, "ux12-post-registry-loss", `sh -c 'stty -echo; printf "UX12-POST-REGISTRY\n"; while :; do sleep 1; done'`)
+	sessionID := fixture.startPaneCommand(t, "refit-post-registry-loss", `sh -c 'stty -echo; printf "REFIT-POST-REGISTRY\n"; while :; do sleep 1; done'`)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	adoption, err := fixture.effects.AdoptSession(ctx, sessionID)
@@ -31,7 +31,7 @@ func TestUX12RereviewPostRegistryTransportLossRetainsUncertainSuccessor(t *testi
 		t.Fatal(err)
 	}
 	pollUntil(t, 10*time.Second, "predecessor output", func() bool {
-		return strings.Contains(string(fixture.journalBytes(t, adoption.Key)), "UX12-POST-REGISTRY")
+		return strings.Contains(string(fixture.journalBytes(t, adoption.Key)), "REFIT-POST-REGISTRY")
 	})
 	detail, err := details(fixture.server, sessionID)
 	if err != nil {
@@ -97,9 +97,9 @@ func TestUX12RereviewPostRegistryTransportLossRetainsUncertainSuccessor(t *testi
 // retry must therefore locate the settled token before geometry/current-source
 // validation, even though the recomputed incarnation now describes the
 // changed-width successor.
-func TestUX12RereviewRevalidatedExactRetryFindsSettledOperation(t *testing.T) {
+func TestRefitSettlementRevalidatedExactRetryFindsSettledOperation(t *testing.T) {
 	fixture := newAdoptionFixture(t, 4)
-	sessionID := fixture.startPaneCommand(t, "ux12-revalidated-retry", `sh -c 'stty -echo; while :; do sleep 1; done'`)
+	sessionID := fixture.startPaneCommand(t, "refit-revalidated-retry", `sh -c 'stty -echo; while :; do sleep 1; done'`)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	if _, err := fixture.effects.AdoptSession(ctx, sessionID); err != nil {
@@ -138,7 +138,7 @@ func TestUX12RereviewRevalidatedExactRetryFindsSettledOperation(t *testing.T) {
 // Exercise the real changed-width refit on both sides of registry commit. The
 // exact/ambiguous cases must not elect durable cleanup; proved gone/replacement
 // cases must converge through success, ENOENT and a retryable unlink failure.
-func TestUX12RereviewRealDispositionAndUnlinkMatrix(t *testing.T) {
+func TestRefitSettlementRealDispositionAndUnlinkMatrix(t *testing.T) {
 	type dispositionCase struct {
 		name       string
 		uncertain  bool
@@ -172,7 +172,7 @@ func TestUX12RereviewRealDispositionAndUnlinkMatrix(t *testing.T) {
 					initialSlots := fixture.effects.realm.AvailableCompletePaneSlots()
 					initialLogical, initialLogicalReserved, _ := fixture.effects.realm.LogicalBudget()
 					initialPhysical, initialPhysicalReserved, _ := fixture.effects.realm.PhysicalBudget()
-					sessionID := fixture.startPaneCommand(t, "ux12-matrix", `sh -c 'stty -echo; while :; do sleep 1; done'`)
+					sessionID := fixture.startPaneCommand(t, "refit-matrix", `sh -c 'stty -echo; while :; do sleep 1; done'`)
 					ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 					defer cancel()
 					if _, err := fixture.effects.AdoptSession(ctx, sessionID); err != nil {
@@ -400,13 +400,13 @@ func TestUX12RereviewRealDispositionAndUnlinkMatrix(t *testing.T) {
 // A predecessor's retiring seal can settle before the refit driver observes
 // owner disappearance. The late terminal callback must not recreate that
 // already-refunded runtime lifetime merely to report the same source failure.
-func TestUX12RereviewLatePredecessorFaultDoesNotRecreateRetiredLifetime(t *testing.T) {
+func TestRefitSettlementLatePredecessorFaultDoesNotRecreateRetiredLifetime(t *testing.T) {
 	for _, unlinkMode := range []string{"success", "eio"} {
 		t.Run(unlinkMode, func(t *testing.T) {
 
 			fixture := newAdoptionFixture(t, 4)
 			initialSlots := fixture.effects.realm.AvailableCompletePaneSlots()
-			sessionID := fixture.startPaneCommand(t, "ux12-late-predecessor", `sh -c 'stty -echo; while :; do sleep 1; done'`)
+			sessionID := fixture.startPaneCommand(t, "refit-late-predecessor", `sh -c 'stty -echo; while :; do sleep 1; done'`)
 			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 			defer cancel()
 			adoption, err := fixture.effects.AdoptSession(ctx, sessionID)
@@ -501,12 +501,12 @@ func TestUX12RereviewLatePredecessorFaultDoesNotRecreateRetiredLifetime(t *testi
 // Initial cancellation and the refit driver share the provisional successor.
 // Complete the real initial cleanup before allowing the late driver Fatal to
 // run, rather than relying on a fast hosted runner to win that ordering.
-func TestUX12RereviewSettledSuccessorCannotBeFaultedAgain(t *testing.T) {
+func TestRefitSettlementSettledSuccessorCannotBeFaultedAgain(t *testing.T) {
 	for _, site := range []string{"fatal", "commit", "committed"} {
 		for _, unlinkMode := range []string{"success", "eio"} {
 			t.Run(site+"/"+unlinkMode, func(t *testing.T) {
 				fixture := newAdoptionFixture(t, 4)
-				sessionID := fixture.startPaneCommand(t, "ux12-settled-successor", `sh -c 'stty -echo; while :; do sleep 1; done'`)
+				sessionID := fixture.startPaneCommand(t, "refit-settled-successor", `sh -c 'stty -echo; while :; do sleep 1; done'`)
 				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 				defer cancel()
 				if _, err := fixture.effects.AdoptSession(ctx, sessionID); err != nil {

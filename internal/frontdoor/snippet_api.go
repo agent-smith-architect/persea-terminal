@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// /api/snippets routes (design packet §3b) under the M4 route contract:
+// /api/snippets routes  under the M4 route contract:
 // ingress identity on every method, CSRF on every mutation (secure wrapper),
 // Cache-Control: no-store on every response, strict method and content type,
 // http.MaxBytesReader before any decode, DisallowUnknownFields, exactly one

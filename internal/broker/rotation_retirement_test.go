@@ -12,28 +12,28 @@ import (
 	"persea-terminal/internal/unifiedjournal"
 )
 
-type p2aReview3Ledger struct {
+type rotationLedger struct {
 	p, q, e int
 	b, o    int64
 }
 
-func p2aReview3RuntimeLedger(runtime *retentionTrialRuntime) p2aReview3Ledger {
+func rotationRuntimeLedger(runtime *retentionTrialRuntime) rotationLedger {
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
-	return p2aReview3Ledger{p: runtime.pUsed, q: runtime.qUsed, e: runtime.eUsed, b: runtime.bUsed, o: runtime.oUsed}
+	return rotationLedger{p: runtime.pUsed, q: runtime.qUsed, e: runtime.eUsed, b: runtime.bUsed, o: runtime.oUsed}
 }
 
-func TestP2AReview3AbortRefusedAfterRealSealWithoutMarkSealed(t *testing.T) {
+func TestRotationAbortRefusedAfterRealSealWithoutMarkSealed(t *testing.T) {
 	for _, boundaryError := range []bool{false, true} {
 		t.Run(map[bool]string{false: "settled", true: "boundary_error"}[boundaryError], func(t *testing.T) {
-			fixture := newP2AFixture(t)
+			fixture := newRotationFixture(t)
 			next := fixture.next(2)
 			reservation := fixture.materialize(next)
 			txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
 			if err != nil {
 				t.Fatal(err)
 			}
-			fixture.reviewBootstrap(txn)
+			fixture.writeBootstrap(txn)
 			if err := txn.Validate(); err != nil {
 				t.Fatal(err)
 			}
@@ -46,7 +46,7 @@ func TestP2AReview3AbortRefusedAfterRealSealWithoutMarkSealed(t *testing.T) {
 					}
 					return nil
 				}
-				if err := fixture.registry.retention.WritePane(journalKey(fixture.previous), []byte("P2A-REVIEW3-SEAL-FLUSH")); err != nil {
+				if err := fixture.registry.retention.WritePane(journalKey(fixture.previous), []byte("rotation-SEAL-FLUSH")); err != nil {
 					t.Fatal(err)
 				}
 				fail.Store(true)
@@ -97,9 +97,9 @@ func TestP2AReview3AbortRefusedAfterRealSealWithoutMarkSealed(t *testing.T) {
 	}
 }
 
-func TestP2AReview3AbandonedSuccessorRejectsEveryIngress(t *testing.T) {
-	fixture := newP2AFixture(t)
-	baseline := p2aReview3RuntimeLedger(fixture.registry.retention)
+func TestRotationAbandonedSuccessorRejectsEveryIngress(t *testing.T) {
+	fixture := newRotationFixture(t)
+	baseline := rotationRuntimeLedger(fixture.registry.retention)
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
@@ -118,12 +118,12 @@ func TestP2AReview3AbandonedSuccessorRejectsEveryIngress(t *testing.T) {
 			})
 		}
 	})
-	original := []byte("P2A-REVIEW3-ORIGINAL-WRITER")
+	original := []byte("rotation-ORIGINAL-WRITER")
 	if err := fixture.registry.retention.WritePane(journalKey(next), original); err != nil {
 		t.Fatal(err)
 	}
 	flushDone := make(chan error, 1)
-	go func() { flushDone <- fixture.registry.retention.Boundary(journalKey(next), "review3_writer_flush") }()
+	go func() { flushDone <- fixture.registry.retention.Boundary(journalKey(next), "retirement_writer_flush") }()
 	select {
 	case <-entered:
 	case <-time.After(2 * time.Second):
@@ -132,17 +132,17 @@ func TestP2AReview3AbandonedSuccessorRejectsEveryIngress(t *testing.T) {
 	if !txn.Abort() {
 		t.Fatal("pre-seal Abort was refused")
 	}
-	retained := p2aReview3RuntimeLedger(fixture.registry.retention)
+	retained := rotationRuntimeLedger(fixture.registry.retention)
 	if _, _, err := fixture.registry.retention.ensureGeneration(journalKey(next), false); !errors.Is(err, unifiedjournal.ErrInvalidated) {
 		t.Errorf("abandoned staging=%v, want ErrInvalidated", err)
 	}
-	refused := []byte("P2A-REVIEW3-REFUSED-WRITER")
+	refused := []byte("rotation-REFUSED-WRITER")
 	refusedAccepted := false
 	if err := fixture.registry.retention.WritePane(journalKey(next), refused); !errors.Is(err, unifiedjournal.ErrInvalidated) {
 		refusedAccepted = err == nil
 		t.Errorf("abandoned WritePane=%v, want ErrInvalidated", err)
 	}
-	if after := p2aReview3RuntimeLedger(fixture.registry.retention); after != retained {
+	if after := rotationRuntimeLedger(fixture.registry.retention); after != retained {
 		t.Errorf("refused ingress changed retained ledger: before=%+v after=%+v", retained, after)
 	}
 	close(release)
@@ -150,7 +150,7 @@ func TestP2AReview3AbandonedSuccessorRejectsEveryIngress(t *testing.T) {
 		t.Fatal(err)
 	}
 	if refusedAccepted {
-		if err := fixture.registry.retention.Boundary(journalKey(next), "review3_refused_writer_drain"); err != nil {
+		if err := fixture.registry.retention.Boundary(journalKey(next), "retirement_refused_writer_drain"); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -179,20 +179,20 @@ func TestP2AReview3AbandonedSuccessorRejectsEveryIngress(t *testing.T) {
 		}
 		time.Sleep(time.Millisecond)
 	}
-	if settled := p2aReview3RuntimeLedger(fixture.registry.retention); settled != baseline {
+	if settled := rotationRuntimeLedger(fixture.registry.retention); settled != baseline {
 		t.Errorf("last-reference retirement ledger=%+v want %+v", settled, baseline)
 	}
 	fixture.abortReservation(reservation)
 }
 
-func p2aReview3CommitRotation(t *testing.T, fixture *p2aFixture, previous, next controlmode.PaneWitness) {
+func rotationCommitRotation(t *testing.T, fixture *rotationFixture, previous, next controlmode.PaneWitness) {
 	t.Helper()
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(previous, next)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := txn.WriteBootstrap([]byte("review3-bootstrap")); err != nil {
+	if err := txn.WriteBootstrap([]byte("retirement-bootstrap")); err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.registry.retentionBoundary(next, "rotation_bootstrap"); err != nil {
@@ -223,18 +223,18 @@ func p2aReview3CommitRotation(t *testing.T, fixture *p2aFixture, previous, next 
 	fixture.effects.mu.Unlock()
 }
 
-func TestP2AReview3ReapAfterRotationLeavesNoRetiredKeyResidue(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationReapAfterRotationLeavesNoRetiredKeyResidue(t *testing.T) {
+	fixture := newRotationFixture(t)
 	first := fixture.next(2)
 	second := fixture.next(3)
-	p2aReview3CommitRotation(t, fixture, fixture.previous, first)
-	p2aReview3CommitRotation(t, fixture, first, second)
+	rotationCommitRotation(t, fixture, fixture.previous, first)
+	rotationCommitRotation(t, fixture, first, second)
 
-	var baseline p2aReview3Ledger
+	var baseline rotationLedger
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		baseline = p2aReview3RuntimeLedger(fixture.registry.retention)
-		if baseline == (p2aReview3Ledger{p: 1, q: 2}) {
+		baseline = rotationRuntimeLedger(fixture.registry.retention)
+		if baseline == (rotationLedger{p: 1, q: 2}) {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -255,7 +255,7 @@ func TestP2AReview3ReapAfterRotationLeavesNoRetiredKeyResidue(t *testing.T) {
 		fixture.effects.reapFaultedUnitOnce(unit)
 		deadline := time.Now().Add(2 * time.Second)
 		for {
-			got := p2aReview3RuntimeLedger(fixture.registry.retention)
+			got := rotationRuntimeLedger(fixture.registry.retention)
 			if got == baseline {
 				break
 			}
@@ -296,9 +296,9 @@ func TestP2AReview3ReapAfterRotationLeavesNoRetiredKeyResidue(t *testing.T) {
 	}
 }
 
-func TestP2AReview3ExplicitFaultDisconnectsCurrentGeneration(t *testing.T) {
-	fixture := newP2AFixture(t)
-	baseline := p2aReview3RuntimeLedger(fixture.registry.retention)
+func TestRotationExplicitFaultDisconnectsCurrentGeneration(t *testing.T) {
+	fixture := newRotationFixture(t)
+	baseline := rotationRuntimeLedger(fixture.registry.retention)
 	key := journalKey(fixture.previous)
 	var reservations atomic.Int64
 	fixture.registry.retention.setHook(func(point string, got unifiedjournal.PaneKey) {
@@ -312,7 +312,7 @@ func TestP2AReview3ExplicitFaultDisconnectsCurrentGeneration(t *testing.T) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if got := p2aReview3RuntimeLedger(fixture.registry.retention); got == baseline {
+		if got := rotationRuntimeLedger(fixture.registry.retention); got == baseline {
 			break
 		} else if time.Now().After(deadline) {
 			t.Fatalf("ordinary reap ledger=%+v want %+v", got, baseline)

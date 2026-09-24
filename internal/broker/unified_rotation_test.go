@@ -822,22 +822,22 @@ func TestUnifiedRotationCapacityRefusesBeforeObserverCommand(t *testing.T) {
 }
 
 func TestUnifiedRotationConsumesRefusedPostSealAbort(t *testing.T) {
-	fixture := newP2AFixture(t)
+	fixture := newRotationFixture(t)
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.reviewBootstrap(txn)
+	fixture.writeBootstrap(txn)
 	if err := txn.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	fixture.reviewSeal(t)
+	fixture.sealPredecessor(t)
 	txn.markSealed()
 	rotation := &unifiedDevRotation{registryT: txn}
 	if rotation.abortRegistry() {
-		t.Fatal("P2b treated a refused post-seal Abort as rollback success")
+		t.Fatal("rotation flow treated a refused post-seal Abort as rollback success")
 	}
 	if rotation.registryT != txn || txn.settled {
 		t.Fatalf("refused Abort discarded registry ownership: txn=%v settled=%v", rotation.registryT == txn, txn.settled)

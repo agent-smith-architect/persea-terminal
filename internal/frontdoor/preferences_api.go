@@ -93,7 +93,7 @@ func parsePreferencesIfMatch(r *http.Request) (uint64, bool) {
 	return n, true
 }
 
-// font_size is a tri-state on the wire (ruling J-UX-9): a number is the
+// font_size is a tri-state on the wire: a number is the
 // operator's explicit size, JSON null is "auto", and an absent key is neither —
 // a PUT states the whole record, so a missing field is a malformed request, as
 // it has always been. A *int cannot tell "absent" from "null" (both decode to

@@ -28,7 +28,7 @@ func (w *workspaceListInterleavingRecorder) Header() http.Header {
 	return w.ResponseRecorder.Header()
 }
 
-// The first W2 integration falsifier is deliberately existing-seam only: the
+// The first W2 integration regression test is deliberately existing-seam only: the
 // secured front handler currently has no durable-workspace route, so the
 // natural baseline is 404. The product contract makes an unconfigured store a
 // typed, no-store 503 instead of omitting the route or serving an ephemeral

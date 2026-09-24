@@ -53,7 +53,7 @@ type sessionBirthCreator interface {
 // would make this a remote execution service rather than a terminal attachment.
 //
 // Uniqueness is left to tmux. The creation command below omits -A, so tmux fails
-// when the name is taken; there is deliberately no existence pre-check, which
+// when the name is taken; there is deliberately no existence precheck, which
 // would be a time-of-check to time-of-use race and strictly weaker than the
 // atomic failure tmux already gives us.
 func (s *Server) create(writer *lockedWriter, ctrl proto.Control) {

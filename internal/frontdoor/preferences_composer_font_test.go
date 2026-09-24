@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// C1 (UX-9): the composer's face is an operator preference. Unlike the terminal
+// the composer's face is an operator preference. Unlike the terminal
 // font it is a PLAIN NUMBER with a default, not a tri-state — the composer has
 // no auto-fit to hand the decision back to, so "auto" would mean nothing.
 //
@@ -19,11 +19,11 @@ import (
 //
 //   - forward: a record written before the field existed carries no key at all
 //     and must read as the default, not as a zero the range check then rejects;
-//   - backward: a release older than UX-9 loads this file with
+//   - backward: a release without configurable font sizes loads this file with
 //     DisallowUnknownFields, so the new key makes it reject the WHOLE store —
 //     which is what deploy/preferences-store-downgrade.sh now repairs.
 
-// preComposerFontEntry is the record shape as of 436f99e: the J-UX-9 font
+// preComposerFontEntry is the record shape before configurable composer fonts: the nullable terminal font
 // tri-state, and no composer face. loadPreComposerFontStore is that release's
 // load path, including the strict decode that is the whole hazard.
 type preComposerFontEntry struct {
@@ -239,7 +239,7 @@ func TestPreferencesStoreDowngradeStripsComposerFont(t *testing.T) {
 	}
 	// And the older-still release, whose font clause is not a tri-state.
 	if err := loadLegacyPreferencesStore(downgraded); err != nil {
-		t.Fatalf("a pre-J-UX-9 release rejects the downgraded store: %v", err)
+		t.Fatalf("a release without configurable fonts rejects the downgraded store: %v", err)
 	}
 
 	// Rolling forward: this release reads the repaired file, and the operators

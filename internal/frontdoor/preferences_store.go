@@ -11,7 +11,7 @@ import (
 	"unicode/utf8"
 )
 
-// Operator preferences (design packet §5b): one closed record per ingress
+// Operator preferences: one closed record per ingress
 // operator login, persisted with the alias store's durability contract.
 
 const preferencesStoreVersion = 1
@@ -58,7 +58,7 @@ type DefaultSession struct {
 
 // Preferences is the closed operator-visible schema (version 1).
 //
-// FontSize is a tri-state (ruling J-UX-9): a nil pointer is "auto" — the page
+// FontSize is a tri-state: a nil pointer is "auto" — the page
 // fits the font to the viewport — and a non-nil pointer is the operator's
 // explicit size in the 9…24 range, which overrides the fit on every load and
 // reattach. The distinction is carried by the pointer, never by a sentinel:
@@ -81,7 +81,7 @@ type PreferenceRecord struct {
 }
 
 // preferenceEntry is the persisted shape. FontSize keeps the wire's tri-state:
-// a record written before J-UX-9 holds a JSON number and decodes into a non-nil
+// an older record holds a JSON number and decodes into a non-nil
 // pointer — an explicit size, exactly what its operator chose — while "auto" is
 // written and read as JSON null. The file's shape is unchanged for every record
 // that already exists, so there is no migration.
@@ -116,8 +116,8 @@ type preferencesStore struct {
 
 // defaultPreferences is what an operator with nothing stored reads: the default
 // theme and "auto" font. A default font *number* would be indistinguishable
-// from the same number chosen deliberately, which is precisely the ambiguity
-// J-UX-9 forbids.
+// from the same number chosen deliberately. The nullable field preserves that
+// distinction.
 func defaultPreferences() PreferenceRecord {
 	return PreferenceRecord{Preferences: Preferences{Version: preferencesStoreVersion, Theme: preferenceDefaultTheme, ComposerFontSize: preferenceDefaultComposerFontSize}}
 }

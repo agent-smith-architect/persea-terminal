@@ -1,19 +1,16 @@
 package unifiedjournal
 
-// Re-adjudication 2 experiments for eec5fa1 "Arm rotation rollback after the
-// boundary". Review-only.
-
 import (
 	"errors"
 	"testing"
 )
 
-// T5 — FINDING candidate. Armed rollback credit must stay BACKED by the
+// Armed rollback credit must stay backed by the
 // reservation until it is consumed or settled (packet 4R: "R1 guarantees
 // both the capacity and the record count"). If arming releases the global
 // reservation, a competitor can take the room and the replay then overdraws
 // the realm caps — logical and physical.
-func TestReviewArmedRollbackCreditStaysBackedByReservation(t *testing.T) {
+func TestRotationArmedRollbackCreditStaysBackedByReservation(t *testing.T) {
 	options := rotationOptions(t)
 	options.CompletePaneSlots = 3
 	const filled = 7 << 20
@@ -24,9 +21,9 @@ func TestReviewArmedRollbackCreditStaysBackedByReservation(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer realm.Close()
-	predecessor := rotationKey("$review-backed", 1)
-	successor := rotationKey("$review-backed", 2)
-	competitor := rotationKey("$review-backed-competitor", 1)
+	predecessor := rotationKey("$rotation-backed", 1)
+	successor := rotationKey("$rotation-backed", 2)
+	competitor := rotationKey("$rotation-backed-competitor", 1)
 	admitRotationPredecessor(t, realm, predecessor)
 	admitRotationPredecessor(t, realm, competitor)
 	if _, err := realm.Append(predecessor, make([]byte, filled)); err != nil {
@@ -53,14 +50,14 @@ func TestReviewArmedRollbackCreditStaysBackedByReservation(t *testing.T) {
 	_, replayErr := realm.Append(predecessor, make([]byte, RotationPendingCapBytes))
 	capacity.Release()
 	if realm.total > options.RealmCapBytes {
-		t.Fatalf("FINDING: realm logical ledger overdrawn: total=%d cap=%d (replay err=%v, competitor took %d)", realm.total, options.RealmCapBytes, replayErr, room)
+		t.Fatalf("realm logical ledger overdrawn: total=%d cap=%d (replay err=%v, competitor took %d)", realm.total, options.RealmCapBytes, replayErr, room)
 	}
 	if replayErr != nil {
-		t.Fatalf("FINDING: backed rollback replay refused: %v", replayErr)
+		t.Fatalf("backed rollback replay refused: %v", replayErr)
 	}
 }
 
-func TestReviewArmedRollbackCreditStaysBackedPhysically(t *testing.T) {
+func TestRotationArmedRollbackCreditStaysBackedPhysically(t *testing.T) {
 	options := rotationOptions(t)
 	options.CompletePaneSlots = 3
 	options.PhysicalCapBytes = 8 << 20
@@ -69,9 +66,9 @@ func TestReviewArmedRollbackCreditStaysBackedPhysically(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer realm.Close()
-	predecessor := rotationKey("$review-backed-phys", 1)
-	successor := rotationKey("$review-backed-phys", 2)
-	competitor := rotationKey("$review-backed-phys-competitor", 1)
+	predecessor := rotationKey("$rotation-backed-phys", 1)
+	successor := rotationKey("$rotation-backed-phys", 2)
+	competitor := rotationKey("$rotation-backed-phys-competitor", 1)
 	admitRotationPredecessor(t, realm, predecessor)
 	admitRotationPredecessor(t, realm, competitor)
 	capacity, err := realm.BeginRotationCapacity(predecessor)
@@ -94,18 +91,17 @@ func TestReviewArmedRollbackCreditStaysBackedPhysically(t *testing.T) {
 	_, replayErr := realm.Append(predecessor, make([]byte, RotationPendingCapBytes))
 	capacity.Release()
 	if charged, _, cap := realm.PhysicalBudget(); charged > cap {
-		t.Fatalf("FINDING: realm physical ledger overdrawn: charged=%d cap=%d (replay err=%v)", charged, cap, replayErr)
+		t.Fatalf("realm physical ledger overdrawn: charged=%d cap=%d (replay err=%v)", charged, cap, replayErr)
 	}
 	if replayErr != nil {
-		t.Fatalf("FINDING: backed rollback replay refused: %v", replayErr)
+		t.Fatalf("backed rollback replay refused: %v", replayErr)
 	}
 }
 
-// E1b' — amended falsifier (replaces the adopted E1b's over-permissive
-// expectation that a competitor may take R1's room after Abort). The
+// After Abort, rollback credit remains reserved. The
 // competitor may take exactly the non-R1 room; the replay then succeeds and
 // the realm stays within its cap.
-func TestReviewR1SurvivesAbortAndCompetitorTakesOnlyNonR1Room(t *testing.T) {
+func TestRotationR1SurvivesAbortAndCompetitorTakesOnlyNonR1Room(t *testing.T) {
 	options := rotationOptions(t)
 	options.CompletePaneSlots = 4
 	const filled = 7 << 20
@@ -115,10 +111,10 @@ func TestReviewR1SurvivesAbortAndCompetitorTakesOnlyNonR1Room(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer realm.Close()
-	predecessor := rotationKey("$review-r1-abort2", 1)
-	successor := rotationKey("$review-r1-abort2", 2)
-	control := rotationKey("$review-control2", 1)
-	competitor := rotationKey("$review-competitor2", 1)
+	predecessor := rotationKey("$rotation-r1-abort2", 1)
+	successor := rotationKey("$rotation-r1-abort2", 2)
+	control := rotationKey("$rotation-control2", 1)
+	competitor := rotationKey("$rotation-competitor2", 1)
 	admitRotationPredecessor(t, realm, predecessor)
 	admitRotationPredecessor(t, realm, control)
 	admitRotationPredecessor(t, realm, competitor)
@@ -142,7 +138,7 @@ func TestReviewR1SurvivesAbortAndCompetitorTakesOnlyNonR1Room(t *testing.T) {
 		t.Fatalf("competitor append of the non-R1 room: %v", err)
 	}
 	if _, err := realm.Append(competitor, []byte{1}); !errors.Is(err, ErrQuota) {
-		t.Fatalf("FINDING: competitor entered R1's room after Abort: %v", err)
+		t.Fatalf("competitor entered R1's room after Abort: %v", err)
 	}
 	if _, err := realm.Append(predecessor, make([]byte, RotationPendingCapBytes)); err != nil {
 		t.Fatalf("rollback replay refused: %v", err)
@@ -157,16 +153,16 @@ func TestReviewR1SurvivesAbortAndCompetitorTakesOnlyNonR1Room(t *testing.T) {
 // materialization (Abort arms instead); pre-materialization arm then Release
 // settles everything; a held-but-unarmed capacity cannot be armed by a stale
 // object after Release.
-func TestReviewArmRollbackDiscipline(t *testing.T) {
+func TestRotationArmRollbackDiscipline(t *testing.T) {
 	options := rotationOptions(t)
 	realm, err := openRealm(options, realJournalOps())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer realm.Close()
-	predecessor := rotationKey("$review-arm", 1)
+	predecessor := rotationKey("$rotation-arm", 1)
 	admitRotationPredecessor(t, realm, predecessor)
-	baseSlots, baseLogical, basePhysical := reviewLedger(realm)
+	baseSlots, baseLogical, basePhysical := rotationLedger(realm)
 	capacity, err := realm.BeginRotationCapacity(predecessor)
 	if err != nil {
 		t.Fatal(err)
@@ -177,7 +173,7 @@ func TestReviewArmRollbackDiscipline(t *testing.T) {
 	if err := capacity.ArmRollback(); err != nil {
 		t.Fatalf("second arm: %v", err)
 	}
-	if _, err := realm.BeginRotatedPane(rotationKey("$review-arm", 2), Geometry{Columns: 80, Rows: 24}, capacity); !errors.Is(err, ErrInvalidated) {
+	if _, err := realm.BeginRotatedPane(rotationKey("$rotation-arm", 2), Geometry{Columns: 80, Rows: 24}, capacity); !errors.Is(err, ErrInvalidated) {
 		t.Fatalf("materialized after arm: %v", err)
 	}
 	if _, err := realm.Append(predecessor, make([]byte, RotationPendingCapBytes/2)); err != nil {
@@ -187,7 +183,7 @@ func TestReviewArmRollbackDiscipline(t *testing.T) {
 	if err := capacity.ArmRollback(); !errors.Is(err, ErrInvalidated) {
 		t.Fatalf("stale arm after release: %v", err)
 	}
-	slots, logical, physical := reviewLedger(realm)
+	slots, logical, physical := rotationLedger(realm)
 	pane := realm.panes[predecessor]
 	if slots != baseSlots || logical != baseLogical || physical != basePhysical || pane.rotationCapacityHeld || pane.rotationRollbackArmed || pane.reservedCharge != 0 || pane.physicalReserved != 0 {
 		t.Fatalf("arm+release drift: slots=%d/%d logical=%d/%d physical=%d/%d pane=%#v", slots, baseSlots, logical, baseLogical, physical, basePhysical, pane)
@@ -196,7 +192,7 @@ func TestReviewArmRollbackDiscipline(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reservation, err := realm.BeginRotatedPane(rotationKey("$review-arm", 3), Geometry{Columns: 80, Rows: 24}, capacity)
+	reservation, err := realm.BeginRotatedPane(rotationKey("$rotation-arm", 3), Geometry{Columns: 80, Rows: 24}, capacity)
 	if err != nil {
 		t.Fatal(err)
 	}

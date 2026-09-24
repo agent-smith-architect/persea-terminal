@@ -7,21 +7,21 @@ import (
 	"testing"
 )
 
-func TestM11LiveFixF2StartupOrphanRecoveryPersistentRoot(t *testing.T) {
+func TestSourceStartupOrphanRecoveryPersistentRoot(t *testing.T) {
 	options := rotationOptions(t)
 	options.CompletePaneSlots = 8
 	seed, err := openRealm(options, realJournalOps())
 	if err != nil {
 		t.Fatal(err)
 	}
-	live := rotationKey("$m11pr1dbe1-live", 1)
-	absent := rotationKey("$m11pr1dbe1-absent", 1)
-	stale := rotationKey("$m11pr1dbe1-live", 2)
+	live := rotationKey("$startup-recovery-live", 1)
+	absent := rotationKey("$startup-recovery-absent", 1)
+	stale := rotationKey("$startup-recovery-live", 2)
 	stale.Incarnation = "different-incarnation"
-	ambiguous := rotationKey("$m11pr1dbe1-other", 1)
+	ambiguous := rotationKey("$startup-recovery-other", 1)
 	for _, key := range []PaneKey{live, absent, stale, ambiguous} {
 		admitRotationPredecessor(t, seed, key)
-		appendCommittedOutput(t, seed, key, []byte("m11pr1dbe1 persistent recovery shape"))
+		appendCommittedOutput(t, seed, key, []byte("startup-recovery persistent recovery shape"))
 	}
 	livePath := storagePathsForTest(options, live).Journal
 	liveBytes, err := os.ReadFile(livePath)
@@ -182,7 +182,7 @@ func TestTerminalRetirementRetainsEIOChargeAndRetriesToProof(t *testing.T) {
 	}
 }
 
-func TestM11D6StartupRecoveryLedgerRetains1294ByteResidueUntilProof(t *testing.T) {
+func TestSourceStartupRecoveryLedgerRetains1294ByteResidueUntilProof(t *testing.T) {
 	options := rotationOptions(t)
 	options.CompletePaneSlots = 2
 	seed, err := openRealm(options, realJournalOps())

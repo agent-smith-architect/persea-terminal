@@ -1,10 +1,5 @@
 package broker
 
-// Provenance: Fable adversarial adjudication of M11 P2a candidate 03ec589
-// (docs: 2026-08-27_p2a_adjudication.md). These are acceptance regressions
-// for the registry rotation transaction. They reuse the builder's p2aFixture
-// and may be adopted byte-identically.
-
 import (
 	"bytes"
 	"errors"
@@ -19,9 +14,9 @@ import (
 	"persea-terminal/internal/unifiedjournal"
 )
 
-// p2aReviewAccounting is the residue fingerprint a rotation transaction must
+// rotationAccounting is the residue fingerprint a rotation transaction must
 // leave untouched after Abort or refusal.
-type p2aReviewAccounting struct {
+type rotationAccounting struct {
 	generations         int
 	pUsed, qUsed        int
 	rotations           int
@@ -32,9 +27,9 @@ type p2aReviewAccounting struct {
 	panes               int
 }
 
-func (fixture *p2aFixture) reviewAccounting() p2aReviewAccounting {
+func (fixture *rotationFixture) rotationAccounting() rotationAccounting {
 	fixture.t.Helper()
-	var out p2aReviewAccounting
+	var out rotationAccounting
 	fixture.registry.mu.Lock()
 	out.rotations = len(fixture.registry.rotations)
 	out.rotationGenerations = len(fixture.registry.rotationGenerations)
@@ -51,11 +46,11 @@ func (fixture *p2aFixture) reviewAccounting() p2aReviewAccounting {
 	return out
 }
 
-func (fixture *p2aFixture) waitReviewAccounting(want p2aReviewAccounting) p2aReviewAccounting {
+func (fixture *rotationFixture) waitRotationAccounting(want rotationAccounting) rotationAccounting {
 	fixture.t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		got := fixture.reviewAccounting()
+		got := fixture.rotationAccounting()
 		if got == want || time.Now().After(deadline) {
 			return got
 		}
@@ -63,7 +58,7 @@ func (fixture *p2aFixture) waitReviewAccounting(want p2aReviewAccounting) p2aRev
 	}
 }
 
-func (fixture *p2aFixture) reviewAdmit(witness controlmode.PaneWitness) {
+func (fixture *rotationFixture) admitRotationPane(witness controlmode.PaneWitness) {
 	fixture.t.Helper()
 	base := fixture.effects.UnifiedDevPaneEffects
 	reserveRecordingSourceForTest(fixture.t, base, journalKey(witness))
@@ -79,7 +74,7 @@ func (fixture *p2aFixture) reviewAdmit(witness controlmode.PaneWitness) {
 	commitRecordingInitialForTest(fixture.t, fixture.registry, witness, nil)
 }
 
-func (fixture *p2aFixture) reviewSuccessorGeneration(next controlmode.PaneWitness) (present, admitted bool, refs int) {
+func (fixture *rotationFixture) successorGeneration(next controlmode.PaneWitness) (present, admitted bool, refs int) {
 	fixture.t.Helper()
 	fixture.registry.retention.mu.Lock()
 	defer fixture.registry.retention.mu.Unlock()
@@ -93,13 +88,13 @@ func (fixture *p2aFixture) reviewSuccessorGeneration(next controlmode.PaneWitnes
 // F14: a post-Validate inconsistency must fault the successor and reap the
 // unit. It must not trip the realm-wide breaker, which would destroy every
 // other session's admission and refuse re-adoption of this one.
-func TestP2AReviewFatalCommitDoesNotTripRealmBreaker(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationFatalCommitDoesNotTripRealmBreaker(t *testing.T) {
+	fixture := newRotationFixture(t)
 	other := controlmode.PaneWitness{
-		Session: controlmode.SessionWitness{Server: "main", Session: "$p2a-other", ControlGeneration: 1},
+		Session: controlmode.SessionWitness{Server: "main", Session: "$rotation-other", ControlGeneration: 1},
 		Window:  "@other", Pane: "%other", Incarnation: "2000,1,0",
 	}
-	fixture.reviewAdmit(other)
+	fixture.admitRotationPane(other)
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
@@ -121,7 +116,7 @@ func TestP2AReviewFatalCommitDoesNotTripRealmBreaker(t *testing.T) {
 	fixture.registry.retention.mu.Unlock()
 	txn.Commit()
 
-	after := fixture.reviewAccounting()
+	after := fixture.rotationAccounting()
 	fixture.registry.mu.Lock()
 	_, otherAdmitted := fixture.registry.admitted[routeCoordinateKey(other)]
 	fixture.registry.mu.Unlock()
@@ -144,12 +139,12 @@ func TestP2AReviewFatalCommitDoesNotTripRealmBreaker(t *testing.T) {
 // cannot be rotated one pane at a time: the transaction must refuse, or the
 // sibling must remain routable after Commit. It must never leave the sibling
 // admitted-but-unroutable.
-func TestP2AReviewRotationRefusesOrCarriesSiblingPane(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationRotationRefusesOrCarriesSiblingPane(t *testing.T) {
+	fixture := newRotationFixture(t)
 	sibling := fixture.previous
-	sibling.Pane = "%p2a-sibling"
+	sibling.Pane = "%rotation-sibling"
 	sibling.Incarnation = "1001,1,0"
-	fixture.reviewAdmit(sibling)
+	fixture.admitRotationPane(sibling)
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
@@ -203,9 +198,9 @@ func TestP2AReviewRotationRefusesOrCarriesSiblingPane(t *testing.T) {
 // Begin must reject every shape that is not "differs only in
 // ControlGeneration", every predecessor that is not the live admitted
 // witness, and an already-admitted successor route — all without residue.
-func TestP2AReviewBeginRejectsEveryNonRotationShapeWithoutResidue(t *testing.T) {
-	fixture := newP2AFixture(t)
-	before := fixture.reviewAccounting()
+func TestRotationBeginRejectsEveryNonRotationShapeWithoutResidue(t *testing.T) {
+	fixture := newRotationFixture(t)
+	before := fixture.rotationAccounting()
 	shapes := map[string]func(*controlmode.PaneWitness){
 		"same_generation":       func(*controlmode.PaneWitness) {},
 		"window":                func(w *controlmode.PaneWitness) { w.Window = "@drift" },
@@ -226,7 +221,7 @@ func TestP2AReviewBeginRejectsEveryNonRotationShapeWithoutResidue(t *testing.T) 
 		if txn != nil || !errors.Is(err, ErrPaneRotationInvalid) {
 			t.Fatalf("shape %s: txn=%v err=%v", name, txn, err)
 		}
-		if after := fixture.reviewAccounting(); after != before {
+		if after := fixture.rotationAccounting(); after != before {
 			t.Fatalf("shape %s left residue: before=%+v after=%+v", name, before, after)
 		}
 	}
@@ -237,24 +232,24 @@ func TestP2AReviewBeginRejectsEveryNonRotationShapeWithoutResidue(t *testing.T) 
 	if txn, err := fixture.registry.BeginPaneRotation(stranger, strangerNext); txn != nil || !errors.Is(err, ErrPaneRotationInvalid) {
 		t.Fatalf("unadmitted predecessor: txn=%v err=%v", txn, err)
 	}
-	if after := fixture.reviewAccounting(); after != before {
+	if after := fixture.rotationAccounting(); after != before {
 		t.Fatalf("unadmitted predecessor left residue: before=%+v after=%+v", before, after)
 	}
 	if txn, err := fixture.registry.BeginPaneRotation(fixture.next(2), fixture.next(3)); txn != nil || !errors.Is(err, ErrPaneRotationInvalid) {
 		t.Fatalf("unadmitted generation as predecessor: txn=%v err=%v", txn, err)
 	}
-	if after := fixture.reviewAccounting(); after != before {
+	if after := fixture.rotationAccounting(); after != before {
 		t.Fatalf("unadmitted generation left residue: before=%+v after=%+v", before, after)
 	}
 
 	// An already-admitted successor route is never a rotation target.
 	next := fixture.next(2)
-	fixture.reviewAdmit(next)
-	afterAdmit := fixture.reviewAccounting()
+	fixture.admitRotationPane(next)
+	afterAdmit := fixture.rotationAccounting()
 	if txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next); txn != nil || !errors.Is(err, ErrPaneRotationInvalid) {
 		t.Fatalf("admitted successor: txn=%v err=%v", txn, err)
 	}
-	if after := fixture.reviewAccounting(); after != afterAdmit {
+	if after := fixture.rotationAccounting(); after != afterAdmit {
 		t.Fatalf("admitted successor left residue: before=%+v after=%+v", afterAdmit, after)
 	}
 }
@@ -262,15 +257,15 @@ func TestP2AReviewBeginRejectsEveryNonRotationShapeWithoutResidue(t *testing.T) 
 // Validate is the only fallible step; it must actually fail on every
 // condition Commit would otherwise install over: a dead unit, a drifted
 // witness set, a moved active key, and a bootstrap that was never written.
-func TestP2AReviewValidateRefusesDeadUnitDriftedWitnessAndMissingBootstrap(t *testing.T) {
-	cases := map[string]func(*p2aFixture, *paneRotationTxn){
-		"missing_bootstrap": func(*p2aFixture, *paneRotationTxn) {},
-		"unit_death": func(fixture *p2aFixture, txn *paneRotationTxn) {
-			fixture.reviewBootstrap(txn)
+func TestRotationValidateRefusesDeadUnitDriftedWitnessAndMissingBootstrap(t *testing.T) {
+	cases := map[string]func(*rotationFixture, *paneRotationTxn){
+		"missing_bootstrap": func(*rotationFixture, *paneRotationTxn) {},
+		"unit_death": func(fixture *rotationFixture, txn *paneRotationTxn) {
+			fixture.writeBootstrap(txn)
 			close(fixture.unit.done)
 		},
-		"witness_drift": func(fixture *p2aFixture, txn *paneRotationTxn) {
-			fixture.reviewBootstrap(txn)
+		"witness_drift": func(fixture *rotationFixture, txn *paneRotationTxn) {
+			fixture.writeBootstrap(txn)
 			extra := fixture.previous
 			extra.Pane = "%adopted-later"
 			base := fixture.effects.UnifiedDevPaneEffects
@@ -278,15 +273,15 @@ func TestP2AReviewValidateRefusesDeadUnitDriftedWitnessAndMissingBootstrap(t *te
 			fixture.unit.witnesses = append(fixture.unit.witnesses, extra)
 			base.mu.Unlock()
 		},
-		"active_key_drift": func(fixture *p2aFixture, txn *paneRotationTxn) {
-			fixture.reviewBootstrap(txn)
+		"active_key_drift": func(fixture *rotationFixture, txn *paneRotationTxn) {
+			fixture.writeBootstrap(txn)
 			base := fixture.effects.UnifiedDevPaneEffects
 			base.mu.Lock()
 			base.active[fixture.unit.sessionID] = journalKey(fixture.next(99))
 			base.mu.Unlock()
 		},
-		"unit_replaced": func(fixture *p2aFixture, txn *paneRotationTxn) {
-			fixture.reviewBootstrap(txn)
+		"unit_replaced": func(fixture *rotationFixture, txn *paneRotationTxn) {
+			fixture.writeBootstrap(txn)
 			base := fixture.effects.UnifiedDevPaneEffects
 			base.mu.Lock()
 			base.units[fixture.unit.sessionID] = &unifiedDevUnit{owner: base, sessionID: fixture.unit.sessionID, done: make(chan struct{})}
@@ -295,8 +290,8 @@ func TestP2AReviewValidateRefusesDeadUnitDriftedWitnessAndMissingBootstrap(t *te
 	}
 	for name, arrange := range cases {
 		t.Run(name, func(t *testing.T) {
-			fixture := newP2AFixture(t)
-			before := fixture.reviewAccounting()
+			fixture := newRotationFixture(t)
+			before := fixture.rotationAccounting()
 			witnessesBefore := append([]controlmode.PaneWitness(nil), fixture.unit.witnesses...)
 			next := fixture.next(2)
 			reservation := fixture.materialize(next)
@@ -329,7 +324,7 @@ func TestP2AReviewValidateRefusesDeadUnitDriftedWitnessAndMissingBootstrap(t *te
 				t.Fatalf("unit.witnesses changed: %#v", fixture.unit.witnesses)
 			}
 			fixture.unit.witnesses = witnessesBefore
-			after := fixture.waitReviewAccounting(before)
+			after := fixture.waitRotationAccounting(before)
 			if after != before {
 				t.Fatalf("residue after refused Validate + Abort: before=%+v after=%+v", before, after)
 			}
@@ -337,9 +332,9 @@ func TestP2AReviewValidateRefusesDeadUnitDriftedWitnessAndMissingBootstrap(t *te
 	}
 }
 
-func (fixture *p2aFixture) reviewBootstrap(txn *paneRotationTxn) {
+func (fixture *rotationFixture) writeBootstrap(txn *paneRotationTxn) {
 	fixture.t.Helper()
-	if err := txn.WriteBootstrap([]byte("review-bootstrap")); err != nil {
+	if err := txn.WriteBootstrap([]byte("rotation-bootstrap")); err != nil {
 		fixture.t.Fatal(err)
 	}
 	if err := fixture.boundary(txn.next); err != nil {
@@ -353,11 +348,11 @@ func (fixture *p2aFixture) reviewBootstrap(txn *paneRotationTxn) {
 // while the bootstrap write still holds a reference on the successor
 // generation; the generation must still be released once that reference
 // drops, or every such abort leaks a pane slot.
-func TestP2AReviewAbortLeavesZeroResidueAtEveryStage(t *testing.T) {
+func TestRotationAbortLeavesZeroResidueAtEveryStage(t *testing.T) {
 	for _, stage := range []string{"begin", "bootstrap_in_flight", "bootstrap_durable", "validated"} {
 		t.Run(stage, func(t *testing.T) {
-			fixture := newP2AFixture(t)
-			before := fixture.reviewAccounting()
+			fixture := newRotationFixture(t)
+			before := fixture.rotationAccounting()
 			next := fixture.next(2)
 			reservation := fixture.materialize(next)
 			txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
@@ -382,7 +377,7 @@ func TestP2AReviewAbortLeavesZeroResidueAtEveryStage(t *testing.T) {
 				}
 				deadline := time.Now().Add(2 * time.Second)
 				for {
-					if _, _, refs := fixture.reviewSuccessorGeneration(next); refs > 0 {
+					if _, _, refs := fixture.successorGeneration(next); refs > 0 {
 						break
 					}
 					if time.Now().After(deadline) {
@@ -391,9 +386,9 @@ func TestP2AReviewAbortLeavesZeroResidueAtEveryStage(t *testing.T) {
 					time.Sleep(time.Millisecond)
 				}
 			case "bootstrap_durable":
-				fixture.reviewBootstrap(txn)
+				fixture.writeBootstrap(txn)
 			case "validated":
-				fixture.reviewBootstrap(txn)
+				fixture.writeBootstrap(txn)
 				if err := txn.Validate(); err != nil {
 					t.Fatal(err)
 				}
@@ -409,7 +404,7 @@ func TestP2AReviewAbortLeavesZeroResidueAtEveryStage(t *testing.T) {
 			fixture.waitSuccessorQuiescent(next)
 			deadline := time.Now().Add(2 * time.Second)
 			for {
-				present, _, _ := fixture.reviewSuccessorGeneration(next)
+				present, _, _ := fixture.successorGeneration(next)
 				if !present {
 					break
 				}
@@ -418,7 +413,7 @@ func TestP2AReviewAbortLeavesZeroResidueAtEveryStage(t *testing.T) {
 				}
 				time.Sleep(time.Millisecond)
 			}
-			after := fixture.reviewAccounting()
+			after := fixture.rotationAccounting()
 			if after != before {
 				t.Fatalf("stage %s residue: before=%+v after=%+v", stage, before, after)
 			}
@@ -431,8 +426,8 @@ func TestP2AReviewAbortLeavesZeroResidueAtEveryStage(t *testing.T) {
 // Settlement semantics: one bootstrap per transaction, Busy after settle,
 // Commit marks the successor generation admitted, ownership is released, and
 // a settled transaction is inert on every later call.
-func TestP2AReviewSettleSemanticsAndSuccessorAdmission(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationSettleSemanticsAndSuccessorAdmission(t *testing.T) {
+	fixture := newRotationFixture(t)
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
@@ -456,11 +451,11 @@ func TestP2AReviewSettleSemanticsAndSuccessorAdmission(t *testing.T) {
 	reservation.Commit()
 	fixture.effects.journalMu.Unlock()
 
-	present, admitted, _ := fixture.reviewSuccessorGeneration(next)
+	present, admitted, _ := fixture.successorGeneration(next)
 	if !present || !admitted {
 		t.Fatalf("commit did not mark the successor generation admitted: present=%v admitted=%v", present, admitted)
 	}
-	after := fixture.reviewAccounting()
+	after := fixture.rotationAccounting()
 	if after.rotations != 0 || after.rotationGenerations != 0 {
 		t.Fatalf("commit left transaction ownership: %+v", after)
 	}
@@ -472,7 +467,7 @@ func TestP2AReviewSettleSemanticsAndSuccessorAdmission(t *testing.T) {
 	}
 	txn.Commit()
 	txn.Abort()
-	if again := fixture.reviewAccounting(); again != after {
+	if again := fixture.rotationAccounting(); again != after {
 		t.Fatalf("settled transaction mutated state: before=%+v after=%+v", after, again)
 	}
 	fixture.registry.mu.Lock()
@@ -504,9 +499,9 @@ func TestP2AReviewSettleSemanticsAndSuccessorAdmission(t *testing.T) {
 
 // Concurrent Begins for one predecessor admit exactly one transaction, and
 // every loser leaves no provisional generation, ownership, or accounting.
-func TestP2AReviewConcurrentBeginsAdmitExactlyOne(t *testing.T) {
-	fixture := newP2AFixture(t)
-	before := fixture.reviewAccounting()
+func TestRotationConcurrentBeginsAdmitExactlyOne(t *testing.T) {
+	fixture := newRotationFixture(t)
+	before := fixture.rotationAccounting()
 	const fanout = 6
 	for round := 0; round < 12; round++ {
 		nexts := make([]controlmode.PaneWitness, fanout)
@@ -543,7 +538,7 @@ func TestP2AReviewConcurrentBeginsAdmitExactlyOne(t *testing.T) {
 		if winners != 1 {
 			t.Fatalf("round %d: %d concurrent transactions admitted, want exactly 1", round, winners)
 		}
-		during := fixture.reviewAccounting()
+		during := fixture.rotationAccounting()
 		if during.rotations != 1 || during.rotationGenerations != 1 || during.generations != before.generations+1 || during.pUsed != before.pUsed+1 {
 			t.Fatalf("round %d: losers left residue while the winner was open: %+v (baseline %+v)", round, during, before)
 		}
@@ -552,7 +547,7 @@ func TestP2AReviewConcurrentBeginsAdmitExactlyOne(t *testing.T) {
 				txns[index].Abort()
 			}
 		}
-		if after := fixture.reviewAccounting(); after != before {
+		if after := fixture.rotationAccounting(); after != before {
 			t.Fatalf("round %d residue: before=%+v after=%+v", round, before, after)
 		}
 	}
@@ -565,13 +560,13 @@ func TestP2AReviewConcurrentBeginsAdmitExactlyOne(t *testing.T) {
 // observes the successor before Commit; the coordinator pointer never
 // changes; every predecessor byte accepted before Commit is journaled to the
 // predecessor; the successor accepts output only after Commit.
-func TestP2AReviewLivePathsAcrossTransactionUnderRace(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationLivePathsAcrossTransactionUnderRace(t *testing.T) {
+	fixture := newRotationFixture(t)
 	other := controlmode.PaneWitness{
-		Session: controlmode.SessionWitness{Server: "main", Session: "$p2a-race-other", ControlGeneration: 1},
+		Session: controlmode.SessionWitness{Server: "main", Session: "$rotation-race-other", ControlGeneration: 1},
 		Window:  "@race", Pane: "%race", Incarnation: "3000,1,0",
 	}
-	fixture.reviewAdmit(other)
+	fixture.admitRotationPane(other)
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
@@ -728,20 +723,20 @@ func TestP2AReviewLivePathsAcrossTransactionUnderRace(t *testing.T) {
 	}
 }
 
-// Seam pin for P2b: a successor-witness observation that reaches the
+// Seam pin for rotation flow: a successor-witness observation that reaches the
 // registry BEFORE Commit is never journaled to the successor, and the
 // transaction can no longer commit (Validate refuses). This is why the
 // rotation flow must buffer post-boundary bytes until after Commit.
-func TestP2AReviewPreCommitSuccessorObservationNeverReachesSuccessorAndBlocksCommit(t *testing.T) {
-	fixture := newP2AFixture(t)
-	before := fixture.reviewAccounting()
+func TestRotationPreCommitSuccessorObservationNeverReachesSuccessorAndBlocksCommit(t *testing.T) {
+	fixture := newRotationFixture(t)
+	before := fixture.rotationAccounting()
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.reviewBootstrap(txn)
+	fixture.writeBootstrap(txn)
 	leakErr := fixture.registry.ObservePane(controlmode.Observation{
 		Kind: controlmode.ObservationOutput, Witness: next, Data: []byte("LEAK-BEFORE-COMMIT|"),
 	})
@@ -771,8 +766,8 @@ func TestP2AReviewPreCommitSuccessorObservationNeverReachesSuccessorAndBlocksCom
 	txn.Abort()
 	fixture.abortReservation(reservation)
 	fixture.waitSuccessorQuiescent(next)
-	after := fixture.reviewAccounting()
-	if present, _, _ := fixture.reviewSuccessorGeneration(next); present || after.rotations != 0 || after.rotationGenerations != 0 || after.pUsed != before.pUsed {
+	after := fixture.rotationAccounting()
+	if present, _, _ := fixture.successorGeneration(next); present || after.rotations != 0 || after.rotationGenerations != 0 || after.pUsed != before.pUsed {
 		t.Fatalf("successor residue after abort: present=%v before=%+v after=%+v", present, before, after)
 	}
 }

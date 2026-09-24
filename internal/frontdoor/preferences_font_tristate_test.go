@@ -11,7 +11,7 @@ import (
 	"testing"
 )
 
-// UX8-F1 (ruling J-UX-9): the operator record carries a font-size tri-state —
+// font-auto-preference: the operator record carries a font-size tri-state —
 // an explicit 9…24, or "auto". "Auto" is JSON null on the wire and on disk,
 // never a sentinel inside the range and never the absence of the key, so no
 // number is spent on it and "never chosen" is not "deliberately chose 14".
@@ -78,7 +78,7 @@ func TestPreferencesStoreFontSizeTriState(t *testing.T) {
 	}
 	// Nothing stored is "auto", not a number. A default number would be
 	// indistinguishable from the same number chosen on purpose, which is the
-	// ambiguity J-UX-9 forbids.
+	// ambiguity the nullable field prevents.
 	if got := f1FontRaw(t, s.get("operator@example.com")); got != "null" {
 		t.Fatalf("the default record's font_size is %s, want null", got)
 	}
@@ -130,7 +130,7 @@ func TestPreferencesStoreFontSizeTriState(t *testing.T) {
 	}
 }
 
-// A record written before J-UX-9 holds a JSON number. It must read back as an
+// A record written before nullable font support holds a JSON number. It must read back as an
 // explicit size — its operator chose it — with no migration step.
 func TestPreferencesStoreReadsPreTriStateRecord(t *testing.T) {
 	dir := shortTestDir(t)

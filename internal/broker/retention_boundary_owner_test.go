@@ -47,7 +47,7 @@ func TestRetentionBoundaryAbsentOrRetiredOwnerDoesNotAllocate(t *testing.T) {
 				name += "/blocking"
 			}
 			t.Run(name, func(t *testing.T) {
-				fixture := newP2AFixture(t)
+				fixture := newRotationFixture(t)
 				next := fixture.next(2)
 				if retired {
 					reservation := fixture.materialize(next)
@@ -85,7 +85,7 @@ func TestRetentionBoundaryAbsentOrRetiredOwnerDoesNotAllocate(t *testing.T) {
 }
 
 func TestRetentionBoundaryFaultBetweenRegistryCheckAndReserveDoesNotResurrect(t *testing.T) {
-	fixture := newP2AFixture(t)
+	fixture := newRotationFixture(t)
 	runtime := fixture.registry.retention
 	key := journalKey(fixture.previous)
 	entered, release := make(chan struct{}), make(chan struct{})
@@ -109,7 +109,7 @@ func TestRetentionBoundaryFaultBetweenRegistryCheckAndReserveDoesNotResurrect(t 
 	case <-time.After(2 * time.Second):
 		t.Fatal("boundary did not reach reservation")
 	}
-	winner, cleanup := runtime.classifyFault(key, "boundary_owner_test", errP2AInjected)
+	winner, cleanup := runtime.classifyFault(key, "boundary_owner_test", errRotationInjected)
 	if !winner || cleanup == nil {
 		t.Fatal("fault did not own cleanup")
 	}

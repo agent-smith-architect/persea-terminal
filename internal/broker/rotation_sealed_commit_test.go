@@ -1,9 +1,5 @@
 package broker
 
-// Provenance: Fable adversarial adjudication of M11 P2a candidate 03ec589
-// (docs: 2026-08-27_p2a_adjudication.md). Seam regression for the §3.3 step 7
-// order: 7-pre Validate → 7a seal the predecessor with retire → 7b Commit.
-
 import (
 	"testing"
 	"time"
@@ -17,8 +13,8 @@ import (
 // infallible after a green Validate and must therefore not re-require a live
 // predecessor generation; if it does, every real rotation takes the F14
 // fatal path.
-func TestP2AReviewCommitSucceedsAfterPredecessorSeal(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationCommitSucceedsAfterPredecessorSeal(t *testing.T) {
+	fixture := newRotationFixture(t)
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
@@ -34,7 +30,7 @@ func TestP2AReviewCommitSucceedsAfterPredecessorSeal(t *testing.T) {
 	if err := txn.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	// Step 7a, exactly as §3.3 specifies: seal the predecessor with retire,
+	// Seal the predecessor with retire,
 	// waiting while holding no locks.
 	sealed, err := fixture.registry.retention.startBoundary(journalKey(fixture.previous), "rotation_seal", true)
 	if err != nil {

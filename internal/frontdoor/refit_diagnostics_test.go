@@ -13,7 +13,7 @@ import (
 	"persea-terminal/internal/proto"
 )
 
-func ux17RefitServer(t *testing.T, reply func(proto.Control) proto.Control) (*Server, string, string) {
+func refit_failureRefitServer(t *testing.T, reply func(proto.Control) proto.Control) (*Server, string, string) {
 	t.Helper()
 	operation := strings.Repeat("O", 43)
 	source := strings.Repeat("S", 43)
@@ -31,7 +31,7 @@ func ux17RefitServer(t *testing.T, reply func(proto.Control) proto.Control) (*Se
 	return server, source, operation
 }
 
-func ux17PostRefit(t *testing.T, server *Server, source, operation string) *httptest.ResponseRecorder {
+func refit_failurePostRefit(t *testing.T, server *Server, source, operation string) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "http://127.0.0.1:8080/api/session-refits", bytes.NewBufferString(
 		`{"source":"`+source+`","columns":97,"operation":"`+operation+`"}`,
@@ -41,9 +41,9 @@ func ux17PostRefit(t *testing.T, server *Server, source, operation string) *http
 	return rr
 }
 
-func TestUX17RefitFaultLogsOnlyClosedStageAndClass(t *testing.T) {
+func TestRefitFaultLogsOnlyClosedStageAndClass(t *testing.T) {
 	const private = "PRIVATE /var/lib/token capability-secret"
-	server, source, operation := ux17RefitServer(t, func(request proto.Control) proto.Control {
+	server, source, operation := refit_failureRefitServer(t, func(request proto.Control) proto.Control {
 		return proto.Control{
 			Type: "refit_refused", ID: request.ID, Code: "refit_faulted",
 			RefitStage: proto.RefitFailureQueueBootstrap, RefitClass: proto.RefitFailureStorage,
@@ -53,7 +53,7 @@ func TestUX17RefitFaultLogsOnlyClosedStageAndClass(t *testing.T) {
 	var logs strings.Builder
 	oldLogf := frontLogf
 	frontLogf = func(format string, args ...any) { _, _ = fmt.Fprintf(&logs, format, args...) }
-	rr := ux17PostRefit(t, server, source, operation)
+	rr := refit_failurePostRefit(t, server, source, operation)
 	frontLogf = oldLogf
 	if rr.Code != http.StatusBadGateway || strings.TrimSpace(rr.Body.String()) != "refit_faulted" {
 		t.Fatalf("refit response status=%d body=%q", rr.Code, rr.Body.String())
@@ -67,7 +67,7 @@ func TestUX17RefitFaultLogsOnlyClosedStageAndClass(t *testing.T) {
 	}
 }
 
-func TestUX17RefitFaultRejectsUnclosedMetadata(t *testing.T) {
+func TestRefitFaultRejectsUnclosedMetadata(t *testing.T) {
 	for name, response := range map[string]proto.Control{
 		"missing":         {Type: "refit_refused", Code: "refit_faulted"},
 		"arbitrary_stage": {Type: "refit_refused", Code: "refit_faulted", RefitStage: "private/path", RefitClass: proto.RefitFailureStorage},
@@ -76,11 +76,11 @@ func TestUX17RefitFaultRejectsUnclosedMetadata(t *testing.T) {
 		"wrong_code":      {Type: "refit_refused", Code: "bad_refit", RefitStage: proto.RefitFailureBeginRegistry, RefitClass: proto.RefitFailureInternal},
 	} {
 		t.Run(name, func(t *testing.T) {
-			server, source, operation := ux17RefitServer(t, func(request proto.Control) proto.Control {
+			server, source, operation := refit_failureRefitServer(t, func(request proto.Control) proto.Control {
 				response.ID = request.ID
 				return response
 			})
-			if rr := ux17PostRefit(t, server, source, operation); rr.Code != http.StatusServiceUnavailable {
+			if rr := refit_failurePostRefit(t, server, source, operation); rr.Code != http.StatusServiceUnavailable {
 				t.Fatalf("unclosed metadata status=%d body=%q", rr.Code, rr.Body.String())
 			}
 		})

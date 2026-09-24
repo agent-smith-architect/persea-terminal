@@ -1,10 +1,5 @@
 package broker
 
-// Provenance: Fable re-check of M11 P2a candidate 7411b8b
-// (docs: 2026-08-27_p2a_adjudication.md, "Re-check (7411b8b)"). Probes around
-// the new settlement states: markSealed / the post-seal predicate / the
-// aborted settlement / abandoned successor generations.
-
 import (
 	"errors"
 	"slices"
@@ -16,7 +11,7 @@ import (
 	"persea-terminal/internal/unifiedjournal"
 )
 
-func (fixture *p2aFixture) reviewSeal(t *testing.T) {
+func (fixture *rotationFixture) sealPredecessor(t *testing.T) {
 	t.Helper()
 	sealed, err := fixture.registry.retention.startBoundary(journalKey(fixture.previous), "rotation_seal", true)
 	if err != nil {
@@ -32,22 +27,22 @@ func (fixture *p2aFixture) reviewSeal(t *testing.T) {
 	}
 }
 
-// Past the seal there is no abort (§3.3 step 7, §6 F13/F14). Abort after
+// Past the seal there is no abort. Abort after
 // markSealed must not be able to settle the transaction as "aborted" and
 // leave the predecessor admitted-and-routable over a retired generation.
-func TestP2AReview2AbortAfterSealIsNotARollback(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationAbortAfterSealIsNotARollback(t *testing.T) {
+	fixture := newRotationFixture(t)
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.reviewBootstrap(txn)
+	fixture.writeBootstrap(txn)
 	if err := txn.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	fixture.reviewSeal(t)
+	fixture.sealPredecessor(t)
 	txn.markSealed()
 	if txn.Abort() {
 		t.Fatal("Abort settled a transaction after the predecessor seal")
@@ -84,15 +79,15 @@ func TestP2AReview2AbortAfterSealIsNotARollback(t *testing.T) {
 	fixture.effects.journalMu.Unlock()
 }
 
-func TestP2AReview2AbortImmediatelyBeforeSealSettlesOnce(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationAbortImmediatelyBeforeSealSettlesOnce(t *testing.T) {
+	fixture := newRotationFixture(t)
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.reviewBootstrap(txn)
+	fixture.writeBootstrap(txn)
 	if err := txn.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -109,8 +104,8 @@ func TestP2AReview2AbortImmediatelyBeforeSealSettlesOnce(t *testing.T) {
 // holds a reference) is a retiring authority. Nothing may re-admit it: a
 // later admission of the same key would be deleted underneath the admitted
 // pane when the held reference settles.
-func TestP2AReview2AbandonedSuccessorCannotBeReadmitted(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationAbandonedSuccessorCannotBeReadmitted(t *testing.T) {
+	fixture := newRotationFixture(t)
 	usage := func() [5]int64 {
 		fixture.registry.retention.mu.Lock()
 		defer fixture.registry.retention.mu.Unlock()
@@ -146,7 +141,7 @@ func TestP2AReview2AbandonedSuccessorCannotBeReadmitted(t *testing.T) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if _, _, refs := fixture.reviewSuccessorGeneration(next); refs > 0 {
+		if _, _, refs := fixture.successorGeneration(next); refs > 0 {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -173,14 +168,14 @@ func TestP2AReview2AbandonedSuccessorCannotBeReadmitted(t *testing.T) {
 	for attempt := 0; attempt < 2; attempt++ {
 		admitErrs = append(admitErrs, fixture.registry.AdmitPane(next))
 	}
-	_, _, _ = fixture.reviewSuccessorGeneration(next)
+	_, _, _ = fixture.successorGeneration(next)
 	releaseOnce.Do(func() { close(release) })
 	fixture.effects.mu.Lock()
 	fixture.effects.lockProbe = nil
 	fixture.effects.mu.Unlock()
 	fixture.waitSuccessorQuiescent(next)
 	time.Sleep(20 * time.Millisecond)
-	present, admitted, _ := fixture.reviewSuccessorGeneration(next)
+	present, admitted, _ := fixture.successorGeneration(next)
 	fixture.registry.mu.Lock()
 	_, routeAdmitted := fixture.registry.admitted[routeCoordinateKey(next)]
 	broken := fixture.registry.broken
@@ -215,15 +210,15 @@ func TestP2AReview2AbandonedSuccessorCannotBeReadmitted(t *testing.T) {
 // A seal that never happened must not let markSealed relax Commit: with the
 // predecessor still admitted, the post-seal predicate must refuse rather
 // than install over a live predecessor generation as if it were retired.
-func TestP2AReview2MarkSealedWithoutSealDoesNotRelaxCommit(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationMarkSealedWithoutSealDoesNotRelaxCommit(t *testing.T) {
+	fixture := newRotationFixture(t)
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.reviewBootstrap(txn)
+	fixture.writeBootstrap(txn)
 	if err := txn.Validate(); err != nil {
 		t.Fatal(err)
 	}
@@ -243,27 +238,27 @@ func TestP2AReview2MarkSealedWithoutSealDoesNotRelaxCommit(t *testing.T) {
 	fixture.abortReservation(reservation)
 }
 
-// A stale predecessor observation after the seal (something P2b must never
+// A stale predecessor observation after the seal (something rotation flow must never
 // produce) re-materializes unknown old-key payload. It must take the local F14
 // path rather than broadening the post-seal predecessor predicate.
-func TestP2AReview2StalePredecessorObservationAfterSeal(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationStalePredecessorObservationAfterSeal(t *testing.T) {
+	fixture := newRotationFixture(t)
 	other := controlmode.PaneWitness{
-		Session: controlmode.SessionWitness{Server: "main", Session: "$p2a-review2-other", ControlGeneration: 1},
-		Window:  "@review2-other", Pane: "%review2-other", Incarnation: "3000,1,0",
+		Session: controlmode.SessionWitness{Server: "main", Session: "$rotation-other", ControlGeneration: 1},
+		Window:  "@seal-other", Pane: "%seal-other", Incarnation: "3000,1,0",
 	}
-	fixture.reviewAdmit(other)
+	fixture.admitRotationPane(other)
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
 	if err != nil {
 		t.Fatal(err)
 	}
-	fixture.reviewBootstrap(txn)
+	fixture.writeBootstrap(txn)
 	if err := txn.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	fixture.reviewSeal(t)
+	fixture.sealPredecessor(t)
 	fixture.waitSuccessorQuiescentKey(journalKey(fixture.previous))
 	staleErr := fixture.registry.ObservePane(controlmode.Observation{
 		Kind: controlmode.ObservationOutput, Witness: fixture.previous, Data: []byte("stale-after-seal"),
@@ -309,7 +304,7 @@ func TestP2AReview2StalePredecessorObservationAfterSeal(t *testing.T) {
 	fixture.abortReservation(reservation)
 }
 
-func (fixture *p2aFixture) waitSuccessorQuiescentKey(key unifiedjournal.PaneKey) {
+func (fixture *rotationFixture) waitSuccessorQuiescentKey(key unifiedjournal.PaneKey) {
 	fixture.t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {

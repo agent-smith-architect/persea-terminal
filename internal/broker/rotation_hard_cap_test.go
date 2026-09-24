@@ -16,7 +16,7 @@ import (
 	"persea-terminal/internal/unifiedjournal"
 )
 
-func TestM11LiveFixF4HardCapUsesCommittedLogicalBytes(t *testing.T) {
+func TestSourceHardCapUsesCommittedLogicalBytes(t *testing.T) {
 	const logicalCap = int64(128 << 10)
 	shapes := []struct {
 		name string
@@ -43,7 +43,7 @@ func TestM11LiveFixF4HardCapUsesCommittedLogicalBytes(t *testing.T) {
 		t.Run(shape.name, func(t *testing.T) {
 			runtimeDir := shortTempDir(t)
 			realm, err := unifiedjournal.OpenRealm(unifiedjournal.OpenOptions{
-				RuntimeDir: runtimeDir, Realm: "m11-f4-" + shape.name, BrokerIncarnation: "m11-f4",
+				RuntimeDir: runtimeDir, Realm: "hard-cap-" + shape.name, BrokerIncarnation: "hard-cap",
 				UID: os.Getuid(), GID: os.Getgid(), DirectoryMode: 0o700, FileMode: 0o600,
 				PaneCapBytes: logicalCap, RealmCapBytes: 2 * logicalCap,
 				PanePhysicalCapBytes: 256 << 20, PhysicalCapBytes: 512 << 20,
@@ -52,7 +52,7 @@ func TestM11LiveFixF4HardCapUsesCommittedLogicalBytes(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer realm.Close()
-			key := rotationScheduleKey("$m11-f4-"+shape.name, 1)
+			key := rotationScheduleKey("$hard-cap-"+shape.name, 1)
 			if err := realm.AdmitPane(key, unifiedjournal.Geometry{Columns: 80, Rows: 24}); err != nil {
 				t.Fatal(err)
 			}
@@ -128,13 +128,13 @@ func TestM11LiveFixF4HardCapUsesCommittedLogicalBytes(t *testing.T) {
 			if _, err := realm.Append(key, []byte{'w'}); !errors.Is(err, unifiedjournal.ErrInvalidated) {
 				t.Fatalf("post-cap append=%v want ErrInvalidated", err)
 			}
-			t.Logf("M11LF-F4A receipt split=%s records=%d cap-1=%d cap=%d requested_first_over=%d pending=%d physical=%d",
+			t.Logf("rotationLF-F4A receipt split=%s records=%d cap-1=%d cap=%d requested_first_over=%d pending=%d physical=%d",
 				shape.name, records, pressureAtMinusOne.logical, pressureAtCap.logical, requested, len(pending.data), physicalAtCap)
 		})
 	}
 }
 
-func TestM11LiveFixF4FatalHardCapSettlement(t *testing.T) {
+func TestSourceFatalHardCapSettlement(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real tmux hard-cap settlement")
 	}
@@ -146,7 +146,7 @@ func TestM11LiveFixF4FatalHardCapSettlement(t *testing.T) {
 	t.Cleanup(func() { unifiedJournalCaps = saved })
 
 	fixture := newAdoptionFixture(t, 4)
-	sessionID := fixture.startPaneCommand(t, "m11-f4-hard", "sleep 600")
+	sessionID := fixture.startPaneCommand(t, "hard-cap-hard", "sleep 600")
 	adoption, err := fixture.effects.AdoptSession(context.Background(), sessionID)
 	if err != nil {
 		t.Fatalf("adopt: %v", err)
@@ -322,6 +322,6 @@ func TestM11LiveFixF4FatalHardCapSettlement(t *testing.T) {
 	if committedAtCap != cap {
 		t.Fatalf("pre-fault committed charge=%d want cap=%d", committedAtCap, cap)
 	}
-	t.Logf("M11LF-F4B receipt cap-1=%d logical=%d/%d physical=%d first_over=%v close=%q close_count=%d successor_edges=%v retained_slots=%d retained_logical=%d retained_physical=%d",
+	t.Logf("rotationLF-F4B receipt cap-1=%d logical=%d/%d physical=%d first_over=%v close=%q close_count=%d successor_edges=%v retained_slots=%d retained_logical=%d retained_physical=%d",
 		committedAtMinusOne, committedAtCap, cap, physicalAtCap, firstOverErr, proto.SubscriberClosedGenerationFailed, closeCount.Load(), seenEdges, slotsAfterAdoption, cap, physicalAtCap)
 }

@@ -913,7 +913,7 @@ func TestUnifiedRotationUnitDeathAtEverySequenceEdgeCanRestart(t *testing.T) {
 	}
 }
 
-// This is the wire-level P2D-F1 shape. Five peers keep draining and receive
+// This is the wire-level rotation transport shape. Five peers keep draining and receive
 // every pre-rotation sentinel before their typed rotation verdict. One peer is
 // wedged on the triggering write, is cut once, then one re-mint reconstructs
 // that event and receives the post-reconnect sentinel once.

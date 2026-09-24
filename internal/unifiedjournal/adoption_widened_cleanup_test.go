@@ -553,7 +553,7 @@ func TestWidenedCleanupExcludesTheCurrentKeyByIdentity(t *testing.T) {
 // incarnation cannot resume. That stranded generation must not hold a slot,
 // and the next adoption of the session supersedes it and refunds exactly the
 // charges the scan attributed to it. (N2's first half, rotating a born
-// session, needs the P1b rotation transaction and is not exercised here.)
+// session, needs the rotation flow rotation transaction and is not exercised here.)
 func TestStrandedBirthGenerationIsSupersededAfterCrash(t *testing.T) {
 	options := journalOptions(t)
 	options.CompletePaneSlots = 2

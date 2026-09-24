@@ -111,7 +111,7 @@ func recordingCombinedOwnershipShape(t *testing.T, recoveredFixture string) {
 			}
 			// Model completed source attribution without granting legacy replay
 			// authority. Unknown owners correctly blocked every new source in
-			// the first falsifying run of this mixed-state fixture.
+			// the first regression run of this mixed-state fixture.
 			id := unifiedjournal.SourceID{Realm: cfg.Realm, Server: recovered.Key.Server, Session: recovered.Key.Session, Window: recovered.Key.Window, Pane: recovered.Key.Pane, SocketPath: "/synthetic/dense-source", SocketDevice: 1, SocketInode: 1, ServerPID: 1, ServerStartTime: 1, PanePID: 2, PaneStartTime: 2}
 			if err := effects.realm.AttributeRecoveredSource(recovered.Key, id); err != nil {
 				t.Fatal(err)

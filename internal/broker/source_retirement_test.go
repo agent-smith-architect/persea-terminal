@@ -16,8 +16,8 @@ import (
 	"persea-terminal/internal/unifiedjournal"
 )
 
-func TestM11LiveFixF2BrowserSocketClosePreservesGeneration(t *testing.T) {
-	effects, key := unifiedE2E1JournalProvider(t, "m11-f2-browser-close", "$browser")
+func TestSourceBrowserSocketClosePreservesGeneration(t *testing.T) {
+	effects, key := unifiedE2E1JournalProvider(t, "rotation-f2-browser-close", "$browser")
 	defer effects.realm.Close()
 	unifiedE2E1Commit(t, effects.realm, key, []byte("F2-BROWSER-CLOSE"))
 	beforeLogical, beforeReserved, _ := effects.realm.LogicalBudget()
@@ -50,7 +50,7 @@ func TestM11LiveFixF2BrowserSocketClosePreservesGeneration(t *testing.T) {
 	}
 }
 
-func TestM11LiveFixF2SourceClassificationMatrix(t *testing.T) {
+func TestSourceSourceClassificationMatrix(t *testing.T) {
 	want := controlmode.PaneWitness{Session: controlmode.SessionWitness{Server: "main", Session: "$1", ControlGeneration: 9}, Window: "@1", Pane: "%1", Incarnation: "exact"}
 	different := want
 	different.Incarnation = "replacement"
@@ -77,9 +77,9 @@ func TestM11LiveFixF2SourceClassificationMatrix(t *testing.T) {
 	}
 }
 
-func TestM11F2SevenDeadSessionsRetireAndEighthAdmits(t *testing.T) {
+func TestSourceSevenDeadSessionsRetireAndEighthAdmits(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real private-tmux terminal-retirement falsifier")
+		t.Skip("real private-tmux terminal-retirement regression test")
 	}
 	fixture := newAdoptionFixture(t, 8)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
@@ -89,7 +89,7 @@ func TestM11F2SevenDeadSessionsRetireAndEighthAdmits(t *testing.T) {
 	subscribers := make([]*unifiedDevSubscriber, 0, sessionCount)
 	stops := make([]func(), 0, sessionCount)
 	for index := 0; index < sessionCount; index++ {
-		name := "m11_f2_dead_" + string(rune('a'+index))
+		name := "rotation_f2_dead_" + string(rune('a'+index))
 		sessionID := fixture.startPaneCommand(t, name, "sh -c 'stty -echo; printf F2-READY\\n; sleep 120'")
 		if _, err := fixture.effects.AdoptSession(ctx, sessionID); err != nil {
 			t.Fatalf("adopt %s: %v", name, err)
@@ -146,7 +146,7 @@ func TestM11F2SevenDeadSessionsRetireAndEighthAdmits(t *testing.T) {
 		stops[index]()
 	}
 
-	eighth := fixture.startPaneCommand(t, "m11_f2_eighth", "sh -c 'stty -echo; printf F2-EIGHTH\\n; sleep 120'")
+	eighth := fixture.startPaneCommand(t, "rotation_f2_eighth", "sh -c 'stty -echo; printf F2-EIGHTH\\n; sleep 120'")
 	adoption, err := fixture.effects.AdoptSession(ctx, eighth)
 	if err != nil {
 		t.Fatalf("differently named eighth admission: %v", err)
@@ -156,9 +156,9 @@ func TestM11F2SevenDeadSessionsRetireAndEighthAdmits(t *testing.T) {
 	}
 }
 
-func TestM11D2ObserverTransportRecoveryCapturesGapExactlyOnce(t *testing.T) {
+func TestSourceObserverTransportRecoveryCapturesGapExactlyOnce(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real tmux observer transport falsifier")
+		t.Skip("real tmux observer transport regression test")
 	}
 	disposable := newDisposable(t)
 	tmuxServer := config.TmuxServer{Label: "main", SocketPath: disposable.path}
@@ -183,9 +183,9 @@ func TestM11D2ObserverTransportRecoveryCapturesGapExactlyOnce(t *testing.T) {
 	})
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	disposable.run("new-session", "-d", "-s", "m11_f2_transport", "-x", "80", "-y", "24",
+	disposable.run("new-session", "-d", "-s", "rotation_f2_transport", "-x", "80", "-y", "24",
 		"sh", "-c", "stty -echo; printf 'F2-TRANSPORT\\n'; exec sh")
-	sessionID := strings.TrimSpace(disposable.run("display-message", "-p", "-t", "m11_f2_transport:", "#{session_id}"))
+	sessionID := strings.TrimSpace(disposable.run("display-message", "-p", "-t", "rotation_f2_transport:", "#{session_id}"))
 	adoption, err := effects.AdoptSession(ctx, sessionID)
 	if err != nil {
 		t.Fatal(err)
@@ -324,14 +324,14 @@ func TestM11D2ObserverTransportRecoveryCapturesGapExactlyOnce(t *testing.T) {
 	}
 }
 
-func TestM11F2TerminalRetirementRetriesAfterRetentionSaturation(t *testing.T) {
+func TestSourceTerminalRetirementRetriesAfterRetentionSaturation(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real tmux terminal-retirement saturation falsifier")
+		t.Skip("real tmux terminal-retirement saturation regression test")
 	}
 	fixture := newAdoptionFixture(t, 4)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	sessionID := fixture.startPaneCommand(t, "m11_f2_saturated", "sh -c 'printf F2-SATURATED\\n; sleep 120'")
+	sessionID := fixture.startPaneCommand(t, "rotation_f2_saturated", "sh -c 'printf F2-SATURATED\\n; sleep 120'")
 	adoption, err := fixture.effects.AdoptSession(ctx, sessionID)
 	if err != nil {
 		t.Fatal(err)
@@ -426,7 +426,7 @@ func TestTerminalDurableRetirementRetriesAfterUnlinkFailure(t *testing.T) {
 			return func() bool { return true }
 		},
 	}}
-	key := unifiedjournal.PaneKey{Server: "main", Session: "m11-f2-retry", Pane: "%1", Incarnation: "1"}
+	key := unifiedjournal.PaneKey{Server: "main", Session: "rotation-f2-retry", Pane: "%1", Incarnation: "1"}
 
 	runtime.retireDurable(key)
 	if attempts != 1 || retry == nil {

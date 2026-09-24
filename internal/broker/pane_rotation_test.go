@@ -16,9 +16,9 @@ import (
 	"persea-terminal/internal/unifiedjournal"
 )
 
-var errP2AInjected = errors.New("p2a injected failure")
+var errRotationInjected = errors.New("rotation injected failure")
 
-type p2aTestEffects struct {
+type rotationTestEffects struct {
 	*UnifiedDevPaneEffects
 	mu        sync.Mutex
 	failStage string
@@ -27,7 +27,7 @@ type p2aTestEffects struct {
 	observed  chan string
 }
 
-func (effects *p2aTestEffects) retentionTrial() retentionTrialOptions {
+func (effects *rotationTestEffects) retentionTrial() retentionTrialOptions {
 	options := effects.UnifiedDevPaneEffects.retentionTrial()
 	options.stage = func(stage string, key unifiedjournal.PaneKey) error {
 		effects.mu.Lock()
@@ -38,30 +38,30 @@ func (effects *p2aTestEffects) retentionTrial() retentionTrialOptions {
 			probe(stage)
 		}
 		if fail {
-			return errP2AInjected
+			return errRotationInjected
 		}
 		return nil
 	}
 	return options
 }
 
-func (effects *p2aTestEffects) WritePaneRange(key unifiedjournal.PaneKey, payload []byte, start, end, sequence int64) error {
+func (effects *rotationTestEffects) WritePaneRange(key unifiedjournal.PaneKey, payload []byte, start, end, sequence int64) error {
 	effects.mu.Lock()
 	fail := effects.failFeed
 	effects.mu.Unlock()
 	if fail {
-		return errP2AInjected
+		return errRotationInjected
 	}
 	return effects.UnifiedDevPaneEffects.WritePaneRange(key, payload, start, end, sequence)
 }
 
-func (effects *p2aTestEffects) beginPaneRotationWitness(previous, next controlmode.PaneWitness) (paneRotationWitnessStage, error) {
+func (effects *rotationTestEffects) beginPaneRotationWitness(previous, next controlmode.PaneWitness) (paneRotationWitnessStage, error) {
 	return effects.UnifiedDevPaneEffects.beginPaneRotationWitness(previous, next)
 }
 
-type p2aFixture struct {
+type rotationFixture struct {
 	t           *testing.T
-	effects     *p2aTestEffects
+	effects     *rotationTestEffects
 	registry    *paneRegistry
 	previous    controlmode.PaneWitness
 	unit        *unifiedDevUnit
@@ -74,14 +74,14 @@ type p2aFixture struct {
 	cancel      func()
 }
 
-func newP2AFixture(t *testing.T) *p2aFixture {
-	return newP2AFixtureWithSlots(t, 16)
+func newRotationFixture(t *testing.T) *rotationFixture {
+	return newRotationFixtureWithSlots(t, 16)
 }
 
-func newP2AFixtureWithSlots(t *testing.T, adoptionSlots int) *p2aFixture {
+func newRotationFixtureWithSlots(t *testing.T, adoptionSlots int) *rotationFixture {
 	t.Helper()
 	base := newProjectionEffects(t, adoptionSlots)
-	effects := &p2aTestEffects{UnifiedDevPaneEffects: base, observed: make(chan string, 256)}
+	effects := &rotationTestEffects{UnifiedDevPaneEffects: base, observed: make(chan string, 256)}
 	base.retentionObserve = func(event string, _ map[string]int64) {
 		select {
 		case effects.observed <- event:
@@ -96,8 +96,8 @@ func newP2AFixtureWithSlots(t *testing.T, adoptionSlots int) *p2aFixture {
 	})
 
 	previous := controlmode.PaneWitness{
-		Session: controlmode.SessionWitness{Server: "main", Session: "$p2a", ControlGeneration: 1},
-		Window:  "@p2a", Pane: "%p2a", Incarnation: "1000,1,0",
+		Session: controlmode.SessionWitness{Server: "main", Session: "$rotation", ControlGeneration: 1},
+		Window:  "@rotation", Pane: "%rotation", Incarnation: "1000,1,0",
 	}
 	reserveRecordingSourceForTest(t, base, journalKey(previous))
 	base.journalMu.Lock()
@@ -137,7 +137,7 @@ func newP2AFixtureWithSlots(t *testing.T, adoptionSlots int) *p2aFixture {
 		t.Fatal(err)
 	}
 	t.Cleanup(cancel)
-	return &p2aFixture{
+	return &rotationFixture{
 		t: t, effects: effects, registry: registry, previous: previous, unit: unit,
 		session: session, generation: generation,
 		coordinator: coordinator, attachments: attachments, epoch: epoch,
@@ -145,13 +145,13 @@ func newP2AFixtureWithSlots(t *testing.T, adoptionSlots int) *p2aFixture {
 	}
 }
 
-func (fixture *p2aFixture) next(generation uint64) controlmode.PaneWitness {
+func (fixture *rotationFixture) next(generation uint64) controlmode.PaneWitness {
 	next := fixture.previous
 	next.Session.ControlGeneration = generation
 	return next
 }
 
-func (fixture *p2aFixture) materialize(next controlmode.PaneWitness) *unifiedjournal.AdoptionReservation {
+func (fixture *rotationFixture) materialize(next controlmode.PaneWitness) *unifiedjournal.AdoptionReservation {
 	fixture.t.Helper()
 	reserveRecordingSourceForTest(fixture.t, fixture.effects.UnifiedDevPaneEffects, journalKey(next))
 	fixture.effects.journalMu.Lock()
@@ -165,19 +165,19 @@ func (fixture *p2aFixture) materialize(next controlmode.PaneWitness) *unifiedjou
 	return reservation
 }
 
-func (fixture *p2aFixture) abortReservation(reservation *unifiedjournal.AdoptionReservation) {
+func (fixture *rotationFixture) abortReservation(reservation *unifiedjournal.AdoptionReservation) {
 	fixture.t.Helper()
 	fixture.effects.journalMu.Lock()
 	reservation.Abort()
 	fixture.effects.journalMu.Unlock()
 }
 
-func (fixture *p2aFixture) boundary(witness controlmode.PaneWitness) error {
+func (fixture *rotationFixture) boundary(witness controlmode.PaneWitness) error {
 	fixture.t.Helper()
 	return fixture.registry.retentionBoundary(witness, "rotation_bootstrap")
 }
 
-func (fixture *p2aFixture) waitObservation(want string) {
+func (fixture *rotationFixture) waitObservation(want string) {
 	fixture.t.Helper()
 	deadline := time.After(2 * time.Second)
 	for {
@@ -192,7 +192,7 @@ func (fixture *p2aFixture) waitObservation(want string) {
 	}
 }
 
-func (fixture *p2aFixture) waitSuccessorQuiescent(next controlmode.PaneWitness) {
+func (fixture *rotationFixture) waitSuccessorQuiescent(next controlmode.PaneWitness) {
 	fixture.t.Helper()
 	deadline := time.Now().Add(2 * time.Second)
 	for {
@@ -210,7 +210,7 @@ func (fixture *p2aFixture) waitSuccessorQuiescent(next controlmode.PaneWitness) 
 	}
 }
 
-func (fixture *p2aFixture) assertPredecessorLive(marker string, next controlmode.PaneWitness) {
+func (fixture *rotationFixture) assertPredecessorLive(marker string, next controlmode.PaneWitness) {
 	fixture.t.Helper()
 	payload := []byte(marker)
 	if err := fixture.registry.ObservePane(controlmode.Observation{
@@ -218,7 +218,7 @@ func (fixture *p2aFixture) assertPredecessorLive(marker string, next controlmode
 	}); err != nil {
 		fixture.t.Fatalf("predecessor output: %v", err)
 	}
-	if err := fixture.registry.retentionBoundary(fixture.previous, "p2a_predecessor_probe"); err != nil {
+	if err := fixture.registry.retentionBoundary(fixture.previous, "rotation_predecessor_probe"); err != nil {
 		fixture.t.Fatalf("predecessor boundary: %v", err)
 	}
 	deadline := time.After(2 * time.Second)
@@ -283,7 +283,7 @@ delivered:
 	}
 }
 
-func (fixture *p2aFixture) requireRetry(generation uint64) {
+func (fixture *rotationFixture) requireRetry(generation uint64) {
 	fixture.t.Helper()
 	next := fixture.next(generation)
 	reservation := fixture.materialize(next)
@@ -329,7 +329,7 @@ func TestPaneRotationN9FailureMatrixPreservesPredecessor(t *testing.T) {
 	for _, checkpoint := range checkpoints {
 		for _, unitDeath := range []bool{false, true} {
 			t.Run(fmt.Sprintf("%s/death=%v", checkpoint, unitDeath), func(t *testing.T) {
-				fixture := newP2AFixture(t)
+				fixture := newRotationFixture(t)
 				next := fixture.next(2)
 				reservation := fixture.materialize(next)
 				txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
@@ -411,7 +411,7 @@ func TestPaneRotationN9FailureMatrixPreservesPredecessor(t *testing.T) {
 					}
 					// A fresh observer fixture proves retry is still possible after
 					// the ordinary death/reap lifecycle.
-					newP2AFixture(t).requireRetry(3)
+					newRotationFixture(t).requireRetry(3)
 				} else {
 					fixture.requireRetry(3)
 				}
@@ -421,7 +421,7 @@ func TestPaneRotationN9FailureMatrixPreservesPredecessor(t *testing.T) {
 }
 
 func TestPaneRotationAbortWithLiveSuccessorReferenceIsolatesFaultAndRefundsLifetime(t *testing.T) {
-	fixture := newP2AFixture(t)
+	fixture := newRotationFixture(t)
 	next := fixture.next(2)
 	runtime := fixture.registry.retention
 	runtime.mu.Lock()
@@ -454,7 +454,7 @@ func TestPaneRotationAbortWithLiveSuccessorReferenceIsolatesFaultAndRefundsLifet
 	}
 	faulted := make(chan faultResult, 1)
 	go func() {
-		winner, cleanup := runtime.classifyFault(journalKey(next), "p2a_abort_race", errP2AInjected)
+		winner, cleanup := runtime.classifyFault(journalKey(next), "rotation_abort_race", errRotationInjected)
 		faulted <- faultResult{winner: winner, cleanup: cleanup}
 	}()
 	<-faultEntered
@@ -508,10 +508,10 @@ func TestPaneRotationAbortWithLiveSuccessorReferenceIsolatesFaultAndRefundsLifet
 }
 
 func TestPaneRotationBeginRejectsProviderSiblingWithoutAllocatingSuccessor(t *testing.T) {
-	fixture := newP2AFixture(t)
+	fixture := newRotationFixture(t)
 	next := fixture.next(2)
 	sibling := fixture.previous
-	sibling.Pane = "%p2a-provider-sibling"
+	sibling.Pane = "%rotation-provider-sibling"
 	sibling.Incarnation = "1000,3,0"
 	fixture.effects.mu.Lock()
 	fixture.unit.witnesses = append(fixture.unit.witnesses, sibling)
@@ -537,7 +537,7 @@ func TestPaneRotationBeginRejectsProviderSiblingWithoutAllocatingSuccessor(t *te
 }
 
 func TestPaneRotationHistoricalWitnessDoesNotBlockNextSinglePaneRotation(t *testing.T) {
-	fixture := newP2AFixture(t)
+	fixture := newRotationFixture(t)
 	second := fixture.next(2)
 	secondReservation := fixture.materialize(second)
 	first, err := fixture.registry.BeginPaneRotation(fixture.previous, second)
@@ -581,7 +581,7 @@ func TestPaneRotationHistoricalWitnessDoesNotBlockNextSinglePaneRotation(t *test
 }
 
 func TestPaneRotationN9ConsecutiveAbortsNeverStageWitnesses(t *testing.T) {
-	fixture := newP2AFixture(t)
+	fixture := newRotationFixture(t)
 	before := append([]controlmode.PaneWitness(nil), fixture.unit.witnesses...)
 	for index := 0; index < 32; index++ {
 		next := fixture.next(uint64(100 + index))
@@ -599,7 +599,7 @@ func TestPaneRotationN9ConsecutiveAbortsNeverStageWitnesses(t *testing.T) {
 }
 
 func TestPaneRotationValidateThenInconsistencyFatallyReapsWithoutSwap(t *testing.T) {
-	fixture := newP2AFixture(t)
+	fixture := newRotationFixture(t)
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
@@ -642,7 +642,7 @@ func TestPaneRotationValidateThenInconsistencyFatallyReapsWithoutSwap(t *testing
 	fixture.abortReservation(reservation)
 }
 
-func validatedPaneRotation(t *testing.T, fixture *p2aFixture, next controlmode.PaneWitness) (*paneRotationTxn, *unifiedjournal.AdoptionReservation) {
+func validatedPaneRotation(t *testing.T, fixture *rotationFixture, next controlmode.PaneWitness) (*paneRotationTxn, *unifiedjournal.AdoptionReservation) {
 	t.Helper()
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
@@ -661,7 +661,7 @@ func validatedPaneRotation(t *testing.T, fixture *p2aFixture, next controlmode.P
 	return txn, reservation
 }
 
-func (fixture *p2aFixture) assertFatalCommitEdgePreservesPredecessor(txn *paneRotationTxn, next controlmode.PaneWitness) {
+func (fixture *rotationFixture) assertFatalCommitEdgePreservesPredecessor(txn *paneRotationTxn, next controlmode.PaneWitness) {
 	fixture.t.Helper()
 	fixture.waitSuccessorQuiescent(next)
 
@@ -707,7 +707,7 @@ func (fixture *p2aFixture) assertFatalCommitEdgePreservesPredecessor(txn *paneRo
 }
 
 func TestPaneRotationPostValidateProviderReapNeverInstallsSuccessor(t *testing.T) {
-	fixture := newP2AFixture(t)
+	fixture := newRotationFixture(t)
 	next := fixture.next(2)
 	txn, reservation := validatedPaneRotation(t, fixture, next)
 
@@ -735,11 +735,11 @@ func TestPaneRotationPostValidateProviderReapNeverInstallsSuccessor(t *testing.T
 }
 
 func TestPaneRotationPostValidateSiblingDriftNeverPartiallyCommits(t *testing.T) {
-	fixture := newP2AFixture(t)
+	fixture := newRotationFixture(t)
 	next := fixture.next(2)
 	txn, reservation := validatedPaneRotation(t, fixture, next)
 	sibling := fixture.previous
-	sibling.Pane = "%p2a-sibling"
+	sibling.Pane = "%rotation-sibling"
 	sibling.Incarnation = "1000,2,0"
 	if err := fixture.registry.AdmitPane(sibling); err != nil {
 		t.Fatal(err)
@@ -775,7 +775,7 @@ func TestPaneRotationPostValidateSiblingDriftNeverPartiallyCommits(t *testing.T)
 }
 
 func TestPaneRotationFatalDispositionStopsEveryDownstreamMutation(t *testing.T) {
-	fixture := newP2AFixture(t)
+	fixture := newRotationFixture(t)
 	next := fixture.next(2)
 	txn, reservation := validatedPaneRotation(t, fixture, next)
 	fixture.effects.mu.Lock()
@@ -810,7 +810,7 @@ func TestPaneRotationFatalDispositionStopsEveryDownstreamMutation(t *testing.T) 
 }
 
 func TestPaneRotationLockContractLeavesSubscriberMutexOutsideStorageAndBoundary(t *testing.T) {
-	fixture := newP2AFixture(t)
+	fixture := newRotationFixture(t)
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
@@ -856,7 +856,7 @@ func TestPaneRotationLockContractLeavesSubscriberMutexOutsideStorageAndBoundary(
 }
 
 func TestPaneRotationRejectsInvalidAndConcurrentTransactionsTyped(t *testing.T) {
-	fixture := newP2AFixture(t)
+	fixture := newRotationFixture(t)
 	invalid := fixture.previous
 	invalid.Pane = "%other"
 	if _, err := fixture.registry.BeginPaneRotation(fixture.previous, invalid); !errors.Is(err, ErrPaneRotationInvalid) {

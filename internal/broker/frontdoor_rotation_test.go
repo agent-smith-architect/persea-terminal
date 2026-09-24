@@ -28,26 +28,26 @@ import (
 )
 
 const (
-	m11F1FrontHelperEnv = "PERSEA_M11_F1_FRONT_HELPER"
-	m11F1FrontConfigEnv = "PERSEA_M11_F1_FRONT_CONFIG"
-	m11F1StaticDirEnv   = "PERSEA_M11_F1_STATIC_DIR"
-	m11F1CSRF           = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	frontdoorRotationFrontHelperEnv = "PERSEA_ROTATION_FRONT_HELPER"
+	frontdoorRotationFrontConfigEnv = "PERSEA_ROTATION_FRONT_CONFIG"
+	frontdoorRotationStaticDirEnv   = "PERSEA_ROTATION_STATIC_DIR"
+	frontdoorRotationCSRF           = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
 )
 
-func TestM11F1FrontdoorHelperProcess(t *testing.T) {
-	if os.Getenv(m11F1FrontHelperEnv) != "1" {
+func TestSourceFrontdoorHelperProcess(t *testing.T) {
+	if os.Getenv(frontdoorRotationFrontHelperEnv) != "1" {
 		t.Skip("frontdoor subprocess helper")
 	}
 	var cfg config.Front
-	if err := json.Unmarshal([]byte(os.Getenv(m11F1FrontConfigEnv)), &cfg); err != nil {
+	if err := json.Unmarshal([]byte(os.Getenv(frontdoorRotationFrontConfigEnv)), &cfg); err != nil {
 		t.Fatal(err)
 	}
-	if err := frontdoor.Run(cfg, os.Getenv(m11F1StaticDirEnv)); err != nil {
+	if err := frontdoor.Run(cfg, os.Getenv(frontdoorRotationStaticDirEnv)); err != nil {
 		t.Fatal(err)
 	}
 }
 
-type m11F1Inventory struct {
+type frontdoorRotationInventory struct {
 	Realms []struct {
 		Servers []struct {
 			Sessions []struct {
@@ -63,9 +63,9 @@ type m11F1Inventory struct {
 	} `json:"realms"`
 }
 
-func m11F1StaticBundle(t *testing.T) string {
+func frontdoorRotationStaticBundle(t *testing.T) string {
 	t.Helper()
-	dir, err := os.MkdirTemp(".", ".m11-f1-static-")
+	dir, err := os.MkdirTemp(".", ".rotation-static-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -73,7 +73,7 @@ func m11F1StaticBundle(t *testing.T) string {
 	for _, name := range []string{"index.html", "app.js", "app.css", "xterm.css", "manifest.webmanifest", "icon-192.png", "icon-512.png", "apple-touch-icon.png"} {
 		body := []byte("test")
 		if name == "index.html" {
-			body = []byte("<!doctype html><title>m11</title>")
+			body = []byte("<!doctype html><title>rotation</title>")
 		}
 		if err := os.WriteFile(filepath.Join(dir, name), body, 0600); err != nil {
 			t.Fatal(err)
@@ -86,9 +86,9 @@ func m11F1StaticBundle(t *testing.T) string {
 	return relative
 }
 
-func m11F1StartFrontdoor(t *testing.T, brokerSocket string) (string, *http.Client) {
+func frontdoorRotationStartFrontdoor(t *testing.T, brokerSocket string) (string, *http.Client) {
 	t.Helper()
-	frontDir, err := os.MkdirTemp("", "m11f-front-")
+	frontDir, err := os.MkdirTemp("", "rotationf-front-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,12 +112,12 @@ func m11F1StartFrontdoor(t *testing.T, brokerSocket string) (string, *http.Clien
 	if err != nil {
 		t.Fatal(err)
 	}
-	cmd := exec.Command(os.Args[0], "-test.run=^TestM11F1FrontdoorHelperProcess$")
+	cmd := exec.Command(os.Args[0], "-test.run=^TestSourceFrontdoorHelperProcess$")
 	cmd.Dir = "."
 	cmd.Env = append(os.Environ(),
-		m11F1FrontHelperEnv+"=1",
-		m11F1FrontConfigEnv+"="+string(raw),
-		m11F1StaticDirEnv+"="+m11F1StaticBundle(t),
+		frontdoorRotationFrontHelperEnv+"=1",
+		frontdoorRotationFrontConfigEnv+"="+string(raw),
+		frontdoorRotationStaticDirEnv+"="+frontdoorRotationStaticBundle(t),
 	)
 	var childOutput bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &childOutput, &childOutput
@@ -147,24 +147,24 @@ func m11F1StartFrontdoor(t *testing.T, brokerSocket string) (string, *http.Clien
 	return "", nil
 }
 
-func m11F1SecureHeaders() http.Header {
+func frontdoorRotationSecureHeaders() http.Header {
 	return http.Header{
 		"X-Forwarded-Host":     []string{"127.0.0.1:43210"},
 		"X-Forwarded-Proto":    []string{"http"},
 		"Tailscale-User-Login": []string{"operator@example.com"},
 		"Origin":               []string{"http://127.0.0.1:43210"},
 		"Sec-Fetch-Site":       []string{"same-origin"},
-		"Cookie":               []string{"__Host-persea-terminal-csrf=" + m11F1CSRF},
+		"Cookie":               []string{"__Host-persea-terminal-csrf=" + frontdoorRotationCSRF},
 	}
 }
 
-func m11F1InventoryHandle(t *testing.T, client *http.Client, sessionID string) string {
+func frontdoorRotationInventoryHandle(t *testing.T, client *http.Client, sessionID string) string {
 	t.Helper()
 	req, err := http.NewRequest(http.MethodGet, "http://localhost/api/inventory", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header = m11F1SecureHeaders()
+	req.Header = frontdoorRotationSecureHeaders()
 	response, err := client.Do(req)
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func m11F1InventoryHandle(t *testing.T, client *http.Client, sessionID string) s
 		body, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		t.Fatalf("inventory status=%d body=%q", response.StatusCode, body)
 	}
-	var inventory m11F1Inventory
+	var inventory frontdoorRotationInventory
 	if err := json.NewDecoder(response.Body).Decode(&inventory); err != nil {
 		t.Fatal(err)
 	}
@@ -194,16 +194,16 @@ func m11F1InventoryHandle(t *testing.T, client *http.Client, sessionID string) s
 	return ""
 }
 
-func m11F1DialController(t *testing.T, frontSocket, handle string) *websocket.Conn {
+func frontdoorRotationDialController(t *testing.T, frontSocket, handle string) *websocket.Conn {
 	t.Helper()
 	dialer := websocket.Dialer{
 		NetDial: func(_, _ string) (net.Conn, error) { return net.Dial("unix", frontSocket) },
 		Subprotocols: []string{
 			"persea-terminal.v1", "persea-handle." + handle, "persea-mode.control",
-			"persea-csrf." + m11F1CSRF, "persea-history.5000", "persea-engine.unified-dev",
+			"persea-csrf." + frontdoorRotationCSRF, "persea-history.5000", "persea-engine.unified-dev",
 		},
 	}
-	header := m11F1SecureHeaders()
+	header := frontdoorRotationSecureHeaders()
 	ws, response, err := dialer.Dial("ws://localhost/ws", header)
 	if err != nil {
 		status := 0
@@ -215,12 +215,12 @@ func m11F1DialController(t *testing.T, frontSocket, handle string) *websocket.Co
 	return ws
 }
 
-func m11F1CommitController(t *testing.T, ws *websocket.Conn) terminal.Frame {
+func frontdoorRotationCommitController(t *testing.T, ws *websocket.Conn) terminal.Frame {
 	t.Helper()
-	return m11F1CommitControllerWithMarker(t, ws, "")
+	return frontdoorRotationCommitControllerWithMarker(t, ws, "")
 }
 
-func m11F1CommitControllerWithMarker(t *testing.T, ws *websocket.Conn, marker string) terminal.Frame {
+func frontdoorRotationCommitControllerWithMarker(t *testing.T, ws *websocket.Conn, marker string) terminal.Frame {
 	t.Helper()
 	if err := ws.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		t.Fatal(err)
@@ -312,7 +312,7 @@ func m11F1CommitControllerWithMarker(t *testing.T, ws *websocket.Conn, marker st
 	}
 }
 
-func m11F1DrainUntilClosed(ws *websocket.Conn) <-chan string {
+func frontdoorRotationDrainUntilClosed(ws *websocket.Conn) <-chan string {
 	done := make(chan string, 1)
 	stopPing := make(chan struct{})
 	go func() {
@@ -352,9 +352,9 @@ func m11F1DrainUntilClosed(ws *websocket.Conn) <-chan string {
 	return done
 }
 
-func TestM11F1AutomaticRotationFreshFrontdoorController(t *testing.T) {
+func TestSourceAutomaticRotationFreshFrontdoorController(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real tmux/frontdoor automatic-rotation falsifier")
+		t.Skip("real tmux/frontdoor automatic-rotation regression test")
 	}
 	saved := unifiedJournalCaps
 	unifiedJournalCaps.pane = 8 << 20
@@ -404,11 +404,11 @@ func TestM11F1AutomaticRotationFreshFrontdoorController(t *testing.T) {
 			t.Error("broker did not stop")
 		}
 	})
-	frontSocket, client := m11F1StartFrontdoor(t, listener.Addr().String())
+	frontSocket, client := frontdoorRotationStartFrontdoor(t, listener.Addr().String())
 
-	disposable.run("new-session", "-d", "-s", "m11_f1_live", "-x", "80", "-y", "24",
+	disposable.run("new-session", "-d", "-s", "rotation_live", "-x", "80", "-y", "24",
 		"sh", "-c", "stty -echo; exec sh")
-	sessionID := strings.TrimSpace(disposable.run("display-message", "-p", "-t", "m11_f1_live:", "#{session_id}"))
+	sessionID := strings.TrimSpace(disposable.run("display-message", "-p", "-t", "rotation_live:", "#{session_id}"))
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
 	adoption, err := effects.AdoptSession(ctx, sessionID)
@@ -419,9 +419,9 @@ func TestM11F1AutomaticRotationFreshFrontdoorController(t *testing.T) {
 	predecessorKey = adoption.Key
 	predecessorCloseMu.Unlock()
 
-	const pressureComplete = "M11-F1-PRESSURE-COMPLETE"
-	disposable.run("send-keys", "-t", "m11_f1_live:",
-		`awk 'BEGIN { for (i=0; i<102000; i++) printf "M11-AUTO-%06d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", i; print "`+pressureComplete+`"; fflush() }'`, "Enter")
+	const pressureComplete = "ROTATION-PRESSURE-COMPLETE"
+	disposable.run("send-keys", "-t", "rotation_live:",
+		`awk 'BEGIN { for (i=0; i<102000; i++) printf "rotation-AUTO-%06d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", i; print "`+pressureComplete+`"; fflush() }'`, "Enter")
 	pollUntil(t, 15*time.Second, "automatic journal pressure", func() bool {
 		effects.journalMu.Lock()
 		logical, cap := effects.realm.PaneLogical(adoption.Key)
@@ -435,10 +435,10 @@ func TestM11F1AutomaticRotationFreshFrontdoorController(t *testing.T) {
 		return bytes.Contains((&adoptionFixture{effects: effects}).journalBytes(t, adoption.Key), []byte(pressureComplete))
 	})
 
-	predecessorHandle := m11F1InventoryHandle(t, client, sessionID)
-	predecessorWS := m11F1DialController(t, frontSocket, predecessorHandle)
-	_ = m11F1CommitController(t, predecessorWS)
-	_ = m11F1DrainUntilClosed(predecessorWS)
+	predecessorHandle := frontdoorRotationInventoryHandle(t, client, sessionID)
+	predecessorWS := frontdoorRotationDialController(t, frontSocket, predecessorHandle)
+	_ = frontdoorRotationCommitController(t, predecessorWS)
+	_ = frontdoorRotationDrainUntilClosed(predecessorWS)
 	rotationEnabled.Store(true)
 	effects.mu.Lock()
 	if state := effects.rotationStates[sessionID]; state != nil {
@@ -470,8 +470,8 @@ func TestM11F1AutomaticRotationFreshFrontdoorController(t *testing.T) {
 		return effects.rotation == nil && effects.active[sessionID] == successorKey
 	})
 
-	const replayMarker = "M11-F1-SUCCESSOR-REPLAY"
-	disposable.run("send-keys", "-t", "m11_f1_live:", "printf '"+replayMarker+"\\n'", "Enter")
+	const replayMarker = "ROTATION-SUCCESSOR-REPLAY"
+	disposable.run("send-keys", "-t", "rotation_live:", "printf '"+replayMarker+"\\n'", "Enter")
 	pollUntil(t, 10*time.Second, "successor marker commit", func() bool {
 		return bytes.Contains((&adoptionFixture{effects: effects}).journalBytes(t, successorKey), []byte(replayMarker))
 	})
@@ -479,12 +479,12 @@ func TestM11F1AutomaticRotationFreshFrontdoorController(t *testing.T) {
 	// This first successor controller models the automatic reattach. Its COMMIT
 	// is complete before it closes, and the proof below waits for the whole
 	// successor subscriber bucket to disappear.
-	successorHandle := m11F1InventoryHandle(t, client, sessionID)
+	successorHandle := frontdoorRotationInventoryHandle(t, client, sessionID)
 	if successorHandle == predecessorHandle {
 		t.Fatal("successor reused consumed predecessor handle")
 	}
-	successorWS := m11F1DialController(t, frontSocket, successorHandle)
-	_ = m11F1CommitController(t, successorWS)
+	successorWS := frontdoorRotationDialController(t, frontSocket, successorHandle)
+	_ = frontdoorRotationCommitController(t, successorWS)
 	_ = successorWS.Close()
 	pollUntil(t, 5*time.Second, "successor subscriber bucket removal", func() bool {
 		effects.subscriberMu.Lock()
@@ -515,17 +515,17 @@ func TestM11F1AutomaticRotationFreshFrontdoorController(t *testing.T) {
 	// Inventory is still live, but this is a newly minted, one-time frontdoor
 	// handle and a brand-new controller, not the automatic reattach socket and
 	// not a pre-rotation broker authority.
-	freshHandle := m11F1InventoryHandle(t, client, sessionID)
+	freshHandle := frontdoorRotationInventoryHandle(t, client, sessionID)
 	if freshHandle == predecessorHandle || freshHandle == successorHandle {
 		t.Fatal("fresh controller did not receive a new one-time handle")
 	}
-	freshWS := m11F1DialController(t, frontSocket, freshHandle)
+	freshWS := frontdoorRotationDialController(t, frontSocket, freshHandle)
 	defer freshWS.Close()
-	prepared := m11F1CommitControllerWithMarker(t, freshWS, replayMarker)
+	prepared := frontdoorRotationCommitControllerWithMarker(t, freshWS, replayMarker)
 	if prepared.Columns != 80 || prepared.Rows != 24 {
 		t.Fatalf("fresh geometry=%dx%d want 80x24", prepared.Columns, prepared.Rows)
 	}
-	const inputMarker = "M11-F1-FRESH-INPUT"
+	const inputMarker = "ROTATION-FRESH-INPUT"
 	input, err := attachmentwire.Encode(terminal.Frame{
 		Version: terminal.ProtocolVersion, Type: terminal.FrameInput,
 		Source: prepared.Source, Epoch: prepared.Epoch, Data: []byte("printf '" + inputMarker + "\\n'\n"),

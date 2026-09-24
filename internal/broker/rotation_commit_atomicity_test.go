@@ -11,14 +11,14 @@ import (
 	"persea-terminal/internal/unifiedjournal"
 )
 
-type p2aReview5Rotation struct {
-	fixture     *p2aFixture
+type rotationRotation struct {
+	fixture     *rotationFixture
 	next        controlmode.PaneWitness
 	txn         *paneRotationTxn
 	reservation *unifiedjournal.AdoptionReservation
 }
 
-func p2aReview5PrepareRotation(t *testing.T, fixture *p2aFixture) *p2aReview5Rotation {
+func rotationPrepareRotation(t *testing.T, fixture *rotationFixture) *rotationRotation {
 	t.Helper()
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
@@ -26,7 +26,7 @@ func p2aReview5PrepareRotation(t *testing.T, fixture *p2aFixture) *p2aReview5Rot
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := txn.WriteBootstrap([]byte("review4-bootstrap")); err != nil {
+	if err := txn.WriteBootstrap([]byte("lifecycle-bootstrap")); err != nil {
 		t.Fatal(err)
 	}
 	if err := fixture.registry.retentionBoundary(next, "rotation_bootstrap"); err != nil {
@@ -35,10 +35,10 @@ func p2aReview5PrepareRotation(t *testing.T, fixture *p2aFixture) *p2aReview5Rot
 	if err := txn.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	return &p2aReview5Rotation{fixture: fixture, next: next, txn: txn, reservation: reservation}
+	return &rotationRotation{fixture: fixture, next: next, txn: txn, reservation: reservation}
 }
 
-func (rotation *p2aReview5Rotation) commit(t *testing.T) {
+func (rotation *rotationRotation) commit(t *testing.T) {
 	t.Helper()
 	sealed, err := rotation.fixture.registry.retention.startBoundary(
 		journalKey(rotation.fixture.previous), "rotation_seal", true,
@@ -58,12 +58,12 @@ func (rotation *p2aReview5Rotation) commit(t *testing.T) {
 	rotation.fixture.effects.journalMu.Unlock()
 }
 
-func p2aReview5AssertSuccessorOnly(t *testing.T, rotation *p2aReview5Rotation) {
+func rotationAssertSuccessorOnly(t *testing.T, rotation *rotationRotation) {
 	t.Helper()
 	fixture := rotation.fixture
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if got := p2aReview3RuntimeLedger(fixture.registry.retention); got == (p2aReview3Ledger{p: 1, q: 2}) {
+		if got := rotationRuntimeLedger(fixture.registry.retention); got == (rotationLedger{p: 1, q: 2}) {
 			break
 		} else if time.Now().After(deadline) {
 			t.Fatalf("rotation ledger=%+v want {p:1 q:2}", got)
@@ -105,9 +105,9 @@ func p2aReview5AssertSuccessorOnly(t *testing.T, rotation *p2aReview5Rotation) {
 	}
 }
 
-func TestP2AReview5DisconnectCannotReserveAcrossRotationCommit(t *testing.T) {
-	fixture := newP2AFixture(t)
-	rotation := p2aReview5PrepareRotation(t, fixture)
+func TestRotationDisconnectCannotReserveAcrossRotationCommit(t *testing.T) {
+	fixture := newRotationFixture(t)
+	rotation := rotationPrepareRotation(t, fixture)
 	var once sync.Once
 	var oldReservations atomic.Int64
 	fixture.registry.retention.setHook(func(point string, key unifiedjournal.PaneKey) {
@@ -129,12 +129,12 @@ func TestP2AReview5DisconnectCannotReserveAcrossRotationCommit(t *testing.T) {
 	if got := oldReservations.Load(); got != 0 {
 		t.Fatalf("stale Disconnect reserved retired predecessor %d times", got)
 	}
-	p2aReview5AssertSuccessorOnly(t, rotation)
+	rotationAssertSuccessorOnly(t, rotation)
 }
 
-func TestP2AReview5DisconnectRechecksAuthorityAfterReservation(t *testing.T) {
-	fixture := newP2AFixture(t)
-	rotation := p2aReview5PrepareRotation(t, fixture)
+func TestRotationDisconnectRechecksAuthorityAfterReservation(t *testing.T) {
+	fixture := newRotationFixture(t)
+	rotation := rotationPrepareRotation(t, fixture)
 	var once sync.Once
 	fixture.registry.retention.setHook(func(point string, key unifiedjournal.PaneKey) {
 		if point == "after_ingress_reserve" && key == journalKey(fixture.previous) {
@@ -146,11 +146,11 @@ func TestP2AReview5DisconnectRechecksAuthorityAfterReservation(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	p2aReview5AssertSuccessorOnly(t, rotation)
+	rotationAssertSuccessorOnly(t, rotation)
 }
 
-func TestP2AReview5CommitPublishesActiveAndClosesPredecessorSubscribers(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationCommitPublishesActiveAndClosesPredecessorSubscribers(t *testing.T) {
+	fixture := newRotationFixture(t)
 	oldKey := journalKey(fixture.previous)
 	subscribers := []*unifiedDevSubscriber{fixture.subscriber}
 	for index := 0; index < 5; index++ {
@@ -162,7 +162,7 @@ func TestP2AReview5CommitPublishesActiveAndClosesPredecessorSubscribers(t *testi
 		subscribers = append(subscribers, subscriber)
 	}
 
-	rotation := p2aReview5PrepareRotation(t, fixture)
+	rotation := rotationPrepareRotation(t, fixture)
 	rotation.commit(t)
 
 	fixture.effects.mu.Lock()
@@ -206,11 +206,11 @@ func TestP2AReview5CommitPublishesActiveAndClosesPredecessorSubscribers(t *testi
 	}
 }
 
-func TestP2AReview5AttachCannotObserveCommitInterior(t *testing.T) {
+func TestRotationAttachCannotObserveCommitInterior(t *testing.T) {
 	for _, edge := range []string{"after_install_before_close", "after_close_before_unlock"} {
 		t.Run(edge, func(t *testing.T) {
-			fixture := newP2AFixture(t)
-			rotation := p2aReview5PrepareRotation(t, fixture)
+			fixture := newRotationFixture(t)
+			rotation := rotationPrepareRotation(t, fixture)
 			type attachResult struct {
 				subscriber *unifiedDevSubscriber
 				cancel     func()
@@ -250,11 +250,11 @@ func TestP2AReview5AttachCannotObserveCommitInterior(t *testing.T) {
 	}
 }
 
-func TestP2AReview5ReapCannotObserveCommitInterior(t *testing.T) {
+func TestRotationReapCannotObserveCommitInterior(t *testing.T) {
 	for _, edge := range []string{"after_install_before_close", "after_close_before_unlock"} {
 		t.Run(edge, func(t *testing.T) {
-			fixture := newP2AFixture(t)
-			rotation := p2aReview5PrepareRotation(t, fixture)
+			fixture := newRotationFixture(t)
+			rotation := rotationPrepareRotation(t, fixture)
 			var oldDisconnects, successorDisconnects atomic.Int64
 			fixture.registry.retention.setHook(func(point string, key unifiedjournal.PaneKey) {
 				if point != "after_ingress_reserve" {
