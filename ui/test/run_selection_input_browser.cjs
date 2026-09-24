@@ -84,7 +84,15 @@ async function main() {
         assert.equal(await focused(), true, `input tap did not keep terminal focus: ${JSON.stringify(await page.evaluate(() => window.__selectionInputEvents))}`);
         assert.deepEqual(await wire(), before, "input tap emitted terminal input or resized");
         await page.keyboard.type("typed-after-selection");
-        const afterInput = await wire();
+        // Keyboard dispatch completes before the WebSocket receiver records all
+        // bytes. Wait for the exact wire condition, retaining the equality check.
+        let afterInput;
+        const inputDeadline = Date.now() + 10_000;
+        do {
+          afterInput = await wire();
+          if (afterInput.at(-1).inputs.slice(before.at(-1).inputs.length).join("") === "typed-after-selection") break;
+          await page.waitForTimeout(20);
+        } while (Date.now() < inputDeadline);
         assert.equal(afterInput.at(-1).inputs.slice(before.at(-1).inputs.length).join(""), "typed-after-selection");
 
         await enter();
