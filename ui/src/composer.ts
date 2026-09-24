@@ -409,7 +409,7 @@ export class Composer {
 
     const footer = document.createElement("div");
     footer.className = "attachment-page__composer-footer";
-    // UX-16 §16.2: the status is a conditional line — it renders only while
+    // the status is a conditional line — it renders only while
     // there is something to act on (guard, blocked, receipt, upload, restore,
     // punctuation, storage) and is hidden otherwise. No counter (§16.3): a
     // terminal composer has no length limit, images are visible as chips,
@@ -505,7 +505,7 @@ export class Composer {
   }
 
   /**
-   * Show the panel WITHOUT claiming focus (EP3-R4).
+   * Show the panel WITHOUT claiming focus (clipboard-focus-ownership).
    *
    * `openFromTrustedEvent` focuses the textarea, which on a coarse pointer
    * raises the keyboard. A caller that has populated the draft on the
@@ -911,7 +911,7 @@ export class Composer {
     else if (this.contentState === "sent") stateStatus = this.lastSentImages > 0
       ? `Inserted ${this.lastSentLength.toLocaleString()} ch \u00b7 ${this.lastSentImages.toLocaleString()} image${this.lastSentImages === 1 ? "" : "s"}`
       : `Inserted ${this.lastSentLength.toLocaleString()} ch`;
-    // UX-16 \u00a716.1/\u00a716.2: no "not run" qualifier (the receipt says what
+    // composer input \u00a716.1/\u00a716.2: no "not run" qualifier (the receipt says what
     // happened; the no-Return law is explained in Help) and no persistent
     // instruction line for the empty and draft states.
     this.status.value = [stateStatus, uploadHint, failureHint, restoreHint, punctuationHint, storageHint].filter(Boolean).join(" \u00b7 ");
@@ -1676,7 +1676,7 @@ export class Composer {
   // coarse pointer the textarea wears a 16px face for that instant — armed on
   // the pointer that is about to focus it and before any programmatic focus —
   // and returns to the chosen face on the frame after focus. Page zoom itself
-  // is never capped (UX15-R1: a `maximum-scale` cap defeats WCAG 1.4.4).
+  // is never capped (unrestricted-zoom: a `maximum-scale` cap defeats WCAG 1.4.4).
   private focusZoomGuardRelease?: ReturnType<typeof setTimeout>;
   private armFocusZoomGuard(): void {
     if (this.destroyed || !window.matchMedia("(pointer: coarse)").matches) return;

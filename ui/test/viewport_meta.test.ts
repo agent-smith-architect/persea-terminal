@@ -1,4 +1,4 @@
-// UX15-R1 (): the viewport meta must never cap page zoom. `maximum-scale`
+// unrestricted-zoom (): the viewport meta must never cap page zoom. `maximum-scale`
 // below 2 or `user-scalable=no` defeats WCAG 2.2 SC 1.4.4 (200% resize) on
 // every user agent that honours them; iOS focus zoom is prevented at the
 // composer instead (a 16px face for the instant of focus on coarse pointers).

@@ -1,6 +1,6 @@
 "use strict";
 
-// UX-18 focused real-browser gate. It drives the bundled terminal against the
+// terminal controls focused real-browser gate. It drives the bundled terminal against the
 // existing reopen fixture. Product clicks are trusted browser pointer events;
 // fixture controls only arrange server state and terminal modes.
 const fs = require("fs");
@@ -11,10 +11,10 @@ const { startFixture, STYLE_NONCE } = require("./unified_reopen_fixture.cjs");
 const { requestJSON: requestHTTPJSON } = require("./unified_browser_lib.cjs");
 
 const UI = path.resolve(__dirname, "..");
-const ENGINE = process.env.PERSEA_UX18_ENGINE || "chromium";
+const ENGINE = process.env.PERSEA_TERMINAL_CONTROLS_ENGINE || "chromium";
 const MODULE = process.env.PERSEA_PLAYWRIGHT_MODULE || require.resolve("playwright");
-const EVIDENCE = path.resolve(process.env.PERSEA_UX18_EVIDENCE_DIR || path.join(os.tmpdir(), `persea-ux18-${ENGINE}`));
-const MUTANT = process.env.PERSEA_UX18_MUTANT || "";
+const EVIDENCE = path.resolve(process.env.PERSEA_TERMINAL_CONTROLS_EVIDENCE_DIR || path.join(os.tmpdir(), `persea-terminal_controls-${ENGINE}`));
+const MUTANT = process.env.PERSEA_TERMINAL_CONTROLS_MUTANT || "";
 const MUTANTS = new Set([
   "no-keybox-bank-entry",
   "clipped-status-notice",
@@ -43,13 +43,13 @@ const ALL_SHAPES = Object.freeze([
   { name: "phone-390", width: 390, height: 844, touch: true },
   { name: "desktop-1280", width: 1280, height: 800, touch: false },
 ]);
-const selectedCase = process.env.PERSEA_UX18_CASE;
+const selectedCase = process.env.PERSEA_TERMINAL_CONTROLS_CASE;
 const SHAPES = ALL_SHAPES.filter((shape) => !selectedCase || shape.name === selectedCase);
 
 function assert(value, message) {
   if (value) return;
-  const error = new Error(`UX18_ASSERTION: ${message}`);
-  error.name = "UX18AssertionError";
+  const error = new Error(`TERMINAL_CONTROLS_ASSERTION: ${message}`);
+  error.name = "TERMINAL_CONTROLSAssertionError";
   throw error;
 }
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -207,8 +207,8 @@ function replace(source, pattern, replacement, expected, label) {
 
 async function prepareFixtureUI() {
   if (!MUTANT) return { root: UI, cleanup() {} };
-  assert(MUTANTS.has(MUTANT), `unknown UX18 mutant ${MUTANT}`);
-  const root = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "ux18-mutant-"));
+  assert(MUTANTS.has(MUTANT), `unknown terminal controls mutant ${MUTANT}`);
+  const root = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "terminal_controls-mutant-"));
   const dist = path.join(root, "dist");
   fs.cpSync(path.join(UI, "dist"), dist, { recursive: true });
   const esbuild = require(path.join(UI, "node_modules/esbuild"));
@@ -217,7 +217,7 @@ async function prepareFixtureUI() {
     entryPoints: [path.join(UI, "src/app.ts")], bundle: true, format: "esm", platform: "browser",
     sourcemap: true, outfile: path.join(dist, "app.js"), metafile: true,
     plugins: [{
-      name: `ux18-${MUTANT}`,
+      name: `terminal_controls-${MUTANT}`,
       setup(build) {
         build.onLoad({ filter: /\.(ts|css)$/ }, (args) => {
           let source = fs.readFileSync(args.path, "utf8");
@@ -302,7 +302,7 @@ function wire(snapshot) {
 function allInputs(snapshot) { return snapshot.attachments.flatMap((item) => item.inputs); }
 
 async function main() {
-  assert(SHAPES.length > 0, `no UX18 shape matched ${selectedCase}`);
+  assert(SHAPES.length > 0, `no terminal controls shape matched ${selectedCase}`);
   fs.mkdirSync(EVIDENCE, { recursive: true });
   const playwright = require(MODULE);
   assert(playwright[ENGINE], `Playwright has no ${ENGINE} engine`);
@@ -388,7 +388,7 @@ async function main() {
           const item = registration(this, type, listener, options);
           if (item) active.delete(item.key);
         };
-        window.__ux18TypographyListenerLedger = {
+        window.__terminal_controlsTypographyListenerLedger = {
           active: () => Array.from(active.values()),
           stop: () => {
             EventTarget.prototype.addEventListener = add;
@@ -470,7 +470,7 @@ async function main() {
           panelOverflow: q(".attachment-page__composer") ? getComputedStyle(q(".attachment-page__composer")).overflow : "",
           coarsePointer: matchMedia("(pointer: coarse)").matches,
           maxTouchPoints: navigator.maxTouchPoints,
-          standardCtrlPressed: window.__ux18StandardNodes?.[2]?.getAttribute?.("aria-pressed") || null,
+          standardCtrlPressed: window.__terminal_controlsStandardNodes?.[2]?.getAttribute?.("aria-pressed") || null,
           // Favorites has no dedicated modifier row. Check every Ctrl control
           // currently rendered, including the persistent accessory control.
           ctrlSurfaces: Array.from(document.querySelectorAll('[data-bar-modifier="ctrl"], .persea-terminal-keys__modifier[aria-label="Ctrl"]'), (node) => node.getAttribute('aria-pressed')),
@@ -527,8 +527,8 @@ async function main() {
       const caseEvidence = { shape: shape.name, touch: shape.touch };
       await page.evaluate(() => {
         const row = document.querySelector(".persea-unified-keybar-row");
-        window.__ux18StandardNodes = Array.from(row.children);
-        window.__ux18StandardRowAttributes = Array.from(row.attributes, (attribute) => [attribute.name, attribute.value]);
+        window.__terminal_controlsStandardNodes = Array.from(row.children);
+        window.__terminal_controlsStandardRowAttributes = Array.from(row.attributes, (attribute) => [attribute.name, attribute.value]);
       });
       const pristine = await uiState();
       assert(pristine.bank === null, `${shape.name}: standard row exposes a transient bank marker`);
@@ -566,9 +566,9 @@ async function main() {
       const unfocusedBefore = await uiState();
       const wireBeforeOpen = wire(await snapshot());
       const typographyListenerBaseline = detailed && !MUTANT
-        ? await page.evaluate(() => window.__ux18TypographyListenerLedger.active()) : null;
+        ? await page.evaluate(() => window.__terminal_controlsTypographyListenerLedger.active()) : null;
       const typographyListenerDelta = async () => {
-        const active = await page.evaluate(() => window.__ux18TypographyListenerLedger.active());
+        const active = await page.evaluate(() => window.__terminal_controlsTypographyListenerLedger.active());
         return active.filter((item) => !typographyListenerBaseline.some((baseline) => baseline.key === item.key));
       };
       const assertTypographyListeners = async (expectedOpen, phase) => {
@@ -656,9 +656,9 @@ async function main() {
           return gap;
         };
         await page.evaluate(() => {
-          window.__ux18UnexpectedLayoutResize = 0;
-          window.__ux18LayoutResizeListener = () => { window.__ux18UnexpectedLayoutResize += 1; };
-          window.addEventListener("resize", window.__ux18LayoutResizeListener);
+          window.__terminal_controlsUnexpectedLayoutResize = 0;
+          window.__terminal_controlsLayoutResizeListener = () => { window.__terminal_controlsUnexpectedLayoutResize += 1; };
+          window.addEventListener("resize", window.__terminal_controlsLayoutResizeListener);
           const popover = document.querySelector(".attachment-page__composer-typography-popover");
           if (!(popover instanceof HTMLElement)) throw new Error("typography layout probe is missing");
           // Seed a stale portal coordinate. Auto-grow is the only event that
@@ -680,15 +680,15 @@ async function main() {
           const terminal = document.querySelector(".persea-unified-terminal");
           const popover = document.querySelector(".attachment-page__composer-typography-popover");
           if (!(terminal instanceof HTMLElement) || !(popover instanceof HTMLElement)) throw new Error("typography font probe is missing");
-          window.__ux18FontLayoutProbe = false;
-          window.__ux18FontLayoutObserver = new MutationObserver(() => {
+          window.__terminal_controlsFontLayoutProbe = false;
+          window.__terminal_controlsFontLayoutObserver = new MutationObserver(() => {
             if (terminal.dataset.composerFont !== "12") return;
-            window.__ux18FontLayoutProbe = true;
+            window.__terminal_controlsFontLayoutProbe = true;
             popover.style.left = "8px";
             popover.style.top = "8px";
-            window.__ux18FontLayoutObserver.disconnect();
+            window.__terminal_controlsFontLayoutObserver.disconnect();
           });
-          window.__ux18FontLayoutObserver.observe(terminal, { attributes: true, attributeFilter: ["data-composer-font"] });
+          window.__terminal_controlsFontLayoutObserver.observe(terminal, { attributes: true, attributeFilter: ["data-composer-font"] });
         });
         await page.getByRole("button", { name: "Increase composer text size" }).click();
         await waitSnapshot((value) => value.counters.preferencesPut === beforeLayoutFont.counters.preferencesPut + 1);
@@ -698,10 +698,10 @@ async function main() {
         const afterLayoutFont = await uiState();
         const fontGap = assertAnchored(afterLayoutFont, "font change");
         const layoutSignals = await page.evaluate(() => {
-          window.removeEventListener("resize", window.__ux18LayoutResizeListener);
-          delete window.__ux18LayoutResizeListener;
-          window.__ux18FontLayoutObserver.disconnect();
-          return { unexpectedResizeEvents: window.__ux18UnexpectedLayoutResize, fontProbe: window.__ux18FontLayoutProbe };
+          window.removeEventListener("resize", window.__terminal_controlsLayoutResizeListener);
+          delete window.__terminal_controlsLayoutResizeListener;
+          window.__terminal_controlsFontLayoutObserver.disconnect();
+          return { unexpectedResizeEvents: window.__terminal_controlsUnexpectedLayoutResize, fontProbe: window.__terminal_controlsFontLayoutProbe };
         });
         assert(layoutSignals.unexpectedResizeEvents === 0 && layoutSignals.fontProbe === true,
           `${shape.name}: typography portal did not follow composer layout (font frame): ${JSON.stringify(layoutSignals)}`);
@@ -737,8 +737,8 @@ async function main() {
       if (typographyListenerBaseline) {
         caseEvidence.typographyListenerLifecycle.escapeClosed = await assertTypographyListeners(false, "Escape-closed");
         await page.evaluate(() => {
-          window.__ux18TypographyListenerLedger.stop();
-          delete window.__ux18TypographyListenerLedger;
+          window.__terminal_controlsTypographyListenerLedger.stop();
+          delete window.__terminal_controlsTypographyListenerLedger;
         });
       }
       await page.locator(".attachment-page__composer-typography-trigger").click();
@@ -845,7 +845,7 @@ async function main() {
             textarea.focus({ preventScroll: true });
             textarea.scrollTop = 0;
             textarea.setSelectionRange(kind === "caret" ? 1 : 2, kind === "caret" ? 1 : 2, "none");
-            window.__ux18TypographyInterleave = { done: false, kind, size };
+            window.__terminal_controlsTypographyInterleave = { done: false, kind, size };
             const observer = new MutationObserver(() => {
               if (terminal.dataset.composerFont !== String(size)) return;
               observer.disconnect();
@@ -867,7 +867,7 @@ async function main() {
                 left: textarea.scrollLeft,
               };
               requestAnimationFrame(() => requestAnimationFrame(() => {
-                window.__ux18TypographyInterleave = {
+                window.__terminal_controlsTypographyInterleave = {
                   done: true,
                   kind,
                   size,
@@ -885,8 +885,8 @@ async function main() {
             observer.observe(terminal, { attributes: true, attributeFilter: ["data-composer-font"] });
           }, { kind, size });
           await publishPreference({ composer_font_size: size });
-          await page.waitForFunction(() => window.__ux18TypographyInterleave?.done === true);
-          const proof = await page.evaluate(() => window.__ux18TypographyInterleave);
+          await page.waitForFunction(() => window.__terminal_controlsTypographyInterleave?.done === true);
+          const proof = await page.evaluate(() => window.__terminal_controlsTypographyInterleave);
           const preserved = kind === "type"
             ? proof.actual.value === proof.expected.value && proof.actual.start === proof.expected.start && proof.actual.end === proof.expected.end
             : kind === "caret"
@@ -1162,9 +1162,9 @@ async function main() {
           await page.evaluate(() => {
             const button = document.querySelector('.persea-terminal-keys button[aria-label="F1"]');
             if (!(button instanceof HTMLButtonElement)) throw new Error("keyboard fence F1 is missing");
-            window.__ux18KeyboardFenceEvents = [];
+            window.__terminal_controlsKeyboardFenceEvents = [];
             for (const type of ["keydown", "keyup", "click", "blur"]) {
-              button.addEventListener(type, (event) => window.__ux18KeyboardFenceEvents.push({
+              button.addEventListener(type, (event) => window.__terminal_controlsKeyboardFenceEvents.push({
                 type, trusted: event.isTrusted, key: event.key || null, detail: event.detail ?? null,
               }));
             }
@@ -1179,7 +1179,7 @@ async function main() {
           await delay(80);
           const keyboardFenceAfter = allInputs(await snapshot());
           const keyboardFenceDelta = keyboardFenceAfter.slice(keyboardFenceBefore.length);
-          const keyboardFenceEvents = await page.evaluate(() => window.__ux18KeyboardFenceEvents);
+          const keyboardFenceEvents = await page.evaluate(() => window.__terminal_controlsKeyboardFenceEvents);
           assert(keyboardFenceDelta.length === 0
             && keyboardFenceEvents.some((event) => event.type === "keydown" && event.trusted && event.key === " ")
             && keyboardFenceEvents.filter((event) => event.type === "click").every((event) => event.trusted && event.detail === 0),
@@ -1198,14 +1198,14 @@ async function main() {
           await page.evaluate(() => {
             const button = document.querySelector('.persea-terminal-keys button[aria-label="F2"]');
             if (!(button instanceof HTMLButtonElement)) throw new Error("accessibility-path F2 is missing");
-            window.__ux18AccessibilityEvents = [];
-            const record = (event) => window.__ux18AccessibilityEvents.push({
+            window.__terminal_controlsAccessibilityEvents = [];
+            const record = (event) => window.__terminal_controlsAccessibilityEvents.push({
               phase: "button", type: event.type, trusted: event.isTrusted,
               key: event.key || null, detail: event.detail ?? null,
             });
             const blockKeydown = (event) => {
               if (event.target !== button || event.key !== "Enter") return;
-              window.__ux18AccessibilityEvents.push({
+              window.__terminal_controlsAccessibilityEvents.push({
                 phase: "withheld-before-control", type: event.type,
                 trusted: event.isTrusted, key: event.key, detail: event.detail ?? null,
               });
@@ -1214,7 +1214,7 @@ async function main() {
             };
             document.addEventListener("keydown", blockKeydown, true);
             for (const type of ["keydown", "click"]) button.addEventListener(type, record);
-            window.__ux18AccessibilityCleanup = () => {
+            window.__terminal_controlsAccessibilityCleanup = () => {
               document.removeEventListener("keydown", blockKeydown, true);
               for (const type of ["keydown", "click"]) button.removeEventListener(type, record);
             };
@@ -1225,9 +1225,9 @@ async function main() {
           const accessibilityAfter = allInputs(await snapshot());
           const accessibilityDelta = accessibilityAfter.slice(accessibilityBefore.length);
           const accessibilityEvents = await page.evaluate(() => {
-            window.__ux18AccessibilityCleanup?.();
-            delete window.__ux18AccessibilityCleanup;
-            return window.__ux18AccessibilityEvents;
+            window.__terminal_controlsAccessibilityCleanup?.();
+            delete window.__terminal_controlsAccessibilityCleanup;
+            return window.__terminal_controlsAccessibilityEvents;
           });
           assert(accessibilityDelta.length === 1 && accessibilityDelta[0] === F_BYTES[1]
             && accessibilityEvents.filter((event) => event.phase === "button" && event.type === "click" && event.trusted && event.detail === 0).length === 1
@@ -1247,23 +1247,23 @@ async function main() {
           await page.evaluate(() => {
             const button = document.querySelector(".persea-unified-quick-actions");
             if (!(button instanceof HTMLButtonElement)) throw new Error("same-control disclosure is missing");
-            window.__ux18SameControlAudit = { events: [], expanded: [] };
-            const record = (event) => window.__ux18SameControlAudit.events.push({
+            window.__terminal_controlsSameControlAudit = { events: [], expanded: [] };
+            const record = (event) => window.__terminal_controlsSameControlAudit.events.push({
               type: event.type, trusted: event.isTrusted, key: event.key || null,
               detail: event.detail ?? null, pointerType: event.pointerType || null,
             });
             for (const type of ["keydown", "pointerdown", "pointerup", "keyup", "click"]) button.addEventListener(type, record);
             const observer = new MutationObserver((records) => {
-              for (const entry of records) window.__ux18SameControlAudit.expanded.push({
+              for (const entry of records) window.__terminal_controlsSameControlAudit.expanded.push({
                 old: entry.oldValue, value: button.getAttribute("aria-expanded"),
               });
             });
             observer.observe(button, { attributes: true, attributeFilter: ["aria-expanded"], attributeOldValue: true });
-            window.__ux18SameControlReset = () => {
-              window.__ux18SameControlAudit.events.length = 0;
-              window.__ux18SameControlAudit.expanded.length = 0;
+            window.__terminal_controlsSameControlReset = () => {
+              window.__terminal_controlsSameControlAudit.events.length = 0;
+              window.__terminal_controlsSameControlAudit.expanded.length = 0;
             };
-            window.__ux18SameControlCleanup = () => {
+            window.__terminal_controlsSameControlCleanup = () => {
               observer.disconnect();
               for (const type of ["keydown", "pointerdown", "pointerup", "keyup", "click"]) button.removeEventListener(type, record);
             };
@@ -1276,12 +1276,12 @@ async function main() {
           await page.locator(".persea-unified-sheet").waitFor({ state: "visible" });
           await delay(40);
           const sameControlAfterPointer = await uiState();
-          const sameControlPointerAudit = await page.evaluate(() => structuredClone(window.__ux18SameControlAudit));
+          const sameControlPointerAudit = await page.evaluate(() => structuredClone(window.__terminal_controlsSameControlAudit));
           await page.keyboard.up("Space");
           await delay(120);
           const sameControlAfterRelease = await uiState();
           const sameControlDelta = allInputs(await snapshot()).slice(sameControlBefore.length);
-          const sameControlAudit = await page.evaluate(() => structuredClone(window.__ux18SameControlAudit));
+          const sameControlAudit = await page.evaluate(() => structuredClone(window.__terminal_controlsSameControlAudit));
           const compatibilityClicks = sameControlAudit.events.filter((event) => event.type === "click" && event.trusted && event.detail === 0).length;
           assert(sameControlAfterPointer.sheetHidden === false && sameControlAfterRelease.sheetHidden === false
             && sameControlPointerAudit.expanded.length === 1 && sameControlPointerAudit.expanded[0].value === "true"
@@ -1301,14 +1301,14 @@ async function main() {
           await page.evaluate(() => {
             const button = document.querySelector(".persea-unified-quick-actions");
             if (!(button instanceof HTMLButtonElement)) throw new Error("post-canceled accessibility disclosure is missing");
-            window.__ux18SameControlReset();
+            window.__terminal_controlsSameControlReset();
             const blockKeydown = (event) => {
               if (event.target !== button || event.key !== "Enter") return;
               document.removeEventListener("keydown", blockKeydown, true);
               event.stopImmediatePropagation();
             };
             document.addEventListener("keydown", blockKeydown, true);
-            window.__ux18PostCanceledATCleanup = () => document.removeEventListener("keydown", blockKeydown, true);
+            window.__terminal_controlsPostCanceledATCleanup = () => document.removeEventListener("keydown", blockKeydown, true);
           });
           const postCanceledBefore = allInputs(await snapshot());
           await page.keyboard.press("Enter");
@@ -1319,9 +1319,9 @@ async function main() {
           const postCanceledState = await uiState();
           const postCanceledDelta = allInputs(await snapshot()).slice(postCanceledBefore.length);
           const postCanceledAudit = await page.evaluate(() => {
-            window.__ux18PostCanceledATCleanup?.();
-            delete window.__ux18PostCanceledATCleanup;
-            return structuredClone(window.__ux18SameControlAudit);
+            window.__terminal_controlsPostCanceledATCleanup?.();
+            delete window.__terminal_controlsPostCanceledATCleanup;
+            return structuredClone(window.__terminal_controlsSameControlAudit);
           });
           assert(postCanceledState.sheetHidden === true && postCanceledDelta.length === 0
             && postCanceledAudit.expanded.length === 1 && postCanceledAudit.expanded[0].value === "false"
@@ -1332,31 +1332,31 @@ async function main() {
           // Fresh pointer and ordinary keyboard activation each toggle the
           // disclosure exactly once; neither may inherit the retired tombstone.
           await page.locator(".xterm-helper-textarea").focus();
-          await page.evaluate(() => window.__ux18SameControlReset());
+          await page.evaluate(() => window.__terminal_controlsSameControlReset());
           await sameControl.click();
           await page.locator(".persea-unified-sheet").waitFor({ state: "visible" });
           await delay(40);
-          const pointerAudit = await page.evaluate(() => structuredClone(window.__ux18SameControlAudit));
+          const pointerAudit = await page.evaluate(() => structuredClone(window.__terminal_controlsSameControlAudit));
           assert(pointerAudit.expanded.length === 1 && pointerAudit.expanded[0].value === "true"
             && pointerAudit.events.filter((event) => event.type === "pointerup" && event.trusted).length === 1,
           `${shape.name}: ordinary pointer activation did not toggle exactly once: ${JSON.stringify(pointerAudit)}`);
 
-          await page.evaluate(() => window.__ux18SameControlReset());
+          await page.evaluate(() => window.__terminal_controlsSameControlReset());
           await sameControl.focus();
           const keyboardBefore = allInputs(await snapshot());
           await page.keyboard.press("Enter");
           await page.locator(".persea-unified-sheet").waitFor({ state: "hidden" });
           await delay(40);
           const keyboardDelta = allInputs(await snapshot()).slice(keyboardBefore.length);
-          const keyboardAudit = await page.evaluate(() => structuredClone(window.__ux18SameControlAudit));
+          const keyboardAudit = await page.evaluate(() => structuredClone(window.__terminal_controlsSameControlAudit));
           assert(keyboardAudit.expanded.length === 1 && keyboardAudit.expanded[0].value === "false" && keyboardDelta.length === 0
             && keyboardAudit.events.filter((event) => event.type === "click" && event.trusted && event.detail === 0).length === 1,
           `${shape.name}: ordinary keyboard activation did not toggle exactly once: ${JSON.stringify({ keyboardDelta, keyboardAudit })}`);
           await page.locator(".xterm-helper-textarea").focus();
           await page.evaluate(() => {
-            window.__ux18SameControlCleanup?.();
-            delete window.__ux18SameControlCleanup;
-            delete window.__ux18SameControlReset;
+            window.__terminal_controlsSameControlCleanup?.();
+            delete window.__terminal_controlsSameControlCleanup;
+            delete window.__terminal_controlsSameControlReset;
           });
           caseEvidence.keyboardTombstone = {
             sameControl: { afterPointer: sameControlAfterPointer.sheetHidden, afterRelease: sameControlAfterRelease.sheetHidden, delta: sameControlDelta, audit: sameControlAudit },
@@ -1375,9 +1375,9 @@ async function main() {
           await page.evaluate(() => {
             const button = document.querySelector(".persea-unified-composer-toggle");
             if (!(button instanceof HTMLButtonElement)) throw new Error("toolbar composer generation control is missing");
-            window.__ux18ToolbarComposerFence = [];
+            window.__terminal_controlsToolbarComposerFence = [];
             for (const type of ["keydown", "keyup", "click", "pointerdown", "pointerup"]) {
-              button.addEventListener(type, (event) => window.__ux18ToolbarComposerFence.push({
+              button.addEventListener(type, (event) => window.__terminal_controlsToolbarComposerFence.push({
                 type, trusted: event.isTrusted, key: event.key || null, detail: event.detail ?? null,
               }));
             }
@@ -1392,7 +1392,7 @@ async function main() {
           await delay(100);
           const toolbarComposerState = await uiState();
           const toolbarComposerDelta = allInputs(await snapshot()).slice(toolbarComposerBefore.length);
-          const toolbarComposerEvents = await page.evaluate(() => window.__ux18ToolbarComposerFence);
+          const toolbarComposerEvents = await page.evaluate(() => window.__terminal_controlsToolbarComposerFence);
           assert(toolbarComposerState.composerOpen !== "true" && toolbarComposerState.sheetHidden === false && toolbarComposerDelta.length === 0
             && toolbarComposerEvents.some((event) => event.type === "keydown" && event.trusted && event.key === " ")
             && toolbarComposerEvents.some((event) => event.type === "keyup" && event.trusted && event.key === " "),
@@ -1405,7 +1405,7 @@ async function main() {
           // the page's real authority rather than a private generation-zero
           // universe while the panel remains visible across a sheet change.
           await openComposer();
-          const composerText = `ux18-c7-stale-composer-${ENGINE}`;
+          const composerText = `terminal_controls-c7-stale-composer-${ENGINE}`;
           const composerTextarea = page.locator(".attachment-page__composer-textarea");
           await composerTextarea.fill(composerText);
           const composerInsert = page.getByRole("button", { name: "Insert into terminal without running it", exact: true });
@@ -1438,8 +1438,8 @@ async function main() {
           await page.evaluate(() => {
             const button = document.querySelector('.persea-terminal-keys button[aria-label="F1"]');
             if (!(button instanceof HTMLButtonElement)) throw new Error("unrelated-key F1 is missing");
-            window.__ux18UnrelatedKeyFence = [];
-            for (const type of ["keydown", "keyup", "click"]) button.addEventListener(type, (event) => window.__ux18UnrelatedKeyFence.push({
+            window.__terminal_controlsUnrelatedKeyFence = [];
+            for (const type of ["keydown", "keyup", "click"]) button.addEventListener(type, (event) => window.__terminal_controlsUnrelatedKeyFence.push({
               type, trusted: event.isTrusted, key: event.key || null, detail: event.detail ?? null,
             }));
           });
@@ -1453,7 +1453,7 @@ async function main() {
           await page.keyboard.up("Space");
           await delay(100);
           const unrelatedDelta = allInputs(await snapshot()).slice(unrelatedBefore.length);
-          const unrelatedEvents = await page.evaluate(() => window.__ux18UnrelatedKeyFence);
+          const unrelatedEvents = await page.evaluate(() => window.__terminal_controlsUnrelatedKeyFence);
           assert(unrelatedDelta.length === 0
             && unrelatedEvents.some((event) => event.type === "keydown" && event.key === "a" && event.trusted)
             && unrelatedEvents.some((event) => event.type === "keyup" && event.key === "a" && event.trusted),
@@ -1482,10 +1482,10 @@ async function main() {
             const key = document.querySelector('.persea-unified-keybar-row button[title="Esc"]');
             const quick = document.querySelector(".persea-unified-quick-actions");
             if (!(key instanceof HTMLButtonElement) || !(quick instanceof HTMLButtonElement)) throw new Error("pointer-identity controls are missing");
-            window.__ux18PointerIdentity = [];
+            window.__terminal_controlsPointerIdentity = [];
             for (const [name, button] of [["f1", key], ["quick", quick]]) {
               for (const type of ["pointerdown", "pointerup", "pointercancel", "pointerleave"]) button.addEventListener(type, (event) => {
-                window.__ux18PointerIdentity.push({ name, type, trusted: event.isTrusted, pointerId: event.pointerId, pointerType: event.pointerType });
+                window.__terminal_controlsPointerIdentity.push({ name, type, trusted: event.isTrusted, pointerId: event.pointerId, pointerType: event.pointerType });
               });
             }
           });
@@ -1500,7 +1500,7 @@ async function main() {
           await pointerOrder.finish();
           const pointerAfterFreshSnapshot = await waitSnapshot((value) => allInputs(value).length >= pointerBefore.length + 1);
           const pointerFinalDelta = allInputs(pointerAfterFreshSnapshot).slice(pointerBefore.length);
-          const pointerEvents = await page.evaluate(() => window.__ux18PointerIdentity);
+          const pointerEvents = await page.evaluate(() => window.__terminal_controlsPointerIdentity);
           const f1DownIds = pointerEvents.filter((event) => event.name === "f1" && event.type === "pointerdown").map((event) => event.pointerId);
           assert(pointerAfterStale.length === 0 && pointerFinalDelta.length === 1 && pointerFinalDelta[0] === "\x1b"
             && f1DownIds.length === 2 && f1DownIds[0] !== f1DownIds[1]
@@ -1520,7 +1520,7 @@ async function main() {
           await delay(80);
           await page.evaluate((nonce) => {
             const style = document.createElement("style");
-            style.id = "ux18-session-host-probe";
+            style.id = "terminal_controls-session-host-probe";
             style.nonce = nonce;
             style.textContent = ".persea-unified-identity { display: flex !important; }";
             document.head.append(style);
@@ -1535,7 +1535,7 @@ async function main() {
           assert(tagRows.some((row) => row.label === "Switch to beta"), `${shape.name}: identity SessionSwitcher did not render beta: ${JSON.stringify(tagRows)}`);
           await page.evaluate((nonce) => {
             const style = document.createElement("style");
-            style.id = "ux18-session-tag-focus-probe";
+            style.id = "terminal_controls-session-tag-focus-probe";
             style.nonce = nonce;
             style.textContent = ".persea-unified-identity__details[hidden] { display: block !important; }";
             document.head.append(style);
@@ -1551,7 +1551,7 @@ async function main() {
           const tagSwitcherName = await page.locator(".persea-unified-tag__name").textContent();
           assert(tagSwitcherName === "alpha",
             `${shape.name}: identity SessionSwitcher keyboard activation crossed disclosure generation: ${JSON.stringify({ tagSwitcherName })}`);
-          await page.evaluate(() => document.querySelector("#ux18-session-tag-focus-probe")?.remove());
+          await page.evaluate(() => document.querySelector("#terminal_controls-session-tag-focus-probe")?.remove());
           await page.locator(".persea-unified-quick-actions").click();
 
           await page.locator(".persea-unified-quick-actions").click();
@@ -1562,7 +1562,7 @@ async function main() {
           await sheetBeta.waitFor({ state: "visible" });
           await page.evaluate((nonce) => {
             const style = document.createElement("style");
-            style.id = "ux18-session-sheet-focus-probe";
+            style.id = "terminal_controls-session-sheet-focus-probe";
             style.nonce = nonce;
             style.textContent = ".persea-unified-sheet[hidden] { display: block !important; }";
             document.head.append(style);
@@ -1578,9 +1578,9 @@ async function main() {
           const sheetSwitcherName = await page.locator(".persea-unified-tag__name").textContent();
           assert(sheetSwitcherName === "alpha",
             `${shape.name}: sheet SessionSwitcher keyboard activation crossed disclosure generation: ${JSON.stringify({ sheetSwitcherName })}`);
-          await page.evaluate(() => document.querySelector("#ux18-session-sheet-focus-probe")?.remove());
+          await page.evaluate(() => document.querySelector("#terminal_controls-session-sheet-focus-probe")?.remove());
           if (await page.locator(".persea-unified-identity__details").getAttribute("hidden") === null) await tag.click();
-          await page.evaluate(() => document.querySelector("#ux18-session-host-probe")?.remove());
+          await page.evaluate(() => document.querySelector("#terminal_controls-session-host-probe")?.remove());
           await page.setViewportSize({ width: shape.width, height: shape.height });
           caseEvidence.sessionSwitcherGenerationFence = { tag: tagSwitcherName, sheet: sheetSwitcherName };
         }
@@ -1596,8 +1596,8 @@ async function main() {
           await page.evaluate(() => {
             const button = document.querySelector(".persea-unified-keybar-key--latch");
             if (!(button instanceof HTMLButtonElement)) throw new Error("standard Ctrl generation control is missing");
-            window.__ux18StandardCtrlFenceEvents = [];
-            const record = (event) => window.__ux18StandardCtrlFenceEvents.push({
+            window.__terminal_controlsStandardCtrlFenceEvents = [];
+            const record = (event) => window.__terminal_controlsStandardCtrlFenceEvents.push({
               type: event.type, trusted: event.isTrusted, key: event.key || null, detail: event.detail ?? null,
             });
             for (const type of ["keydown", "keyup", "click", "blur"]) button.addEventListener(type, record);
@@ -1612,7 +1612,7 @@ async function main() {
           await delay(80);
           const standardCtrlAfterRelease = await uiState();
           const standardCtrlReleaseDelta = allInputs(await snapshot()).slice(standardCtrlBefore.length);
-          const standardCtrlEvents = await page.evaluate(() => window.__ux18StandardCtrlFenceEvents);
+          const standardCtrlEvents = await page.evaluate(() => window.__terminal_controlsStandardCtrlFenceEvents);
           const standardLetterBefore = allInputs(await snapshot());
           await page.locator(".xterm-helper-textarea").focus();
           await page.keyboard.type("s");
@@ -1639,16 +1639,16 @@ async function main() {
             const clipboard = navigator.clipboard;
             if (!(button instanceof HTMLButtonElement) || !clipboard) throw new Error("Paste generation fixture is unavailable");
             const ownReadText = Object.getOwnPropertyDescriptor(clipboard, "readText");
-            window.__ux18PasteFence = { reads: 0, events: [] };
+            window.__terminal_controlsPasteFence = { reads: 0, events: [] };
             Object.defineProperty(clipboard, "readText", {
               configurable: true,
-              value: async () => { window.__ux18PasteFence.reads += 1; return "ux18-stale-paste"; },
+              value: async () => { window.__terminal_controlsPasteFence.reads += 1; return "terminal_controls-stale-paste"; },
             });
-            const record = (event) => window.__ux18PasteFence.events.push({
+            const record = (event) => window.__terminal_controlsPasteFence.events.push({
               type: event.type, trusted: event.isTrusted, key: event.key || null, detail: event.detail ?? null,
             });
             for (const type of ["keydown", "keyup", "click", "blur"]) button.addEventListener(type, record);
-            window.__ux18PasteFenceCleanup = () => {
+            window.__terminal_controlsPasteFenceCleanup = () => {
               for (const type of ["keydown", "keyup", "click", "blur"]) button.removeEventListener(type, record);
               if (ownReadText) Object.defineProperty(clipboard, "readText", ownReadText);
               else delete clipboard.readText;
@@ -1664,9 +1664,9 @@ async function main() {
           await delay(160);
           const pasteAfter = allInputs(await snapshot()).slice(pasteBefore.length);
           const pasteFence = await page.evaluate(() => {
-            const value = structuredClone(window.__ux18PasteFence);
-            window.__ux18PasteFenceCleanup?.();
-            delete window.__ux18PasteFenceCleanup;
+            const value = structuredClone(window.__terminal_controlsPasteFence);
+            window.__terminal_controlsPasteFenceCleanup?.();
+            delete window.__terminal_controlsPasteFenceCleanup;
             return value;
           });
           assert(pasteFence.reads === 0 && pasteAfter.length === 0
@@ -1688,17 +1688,17 @@ async function main() {
           await page.evaluate(() => {
             const button = document.querySelector(".persea-unified-quick-actions");
             if (!(button instanceof HTMLButtonElement)) throw new Error("Enter repeat disclosure is missing");
-            window.__ux18EnterRepeat = { events: [], expanded: [] };
-            const record = (event) => window.__ux18EnterRepeat.events.push({
+            window.__terminal_controlsEnterRepeat = { events: [], expanded: [] };
+            const record = (event) => window.__terminal_controlsEnterRepeat.events.push({
               type: event.type, trusted: event.isTrusted, key: event.key || null,
               repeat: event.repeat ?? null, detail: event.detail ?? null,
             });
             for (const type of ["keydown", "keyup", "click"]) button.addEventListener(type, record);
             const observer = new MutationObserver((records) => {
-              for (const entry of records) window.__ux18EnterRepeat.expanded.push({ old: entry.oldValue, value: button.getAttribute("aria-expanded") });
+              for (const entry of records) window.__terminal_controlsEnterRepeat.expanded.push({ old: entry.oldValue, value: button.getAttribute("aria-expanded") });
             });
             observer.observe(button, { attributes: true, attributeFilter: ["aria-expanded"], attributeOldValue: true });
-            window.__ux18EnterRepeatCleanup = () => {
+            window.__terminal_controlsEnterRepeatCleanup = () => {
               observer.disconnect();
               for (const type of ["keydown", "keyup", "click"]) button.removeEventListener(type, record);
             };
@@ -1713,9 +1713,9 @@ async function main() {
           const repeatDelta = allInputs(await snapshot()).slice(repeatBefore.length);
           await page.keyboard.up("Enter");
           const repeatAudit = await page.evaluate(() => {
-            const value = structuredClone(window.__ux18EnterRepeat);
-            window.__ux18EnterRepeatCleanup?.();
-            delete window.__ux18EnterRepeatCleanup;
+            const value = structuredClone(window.__terminal_controlsEnterRepeat);
+            window.__terminal_controlsEnterRepeatCleanup?.();
+            delete window.__terminal_controlsEnterRepeatCleanup;
             return value;
           });
           assert(repeatState.sheetHidden === false && repeatDelta.length === 0 && repeatAudit.expanded.length === 1
@@ -1773,12 +1773,12 @@ async function main() {
             await page.evaluate(() => {
               const button = document.querySelector(".persea-unified-quick-actions");
               if (!(button instanceof HTMLButtonElement)) throw new Error("lifecycle disclosure is missing");
-              window.__ux18LifecycleKeyboardEvents = [];
-              const record = (event) => window.__ux18LifecycleKeyboardEvents.push({
+              window.__terminal_controlsLifecycleKeyboardEvents = [];
+              const record = (event) => window.__terminal_controlsLifecycleKeyboardEvents.push({
                 type: event.type, trusted: event.isTrusted, key: event.key || null, detail: event.detail ?? null,
               });
               for (const type of ["keydown", "keyup", "click", "blur"]) button.addEventListener(type, record);
-              window.__ux18LifecycleKeyboardCleanup = () => {
+              window.__terminal_controlsLifecycleKeyboardCleanup = () => {
                 for (const type of ["keydown", "keyup", "click", "blur"]) button.removeEventListener(type, record);
               };
             });
@@ -1794,9 +1794,9 @@ async function main() {
             const lifecycleState = await uiState();
             const lifecycleDelta = allInputs(await snapshot()).slice(lifecycleKeyboardBefore.length);
             const lifecycleEvents = await page.evaluate(() => {
-              window.__ux18LifecycleKeyboardCleanup?.();
-              delete window.__ux18LifecycleKeyboardCleanup;
-              return window.__ux18LifecycleKeyboardEvents;
+              window.__terminal_controlsLifecycleKeyboardCleanup?.();
+              delete window.__terminal_controlsLifecycleKeyboardCleanup;
+              return window.__terminal_controlsLifecycleKeyboardEvents;
             });
             assert(lifecycleState.sheetHidden === true && lifecycleDelta.length === 0
               && lifecycleEvents.some((event) => event.type === "keydown" && event.trusted && event.key === " ")
@@ -1807,9 +1807,9 @@ async function main() {
           const reset = await page.evaluate(() => {
             const row = document.querySelector(".persea-unified-keybar-row");
             const nodes = Array.from(row.children);
-            return { labels: nodes.map((node) => node.textContent), sameNodes: Array.isArray(window.__ux18StandardNodes) && nodes.every((node, index) => node === window.__ux18StandardNodes[index]), bank: row.getAttribute("data-bank"), attributes: Array.from(row.attributes, (attribute) => [attribute.name, attribute.value]), typographyClosed: document.querySelector(".attachment-page__composer-typography-popover")?.hidden };
+            return { labels: nodes.map((node) => node.textContent), sameNodes: Array.isArray(window.__terminal_controlsStandardNodes) && nodes.every((node, index) => node === window.__terminal_controlsStandardNodes[index]), bank: row.getAttribute("data-bank"), attributes: Array.from(row.attributes, (attribute) => [attribute.name, attribute.value]), typographyClosed: document.querySelector(".attachment-page__composer-typography-popover")?.hidden };
           });
-          const originalAttributes = await page.evaluate(() => window.__ux18StandardRowAttributes);
+          const originalAttributes = await page.evaluate(() => window.__terminal_controlsStandardRowAttributes);
           assert(reset.labels.join(" ") === "Esc ⇥ Ctrl ← ↓ ↑ →" && reset.sameNodes && reset.bank === null && reset.typographyClosed === true && JSON.stringify(reset.attributes) === JSON.stringify(originalAttributes), `${shape.name}: reconnect did not restore exact row/popover lifecycle state: ${JSON.stringify(reset)}`);
           let reconnectAuthority;
           if (reconnectCtrlArmed) {
@@ -1843,9 +1843,9 @@ async function main() {
           const reset = await page.evaluate(() => {
             const row = document.querySelector(".persea-unified-keybar-row");
             const nodes = Array.from(row.children);
-            return { labels: nodes.map((node) => node.textContent), sameNodes: nodes.every((node, index) => node === window.__ux18StandardNodes[index]), bank: row.getAttribute("data-bank"), attributes: Array.from(row.attributes, (attribute) => [attribute.name, attribute.value]) };
+            return { labels: nodes.map((node) => node.textContent), sameNodes: nodes.every((node, index) => node === window.__terminal_controlsStandardNodes[index]), bank: row.getAttribute("data-bank"), attributes: Array.from(row.attributes, (attribute) => [attribute.name, attribute.value]) };
           });
-          const originalAttributes = await page.evaluate(() => window.__ux18StandardRowAttributes);
+          const originalAttributes = await page.evaluate(() => window.__terminal_controlsStandardRowAttributes);
           assert(reset.labels.join(" ") === "Esc ⇥ Ctrl ← ↓ ↑ →" && reset.sameNodes && reset.bank === null && JSON.stringify(reset.attributes) === JSON.stringify(originalAttributes), `${shape.name}: Back did not restore the exact ordinary row`);
           caseEvidence.backReset = reset;
         }
@@ -1859,8 +1859,8 @@ async function main() {
       evidence.cases.push(caseEvidence);
       await context.close();
     }
-    fs.writeFileSync(path.join(EVIDENCE, `ux18-${ENGINE}${MUTANT ? `-${MUTANT}` : ""}.json`), `${JSON.stringify(evidence, null, 2)}\n`);
-    console.log(`UX18 ${ENGINE}${MUTANT ? ` mutant ${MUTANT}` : ""}: PASS (${evidence.cases.length} shapes)`);
+    fs.writeFileSync(path.join(EVIDENCE, `terminal_controls-${ENGINE}${MUTANT ? `-${MUTANT}` : ""}.json`), `${JSON.stringify(evidence, null, 2)}\n`);
+    console.log(`terminal controls ${ENGINE}${MUTANT ? ` mutant ${MUTANT}` : ""}: PASS (${evidence.cases.length} shapes)`);
   } finally {
     await browser.close();
     await Promise.race([fixture.close(), delay(4_000)]);
@@ -1871,7 +1871,7 @@ async function main() {
 main().catch((error) => {
   fs.mkdirSync(EVIDENCE, { recursive: true });
   const detail = String(error?.stack || error);
-  fs.writeFileSync(path.join(EVIDENCE, `ux18-${ENGINE}${MUTANT ? `-${MUTANT}` : ""}-failure.log`), `${detail}\n`);
+  fs.writeFileSync(path.join(EVIDENCE, `terminal_controls-${ENGINE}${MUTANT ? `-${MUTANT}` : ""}-failure.log`), `${detail}\n`);
   console.error(detail);
   process.exitCode = 1;
 });

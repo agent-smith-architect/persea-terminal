@@ -13,30 +13,30 @@ const { startFixture } = require("./unified_reopen_fixture.cjs");
 const { requestJSON: requestHTTPJSON } = require("./unified_browser_lib.cjs");
 
 const UI = path.resolve(__dirname, "..");
-const ENGINE = process.env.PERSEA_UX11_ENGINE || "chromium";
+const ENGINE = process.env.PERSEA_VIEW_DISCLOSURE_ENGINE || "chromium";
 const MODULE = process.env.PERSEA_PLAYWRIGHT_MODULE || require.resolve("playwright");
-const EVIDENCE = path.resolve(process.env.PERSEA_UX11_EVIDENCE_DIR || path.join("/tmp", `persea-ux11-${ENGINE}`));
-const MUTANT = process.env.PERSEA_UX11_MUTANT || "";
-const MUTANTS = new Set(["wide-toolbar", "standalone-view", "in-flow-popover", "duplicate-section", "focus-only-open", "old-section-order", "remove-inert", "ux17-active-state", "ux17-hide-focus", "ux17-symbolic-binding"]);
-assert(!MUTANT || MUTANTS.has(MUTANT), `unknown UX11 mutant ${MUTANT}`);
+const EVIDENCE = path.resolve(process.env.PERSEA_VIEW_DISCLOSURE_EVIDENCE_DIR || path.join("/tmp", `persea-view_disclosure-${ENGINE}`));
+const MUTANT = process.env.PERSEA_VIEW_DISCLOSURE_MUTANT || "";
+const MUTANTS = new Set(["wide-toolbar", "standalone-view", "in-flow-popover", "duplicate-section", "focus-only-open", "old-section-order", "remove-inert", "refit_failure-active-state", "refit_failure-hide-focus", "refit_failure-symbolic-binding"]);
+assert(!MUTANT || MUTANTS.has(MUTANT), `unknown view disclosure mutant ${MUTANT}`);
 const SHAPES = Object.freeze([
   { name: "wide-1906", viewport: { width: 1906, height: 1270 }, touch: false },
   { name: "fine-1100", viewport: { width: 1100, height: 760 }, touch: false },
   { name: "desktop-1366", viewport: { width: 1366, height: 768 }, touch: false },
   { name: "phone-390", viewport: { width: 390, height: 844 }, touch: true },
   { name: "phone-360", viewport: { width: 360, height: 780 }, touch: true },
-].filter((shape) => !process.env.PERSEA_UX11_CASE || shape.name === process.env.PERSEA_UX11_CASE));
+].filter((shape) => !process.env.PERSEA_VIEW_DISCLOSURE_CASE || shape.name === process.env.PERSEA_VIEW_DISCLOSURE_CASE));
 
 function assert(value, message) { if (!value) throw new Error(message); }
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 async function prepareFixtureUI() {
-  if (MUTANT !== "ux17-symbolic-binding") return { root: UI, cleanup() {} };
+  if (MUTANT !== "refit_failure-symbolic-binding") return { root: UI, cleanup() {} };
 
   // This compiling mutant removes the actual UnifiedTerminalPage -> Composer
   // ownership binding. It deliberately does not alter DOM classes or CSS, so
   // the 44px oracle can pass only when production mounting supplies the marker.
-  const root = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "persea-ux11-symbolic-binding-"));
+  const root = fs.mkdtempSync(path.join(process.env.TMPDIR || os.tmpdir(), "persea-view_disclosure-symbolic-binding-"));
   const dist = path.join(root, "dist");
   fs.cpSync(path.join(UI, "dist"), dist, { recursive: true });
   let loaded = 0;
@@ -51,7 +51,7 @@ async function prepareFixtureUI() {
     outfile: path.join(dist, "app.js"),
     metafile: true,
     plugins: [{
-      name: "ux17-omit-symbolic-composer-binding",
+      name: "refit_failure-omit-symbolic-composer-binding",
       setup(build) {
         build.onLoad({ filter: /unified_terminal_page\.ts$/ }, (args) => {
           loaded += 1;
@@ -67,7 +67,7 @@ async function prepareFixtureUI() {
   });
   assert(loaded === 1 && replacements === 1,
     `symbolic binding mutant did not replace exactly one production binding: ${JSON.stringify({ loaded, replacements })}`);
-  console.log(`UX11 compiling mutant: omitted ${replacements} symbolicChrome production binding`);
+  console.log(`view disclosure compiling mutant: omitted ${replacements} symbolicChrome production binding`);
   fs.writeFileSync(path.join(dist, "app.meta.json"), JSON.stringify(result.metafile));
   const remove = () => fs.rmSync(root, { recursive: true, force: true });
   process.once("exit", remove);
@@ -127,12 +127,12 @@ async function main() {
         await page.evaluate((mutant) => {
           const style = document.createElement("style");
           style.nonce = document.querySelector('meta[name="persea-style-nonce"]')?.getAttribute("content") || "";
-          style.dataset.ux11Mutant = mutant;
+          style.dataset.view_disclosureMutant = mutant;
           if (mutant === "wide-toolbar") style.textContent = ".persea-unified-toolbar{height:143px!important;flex-wrap:wrap!important}";
           if (mutant === "in-flow-popover") style.textContent = ".persea-unified-view-popover{position:static!important;width:100%!important}";
           if (mutant === "focus-only-open") style.textContent = ".persea-unified-view-disclosure[aria-expanded=true]{color:#777!important;background:#777!important}";
-          if (mutant === "ux17-active-state") style.textContent = ".persea-unified-composer-toggle[aria-expanded=true]{box-shadow:none!important}";
-          if (mutant === "ux17-hide-focus") style.textContent = ".attachment-page__composer-close:focus-visible{outline:none!important}";
+          if (mutant === "refit_failure-active-state") style.textContent = ".persea-unified-composer-toggle[aria-expanded=true]{box-shadow:none!important}";
+          if (mutant === "refit_failure-hide-focus") style.textContent = ".attachment-page__composer-close:focus-visible{outline:none!important}";
           if (style.textContent) document.head.append(style);
           if (mutant === "standalone-view") {
             const button = document.createElement("button");
@@ -178,7 +178,7 @@ async function main() {
       const initial = await page.evaluate(() => {
         const toolbar = document.querySelector(".persea-unified-toolbar");
         const stage = document.querySelector(".persea-unified-stage");
-        if (!toolbar || !stage) throw new Error("UX11 toolbar or stage absent");
+        if (!toolbar || !stage) throw new Error("view disclosure toolbar or stage absent");
         const box = toolbar.getBoundingClientRect();
         const stageBox = stage.getBoundingClientRect();
         const visible = [...toolbar.querySelectorAll("button, input, select")].filter((node) => {
@@ -246,7 +246,7 @@ async function main() {
         "persea-unified-view-popover__zoom",
         "persea-unified-size",
       ]), `${shape.name}: compact View groups are absent or unordered: ${JSON.stringify(viewEvidence)}`);
-      // UX14 §14.1: refit actions first (rows, then width), then the one form
+      // refit actions first (rows, then width), then the one form
       // row of Columns, Rows and a single Apply.
       assert(viewEvidence.size?.startsWith("↕ Fit rows")
         && viewEvidence.size.indexOf("↔ Fit width") > viewEvidence.size.indexOf("↕ Fit rows")
@@ -257,13 +257,13 @@ async function main() {
         && !viewEvidence.size.includes("Terminal size"),
       `${shape.name}: compact geometry actions are absent, duplicated, or unordered: ${JSON.stringify(viewEvidence)}`);
       assert(viewEvidence.inputs.length === 2 && viewEvidence.inputs.every((input) => input.em <= 6.1), `${shape.name}: size inputs exceed 6ch: ${JSON.stringify(viewEvidence.inputs)}`);
-      // UX15 §15.6: preference pickers live on the dashboard, not in View.
+      // preference pickers live on the dashboard, not in View.
       assert(viewEvidence.themes === 0, `${shape.name}: a preference picker leaked into the View popover`);
       assert(sameBoxes(beforeViewBoxes, await shellBoxes()), `${shape.name}: opening View moved toolbar/xterm boxes`);
       assert(await resizeCount() === beforeViewResizes, `${shape.name}: opening View emitted resize`);
       assert(await viewButton.getAttribute("aria-expanded") === "true", `${shape.name}: View semantic open state absent`);
       assert(JSON.stringify(viewButtonBox) === JSON.stringify(await viewButton.boundingBox()), `${shape.name}: View open state changed its box`);
-      // UX15 §15.6: no theme control in the chrome; the catalogue comes from
+      // no theme control in the chrome; the catalogue comes from
       // the product's theme module, the same list the dashboard card offers.
       const contrasts = await page.evaluate((themeIDs) => {
         const shell = document.querySelector(".persea-unified-terminal");
@@ -370,7 +370,7 @@ async function main() {
 		const range = document.createRange(); range.selectNodeContents(row);
 		const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
 	  });
-	  // UX14 §14.2: the Paste slot is the Copy control while the range exists.
+	  // the Paste slot is the Copy control while the range exists.
 	  await page.waitForFunction(() => document.querySelector(".persea-unified-toolbar-paste")?.dataset.pasteState === "copy");
 	  await page.locator(".persea-unified-toolbar-paste").click();
       await overlay.waitFor({ state: "hidden" });
@@ -513,8 +513,8 @@ async function main() {
       });
       await context.close();
     }
-    fs.writeFileSync(path.join(EVIDENCE, `ux11-${ENGINE}.json`), JSON.stringify(evidence, null, 2));
-    console.log(`UX11 ${ENGINE}: PASS (${evidence.cases.length} postures)`);
+    fs.writeFileSync(path.join(EVIDENCE, `view_disclosure-${ENGINE}.json`), JSON.stringify(evidence, null, 2));
+    console.log(`view disclosure ${ENGINE}: PASS (${evidence.cases.length} postures)`);
   } finally {
     await browser.close();
     await Promise.race([fixture.close(), delay(3_000)]);
@@ -525,7 +525,7 @@ async function main() {
 main().catch((error) => {
   fs.mkdirSync(EVIDENCE, { recursive: true });
   const detail = String(error && error.stack || error);
-  fs.writeFileSync(path.join(EVIDENCE, `ux11-${ENGINE}-failure.log`), `${detail}\n`);
+  fs.writeFileSync(path.join(EVIDENCE, `view_disclosure-${ENGINE}-failure.log`), `${detail}\n`);
   console.error(detail);
   process.exitCode = 1;
 });

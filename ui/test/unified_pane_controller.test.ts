@@ -8,7 +8,7 @@
 // replaced stays an ordinary pre-commit refusal.
 //
 // The projection-detail guard is keyed by the controller's CURRENT resolved
-// incarnation, not the one it was constructed with (M11LF-F3C under E-P4's
+// incarnation, not the one it was constructed with (workspace rotationC under session switch's
 // replaceable identity). After a switch A -> B the guard must accept B's key
 // and refuse A's; keying by the construction-time `options.incarnationKey`
 // inverts both answers.

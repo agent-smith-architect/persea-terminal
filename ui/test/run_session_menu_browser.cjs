@@ -31,7 +31,7 @@ async function main() {
     // that compact fallback remains covered by the full toolbar/quick-sheet gate.
     for (const [width, height] of [[360,780],[390,844],[430,932],[844,390],[1440,1000]]) {
       phase = `${width}x${height}`;
-      await control({ reset: true, switchSessions: true, ux13SwitcherMetadata: true });
+      await control({ reset: true, switchSessions: true, terminal_touchSwitcherMetadata: true });
       const context = await browser.newContext({ viewport: { width, height }, screen: { width, height }, isMobile: width < 1000, hasTouch: width < 1000, ignoreHTTPSErrors: true });
       const page = await context.newPage(); page.setDefaultTimeout(7000);
       page.on('console', message => result.console.push({ phase, text: message.text().slice(0,500), type: message.type() })); page.on('pageerror', error => result.errors.push({ phase, text: error.message }));

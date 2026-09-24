@@ -11,7 +11,7 @@ body {
   background: #0b0f14;
 }
 
-/* E-P5's three page tokens. Theme choice is a closed data attribute, so a
+/* preferences's three page tokens. Theme choice is a closed data attribute, so a
    live switch needs no inline style, no new style node and no CSP exception. */
 body,
 .persea-unified-terminal[data-theme="default"] {
@@ -36,7 +36,7 @@ body[data-persea-theme="dracula"],
 body[data-persea-theme="catppuccin-mocha"],
 .persea-unified-terminal[data-theme="catppuccin-mocha"] { --persea-page-bg: #181825; --persea-terminal-bg: #1e1e2e; --persea-chrome-bg: #313244; --persea-chrome-fg: #cdd6f4; --persea-accent: #cba6f7; }
 
-/* Derived semantic chrome tokens (J-EP5-1 / UX18-R5). Secondary text and the preference
+/* Derived semantic chrome tokens (theme-contrast / control-contrast). Secondary text and the preference
    notice used fixed colours picked for a dark chrome, so the one light theme
    in the catalogue rendered them at 1.4:1. They are computed from whichever
    chrome pair the active theme declared above, which is what keeps a new

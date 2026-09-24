@@ -3,7 +3,7 @@
 // M9 W1b workspace runtime gate: the REAL bundled /workspace document in real
 // Chromium against the workspace fixture (six independent sessions with the
 // front door's one-time handles, per-session leases, takeover offers, source
-// bindings, and broker automata). Falsifiers W1B-F1…F15 in their fixture
+// bindings, and broker automata). regression tests W1B-F1…F15 in their fixture
 // form; the real-stack forms (tmux geometry witness, front-door CSP on both
 // engines, B1 eviction on a real broker) live in run_workspace_stack_browser.
 //
@@ -98,7 +98,7 @@ const STATE = `(() => {
       themeValues: [...c.querySelectorAll(".persea-unified-preference__theme")].map((select) => select.value),
       viewportHeight: c.querySelector(".xterm-viewport")?.clientHeight ?? null,
       viewportScrollTop: c.querySelector(".xterm-viewport")?.scrollTop ?? null,
-      xtermStamp: c.querySelector(".xterm")?.dataset.ep4Stamp ?? null,
+      xtermStamp: c.querySelector(".xterm")?.dataset.session_switchStamp ?? null,
       connection: c.querySelector(".persea-unified-connection")?.textContent ?? "",
       notice: c.querySelector(".persea-unified-notice__headline")?.textContent ?? "",
       alias: c.querySelector(".ws-cell__hint")?.textContent ?? "",
@@ -109,7 +109,7 @@ const STATE = `(() => {
       composeCount: c.querySelectorAll(".persea-unified-composer-toggle").length,
       moreCount: c.querySelectorAll(".persea-unified-toolbar__more").length,
       quickActionsCount: c.querySelectorAll(".persea-unified-quick-actions").length,
-      // U3 inside a cell (review FOLLOW-UP 2, finding 10). Six panes on
+      // U3 inside a cell. Six panes on
       // screen, so the one thing a pane must say is which session it is
       // showing. Laid out is not shown: the bar's controls come later in
       // document order, so an over-subscribed bar paints them on top of a tag
@@ -356,8 +356,8 @@ async function main() {
   const debugPort = chrome.debugPort;
   const tabs = [];
   const failures = [];
-  const evidence = { falsifiers: {} };
-  const record = (id, receipt) => { evidence.falsifiers[id] = { ...(evidence.falsifiers[id] || {}), ...receipt }; };
+  const evidence = { checks: {} };
+  const record = (id, receipt) => { evidence.checks[id] = { ...(evidence.checks[id] || {}), ...receipt }; };
   const fail = (id, message, detail) => { failures.push(`${id}: ${message} ${JSON.stringify(detail)}`); console.error(`FAIL ${id}: ${message}`, JSON.stringify(detail)); };
   const check = (id, condition, message, detail) => { if (!condition) fail(id, message, detail); return condition; };
   const begin = (id) => console.log(`scenario ${id}`);
@@ -669,7 +669,7 @@ async function main() {
         await delay(100);
         cell = cellOf(await tab.state(), name);
         assert(cell.fitPoint, `W1B-F10: ↕ is not available on live pane ${name}: ${JSON.stringify({ disabled: cell.fitDisabled })}`);
-        if (name === SESSIONS[0]) await tab.screenshot("ux11_workspace_view_popover.png");
+        if (name === SESSIONS[0]) await tab.screenshot("view_disclosure_workspace_view_popover.png");
         assert(cell.fitHit, `W1B-F10: ↕ is covered by ${cell.fitHitBy} before activation on live pane ${name}: ${JSON.stringify(cell.fitDiagnostics)}`);
         await tab.trustedClick(cell.fitPoint);
         await delay(150);
@@ -872,7 +872,7 @@ async function main() {
       record(id, { sleep, cold: { counters: cold.counters, perSession, rateLimitedSeen: sawRateLimited.state !== null, elapsedMs: Date.now() - t0 } });
       await tab2.close(debugPort);
     }]);
-    // W1B-F9 (coarse half) — on a coarse pointer the designated policy never PROMOTES focus: E-P1's pointer rule vetoes first.
+    // W1B-F9 (coarse half) — on a coarse pointer the designated policy never PROMOTES focus: terminal's pointer rule vetoes first.
     scenarios.push(["F9", async () => {
       const id = "W1B-F9";
       begin(id);
@@ -983,14 +983,14 @@ async function main() {
       await tab.screenshot("f12_tablet_after_keyboard_storm.png");
       await tab.close(debugPort);
     }]);
-    // M11LF-F3A/F3B/F3C — inventory detail reaches the exact mounted
+    // workspace rotationA/F3B/F3C — inventory detail reaches the exact mounted
     // controller as presentation only, clears without transport action, and
     // the ordinary typed rotation close still causes one reattach.
-    scenarios.push(["M11LF-F3", async () => {
-      const id = "M11LF-F3";
+    scenarios.push(["workspace rotation", async () => {
+      const id = "workspace rotation";
       begin(id);
       await control({ reset: true, sessions: SESSIONS });
-      const tab = await openTab("m11lf-f3");
+      const tab = await openTab("workspace rotation");
       await tab.navigate(`${origin}/workspace-harness`);
       const ready = await tab.waitUntil((s) => s.harnessReady, 8_000);
       assert(ready.state, `${id}: the workspace page harness never became ready`);
@@ -1100,7 +1100,7 @@ async function main() {
       record(id, { before: before.counters, deferred: { badge: deferred.badge, controller: panes }, after: fixtureState.counters, initialControllers: beforePanes, presentationPollPeriods: heldPeriods, documentPollRequests: pollRequests, pollPaneCount: beforePanes.length });
       await tab.close(debugPort);
     }]);
-    // SEAM1-F1 — M11's rotation detail, E-P4's in-place switch and UX-7's
+    // SEAM1-F1 — rotation's rotation detail, session switch's in-place switch and loading state's
     // loading surface meet on ONE pane. After a pane switches session in
     // place: the shared presentation refresh must reach the session the pane
     // NOW runs and never the one its durable leaf still names, and the pane
@@ -1144,7 +1144,7 @@ async function main() {
       assert(!rowPoint.hidden, `${id}: the ws07 row is not on screen`);
       await tab.trustedClick(rowPoint);
 
-      // UX-7: the switched pane is never a blank viewport with no state, and
+      // the switched pane is never a blank viewport with no state, and
       // the surface names the session it is now waiting for.
       const loading = await tab.waitUntil((s) => {
         const cell = cellOf(s, "ws03");
@@ -1164,7 +1164,7 @@ async function main() {
       check(id, cellOf(committed.state, "ws03").loading?.hidden === true,
         "the loading surface survived the new session's COMMIT", cellOf(committed.state, "ws03").loading);
 
-      // M11 F3 through the switched pane: the detail of the session it NOW
+      // rotation F3 through the switched pane: the detail of the session it NOW
       // runs reaches it, although its leaf still names the old one.
       const beforeProjection = await snapshot();
       await control({ session: "ws07", detail: "rotation_deferred_alt_screen" });
@@ -1181,7 +1181,7 @@ async function main() {
       "projecting a detail onto the switched pane caused transport or capability activity",
       { before: beforeProjection.counters, after: afterProjection.counters });
 
-      // M11LF-F3C at page level: the pane switched AWAY from ws03, so ws03's
+      // workspace rotationC at page level: the pane switched AWAY from ws03, so ws03's
       // detail must not decorate it even though the leaf still names ws03.
       await control({ session: "ws07", detail: null });
       await control({ session: "ws03", detail: "rotation_deferred_alt_screen" });
@@ -1256,14 +1256,14 @@ async function main() {
       record(id, { before: before.counters, after: after.counters, selection: [pre.selectionText, post.selectionText], active: post.activeDetail });
       await tab.close(debugPort);
     }]);
-    // EP3 — one document-global snippet service across six panes: target-pane
-    // INPUT authority (EP3-F1), one poll for the whole document (EP3-F4), and
-    // the OSC record's economics under a two-document flood (EP3-F8).
-    scenarios.push(["EP3", async () => {
-      const id = "EP3";
+    // clipboard — one document-global snippet service across six panes: target-pane
+    // INPUT authority (clipboard-local-editing), one poll for the whole document (clipboard-shared-polling), and
+    // the OSC record's economics under a two-document flood (clipboard-osc-budget).
+    scenarios.push(["clipboard", async () => {
+      const id = "clipboard";
       await control({ reset: true, sessions: SESSIONS });
       begin(id);
-      const tab = await openTab("ep3");
+      const tab = await openTab("clipboard");
       await tab.emulate(TOUCH_DESKTOP, true);
       await seedArrangement(tab, SESSIONS);
       await landOn(tab, workspaceURL(), "resume");
@@ -1308,7 +1308,7 @@ async function main() {
         await tab.tap(tile); await delay(250);
       };
 
-      // --- EP3-F4 (six panes, ONE poll loop) -------------------------------
+      // --- clipboard-shared-polling (six panes, ONE poll loop) -------------------------------
       // A sheet is dismissed by a pointer outside it, so at most one pane's
       // list is on screen at a time — and that is exactly the point: the poll
       // belongs to the DOCUMENT's one service, not to a pane. Six panes are
@@ -1336,16 +1336,16 @@ async function main() {
       check(id, perOpen.every((entry) => entry.reads <= 1), "opening one pane's list cost more than one read", perOpen);
       check(id, perOpen.every((entry) => entry.view === "list" && entry.rows >= 3), "a pane's Clipboard did not render the shared authoritative snapshot", perOpen);
       check(id, perOpen.every((entry) => entry.openSheets === 1), "more than one pane rendered a snippet panel at once", perOpen);
-      await tab.screenshot("ep3_six_pane_snippets.png");
+      await tab.screenshot("clipboard_six_pane_snippets.png");
 
-      // --- EP3-F1 (target-pane INPUT authority) ----------------------------
+      // --- clipboard-local-editing (target-pane INPUT authority) ----------------------------
       // Focus pane A's terminal, then insert from pane C's list. The bytes
       // belong to C: DOM focus, "most recent controller" and session name are
       // all irrelevant to which pane a row addresses.
       const paneA = SESSIONS[0];
       const paneC = SESSIONS[2];
       // Focus moves PROGRAMMATICALLY: a pointer in pane A would dismiss pane
-      // C's sheet (E-P1's outside-dismissal), and the property under test is
+      // C's sheet (terminal's outside-dismissal), and the property under test is
       // that DOM focus does not choose the pane, not that a tap does.
       await clipboardAction("Close clipboard");
       const focusMoved = await tab.evaluate(`(() => {
@@ -1383,7 +1383,7 @@ async function main() {
       // Presentation only: no pane's geometry moved.
       check(id, after.attachments.every((a, i) => a.resizes === before.attachments[i].resizes), "a snippet action moved a pane's tmux geometry", { before: before.attachments.map((a) => [a.session, a.resizes]), after: after.attachments.map((a) => [a.session, a.resizes]) });
 
-      // --- UX12 (six-pane selection/paste authority) -----------------------
+      // --- refit (six-pane selection/paste authority) -----------------------
 	  // Contextual Select/Copy and primary Paste belong to pane C's controller even while
       // pane A had focus. The lifecycle must not write, resize or remint any
       // sibling attachment.
@@ -1401,7 +1401,7 @@ async function main() {
 		return true;
       })()`);
 	  assert(selected === true, `${id}: pane ${paneC} frozen selection could not be established`);
-	  // UX14 §14.2: the pane's Paste slot becomes Copy while the frozen range
+	  // the pane's Paste slot becomes Copy while the frozen range
 	  // exists; Select stays in its Selecting state.
 	  let copyReady = false;
 	  for (let attempt = 0; attempt < 100 && !copyReady; attempt += 1) {
@@ -1428,7 +1428,7 @@ async function main() {
       }
       assert(pasteBack, `${id}: pane ${paneC} Paste slot did not return to Paste after Copy`);
 	  await tab.evaluate(`Object.defineProperty(navigator, "clipboard", { configurable: true, value: {
-		readText: () => Promise.resolve("UX12-WS-PASTE"), writeText: () => Promise.resolve(),
+		readText: () => Promise.resolve("REFIT-WS-PASTE"), writeText: () => Promise.resolve(),
 	  } })`);
       const beforePaste = await snapshot();
       const pasteInputsBefore = Object.fromEntries(SESSIONS.map((n) => [n, inputsOf(beforePaste, n).join("")]));
@@ -1437,32 +1437,32 @@ async function main() {
       await tab.trustedClick(pastePointC);
       await clipboardAction("Paste from device");
       for (let attempt = 0; attempt < 100; attempt++) {
-        if (await tab.evaluate(`Array.from(document.querySelectorAll('.persea-clipboard__preview')).some(node => node.textContent === 'UX12-WS-PASTE')`)) break;
+        if (await tab.evaluate(`Array.from(document.querySelectorAll('.persea-clipboard__preview')).some(node => node.textContent === 'REFIT-WS-PASTE')`)) break;
         await delay(30);
       }
       const previewPaste = await snapshot();
       check(id, SESSIONS.every(n => inputsOf(previewPaste, n).join("") === pasteInputsBefore[n]), "device import sent input before explicit Send", previewPaste.attachments);
-      const importedPastePoint = await clipboardPoint(`Array.from(document.querySelectorAll('.persea-clipboard [data-clipboard-item]')).find(row => row.querySelector('.persea-clipboard__preview')?.textContent === 'UX12-WS-PASTE')?.querySelector('button[aria-label="Paste text to terminal"]')`);
+      const importedPastePoint = await clipboardPoint(`Array.from(document.querySelectorAll('.persea-clipboard [data-clipboard-item]')).find(row => row.querySelector('.persea-clipboard__preview')?.textContent === 'REFIT-WS-PASTE')?.querySelector('button[aria-label="Paste text to terminal"]')`);
       assert(importedPastePoint, `${id}: imported text has no Paste action`);
       await tab.trustedClick(importedPastePoint);
       await delay(500);
       const afterPaste = await snapshot();
       const pasteInputsAfter = Object.fromEntries(SESSIONS.map((n) => [n, inputsOf(afterPaste, n).join("")]));
       const pasteDeltas = Object.fromEntries(SESSIONS.map((n) => [n, pasteInputsAfter[n].slice(pasteInputsBefore[n].length)]));
-      record(id, { ux12: { pane: paneC, deltas: pasteDeltas } });
-      check(id, pasteDeltas[paneC].length > 0, "UX12 Paste did not reach its own selected pane", pasteDeltas);
-      check(id, SESSIONS.filter((n) => n !== paneC).every((n) => pasteDeltas[n] === ""), "UX12 selection/paste touched a sibling pane", pasteDeltas);
+      record(id, { refit: { pane: paneC, deltas: pasteDeltas } });
+      check(id, pasteDeltas[paneC].length > 0, "refit Paste did not reach its own selected pane", pasteDeltas);
+      check(id, SESSIONS.filter((n) => n !== paneC).every((n) => pasteDeltas[n] === ""), "refit selection/paste touched a sibling pane", pasteDeltas);
       check(id, afterPaste.attachments.length === beforePaste.attachments.length
         && afterPaste.attachments.every((attachment, index) => attachment.resizes === beforePaste.attachments[index].resizes),
-      "UX12 selection/paste reminted or resized an attachment", { before: beforePaste.attachments, after: afterPaste.attachments });
+      "refit selection/paste reminted or resized an attachment", { before: beforePaste.attachments, after: afterPaste.attachments });
 
-      // --- EP3-F8 (two documents flood the ONE global OSC record) ----------
+      // --- clipboard-osc-budget (two documents flood the ONE global OSC record) ----------
       // A second workspace document on its own sessions is a second device as
       // far as the store is concerned: both flood OSC 52 while manual clips
       // sit at the ring's limit.
       await control({ createSession: "ws07" });
       await control({ createSession: "ws08" });
-      const tab2 = await openTab("ep3b");
+      const tab2 = await openTab("clipboardb");
       await tab2.emulate(TOUCH_DESKTOP, true);
       await seedArrangement(tab2, ["ws07", "ws08"], "ops2");
       await landOn(tab2, workspaceURL("ops2"), "resume");
@@ -1537,12 +1537,12 @@ async function main() {
         }, true);
       })()`);
       const tabOrder = [];
-      // UX11 replaces the standalone ↕/readout pair and old More stop with one
+      // view disclosure replaces the standalone ↕/readout pair and old More stop with one
       // committed-geometry disclosure. The pin still says the same thing —
       // every header control, in document order, and only then the terminal.
       //
-      // UX-10 removes the standalone Switch stop: the session tag now opens
-      // the identity/switcher popover itself. UX12 adds the enabled contextual
+      // terminal interaction removes the standalone Switch stop: the session tag now opens
+      // the identity/switcher popover itself. refit adds the enabled contextual
       // Select owner and direct Paste before View; Composer and terminal keep
       // their existing order after Quick actions.
       for (let index = 0; index < 7; index += 1) {
@@ -1563,7 +1563,7 @@ async function main() {
       const directViewOpen = await tab.evaluate(`(() => { const view=document.querySelector(".ws-cell .persea-unified-view-disclosure"); const popover=document.querySelector(".ws-cell .persea-unified-view-popover"); const box=popover?.getBoundingClientRect(); return { expanded:view?.getAttribute("aria-expanded"), hidden:popover?.hidden, display:popover ? getComputedStyle(popover).display : null, box:box ? {x:box.x,y:box.y,w:box.width,h:box.height} : null }; })()`);
       const workspaceViewOpen = await tab.state();
       const openViews = workspaceViewOpen.cells.filter((cell) => cell.viewPopover !== null);
-      // UX15 §15.6: the compact View carries zoom and the size block only; the
+      // the compact View carries zoom and the size block only; the
       // appearance selects live on the dashboard's Settings · Appearance card.
       const workspaceAppearance = await tab.evaluate(`(() => {
         const popover = document.querySelector(".ws-cell .persea-unified-view-popover:not([hidden])");
@@ -1580,8 +1580,8 @@ async function main() {
         && !openViews[0].viewPopover.horizontalScroll,
       "one compact View popover must stay inside its six-pane workspace cell and viewport", { directViewOpen, openViews });
       check(id, workspaceAppearance.selects === 0 && workspaceAppearance.pickers === 0 && workspaceAppearance.zoom === 1 && workspaceAppearance.size === 1,
-      "six-pane View must carry zoom and the size block only (UX15 §15.6)", workspaceAppearance);
-      await tab.screenshot("ux13_view_popover_six_pane.png");
+      "six-pane View must carry zoom and the size block only (terminal appearance §15.6)", workspaceAppearance);
+      await tab.screenshot("terminal_touch_view_popover_six_pane.png");
       await tab.pressKey("Escape");
       const escapeFocus = await tab.evaluate(`(() => {
         const view = document.querySelector(".ws-cell .persea-unified-view-disclosure");
@@ -1717,25 +1717,25 @@ async function main() {
       await tab.close(debugPort);
     }]);
 
-    // EP4-F6/F7 — six pane-local switch owners share one inventory request,
+    // shared-switch-inventory/F7 — six pane-local switch owners share one inventory request,
     // and switching C in place cannot disturb any sibling controller/socket.
-    scenarios.push(["EP4", async () => {
-      const id = "EP4-F6/F7";
+    scenarios.push(["session switch", async () => {
+      const id = "shared-switch-inventory/F7";
       begin(id);
       const candidates = [...SESSIONS, "ws07"];
       await control({ reset: true, sessions: candidates });
-      const tab = await openTab("ep4");
+      const tab = await openTab("session_switch");
       await seedArrangement(tab, SESSIONS);
       await landOn(tab, workspaceURL(), "resume");
       await trustedOpen(tab);
       await waitLive(tab);
-      for (let line = 0; line < 40; line += 1) await control({ writeLiveAll: `EP4-L${line}` });
+      for (let line = 0; line < 40; line += 1) await control({ writeLiveAll: `SESSION_SWITCH-L${line}` });
       await delay(150);
       await tab.evaluate(`(() => {
         for (const cell of document.querySelectorAll(".ws-cell")) {
           const session = cell.dataset.wsSession;
           const xterm = cell.querySelector(".xterm");
-          if (xterm) xterm.dataset.ep4Stamp = "xterm-" + session;
+          if (xterm) xterm.dataset.session_switchStamp = "xterm-" + session;
           const composer = cell.querySelector(".attachment-page__composer-textarea");
           if (composer) { composer.value = "draft-" + session; composer.dispatchEvent(new Event("input", { bubbles: true })); }
           const viewport = cell.querySelector(".xterm-viewport");
@@ -1808,13 +1808,13 @@ async function main() {
       check(id, after.attachments.filter((a) => a.live).length === 6 && after.attachments.filter((a) => a.resizes > 0).length === 0,
         "workspace switch must retain six live sockets and emit zero resize frames", after.attachments.map((a) => [a.session, a.live, a.resizes]));
       record(id, { inventory: [inventoryBefore, afterSharedFetch.counters.inventory], before: before.attachments, after: after.attachments, siblings: siblingNames });
-      await tab.screenshot("ep4_f6_workspace_switch.png");
+      await tab.screenshot("session_switch_f6_workspace_switch.png");
       await tab.close(debugPort);
 
       // C3: C's held reconnect belongs to C while B switches. A module-global
       // operation token would let B invalidate C and strand its minted handle.
       await control({ reset: true, sessions: candidates });
-      const tokenTab = await openTab("ep4-controller-token");
+      const tokenTab = await openTab("session_switch-controller-token");
       await seedArrangement(tokenTab, SESSIONS);
       await landOn(tokenTab, workspaceURL(), "resume");
       await trustedOpen(tokenTab);
@@ -1841,22 +1841,22 @@ async function main() {
       check(id, tokenAfter.attachments.filter((entry) => entry.live).length === 6 && liveAttachmentOf(tokenAfter, "ws07") !== undefined,
         "the adverse token matrix must settle with six live pane-owned sockets", tokenAfter.attachments.map((entry) => [entry.session, entry.live, entry.mintedBy]));
       record(id, { controllerToken: { before: tokenBefore.attachments, after: tokenAfter.attachments, cRemintHandles } });
-      await tokenTab.screenshot("ep4_f7_controller_token.png");
+      await tokenTab.screenshot("session_switch_f7_controller_token.png");
       await tokenTab.close(debugPort);
     }]);
 
-    // E-P5-F4 — one document-global preference service across N controllers.
+    // shared-preference-service — one document-global preference service across N controllers.
     // A late controller receives the current value synchronously before its
     // first render; a retired controller is not retained as a publication
     // target. No pane owns its own GET or persistence loop.
-    scenarios.push(["EP5", async () => {
-      const id = "EP5";
-      // An explicit font in the seeded record (J-UX-9 tri-state): the late
+    scenarios.push(["preferences", async () => {
+      const id = "preferences";
+      // An explicit font in the seeded record (terminal topbar tri-state): the late
       // controller's baseline is then a value only the RECORD can supply —
       // neither the store default (auto) nor the page's construction seed.
       await control({ reset: true, sessions: SESSIONS, preferences: { font_size: 17 } });
       begin(id);
-      const tab = await openTab("ep5");
+      const tab = await openTab("preferences");
       await tab.navigate(`${origin}/workspace-harness`);
       const ready = await tab.waitUntil((state) => state.harnessReady, 8_000);
       assert(ready.state, `${id}: the workspace page harness never became ready`);
@@ -1866,7 +1866,7 @@ async function main() {
       await delay(300);
       const initial = await snapshot();
       check(id, initial.counters.preferencesGet === 1, "six pane controllers performed other than one document preference GET", initial.counters);
-      // UX15 §15.6: no pane carries a theme control. The theme is a record
+      // no pane carries a theme control. The theme is a record
       // stored elsewhere (the dashboard card, another tab) and reaches the
       // document's ONE preference service through the `storage` signal, which
       // is exactly one authoritative GET per signal (14.3b) — never one per
@@ -1914,7 +1914,7 @@ async function main() {
         six: shared.state && shared.state.cells.map((cell) => [cell.session, cell.theme]),
         late: [lateCell.session, lateCell.theme], remaining: disposed.state && disposed.state.cells.map((cell) => [cell.session, cell.theme]),
       });
-      await tab.screenshot("ep5_shared_theme_workspace.png");
+      await tab.screenshot("preferences_shared_theme_workspace.png");
       await tab.close(debugPort);
     }]);
 

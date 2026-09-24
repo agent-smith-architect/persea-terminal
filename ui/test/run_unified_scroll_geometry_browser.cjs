@@ -1,6 +1,6 @@
 "use strict";
 
-// Falsifier for the unified terminal scroll projection, run against a real
+// regression test for the unified terminal scroll projection, run against a real
 // headless Chromium across three viewport shapes.
 //
 // Two invariants, both of which the shipped geometry broke:
@@ -175,7 +175,7 @@ async function runSubPixelSweep(cdp, shape, report, failures) {
     report[label] = { box, settled };
   }
   // Keep the trusted positive case causally distinct from the 24-row birth
-  // geometry even when the expanded UX-10 toolbar changes the stage budget.
+  // geometry even when the expanded terminal interaction toolbar changes the stage budget.
   await evaluate(cdp, `window.__harness.setShellHeight(${Math.max(320, shape.height - 180)})`);
 }
 
@@ -342,7 +342,7 @@ async function runVerticalFit(cdp, shape, report, failures) {
 // The pending-Fit input seal, raced in a real browser.
 //
 // A resize is a cut, and the attachment's protocol reducer does not accept
-// input during one. The adjudicated behaviour is a bounded local seal: from the
+// input during one. The required behaviour is a bounded local seal: from the
 // moment a trusted click is accepted until the committed geometry event has
 // been applied, keystrokes are dropped — never queued, never replayed, never
 // resent across the cut, a refusal, or a transport loss. Anything the operator
@@ -631,7 +631,7 @@ async function runFailureSurface(cdp, report, failures) {
   report.failureSurface = { unavailable, readmitted, leaseHeldAutoClaim: claimed, dropped, waiting, exhausted, recovered };
 }
 
-// Coarse-pointer emulation, the same route the key-input falsifier uses.
+// Coarse-pointer emulation, the same route the key-input regression test uses.
 // Touch emulation is what actually flips the pointer/hover media features in
 // Chromium (measured: setEmulatedMedia's pointer features alone are inert),
 // and it fires 'change' on MediaQueryLists the page created earlier. The page
@@ -964,10 +964,10 @@ async function runMobileComposerDock(cdp, report, failures) {
   if (open.keybarBottom > 509) note("key bar fell below the keyboard's top edge", open);
   if (open.viewportBottom > open.panelTop + 0.5) note("viewport does not end above the composer row", open);
   if (Math.abs(open.fontSize - before.fontSize) > 0.001) note("opening the composer refit the font", { before: before.fontSize, after: open.fontSize });
-  // UX15 §15.5 / UX15-R1: the composer face is the operator's chosen size on
+  // / unrestricted-zoom: the composer face is the operator's chosen size on
   // every pointer, the viewport never caps page zoom (WCAG 1.4.4), and the iOS
   // focus zoom is prevented at the composer instead — a 16px face for the
-  // instant of focus on a coarse pointer, measured by UX-9 C1 on the phone.
+  // instant of focus on a coarse pointer, measured by terminal topbar C1 on the phone.
   const viewportMeta = (fs.readFileSync(path.join(UI, "index.html"), "utf8").match(/<meta name="viewport" content="([^"]+)"/) || [])[1] || "";
   const zoomCap = /(^|,)\s*maximum-scale=(0|1)(\.\d+)?(\s|,|$)/.test(viewportMeta) || /user-scalable=(no|0)/.test(viewportMeta);
   if (zoomCap) note("the viewport meta caps page zoom", { viewportMeta });
@@ -1086,7 +1086,7 @@ async function runComposerImageInsert(cdp, report, failures) {
 // action (⊕ ⌫ ➤) renders inside the viewport at a ≥44px target. The committed
 // size opens the one positioned View & appearance surface without layout;
 // Quick actions remains a separate sheet.
-// composer shows no counter and no idle status line (UX-16) and ➤ is the
+// composer shows no counter and no idle status line (composer input) and ➤ is the
 // chrome row's right edge; the page shell gains no horizontal overflow even
 // with a full-width 80-column TUI frame painted. The fitted font holds
 // through every transition, and a width change still refits it (the
@@ -1230,7 +1230,7 @@ async function runMobilePhoneChrome(cdp, report, failures) {
     if (Math.abs(keyboard.fontSize - closed.fontSize) > 0.001) note(`${width}: the keyboard refit the font`, { before: closed.fontSize, after: keyboard.fontSize });
 
     // The composer with a long draft and two images: no counter renders
-    // (UX-16 §16.3) and, with nothing to act on, no status line either
+    // (composer input §16.3) and, with nothing to act on, no status line either
     // (§16.2) — under the text there is only the chrome row.
     const togglePoint = await evaluate(cdp, "window.__harness.toolbarComposerTogglePoint()");
     if (!togglePoint.visible) note(`${width}: toolbar composer toggle not visible for the tap`, togglePoint);
@@ -1436,8 +1436,8 @@ async function main() {
   const artifact = process.env.PERSEA_SCROLL_GEOMETRY_ARTIFACT;
   if (artifact) fs.writeFileSync(artifact, `${JSON.stringify({ shapes: SHAPES, report, failures }, null, 2)}\n`);
   process.stdout.write(`${JSON.stringify({ failures }, null, 2)}\n`);
-  assert(failures.length === 0, `unified scroll geometry falsifier failed:\n  ${failures.join("\n  ")}`);
-  process.stdout.write("unified scroll geometry falsifier PASS\n");
+  assert(failures.length === 0, `unified scroll geometry regression test failed:\n  ${failures.join("\n  ")}`);
+  process.stdout.write("unified scroll geometry regression test PASS\n");
 }
 
 main().catch((error) => { process.stderr.write(`${error.stack || error}\n`); process.exit(1); });

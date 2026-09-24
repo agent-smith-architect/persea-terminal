@@ -2,13 +2,13 @@
 //
 // A workspace arrangement is a recursive split tree whose leaves name tmux
 // sessions by selector (realm, server, name). Weights size CELLS only: they
-// are CSS track proportions and never reach tmux (packet §2b; falsifier FW3).
+// are CSS track proportions and never reach tmux.
 // Nothing in this module knows about attachments, transports, or geometry —
 // there is no RESIZE_REQUEST path here by construction, and the unit suite
 // pins that with a source scan.
 //
 // Validation fails closed with typed refusals, mirroring the alias store's
-// load discipline (packet §2a, §1e): a malformed or over-cap tree is refused
+// load discipline: a malformed or over-cap tree is refused
 // as a whole, never partially accepted.
 
 export const WORKSPACE_STORE_VERSION = 1 as const;
@@ -87,7 +87,7 @@ function unicodeControl(scalar: number): boolean {
 
 // Refuses (never rewrites) a label that is not a session identity: untrimmed,
 // empty, over-long, or carrying control characters. A silently rewritten name
-// would resolve to a session the operator never named (packet §2a, §3c).
+// would resolve to a session the operator never named.
 export function sessionLabelProblem(value: unknown): string | undefined {
   if (typeof value !== "string") return "must be a string";
   if (value.length === 0) return "must be nonempty";

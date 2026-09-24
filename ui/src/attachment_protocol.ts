@@ -45,7 +45,7 @@ export const MAX_GEOMETRY_CELLS = 1_000;
 
 // Explicit vertical Fit policy. Narrower than the protocol's generic geometry
 // bound on purpose: the protocol bound says what a frame may carry, this says
-// what an operator may ask for. The broker re-derives and re-checks all of it
+// what an operator may ask for. The broker re-derives and rechecks all of it
 // against the exact pane witness, so this is a courtesy to the operator, never
 // the authority.
 export const MIN_FIT_ROWS = 8;

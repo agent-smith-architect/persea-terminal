@@ -1,4 +1,4 @@
-// M9 W1b — falsifier W1B-F13: exhaustive, nonblank per-pane failure policy.
+// M9 W1b — regression test W1B-F13: exhaustive, nonblank per-pane failure policy.
 //
 // The workspace renders pane state through the SHARED projection type and the
 // SHARED close policy (imported, never re-declared). This fence enumerates
@@ -174,12 +174,12 @@ const pageSource = fs.readFileSync(path.join(uiRoot, "src", "workspace_page.ts")
 assert.ok(pageSource.includes("paneStateFromClose(reason)"), "the workspace page must classify transport closes through the shared policy");
 assert.ok(pageSource.includes('from "./workspace_layout"') && !pageSource.includes("UNIFIED_TERMINAL_REASONS"), "the page consumes the layout's classification, not the raw sets");
 
-// UX7-R1: keep the causal loading-state suite discoverable and transitively
+// keep the causal loading-state suite discoverable and transitively
 // owned by the canonical Chromium browser gate.
 const packageManifest = JSON.parse(fs.readFileSync(path.join(uiRoot, "package.json"), "utf8")) as { scripts?: Record<string, string> };
 const loadingStateScript = packageManifest.scripts?.["test:loading-state-browser"] ?? "";
-assert.ok(loadingStateScript.includes("loading_state_browser_harness.ts"), "test:loading-state-browser must build the UX-7 browser harness");
-assert.ok(loadingStateScript.includes("run_loading_state_browser.cjs"), "test:loading-state-browser must run the UX-7 causal suite");
+assert.ok(loadingStateScript.includes("loading_state_browser_harness.ts"), "test:loading-state-browser must build the loading state browser harness");
+assert.ok(loadingStateScript.includes("run_loading_state_browser.cjs"), "test:loading-state-browser must run the loading state causal suite");
 // ci_reachability.cjs enforces this suite's transitive ownership by CI.
 
 process.stdout.write(`workspace failure policy: ${emitted.size} emitted close reasons, ${PROJECTION_PANE_STATES.length} projection states, ${PANE_STATE_KINDS.length} pane kinds — all explicit and nonblank\n`);

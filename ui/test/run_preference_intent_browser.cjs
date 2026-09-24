@@ -1,6 +1,6 @@
 "use strict";
 
-// Runner for the D1 preference-intent falsifier. It bundles the real product
+// Runner for the D1 preference-intent regression test. It bundles the real product
 // modules (UnifiedTerminalPage and OperatorPreferencesService, plus the shipped
 // @xterm/xterm build) and drives the page's own theme select and Zoom in button
 // in a real browser while a sibling preference subscriber throws.
@@ -189,8 +189,8 @@ async function main() {
   if (artifact) fs.writeFileSync(artifact, `${JSON.stringify(outcome, null, 2)}\n`);
   process.stdout.write(`${JSON.stringify(outcome, null, 2)}\n`);
   assert(outcome && outcome.failures.length === 0,
-    `preference intent falsifier failed:\n  ${(outcome?.failures ?? ["no outcome"]).join("\n  ")}`);
-  process.stdout.write("preference intent falsifier PASS\n");
+    `preference intent regression test failed:\n  ${(outcome?.failures ?? ["no outcome"]).join("\n  ")}`);
+  process.stdout.write("preference intent regression test PASS\n");
 }
 
 main().catch((error) => {

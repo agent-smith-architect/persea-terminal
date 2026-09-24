@@ -1,12 +1,12 @@
 "use strict";
 
-// UX-9 gate: the terminal top bar, the quick-actions sheet opener and the
+// terminal topbar gate: the terminal top bar, the quick-actions sheet opener and the
 // composer, driven as the REAL bundled page in real Chromium against the
 // reopen fixture (unified_reopen_fixture.cjs), on a fine pointer at desktop
 // metrics and on a coarse pointer at iPhone metrics.
 //
 // Every case is independent and reports its own verdict: a run against a tree
-// that carries none of UX-9 fails each case separately, which is what makes a
+// that carries none of terminal topbar fails each case separately, which is what makes a
 // per-item causal-RED receipt readable from one log.
 //
 //   U1  the selection note is gone; Copy selection is an icon button whose
@@ -14,7 +14,7 @@
 //   U2  no "Open legacy" control in the top bar
 //   U3  the top bar carries a session tag with a status dot and a details
 //       popover instead of the "Unified terminal (development)" caption
-//   U4  the theme control is not in the primary row at any width; UX11 moves
+//   U4  the theme control is not in the primary row at any width; view disclosure moves
 //       its single instance into View & appearance rather than Quick actions
 //   U5  the sheet opener is a top-bar button on every pointer; the floating
 //       puck does not exist
@@ -22,7 +22,7 @@
 //   C2  the expanded composer stays inside the visible viewport above the
 //       keyboard, the key bar and the toolbar
 //
-// PERSEA_UX9_EVIDENCE_DIR (optional): screenshots land there.
+// PERSEA_TERMINAL_TOPBAR_EVIDENCE_DIR (optional): screenshots land there.
 
 const fs = require("fs");
 const path = require("path");
@@ -30,7 +30,7 @@ const { startFixture } = require("./unified_reopen_fixture.cjs");
 const { assert, delay, requestJSON, Tab: BaseTab, launchChrome, stopChrome } = require("./unified_browser_lib.cjs");
 
 const UI = path.resolve(__dirname, "..");
-const EVIDENCE = process.env.PERSEA_UX9_EVIDENCE_DIR ? path.resolve(process.env.PERSEA_UX9_EVIDENCE_DIR) : null;
+const EVIDENCE = process.env.PERSEA_TERMINAL_TOPBAR_EVIDENCE_DIR ? path.resolve(process.env.PERSEA_TERMINAL_TOPBAR_EVIDENCE_DIR) : null;
 const DESKTOP = { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false };
 const PHONE = { width: 390, height: 844, deviceScaleFactor: 3, mobile: true };
 // The same phone with the software keyboard up: iOS reports the reduced band
@@ -107,7 +107,7 @@ const STATE = `(() => {
       borderColor: getComputedStyle(copy).borderTopColor,
       color: getComputedStyle(copy).color,
     } : null,
-    // UX14 §14.2: the Paste slot is the control that becomes Copy.
+    // the Paste slot is the control that becomes Copy.
     paste: (() => {
       const paste = q(".persea-unified-toolbar-paste");
       return paste ? {
@@ -322,7 +322,7 @@ async function main() {
     handle, mode: "control", history: "1000", name: "alpha", draft_scope: fixture.draftScope, engine: "unified-dev", ...extra,
   }).toString()}`;
 
-  const chrome = await launchChrome("persea-terminal-ux9-");
+  const chrome = await launchChrome("persea-terminal-terminal_topbar-");
   const tabs = [];
   const cases = [];
   const evidence = {};
@@ -385,10 +385,10 @@ async function main() {
 	  await delay(100);
       const selected = await tab.state();
       evidence.u1 = { before: { copy: desktop.copy, paste: desktop.paste, toolbar: desktop.toolbarRect }, after: { copy: selected.copy, paste: selected.paste, toolbar: selected.toolbarRect } };
-      // UX14 §14.2: Select stays a toggle (Selecting); the Paste slot becomes
+      // Select stays a toggle (Selecting); the Paste slot becomes
       // Copy while the range exists.
       if (!desktop.paste || desktop.paste.state !== "paste" || desktop.paste.label !== "Open clipboard" || desktop.paste.iconCount !== 1) { fail("the Paste slot does not start as the accessible Clipboard action", evidence.u1); return; }
-	  // UX15 §15.1: the word stays "Select"; the pressed state carries the mode.
+	  // the word stays "Select"; the pressed state carries the mode.
 	  if (selected.copy.disabled || selected.copy.selection !== "selecting" || selected.copy.text !== "Select") {
 		fail("a frozen selection did not leave the Select toggle in its pressed (selecting) state", evidence.u1);
         return;
@@ -459,7 +459,7 @@ async function main() {
       const closed = await tab.state();
       if (closed.popover && closed.popover.visible) fail("a second tap on the tag did not close the popover", closed.popover);
       // The phone. This row is the ONLY place a phone says which session is on
-      // screen, so the tag stays below the breakpoint (review FOLLOW-UP 2) --
+      // screen, so the tag stays below the breakpoint --
       // and the arithmetic that used to be the argument for hiding it becomes
       // the thing measured: one line, a dot at full size, a name that can
       // ellipsise, no alias, and nothing outside 390 pt.
@@ -504,7 +504,7 @@ async function main() {
         }
       }
       await shot(tab, "phone-04-session-tag");
-      // UX-10 permanently reserves the compact phone row for the tag and its
+      // terminal interaction permanently reserves the compact phone row for the tag and its
       // five 44px controls. Even clearing the presentational hidden flag must
       // not resurrect the retired prose hint into that fixed budget.
       await tab.evaluate(`(() => {
@@ -540,7 +540,7 @@ async function main() {
       await delay(200);
     });
 
-    await run("U4 theme lives on the dashboard: never in the primary row, Quick actions, or the View popover (UX15 §15.6)", async (fail) => {
+    await run("U4 theme lives on the dashboard: never in the primary row, Quick actions, or the View popover (terminal appearance §15.6)", async (fail) => {
       if (desktop.themeSelectsInPrimaryRow !== 0) fail("the primary row still carries a theme control", { count: desktop.themeSelectsInPrimaryRow });
       await tab.emulate({ width: 420, height: 768, deviceScaleFactor: 1, mobile: false }, false);
       await delay(200);
@@ -625,14 +625,14 @@ async function main() {
       // The installed default is the operator's compact 11px face. An
       // explicit stored preference may still choose any value in 9…24.
       if (opened.composer.fontSize !== 11) fail("the default composer face is not 11px on a fine pointer", evidence.c1);
-      // UX15 §15.6: the control lives on the dashboard's Settings · Appearance
+      // the control lives on the dashboard's Settings · Appearance
       // card, never in the sheet; the face reaches this page as a record.
       await tab.click(opened.openerRect);
       await delay(220);
       const sheet = await tab.state();
       if (!sheet.sheetVisible) { fail("the sheet did not open", sheet); return; }
       if (sheet.composerFontControl || sheet.sheetPreferenceRows.length !== 0) {
-        fail("the sheet still carries a preference control (UX15 §15.6)", sheet.sheetPreferenceRows);
+        fail("the sheet still carries a preference control (terminal appearance §15.6)", sheet.sheetPreferenceRows);
         return;
       }
       await tab.click(sheet.openerRect);
@@ -658,7 +658,7 @@ async function main() {
       evidence.c1.stored = { record: stored.preferences.composer_font_size, puts: stored.counters.preferencesPut - putsBefore };
       if (stored.counters.preferencesPut !== putsBefore) fail("following a stored face issued a write from the terminal", evidence.c1);
       await shot(tab, "desktop-05-composer-face");
-      // UX15 §15.5: no coarse floor — the viewport meta suppresses the iOS
+      // no coarse floor — the viewport meta suppresses the iOS
       // focus zoom, so a stored 11 is 11 on a phone and on a desktop alike.
       await tab.emulate(PHONE, true);
       await delay(300);
@@ -668,8 +668,8 @@ async function main() {
       await publishRecord({ composer_font_size: 11 });
       const small = await tab.waitUntil((state) => state.composer.fontSize === 11, 4_000);
       evidence.c1.coarseAt11 = (small.state ?? small.last).composer.fontSize;
-      if (!small.state) fail("a stored 11px face was floored or ignored on a coarse pointer (UX15 §15.5)", evidence.c1);
-      // UX15-R1: page zoom is never capped; on a coarse pointer the textarea
+      if (!small.state) fail("a stored 11px face was floored or ignored on a coarse pointer (terminal appearance §15.5)", evidence.c1);
+      // page zoom is never capped; on a coarse pointer the textarea
       // wears a 16px face for the instant of focus (iOS decides its focus zoom
       // then) and is back at the stored 11px once focus has settled.
       await tab.evaluate(`(() => {
@@ -792,13 +792,13 @@ async function main() {
   const report = { cases: cases.map((entry) => ({ name: entry.name, verdict: entry.ok ? "GREEN" : "RED", failures: entry.failures })), evidence, shots };
   if (EVIDENCE) {
     fs.mkdirSync(EVIDENCE, { recursive: true });
-    fs.writeFileSync(path.join(EVIDENCE, "ux9-topbar.json"), `${JSON.stringify(report, null, 2)}\n`);
+    fs.writeFileSync(path.join(EVIDENCE, "terminal_topbar-topbar.json"), `${JSON.stringify(report, null, 2)}\n`);
   }
   for (const entry of cases) {
     process.stdout.write(`${entry.ok ? "GREEN" : "RED  "}  ${entry.name}\n`);
     for (const failure of entry.failures) process.stdout.write(`         ${failure}\n`);
   }
-  process.stdout.write(`\nux9 top-bar gate: ${cases.length - failed.length}/${cases.length} green\n`);
+  process.stdout.write(`\nterminal_topbar top-bar gate: ${cases.length - failed.length}/${cases.length} green\n`);
   if (failed.length !== 0) {
     process.exitCode = 1;
     return;

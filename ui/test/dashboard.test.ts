@@ -50,7 +50,7 @@ for (const malformed of [null, {}, { realms: [], aliases: null }, { realms: [{ n
   assert.throws(() => parseInventory(malformed));
 }
 
-// UX-8 F3: the broker's internal attachment wrapper is not an operator
+// the broker's internal attachment wrapper is not an operator
 // session. While an attachment is live the broker owns one extra tmux session
 // named `persea-attach-<32 hex>`; the smoke of release 1e8f171 saw it listed
 // as a normal selectable row in the in-terminal switcher and counted in the
@@ -361,7 +361,7 @@ const gate = new RefreshGate(); assert.equal(gate.permitsBackgroundRefresh(), tr
   assert.equal(truncatedMeta.endsWith(" · truncated"), true, `bounded capture must surface truncation: ${truncatedMeta}`);
 }
 
-// --- E-P6 landing copy. Every state names what is true and nothing else: no
+// --- session memory landing copy. Every state names what is true and nothing else: no
 // message promises a session, and the default never speaks as a resume.
 {
   assert.equal(resumeCardLabel({ name: "ops", server: "private" }), "Resume ops · private");

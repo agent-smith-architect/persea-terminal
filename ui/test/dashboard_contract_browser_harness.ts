@@ -64,4 +64,4 @@ async function dashboardRefreshPersistence(): Promise<Record<string, unknown>> {
     host.remove();
   }
 }
-Object.assign(window, { slice24: { dashboardRefreshPersistence }, slice24Ready: true });
+Object.assign(window, { dashboard_contract: { dashboardRefreshPersistence }, dashboard_contractReady: true });

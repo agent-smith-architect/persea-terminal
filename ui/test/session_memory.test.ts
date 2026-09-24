@@ -1,6 +1,6 @@
-// E-P6 — the last-session codec, its landing resolution, and the default
-// preference. Falsifiers EP6-F1 (memory content), EP6-F2 (exact incarnation),
-// EP6-F5 (default containment), EP6-F6 (hostile local storage) at unit level.
+// session memory — the last-session codec, its landing resolution, and the default
+// preference. regression tests remember-committed-identity (memory content), remember-exact-target (exact incarnation),
+// refuse-name-reuse (default containment), validate-stored-record (hostile local storage) at unit level.
 //
 // The scope decode is pinned against a draft scope produced by the REAL
 // `parseInventory`, so this suite fails if the dashboard's authority key ever
@@ -106,7 +106,7 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
   assert.deepEqual(Object.keys(JSON.parse(withoutAlias)).sort(), ["at", "draftScope", "name", "realm", "server"], "absent alias must not be serialized");
 }
 
-// --- EP6-F6: hostile local storage fails closed ------------------------------
+// --- validate-stored-record: hostile local storage fails closed ------------------------------
 {
   const base = JSON.parse(encodeLastSession(goodRecord)) as Record<string, unknown>;
   const hostile: [string, string][] = [
@@ -138,7 +138,7 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
   ];
   for (const [label, raw] of hostile) assert.undefinedValue(decodeLastSession(raw, NOW), `hostile record accepted (${label})`);
 
-  // Inherited fields (EP6-F6, named explicitly by the acceptance). A polluted
+  // Inherited fields (validate-stored-record, named explicitly by the acceptance). A polluted
   // `Object.prototype` must not be able to supply a field the stored record
   // does not itself contain: `in` would accept it, own-property presence does
   // not. The prototype is restored immediately whatever the assertions do.
@@ -206,7 +206,7 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
   assert.equal(writeLastSession(store, Object.freeze({ draftScope: "not-an-authority-key", name: "ops", realm: "local", server: "private", at: NOW }), NOW), "invalid", "an unpinnable scope must not be stored");
   assert.equal(store.entries.size, 0, "a refused write must leave storage untouched");
 
-  // EP6-F1 / adjudication EP6-R1. The recorder can only ever write the identity
+  // remember-committed-identity / contract committed-identity. The recorder can only ever write the identity
   // it was CONSTRUCTED with, and that identity comes from the authoritative
   // inventory session a trusted action resolved -- never from the URL.
   const opsSession = liveInventory.realms[0].servers[0].sessions.find((session) => session.name === "ops");
@@ -237,7 +237,7 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
       "a trusted action's identity plus its own COMMIT records that identity");
   }
 
-  // THE EP6-R1 CASE. A valid handle for ops attaches and COMMITs, but the URL
+  // THE committed-identity CASE. A valid handle for ops attaches and COMMITs, but the URL
   // carries a DIFFERENT live incarnation's draft scope. The page must not
   // record either one: the candidate says ops, the URL says build, and the
   // honest outcome when identity signals disagree is to record nothing.
@@ -271,7 +271,7 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
     assert.equal(recorder.recorded(), false, `${label} must not report a write`);
   }
 
-  // ---- adjudication EP6-R4: identity resolution is settled per operation ----
+  // ---- contract operation-owned-resolution: identity resolution is settled per operation ----
   // The callback carries no generation, so the ONLY window in which it can only
   // be this operation's own resolution is before this recorder is armed. There,
   // a same-operation failure still clears -- that is the page's own identity
@@ -307,7 +307,7 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
     assert.equal(readLastSession(store, NOW)?.name, "ops");
   }
 
-  // ---- adjudication EP6-R2: a candidate belongs to ONE target operation ----
+  // ---- contract operation-owned-candidate: a candidate belongs to ONE target operation ----
   const OP_A = "0123456789abcdef0123456789abcdef";
   const OP_B = "fedcba9876543210fedcba9876543210";
   const buildIdentity = pendingIdentityFromSession(liveInventory.realms[0].servers[0].sessions.find((s2) => s2.name === "build")!);
@@ -389,8 +389,8 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
     assert.equal(store.entries.size, 0);
   }
 
-  // ---- adjudication EP6-R3: the direct E-P4 seam must actually work ----
-  // E-P4 switches panes in-process. There is no navigation and therefore no URL
+  // ---- contract direct-switch-identity: the direct session switch seam must actually work ----
+  // session switch switches panes in-process. There is no navigation and therefore no URL
   // scope to cross-check; the operation is named by the caller instead. A
   // resolved-mode recorder that demanded a page scope would silently refuse to
   // record for the one caller the seam exists for, which is what it did.
@@ -398,7 +398,7 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
     const store = new FakeStorage();
     const recorder = createCommittedSessionRecorder({ mode: "resolved", storage: store, identity: opsIdentity, generation: 9, now: () => NOW });
     recorder.frame(9, COMMIT, "ENQUEUED");
-    assert.equal(recorder.recorded(), true, "E-P4 resolved identity + generation must record without a URL scope");
+    assert.equal(recorder.recorded(), true, "session switch resolved identity + generation must record without a URL scope");
     assert.deepEqual(readLastSession(store, NOW), { draftScope: opsScope, name: "ops", realm: "local", server: "private", at: NOW });
   }
 
@@ -423,7 +423,7 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
     assert.equal(recorder.recorded(), false, "a resolved operation's own refusal still clears it");
   }
 
-  // ---- adjudication EP6-R4: an unowned identity failure cannot clear it ----
+  // ---- contract operation-owned-resolution: an unowned identity failure cannot clear it ----
   // The incoming pane is bound to generation 11. The OUTGOING pane's identity
   // resolution fails; that callback names no operation, so a recorder that
   // honoured it would let the pane being replaced cancel the pane replacing it.
@@ -446,7 +446,7 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
     unarmed.frame(4, COMMIT, "ENQUEUED");
     assert.equal(unarmed.recorded(), false, "an unarmed recorder must never latch a generation");
 
-    // The E-P4 seam: the incoming identity is bound to the incoming generation
+    // The session switch seam: the incoming identity is bound to the incoming generation
     // at construction, so the outgoing pane's frames cannot spend it.
     const incoming = createCommittedSessionRecorder({ mode: "resolved", storage: store, identity: opsIdentity, generation: 7, now: () => NOW });
     incoming.frame(6, COMMIT, "ENQUEUED");
@@ -520,7 +520,7 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
   }
 }
 
-// --- EP6-F2: exact-incarnation resolution ------------------------------------
+// --- remember-exact-target: exact-incarnation resolution ------------------------------------
 {
   const resume = landingMemoryState(goodRecord, resolveDraftScope(liveInventory, goodRecord.draftScope));
   assert.equal(resume.kind, "resume");
@@ -560,7 +560,7 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
   assert.equal(landingMemoryState(undefined, undefined).kind, "none");
 }
 
-// --- EP6-F5: the default is contained and never impersonates a resume --------
+// --- refuse-name-reuse: the default is contained and never impersonates a resume --------
 {
   assert.undefinedValue(parseDefaultSessionPreference(null));
   assert.undefinedValue(parseDefaultSessionPreference({ version: 1 }));

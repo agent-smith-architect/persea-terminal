@@ -1,7 +1,7 @@
 "use strict";
 
 // Fn-bank-only mutants are superseded by test:terminal-keys-mutants.
-// Causal UX18 gate. A non-zero exit is not evidence by itself: every mutant
+// Causal terminal controls gate. A non-zero exit is not evidence by itself: every mutant
 // must compile, the clean fixture must pass, and the mutant must terminate in
 // the assertion that names the invariant it was designed to violate. Spawn,
 // browser, fixture and compilation failures are classified as gate failures.
@@ -10,8 +10,8 @@ const path = require("path");
 const { spawnSync } = require("child_process");
 
 const UI = path.resolve(__dirname, "..");
-const EVIDENCE = path.resolve(process.env.PERSEA_UX18_EVIDENCE_DIR || "/tmp/persea-ux18-mutants");
-const BROWSER_RUNNER = path.join(__dirname, "run_ux18_controls_browser.cjs");
+const EVIDENCE = path.resolve(process.env.PERSEA_TERMINAL_CONTROLS_EVIDENCE_DIR || "/tmp/persea-terminal_controls-mutants");
+const BROWSER_RUNNER = path.join(__dirname, "run_terminal_controls_browser.cjs");
 const BROWSER_MUTANTS = Object.freeze({
   "clipped-status-notice": "status notice clips its explanation",
   "native-key-echo-lost": "native dictation restart duplicated text or sent Enter",
@@ -99,10 +99,10 @@ function spawnBrowser(directory, mutant = "", engine = "chromium") {
     cwd: UI,
     env: {
       ...process.env,
-      PERSEA_UX18_ENGINE: engine,
-      PERSEA_UX18_CASE: "phone-390",
-      PERSEA_UX18_MUTANT: mutant,
-      PERSEA_UX18_EVIDENCE_DIR: directory,
+      PERSEA_TERMINAL_CONTROLS_ENGINE: engine,
+      PERSEA_TERMINAL_CONTROLS_CASE: "phone-390",
+      PERSEA_TERMINAL_CONTROLS_MUTANT: mutant,
+      PERSEA_TERMINAL_CONTROLS_EVIDENCE_DIR: directory,
     },
     encoding: "utf8",
     timeout: 90_000,
@@ -130,7 +130,7 @@ async function compilePreferenceCase(outfile, mutant = "") {
     outfile,
     logLevel: "silent",
     ...(mutant ? { plugins: [{
-      name: `ux18-${mutant}`,
+      name: `terminal_controls-${mutant}`,
       setup(build) {
         build.onLoad({ filter: /operator_preferences\.ts$/ }, (args) => {
           let source = fs.readFileSync(args.path, "utf8");
@@ -172,7 +172,7 @@ async function main() {
     const browserControlDir = path.join(EVIDENCE, "control-browser");
     const browserControl = spawnBrowser(browserControlDir);
     validateProcess(browserControl.result, browserControl.output, "browser clean control");
-    assert(browserControl.result.status === 0 && browserControl.output.includes("UX18 chromium: PASS (1 shapes)"), `browser clean control failed with status ${browserControl.result.status}`);
+    assert(browserControl.result.status === 0 && browserControl.output.includes("terminal controls chromium: PASS (1 shapes)"), `browser clean control failed with status ${browserControl.result.status}`);
     results.push({ case: "control-browser", control: true, passed: true, status: 0 });
 
     const preferenceControlDir = path.join(EVIDENCE, "control-preferences");
@@ -193,7 +193,7 @@ async function main() {
     const previewExpected = "subscriber A lost the preview to the prior PUT";
     assert(preview.result.status === 1 && preview.output.includes(previewExpected), `preview-cleared-by-prior did not die at intended assertion (status ${preview.result.status})`);
     results.push({ mutant: "preview-cleared-by-prior", requirement: "R1", compiled: true, killed: true, status: 1, expected: previewExpected });
-    console.log("UX18 mutant killed causally: preview-cleared-by-prior");
+    console.log("terminal controls mutant killed causally: preview-cleared-by-prior");
 
     const queuedWriteDir = path.join(EVIDENCE, "queued-write-uses-preview");
     fs.mkdirSync(queuedWriteDir, { recursive: true });
@@ -204,7 +204,7 @@ async function main() {
     const queuedWriteExpected = "success: B wire body leaked C preview";
     assert(queuedWrite.result.status === 1 && queuedWrite.output.includes(queuedWriteExpected), `queued-write-uses-preview did not die at intended assertion (status ${queuedWrite.result.status})`);
     results.push({ mutant: "queued-write-uses-preview", requirement: "C2-1", compiled: true, killed: true, status: 1, expected: queuedWriteExpected });
-    console.log("UX18 mutant killed causally: queued-write-uses-preview");
+    console.log("terminal controls mutant killed causally: queued-write-uses-preview");
 
     for (const [mutant, specification] of Object.entries(BROWSER_MUTANTS)) {
       const { expected, engine } = typeof specification === "string"
@@ -214,13 +214,13 @@ async function main() {
       const run = spawnBrowser(directory, mutant, engine);
       validateProcess(run.result, run.output, mutant);
       assert(run.result.status === 1, `${mutant}: expected assertion exit 1, got ${run.result.status}`);
-      assert(run.output.includes("UX18AssertionError: UX18_ASSERTION:"), `${mutant}: failure was not a browser assertion`);
+      assert(run.output.includes("TERMINAL_CONTROLSAssertionError: TERMINAL_CONTROLS_ASSERTION:"), `${mutant}: failure was not a browser assertion`);
       assert(run.output.includes(expected), `${mutant}: missing intended failure signature ${JSON.stringify(expected)}`);
-      results.push({ mutant, requirement: CORRECTION_REQUIREMENT[mutant] || "UX18-baseline", engine, compiled: true, killed: true, status: 1, expected });
-      console.log(`UX18 mutant killed causally: ${mutant}`);
+      results.push({ mutant, requirement: CORRECTION_REQUIREMENT[mutant] || "TERMINAL_CONTROLS-baseline", engine, compiled: true, killed: true, status: 1, expected });
+      console.log(`terminal controls mutant killed causally: ${mutant}`);
     }
     summary("PASS");
-    console.log(`UX18 causal mutants PASS (${results.length - 2}/${results.length - 2} killed; 2/2 clean controls)`);
+    console.log(`terminal controls causal mutants PASS (${results.length - 2}/${results.length - 2} killed; 2/2 clean controls)`);
   } catch (error) {
     summary("FAIL", String(error instanceof Error ? error.stack || error.message : error));
     throw error;

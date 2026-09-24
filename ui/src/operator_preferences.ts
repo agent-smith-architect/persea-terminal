@@ -1,4 +1,4 @@
-// One document-global client for the operator preference record (E-P5).
+// One document-global client for the operator preference record (preferences).
 //
 // The service owns the sole GET/PUT transport and the strong revision. Pane
 // controllers subscribe to it; they never fetch independently, so a six-pane
@@ -20,7 +20,7 @@ export const COMPOSER_FONT_SIZE_MAX = 24;
 export const DEFAULT_COMPOSER_FONT_SIZE = 11;
 
 export type DefaultSessionPreference = Readonly<{ realm: string; server: string; name: string }>;
-// fontSize is the J-UX-9 tri-state: a number is the operator's explicit size,
+// fontSize is the font-size tri-state: a number is the operator's explicit size,
 // which overrides auto-fit on every load and reattach, and `null` is "auto" —
 // the page fits the font to the viewport. `null` is a stored state, not the
 // absence of one: the wire carries it as JSON null, and the record's own
@@ -183,7 +183,7 @@ function parseRecord(value: unknown, etag: string | null): ParsedRecord | undefi
 }
 
 // The hint is a device-local paint before the server answers and a cross-tab
-// signal after it; it is never a source of record truth (UX14 F5), so it
+// signal after it; it is never a source of record truth (terminal layout F5), so it
 // carries no revision and nothing in it is adopted after load.
 function readHint(storage: OperatorPreferencesServiceOptions["storage"]): OperatorPreferences | undefined {
   if (storage === undefined) return undefined;
@@ -280,7 +280,7 @@ export class OperatorPreferencesService implements OperatorPreferencePort {
     return this.loadPromise;
   }
 
-  // UX14 §14.3 (as amended after F5): a preference saved in another tab —
+  // (as amended after F5): a preference saved in another tab —
   // the dashboard's Appearance card, another terminal — reaches this document
   // without a reload. Every publication writes the localStorage hint, so the
   // `storage` event is the cross-tab SIGNAL; the record itself is always taken

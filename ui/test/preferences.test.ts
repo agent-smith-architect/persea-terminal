@@ -64,7 +64,7 @@ const valid = (patch: Partial<PreferencesV1["composer"]> = {}): PreferencesV1 =>
   version: 1,
   composer: {
     density: "standard",
-    // UX-16 §16.4: code (autocorrect off) is the default.
+    // code (autocorrect off) is the default.
     mode: "code",
     panelSize: "compact",
     heightPercent: {

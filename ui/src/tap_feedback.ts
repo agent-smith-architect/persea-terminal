@@ -1,4 +1,4 @@
-// UX15 §15.2: every button press paints a brief flash after the click lands.
+// every button press paints a brief flash after the click lands.
 // On a phone the :active state is gone before the finger lifts, so without
 // this a tap on Fit rows, Apply, Select or any other control gives no sign
 // that it registered. A disabled button does not flash: nothing registered,
@@ -7,7 +7,7 @@ const TAP_CLASS = "persea-tapped";
 const TAP_MS = 340;
 
 export function installTapFeedback(root: HTMLElement | Document): () => void {
-  // One timer per button (UX15-R3): a repeat tap inside the dwell restarts its
+  // One timer per button (tap-feedback-timer): a repeat tap inside the dwell restarts its
   // own flash, and only the newest timer may remove the class — the first
   // tap's timer must never cut the second tap's feedback short.
   const timers = new Map<HTMLElement, number>();

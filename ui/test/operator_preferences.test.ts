@@ -295,7 +295,6 @@ async function main(): Promise<void> {
   // synchronous-commit contract above), and nothing else may change: the client
   // keeps the committed record and its strong revision, no false "unavailable"
   // is published, and the NEXT save still issues a PUT with If-Match: "1".
-  // Reviewer scenario d1_cascade.cjs, made permanent.
   let revision = 0;
   let stored = { theme: "default", font_size: 14, composer_font_size: DEFAULT_COMPOSER_FONT_SIZE };
   const ifMatch: Array<string | null> = [];
@@ -359,7 +358,7 @@ for (const etag of [null, 'W/"0"', "*", '"0", "1"']) {
   assert.equal(service.snapshot().status, "unavailable", `non-strong ETag ${String(etag)} did not fail closed`);
 }
 
-// UX8-F1 / ruling J-UX-9: the font size is a tri-state. `null` is a stored
+// font-auto-preference / ruling terminal topbar: the font size is a tri-state. `null` is a stored
 // state that the service must read, merge and write without collapsing it into
 // a number, and without spending a number in 9…24 to represent it.
 {
@@ -464,7 +463,7 @@ for (const etag of [null, 'W/"0"', "*", '"0", "1"']) {
   }
 }
 
-// UX-18 correction R1: the service, not either pane, owns one tokenized
+// terminal controls correction R1: the service, not either pane, owns one tokenized
 // composer preview. An older queued theme/font PUT is deliberately held,
 // allowed to settle after the preview, and observed before the composer PUT
 // settles. Both exact subscribers must retain the preview through that older
@@ -553,7 +552,7 @@ for (const leg of ["success", "conflict", "unavailable"] as const) {
   assert.equal(puts, 2, `${leg}: operation count was not linear`);
 }
 
-// UX-18 Correction 2: A is already in flight, B is queued without a composer
+// terminal controls Correction 2: A is already in flight, B is queued without a composer
 // patch, and only then does C publish/queue its composer preview. B must build
 // its full-record wire body from the authority published by A, never from C's
 // projected face. Two exact subscribers retain C while B settles, while the
@@ -654,7 +653,7 @@ for (const leg of ["success", "conflict", "unavailable"] as const) {
   assert.equal(requests.length, 3, `${leg}: A/B/C operation count was not linear`);
 }
 
-// UX14 §14.3 (amended after F5): cross-document propagation. A publication
+// (amended after F5): cross-document propagation. A publication
 // writes the hint, which is only a SIGNAL to sibling documents; the record is
 // always taken from the server by refresh(), which re-reads, publishes nothing
 // for an unchanged revision, and never publishes "unavailable" for a transient
@@ -689,7 +688,7 @@ for (const leg of ["success", "conflict", "unavailable"] as const) {
   // A PUT after refresh carries the read revision, so it is not stale.
   assert.equal(await reader.update({ theme: "rose-pine" }), "saved", "the refreshed revision was stale for the next write");
   assert.equal(remote.current().revision, 6);
-  // Hostile hint (F5 falsifier): a same-origin hint that names a different
+  // Hostile hint (F5 regression test): a same-origin hint that names a different
   // profile's record with a higher revision paints before load and is then
   // replaced by the server record; after load it is never consulted at all.
   const hostileHint = JSON.stringify({ version: 1, theme: "dracula", font_size: null, composer_font_size: 24, default_session: null });

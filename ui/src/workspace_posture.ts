@@ -1,8 +1,8 @@
-// Device posture for workspaces (packet §6, M5) — one rule, one home.
+// Device posture for workspaces — one rule, one home.
 //
 // Two documents need this answer and they must never disagree: the /workspace
 // document decides whether it opens panes or the honest phone-class state, and
-// the dashboard decides whether it may offer a workspace at all (UX-8 F2 — a
+// the dashboard decides whether it may offer a workspace at all (workspace access F2 — a
 // phone must not be given a create affordance the same device then refuses to
 // open). The rule and its notice therefore live in a module that imports
 // nothing: workspace_layout.ts and workspace_page.ts already depend on
@@ -25,7 +25,7 @@ export function readPostureEnvironment(win: Window): PostureEnvironment {
   return Object.freeze({ coarsePointer: win.matchMedia?.("(pointer: coarse)").matches === true, viewportWidth: win.innerWidth, viewportHeight: win.innerHeight });
 }
 
-// Posture (packet §6, advisory A1). Decided ONCE at boot from the device
+// Posture. Decided ONCE at boot from the device
 // screen's short edge, which is stable under the software keyboard; never
 // re-evaluated from innerHeight on resize/orientation events. This is the
 // reading both documents use, so the dashboard's prediction and the workspace

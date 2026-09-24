@@ -194,10 +194,10 @@ const SNIPPET_REFUSALS: Readonly<Record<SnippetOutcome, string>> = Object.freeze
   unreachable: "Shared clipboard is unreachable",
 });
 
-// EP3-R5: the local copy landed and only the STORE half was out of grammar.
+// the local copy landed and only the STORE half was out of grammar.
 const CLIPS_TOO_LARGE_COPY_TEXT = "Copied to this device; too large for the shared clipboard";
 
-// EP3-R5: copying to THIS DEVICE never depends on the shared store. When the
+// copying to THIS DEVICE never depends on the shared store. When the
 // store is known unavailable the local copy still happens, no snippet mutation
 // is emitted, and the status says exactly which half worked.
 const CLIPS_UNAVAILABLE_COPY_TEXT = "Copied to this device; shared clipboard unavailable";
@@ -255,7 +255,7 @@ export type UnifiedTerminalPageOptions = Readonly<{
   // takeover offer here, mirroring the legacy page.
   onFirstCommit?(): void;
   // Every successful admission commit. Unlike onFirstCommit, this runs again
-  // after an explicit session switch so E-P6 memory can record the new exact
+  // after an explicit session switch so session memory memory can record the new exact
   // identity only after the new session is genuinely live.
   onCommit?(generation: number): void;
   sessionSwitch?: Readonly<{
@@ -304,7 +304,7 @@ function fontBaselineAttribute(preference: number | null): string {
   return preference === null ? "auto" : String(preference);
 }
 
-// value is the J-UX-9 tri-state the page intends to store: an explicit size, or
+// value is the font-size tri-state the page intends to store: an explicit size, or
 // `null` for auto. `null` is a real intent, never "no intent", so every read of
 // it tests `fontIntent !== undefined` rather than using `??`.
 type FontIntent = Readonly<{
@@ -323,7 +323,7 @@ type InputTraceEntry = Readonly<Record<string, unknown> & { t: number; kind: str
 const INPUT_TRACE_LIMIT = 300;
 const INPUT_TRACE_TEXT_LIMIT = 160;
 const INPUT_TRACE_DECODER = new TextDecoder();
-// UX15 §15.1: a toolbar control whose word lives in its own span, so gates
+// a toolbar control whose word lives in its own span, so gates
 // can measure the word against the button's content box; the button keeps
 // its own token and its aria-label.
 function wordedButton(button: HTMLButtonElement, word: string): HTMLSpanElement {
@@ -445,7 +445,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // attached still has the software keyboard.
   private readonly anyCoarsePointerQuery = window.matchMedia?.("(any-pointer: coarse)");
   private readonly iosBackspace: IOSBackspaceRouter;
-  // UX14 §14.4: the last INPUT_TRACE_LIMIT input events on this page, kept
+  // the last INPUT_TRACE_LIMIT input events on this page, kept
   // only in memory until the operator copies them from Help. Deliberately
   // includes the hidden field's tail and the bytes sent, because a dictation
   // fault is exactly a disagreement between those two.
@@ -613,7 +613,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private sessionDraftScope: string | null;
   private endpointOperation = 0;
   private takeoverController?: AbortController;
-  // E-P5 presentation authority. Every pane in a document subscribes to the
+  // preferences presentation authority. Every pane in a document subscribes to the
   // same service; these arrays contain the fine-pointer and coarse-pointer
   // views of that one record, never independent stores.
   private preferenceSubscription?: OperatorPreferenceSubscription;
@@ -626,7 +626,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private composerFontIntent?: ComposerFontIntent;
   // The font preference this page currently honours: an explicit size that
   // overrides auto-fit on every load, reattach and resize, or `null` for auto,
-  // where the viewport decides (ruling J-UX-9).
+  // where the viewport decides.
   private fontPreference: number | null = null;
   private fontIntentID = 0;
   private fontIntent?: FontIntent;
@@ -762,7 +762,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     geometryReadout.setAttribute("aria-controls", viewPopover.id);
     geometryReadout.setAttribute("aria-expanded", "false");
     geometryReadout.title = "View and size";
-    // UX14: Select is a plain toggle (Select ⇄ Selecting) whose second tap
+    // Select is a plain toggle (Select ⇄ Selecting) whose second tap
     // always leaves the frozen overlay, selection or not. The copy of that
     // selection lives on the Paste slot next to it: while text is selected
     // nothing can be pasted, so that box reads Copy, then the outcome, then
@@ -770,7 +770,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     const selectContext = document.createElement("button");
     selectContext.type = "button";
     selectContext.className = "persea-unified-copy persea-unified-select-context";
-    // UX15 §15.1: the word lives in its own span so gates can measure it
+    // the word lives in its own span so gates can measure it
     // against the button's content box; the button keeps its own token —
     // font, height, padding — and its accessible name (aria-label).
     this.selectWord = wordedButton(selectContext, "Select");
@@ -1674,7 +1674,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.scheduleReconcile();
   }
 
-  // --- operator preferences (E-P5) -----------------------------------------
+  // --- operator preferences (preferences) -----------------------------------------
 
   // The composer face picker. Same shape and the same intent/settlement
   // discipline as the theme picker: apply immediately so the operator sees the
@@ -2035,7 +2035,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private renderSheetState(): void {
     if (this.closed) return;
     // `reason` is what the tile says; `disable` is whether it stops working.
-    // They are usually the same, but not always: EP3-R5 needs a tile that
+    // They are usually the same, but not always: clipboard-store-recovery needs a tile that
     // reports an outage and stays usable, because what it opens still works.
     const setAvailability = (button: HTMLButtonElement, reason: string, disable = reason !== ""): void => {
       const available = !disable;
@@ -2614,7 +2614,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     void this.copyToClips(text).then((result) => {
       if (this.closed || attempt !== this.selectCopyAttempt) return;
       if (result.local) {
-        // UX14 F1: the copied range is consumed, so the slot can return to
+        // the copied range is consumed, so the slot can return to
         // Paste after the dwell; a failed copy keeps the range for a retry.
         this.terminal.clearSelection();
         this.showPasteSlotCopied();
@@ -2644,7 +2644,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private insertStatus(result: InsertTextResult, via: "snippet" | "clip" | "paste"): string {
     switch (result) {
       case "SENT":
-        // UX-16 §16.1: the receipt says what happened. The no-Return law
+        // the receipt says what happened. The no-Return law
         // (§3c) is unchanged and explained in Help, not in every receipt.
         return via === "paste" ? "Pasted" : via === "clip" ? "Clip inserted" : "Snippet inserted";
       case "COMPOSER":
@@ -2687,7 +2687,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
    * The multiline guard's landing: the text goes to this pane's composer
    * draft (never a sibling's).
    *
-   * EP3-R4 / J-EP3-1: it does NOT claim focus, and it DOES make the composer
+   * clipboard-focus-ownership / CLIPBOARD-1: it does NOT claim focus, and it DOES make the composer
    * visible. Opening from the tap's trusted event focused the textarea, which
    * raised the keyboard on a coarse pointer — the thing "one tap, no
    * keyboard" forbids. Merely writing the draft was the opposite error: the
@@ -2814,7 +2814,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.armKeyboardWatchdog(open);
   }
 
-  // UX14 round 2: every keyboard / visual-viewport signal (resize, scroll,
+  // every keyboard / visual-viewport signal (resize, scroll,
   // scale, focus, visibility) changes what the geometry block may offer — the
   // typed geometry availability and the width measurement itself — so the
   // visible affordance is recomputed
@@ -3722,7 +3722,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.viewPopoverOpen = open;
     this.viewPopover.hidden = !open;
     // The Fit width measurement depends on the viewport at this moment
-    // (UX14 F2): refresh the block's availability as the popover opens.
+    // (terminal layout F2): refresh the block's availability as the popover opens.
     if (open) this.updateGeometryControl();
     else for (const form of this.geometryForms) this.clearGeometryReason(form);
     this.geometryReadout.setAttribute("aria-expanded", open ? "true" : "false");
@@ -3843,7 +3843,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.popoverOwner = owner;
   }
 
-  // UX15 §15.3: the software-keyboard guard protects MEASURED fits (Fit rows,
+  // the software-keyboard guard protects MEASURED fits (Fit rows,
   // Fit width read the visible band, which the keyboard has just shrunk). A
   // typed size is the operator's explicit number and is not measured, so an
   // explicit request ignores the guard — on a phone the keyboard is still up
@@ -3875,7 +3875,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     return Number.isFinite(rows) && rows > 0 ? rows : undefined;
   }
 
-  // UX14 §14.1: the Terminal size block reads top-down the way the operator
+  // the Terminal size block reads top-down the way the operator
   // thinks about it — first the two fit-to-view actions, then the explicit
   // form `Columns [ ] Rows [ ] [Apply]`. Apply is ONE request: a row-only
   // change is the live rows request; a column change is the generation refit,
@@ -3902,7 +3902,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     actions.append(fitRows, fitWidth);
     const form = document.createElement("div");
     form.className = "persea-unified-size__form";
-    // UX-16 §16.5: a compact row. The visible caption is short; the
+    // a compact row. The visible caption is short; the
     // accessible name stays the full word.
     const field = (caption: string, name: string): { label: HTMLLabelElement; input: HTMLInputElement } => {
       const label = document.createElement("label");
@@ -4106,14 +4106,14 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   }
 
   // The sole attachment-frame construction site for explicit geometry. Width
-  // remains the committed witness; E-P2 owns generation refit.
+  // remains the committed witness; scrollback owns generation refit.
   private requestRowsOnly(rows: number, explicit = false): void {
     const active = this.prepared;
     const availability = explicit
       ? this.geometryAvailability("apply", true)
       : this.geometryAvailability("fit_rows", false, rows);
     if (!active || !availability.enabled) {
-      // A typed request is never dropped silently (UX15 §15.3).
+      // A typed request is never dropped silently (terminal appearance §15.3).
       if (explicit) this.showRefusalNotice(availability.message);
       return;
     }
@@ -4289,7 +4289,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.projectedRow = -1;
     if (type === "alternate") this.syncNativeScroll(true);
     else this.syncNativeScroll(this.normalAnchor.following, this.normalAnchor);
-    // Width refits are refused on the alternate screen (UX14 F2).
+    // Width refits are refused on the alternate screen (terminal layout F2).
     this.updateGeometryControl();
   }
 
@@ -4317,7 +4317,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
 
   // The size xterm is painting right now, which is what a zoom step must move
   // by one. In auto mode this is the fitted size, not the stored preference:
-  // stepping the stored number is exactly the defect J-UX-9 rules out (a phone
+  // stepping the stored number is exactly the defect auto sizing must prevent (a phone
   // fitted to 9px jumped to 15px on the first "Zoom in").
   private renderedFontSize(): number {
     return this.terminal.options.fontSize ?? UNIFIED_SEED_FONT_SIZE;
@@ -4353,7 +4353,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   }
 
   // One debounced write per font decision, carrying the exact value it intends
-  // (E-P5 R1 point 1). The identity fence and the settle/discard pair are
+  // (preferences R1 point 1). The identity fence and the settle/discard pair are
   // unchanged: only the value's type widened.
   private storeFontPreference(value: number | null): void {
     if (this.fontSaveTimer !== undefined) clearTimeout(this.fontSaveTimer);
@@ -4383,7 +4383,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     // conflict publishes server authority instead. Reconcile only after this
     // matching intent is no longer allowed to mask that outcome.
     this.applyPreferences(this.options.preferences!.snapshot());
-    // UX15-R2: a Zoom that did not persist says so where the operator zoomed
+    // a Zoom that did not persist says so where the operator zoomed
     // (the bounded toast); the dashboard card reports the store, never this
     // page's write. Only the matching intent's settlement speaks — an older
     // operation that lost to a newer Zoom is silent, its value never shown.
@@ -4406,7 +4406,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     if (this.closed || this.fontIntent?.id !== intent.id) return;
     this.fontIntent = undefined;
     this.applyPreferences(this.options.preferences!.snapshot());
-    // UX15-R2: the settled record is on screen, but the write's outcome is
+    // the settled record is on screen, but the write's outcome is
     // unknown to this page — say so rather than nothing.
     this.showToast("Zoom could not be saved");
   }
@@ -4764,7 +4764,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   }
 
   // The single delivery point for every path that puts operator text in the
-  // pane (the composer's Insert and E-P3's snippets/clips/paste). `focusFirst`
+  // pane (the composer's Insert and clipboard's snippets/clips/paste). `focusFirst`
   // is the composer's long-standing behaviour and keeps the ONE terminal
   // focus() call site this method has always had; the snippet paths pass
   // false on coarse pointers, where focusing would raise a keyboard nobody

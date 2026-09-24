@@ -5,7 +5,7 @@ const http = require("http");
 const path = require("path");
 
 const UI = path.resolve(__dirname, "..");
-const ENGINE = process.env.PERSEA_UX12_ACCOUNTING_ENGINE || process.env.PERSEA_UX10_ENGINE || "chromium";
+const ENGINE = process.env.PERSEA_REFIT_ACCOUNTING_ENGINE || process.env.PERSEA_TERMINAL_INTERACTION_ENGINE || "chromium";
 const MODULE = process.env.PERSEA_PLAYWRIGHT_MODULE || require.resolve("playwright");
 const NONCE = "AAAAAAAAAAAAAAAAAAAAAA";
 const CSP = `default-src 'self'; script-src 'self' 'nonce-${NONCE}'; style-src 'self' 'nonce-${NONCE}'; connect-src 'self'; object-src 'none'`;
@@ -14,10 +14,10 @@ async function main() {
   if (!path.isAbsolute(MODULE)) throw new Error("PERSEA_PLAYWRIGHT_MODULE must be absolute");
   const playwright = require(MODULE);
   if (!playwright[ENGINE]) throw new Error(`Playwright has no ${ENGINE} engine`);
-  const html = fs.readFileSync(path.join(__dirname, "ux12_refit_accounting_browser_harness.html"), "utf8").replaceAll("__PERSEA_STYLE_NONCE__", NONCE);
+  const html = fs.readFileSync(path.join(__dirname, "refit_accounting_browser_harness.html"), "utf8").replaceAll("__PERSEA_STYLE_NONCE__", NONCE);
   const files = new Map([
     ["/app.css", [path.join(UI, "dist/app.css"), "text/css"]],
-    ["/ux12_refit_accounting_browser_harness.js", [path.join(UI, "dist/test/ux12_refit_accounting_browser_harness.js"), "text/javascript"]],
+    ["/refit_accounting_browser_harness.js", [path.join(UI, "dist/test/refit_accounting_browser_harness.js"), "text/javascript"]],
   ]);
   const server = http.createServer((request, response) => {
     response.setHeader("Content-Security-Policy", CSP);
@@ -47,7 +47,7 @@ async function main() {
     page.on("pageerror", (error) => errors.push(String(error)));
     await page.goto(`http://127.0.0.1:${server.address().port}`, { waitUntil: "load" });
     await page.waitForFunction(() => document.body.dataset.ready === "true");
-    const result = await page.evaluate(() => window.__ux12RefitAccounting.run());
+    const result = await page.evaluate(() => window.__refitRefitAccounting.run());
     if (errors.length > 0) throw new Error(`page errors: ${JSON.stringify(errors)}`);
     console.log(JSON.stringify({ status: "PASS", engine: ENGINE, result }));
   } finally {

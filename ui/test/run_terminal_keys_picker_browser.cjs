@@ -170,7 +170,7 @@ async function main() {
       await page.mouse.move(held.x + held.width / 2 + 18, held.y + held.height / 2, { steps: 3 }); await page.mouse.up();
       check(await panel.getAttribute("data-group") === "Navigation" && await panel.getAttribute("data-picker") === "key-group", "Dragging cancels choice without closing chooser");
       await down(choice);
-      // Explicit cancellation is a lifecycle falsifier; acquisition above uses
+      // Explicit cancellation is a lifecycle regression test; acquisition above uses
       // real trusted pointer events in both engines.
       await choice.evaluate(node => node.dispatchEvent(new PointerEvent("pointercancel", { bubbles: true, pointerId: window.__pickerPointerId, pointerType: "mouse" })));
       await page.mouse.up();

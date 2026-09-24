@@ -265,7 +265,7 @@ function cookieCSRF(request) {
 }
 
 
-// --- /api/snippets double (design packet §3a/§3b as landed) -----------------
+// --- /api/snippets double  -----------------
 //
 // A faithful stand-in for internal/frontdoor/snippet_store.go + snippet_api.go:
 // the closed record grammar, the 256-snippet cap, the 20-entry manual clip
@@ -524,7 +524,7 @@ function createSnippetStore(csrfToken) {
     }
 
     if (state.mutationDelayMs > 0) await new Promise((done) => setTimeout(done, state.mutationDelayMs));
-    // EP3-R5: an outage that hits WRITES ONLY, so a gate can watch the client
+    // an outage that hits WRITES ONLY, so a gate can watch the client
     // learn about it from a mutation. `snippetUnavailable` fails reads too, so
     // the poll would publish the outage on its own and the mutation's own
     // reporting could not be measured.
@@ -688,10 +688,10 @@ function startFixture(ui, options = {}) {
     "/app.js": { file: path.join(ui, "dist/app.js"), type: "text/javascript" },
     "/app.css": { file: path.join(ui, "dist/app.css"), type: "text/css" },
     "/xterm.css": { file: path.join(ui, "dist/xterm.css"), type: "text/css" },
-    // E-P6 installable shell. index.html links these, so a fixture that does not
+    // session memory installable shell. index.html links these, so a fixture that does not
     // serve them makes the page 404 assets the front door always has
     // (`requiredBundleFiles` refuses to start a release without them). Same paths,
-    // same media types (ruling J-EP6-1).
+    // same media types.
     "/manifest.webmanifest": { file: path.join(ui, "dist/manifest.webmanifest"), type: "application/manifest+json" },
     "/icon-192.png": { file: path.join(ui, "dist/icon-192.png"), type: "image/png" },
     "/icon-512.png": { file: path.join(ui, "dist/icon-512.png"), type: "image/png" },
@@ -703,7 +703,7 @@ function startFixture(ui, options = {}) {
     // Closed-set scenario knobs, all operator-driven through /__fixture/control.
     sessionState: "open",          // open | adoptable | missing
     switchSessions: false,
-    ux13SwitcherMetadata: false,
+    terminal_touchSwitcherMetadata: false,
     sessionBState: "adoptable",
     adoptedB: false,
     holdAdoptionMs: 0,
@@ -755,7 +755,7 @@ function startFixture(ui, options = {}) {
     refitOperations: [],
     counters: { documents: 0, inventory: 0, handleRequests: 0, takeovers: 0, adoptions: 0, refits: 0, websockets: 0, replays: 0, preferencesGet: 0, preferencesPut: 0, keyboardPreferencesGet: 0, keyboardPreferencesPut: 0 },
   };
-  // The /api/snippets store double (E-P3). It is front-door state like the
+  // The /api/snippets store double (clipboard). It is front-door state like the
   // handles and the lease, not a browser concern.
   const snippets = createSnippetStore(CSRF_TOKEN);
   const mint = (purpose, session = "A") => {
@@ -773,7 +773,7 @@ function startFixture(ui, options = {}) {
     for (const release of state.keyboardPreferencePutReleases.splice(0)) release();
     state.sessionState = "open";
     state.switchSessions = false;
-    state.ux13SwitcherMetadata = false;
+    state.terminal_touchSwitcherMetadata = false;
     state.sessionBState = "adoptable";
     state.adoptedB = false;
     state.holdAdoptionMs = 0;
@@ -858,7 +858,7 @@ function startFixture(ui, options = {}) {
     const remoteSessions = sessions.filter((session) => session.realm === "remote");
     const realms = [{ name: "local", display_name: "Local realm", servers: [{ label: "private", status: "ok", can_create: false, can_stage_images: state.imageStaging, sessions: localSessions }] }];
     if (remoteSessions.length > 0) realms.push({ name: "remote", display_name: "Remote realm", servers: [{ label: "private", status: "ok", can_create: false, can_stage_images: state.imageStaging, sessions: remoteSessions }] });
-    const aliases = state.ux13SwitcherMetadata ? [
+    const aliases = state.terminal_touchSwitcherMetadata ? [
       { alias_id: "alias-alpha", display_alias: "primary shell", revision: 1, state: "active", session_incarnation: AUTHORITY },
       { alias_id: "alias-beta", display_alias: "support shell", revision: 1, state: "active", session_incarnation: AUTHORITY_B },
     ] : [];
@@ -914,7 +914,7 @@ function startFixture(ui, options = {}) {
         if (input.reset) reset();
         if (typeof input.sessionState === "string") state.sessionState = input.sessionState;
         if (typeof input.switchSessions === "boolean") state.switchSessions = input.switchSessions;
-        if (typeof input.ux13SwitcherMetadata === "boolean") state.ux13SwitcherMetadata = input.ux13SwitcherMetadata;
+        if (typeof input.terminal_touchSwitcherMetadata === "boolean") state.terminal_touchSwitcherMetadata = input.terminal_touchSwitcherMetadata;
         if (typeof input.sessionBState === "string") state.sessionBState = input.sessionBState;
         if (typeof input.adoptedB === "boolean") state.adoptedB = input.adoptedB;
         if (typeof input.holdAdoptionMs === "number") state.holdAdoptionMs = input.holdAdoptionMs;
@@ -1014,7 +1014,7 @@ function startFixture(ui, options = {}) {
       response.end(JSON.stringify(snapshot()));
       return;
     }
-    // E-P6 (ruling J-EP6-2). The dashboard document reads the operator's
+    // session memory. The dashboard document reads the operator's
     // default-session preference exactly once per page, so a fixture that does
     // not answer this makes the page log a 404 the product never produces.
     // Mirrors `getPreferences` / `writePreferences` in
@@ -1022,7 +1022,7 @@ function startFixture(ui, options = {}) {
     // stored: the `defaultPreferences()` record (version 1, theme "default",
     // font size 14, no default session), revision 0, `stored: false`, plus the
     // `available` flag of the preferencesResponse wrapper, under the same
-    // Cache-Control/Content-Type/ETag headers. E-P5 adds the corresponding
+    // Cache-Control/Content-Type/ETag headers. preferences adds the corresponding
     // exact strong-CAS mutation path below.
     if (url.pathname === "/api/dashboard-preferences") {
       const origin = `${tls ? "https" : "http"}://${request.headers.host}`;
@@ -1267,7 +1267,7 @@ function startFixture(ui, options = {}) {
       if (request.headers["x-persea-csrf"] !== CSRF_TOKEN || !body || !state.bindings.has(body.source) || !Number.isInteger(body.columns) || body.columns < 20 || body.columns > 300 || !/^[A-Za-z0-9_-]{43}$/.test(body.operation || "")) {
         response.writeHead(400); response.end("bad_refit"); return;
       }
-      // UX14 §14.1: rows are optional; when present they ride the refit.
+      // rows are optional; when present they ride the refit.
       if (body.rows !== undefined && (!Number.isInteger(body.rows) || body.rows < 1 || body.rows > 500)) {
         response.writeHead(400); response.end("bad_refit"); return;
       }

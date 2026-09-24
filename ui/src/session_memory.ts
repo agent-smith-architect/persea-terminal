@@ -1,9 +1,9 @@
-// E-P6 — per-device "last session" memory and the landing resolution it feeds.
+// Per-device "last session" memory and the landing resolution it feeds.
 //
-// This module owns ONE localStorage record and its strict codec (packet §7b,
-// acceptance B1.1). Everything here is presentation-level truth about a session
+// This module owns ONE localStorage record and its strict codec.
+// Everything here is presentation-level truth about a session
 // the operator already attached to: the record is written only as the
-// consequence of a real unified first COMMIT (and, when E-P4 lands, of a
+// consequence of a real unified first COMMIT (or a
 // successful switch COMMIT), never at click, connect, or PREPARE. It stores no
 // URL, attachment handle, capability, token, draft body, image path, or secret
 // — only identity metadata that the authoritative inventory has to confirm
@@ -55,7 +55,7 @@ const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/;
 /**
  * Own-property presence. `in` walks the prototype chain, so a document that has
  * polluted `Object.prototype` could satisfy a required field without the stored
- * record containing it — an inherited field, which acceptance B2 EP6-F6 names
+ * record containing it — an inherited field, which acceptance B2 validate-stored-record names
  * explicitly. Every field this codec reads must be the record's own.
  */
 function ownField(value: object, key: string): boolean {
@@ -196,7 +196,7 @@ export function clearLastSession(storage: MemoryStorage): void {
  * client-supplied: a COMMIT proves that *a* handle attached, never that the
  * fragment's `draft_scope` names that attachment, so a URL carrying a valid
  * handle beside a different live incarnation's scope would otherwise record the
- * wrong session as "last session" (adjudication EP6-R1).
+ * wrong session as "last session".
  *
  * It is bounded and carries NO capability: no handle, no URL, no source token,
  * no secret — the same fields the durable record holds, minus the timestamp.
@@ -213,7 +213,7 @@ export type PendingSessionIdentity = Readonly<{
 // would be ambient: every dashboard action writes it and every terminal page
 // destructively reads it, so two supported popup/tab actions overwrite or
 // consume each other's candidate and a page can consume an identity that was
-// never staged for it (adjudication EP6-R2). Each candidate therefore lives
+// never staged for it. Each candidate therefore lives
 // under its own operation key and is consumed only by the matching target.
 export const PENDING_SESSION_KEY_PREFIX = "persea-terminal.pending-session.v1/";
 
@@ -387,15 +387,15 @@ export type CommittedSessionRecorder = Readonly<{
 
 /**
  * How this recorder got its identity. The two shapes are DISCRIMINATED, never
- * inferred from which optional fields happen to be present (adjudication
- * EP6-R3), because the two have opposite obligations:
+ * inferred from which optional fields happen to be present, because the two
+ * have opposite obligations:
  *
  * - `navigation`: the identity crossed a navigation as a staged candidate, so
  *   the page MUST corroborate it against its own URL scope. `pageDraftScope`
  *   is required to be passed — a page with no scope, or one that disagrees,
  *   drops the candidate rather than consuming it. The operation is named later,
  *   by `arm`, from the page's own controller.
- * - `resolved`: the caller already resolved the identity in-process (E-P4's
+ * - `resolved`: the caller already resolved the identity in-process (session switch's
  *   pane switch) and names the operation up front. There is no navigation and
  *   therefore NO URL scope to check — requiring one would make the seam inert.
  *   `generation` is required for exactly that reason: the operation must be
@@ -422,12 +422,12 @@ export type CommittedSessionSource =
  *
  * In navigation mode it never latches a generation on its own: an unarmed
  * recorder ignores every callback, so an unrelated controller's event — an
- * outgoing pane during an E-P4 switch, a sibling reconnect — can never bind it.
+ * outgoing pane during an session switch switch, a sibling reconnect — can never bind it.
  * In resolved mode the generation is given at construction and is never
  * inferred. Either way, events from another generation are ignored, never
  * consumed: a sibling operation's failure is not this operation's failure.
  *
- * Identity resolution is settled per operation (adjudication EP6-R4). A
+ * Identity resolution is settled per operation. A
  * resolved-mode recorder ignores `identityResolve` outright — its identity is
  * already resolved, and the callback carries no operation, so honouring it
  * would let any pane's failure clear this one. A navigation-mode recorder
@@ -588,7 +588,7 @@ export function defaultSessionState(inventory: DashboardInventory | undefined, p
 }
 
 /**
- * Precedence (acceptance B1.2/B1.3, falsifier EP6-F5): a remembered identity
+ * Precedence: a remembered identity
  * that still resolves ALWAYS wins, and the default card is not rendered beside
  * it. Only when there is no valid remembered identity — none stored, ended,
  * ambiguous, or blocked — may the default be offered, and then it is labelled
