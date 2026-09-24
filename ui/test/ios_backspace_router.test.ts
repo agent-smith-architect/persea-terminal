@@ -545,7 +545,7 @@ try {
   // --- F2: unmodeled xterm keys end replacement authority ----------------------
 
   {
-    // The advisor's regression test: establish "hello", deliver ArrowLeft through
+    // Establish "hello", deliver ArrowLeft through
     // both public router hooks, then the full-field revision. Five Backspaces
     // at the moved PTY cursor would over-erase; the revision must fall back
     // to the raw path with the erase count invalidated, never guessed.
@@ -1022,11 +1022,11 @@ try {
     subject.router.onFocusIn(focusEvent(subject.textarea));
     dictationSession([4, 7, 15]);
 
-    assert.equal(ledger.filter((shape) => shape.phase === "delete").length, 12, "refit ledger lost held-delete shapes");
-    assert.equal(ledger.filter((shape) => shape.phase === "dictation").length, 6, "refit ledger lost one dictation session");
+    assert.equal(ledger.filter((shape) => shape.phase === "delete").length, 12, "input-event privacy ledger lost held-delete shapes");
+    assert.equal(ledger.filter((shape) => shape.phase === "dictation").length, 6, "input-event privacy ledger lost one dictation session");
     const encoded = JSON.stringify(ledger);
-    assert.ok(!encoded.includes("xxx"), "refit event-shape ledger retained transcript content");
-    assert.ok(encoded.includes('"trackedNumericCount"') && encoded.includes('"selectionStart"'), "refit ledger lost authority metadata");
+    assert.ok(!encoded.includes("xxx"), "input-event privacy ledger retained transcript content");
+    assert.ok(encoded.includes('"trackedNumericCount"') && encoded.includes('"selectionStart"'), "input-event privacy ledger lost authority metadata");
     console.log(`INPUT_EVENT_PRIVACY_EVENT_SHAPES=${encoded}`);
   }
 
