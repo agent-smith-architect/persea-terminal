@@ -1299,8 +1299,11 @@ button[data-copy-state="failed"] {
    workspace compaction defaults because the attachment toolbar owns the new
    controls and their constant geometry. */
 @media (pointer: fine), (pointer: none) {
-  .ws-cell .ws-cell__header { padding-right: min(22rem, 90%); }
-  .ws-cell .ws-cell__mount .persea-unified-toolbar { width: min(22rem, 90%); }
+  /* Reserve the same share of the header that the toolbar actually uses.
+     A fixed cap starves the name even when the pane has ample free space. */
+  .ws-cell .ws-cell__header { padding-right: 90%; }
+  .ws-cell .ws-cell__mount .persea-unified-toolbar { width: 90%; }
+  .ws-cell .ws-cell__mount .persea-unified-toolbar button.persea-unified-tag { min-width: 0; max-width: none; }
   /* the Paste slot is a fixed box now (it has to hold "Copied ✓"), so
      a cell's bar trims both fixed boxes to what their widest word needs at
      the cell's fine-pointer padding — Select/Selecting at 5rem, Paste/Copy/
