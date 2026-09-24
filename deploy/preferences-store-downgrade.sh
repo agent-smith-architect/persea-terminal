@@ -5,16 +5,16 @@
 # reader does not know about — or any value outside its range — rejects the
 # WHOLE FILE.
 #
-# Repair 1 — the J-UX-9 font tri-state. Since J-UX-9 the store carries
-# `"font_size": null` for an operator whose font is on auto. A pre-J-UX-9 binary
+# Repair 1 — nullable font sizes. The current store carries
+# `"font_size": null` for an operator whose font is on auto. An older binary without nullable font support
 # decodes that JSON null into a plain `int` as a no-op zero, then fails its own
 # 9…24 range check. This script rewrites those to an explicit 14.
 #
-# Repair 2 — the UX-9 composer face. Since UX-9 a record this release writes
-# carries `"composer_font_size"`. A release older than UX-9 has never heard of
+# Repair 2 — configurable composer fonts. A record this release writes
+# carries `"composer_font_size"`. A release without composer font preferences does not recognize
 # that key and its strict decode rejects it. This script deletes the key; the
 # affected operators fall back to the composer face their older release
-# hardcodes, and rolling forward reads them as the UX-9 default again.
+# hardcodes, and rolling forward reads them as the default composer font again.
 #
 # Either way the blast radius is the same and it is why this script exists: one
 # unreadable record takes every other operator's theme and default session down
@@ -24,7 +24,7 @@
 # Nothing is destroyed: the old binary refuses to load the file rather than
 # rewriting it, so rolling forward instead of running this script also works.
 # After this script runs, the operators it touched hold an explicit 14 — the
-# pre-J-UX-9 default — which the newer binary reads back as a deliberate size,
+# older default — which the newer binary reads back as a deliberate size,
 # not as auto. That is the honest cost of the downgrade and it is stated in the
 # summary this script prints.
 set -Eeuo pipefail
@@ -33,7 +33,7 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
 
-# The pre-J-UX-9 default, and the value this script writes. It is inside the
+# The older default, and the value this script writes. It is inside the
 # 9…24 range every release in scope accepts.
 DOWNGRADE_FONT_SIZE=14
 FRONT_UNIT=persea-terminal-front.service
@@ -45,7 +45,7 @@ usage() {
   cat <<'USAGE'
 Usage: preferences-store-downgrade.sh [--force] [--dry-run] [STORE_PATH]
 
-  Rewrites "auto" font preferences to an explicit 14 and removes the UX-9
+  Rewrites "auto" font preferences to an explicit 14 and removes the
   composer_font_size key, so that an older release can read the store.
 
   STORE_PATH  the preferences store to rewrite. Defaults to
@@ -56,7 +56,7 @@ Usage: preferences-store-downgrade.sh [--force] [--dry-run] [STORE_PATH]
               live front can be silently reverted; stop the unit first.
   --dry-run   report what would change and leave every file alone.
 
-Rolling back past the font tri-state or the UX-9 composer face:
+Rolling back past the font tri-state or configurable composer fonts:
   systemctl stop persea-terminal-front.service
   deploy/preferences-store-downgrade.sh
   deploy/rollback.sh --to-release <older> --activate-local
@@ -234,4 +234,4 @@ printf '  records: %s  rewritten from auto to %s: %s  already explicit: %s\n' "$
 printf '  composer_font_size removed from: %s record(s)\n' "$stripped"
 printf '  backup: %s\n' "$backup"
 printf '  the rewritten operators now hold an explicit %s; a newer release reads that as a deliberate size, not as auto.\n' "$DOWNGRADE_FONT_SIZE"
-printf '  the operators whose composer_font_size was removed fall back to the composer face the older release hardcodes; rolling forward reads them as the UX-9 default again.\n'
+printf '  the operators whose composer_font_size was removed fall back to the composer face the older release hardcodes; rolling forward reads them as the default composer font again.\n'

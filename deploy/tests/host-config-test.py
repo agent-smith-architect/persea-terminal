@@ -451,7 +451,7 @@ class HostConfigTest(unittest.TestCase):
 
     def test_front_store_paths_share_the_alias_store_home(self) -> None:
         # The preferences and snippet stores are the alias store's siblings
-        # in the front's 0700 state directory (design packet OQ-E1): never the
+        # in the front's 0700 state directory: never the
         # staging root, never anywhere the staging override can move them.
         for name, mutate in (("default", None), ("staging-override", "/srv/persea-staging")):
             value = fixture()
@@ -812,7 +812,7 @@ class HostConfigTest(unittest.TestCase):
             # tree: its bundled generator speaks for it.
             result = self.verify_release_via_lib(future, release)
             self.assertEqual(result.returncode, 0, msg=result.stderr.decode())
-            # (b) The advisor falsifier: record loading under the same future
+            # (b) The advisor regression test: record loading under the same future
             # tree must select the bundled generator too, so it still yields
             # the release's own realm inventory.
             result = self.load_release_manifest_via_lib(future, release)
