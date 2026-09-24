@@ -128,7 +128,7 @@ func TestSourceHardCapUsesCommittedLogicalBytes(t *testing.T) {
 			if _, err := realm.Append(key, []byte{'w'}); !errors.Is(err, unifiedjournal.ErrInvalidated) {
 				t.Fatalf("post-cap append=%v want ErrInvalidated", err)
 			}
-			t.Logf("rotationLF-F4A receipt split=%s records=%d cap-1=%d cap=%d requested_first_over=%d pending=%d physical=%d",
+			t.Logf("committed-logical-cap receipt split=%s records=%d cap-1=%d cap=%d requested_first_over=%d pending=%d physical=%d",
 				shape.name, records, pressureAtMinusOne.logical, pressureAtCap.logical, requested, len(pending.data), physicalAtCap)
 		})
 	}
@@ -322,6 +322,6 @@ func TestSourceFatalHardCapSettlement(t *testing.T) {
 	if committedAtCap != cap {
 		t.Fatalf("pre-fault committed charge=%d want cap=%d", committedAtCap, cap)
 	}
-	t.Logf("rotationLF-F4B receipt cap-1=%d logical=%d/%d physical=%d first_over=%v close=%q close_count=%d successor_edges=%v retained_slots=%d retained_logical=%d retained_physical=%d",
+	t.Logf("fatal-cap-settlement receipt cap-1=%d logical=%d/%d physical=%d first_over=%v close=%q close_count=%d successor_edges=%v retained_slots=%d retained_logical=%d retained_physical=%d",
 		committedAtMinusOne, committedAtCap, cap, physicalAtCap, firstOverErr, proto.SubscriberClosedGenerationFailed, closeCount.Load(), seenEdges, slotsAfterAdoption, cap, physicalAtCap)
 }

@@ -2326,8 +2326,7 @@ type retentionFeatureOffAddr string
 func (addr retentionFeatureOffAddr) Network() string { return string(addr) }
 func (addr retentionFeatureOffAddr) String() string  { return string(addr) }
 
-// --- meta-advisor adversarial additions (blockers: close_paused_oversize,
-// unbounded_failed_tombstones, reserve_to_router_fault_race) ---
+// Paused oversize closure, bounded failed tombstones, and reservation fault races.
 
 // Close while a pane is paused with two held ceiling-sized deliveries must
 // partition the drain exactly like pause_end; one concatenated oversize feed

@@ -229,7 +229,7 @@ func (d *durableFile) write(b []byte) error {
 var errRequestTooLarge = errors.New("request too large")
 var errRequestInvalid = errors.New("invalid request")
 
-// decodeBoundedJSON is the request half of the M4 contract: the body is
+// decodeBoundedJSON is the request half of the shared route contract: the body is
 // bounded by http.MaxBytesReader BEFORE any decoding, must be valid UTF-8,
 // exactly one JSON object with no duplicate keys (case-fold aware), no unknown
 // fields and nothing after it. The caller maps the two errors to 413 and 400;

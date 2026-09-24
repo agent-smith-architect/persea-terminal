@@ -267,13 +267,11 @@ func runAdoptedExplicitVerticalFit(t *testing.T, framingHeavy bool) {
 	unifiedE2E1Detach(t, conn)
 }
 
-// TestUnifiedTerminalE2E1ResizeFailureKeepsTheAttachment is the design ruling
-// behind the operator's dead end, proven against a real tmux: a Fit whose
+// TestUnifiedTerminalE2E1ResizeFailureKeepsTheAttachment proves against real tmux that a Fit whose
 // guarded transaction is refused before any mutation comes back as an in-band
 // resize_failed control, and NOTHING else changes — the epoch is live, the
 // attachment stays open, the tmux geometry is untouched, input still echoes,
-// and a later Fit on the same attachment applies. Before this ruling the
-// broker ended the attachment on every resize failure.
+// and a later Fit on the same attachment applies.
 func TestUnifiedTerminalE2E1ResizeFailureKeepsTheAttachment(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real tmux resize failure continuity")

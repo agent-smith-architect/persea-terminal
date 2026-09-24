@@ -7,7 +7,7 @@ import (
 	"strings"
 )
 
-// /api/snippets routes  under the M4 route contract:
+// /api/snippets routes  under the shared route contract:
 // ingress identity on every method, CSRF on every mutation (secure wrapper),
 // Cache-Control: no-store on every response, strict method and content type,
 // http.MaxBytesReader before any decode, DisallowUnknownFields, exactly one
@@ -185,9 +185,9 @@ func parseOptionalIfMatch(r *http.Request) (*uint64, bool) {
 	return &n, true
 }
 
-// upsertOSCSnippet serves PUT /api/snippets/osc52 (advisor E2): the
+// upsertOSCSnippet serves PUT /api/snippets/osc52: the
 // idempotent upsert of the one global, server-owned OSC 52 record under the
-// same M4 contract as every other mutation. Body {body, origin?}; origin is
+// same mutation contract as every other mutation. Body {body, origin?}; origin is
 // sanitized presentation metadata for the latest writer. An optional
 // If-Match lets a device retry against a stale revision; absent means the
 // last committed write wins.

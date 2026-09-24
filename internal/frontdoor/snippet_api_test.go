@@ -208,7 +208,7 @@ func TestSnippetAPIContract(t *testing.T) {
 	osc = decodeSnippet(t, c.putOSC(`{"body":"osc 29"}`, nil))
 	beforeRefusals := len(decodeSnippetList(t, c.get()))
 
-	// SF7 / M4 red cases for every mutation and every method.
+	// Route refusal cases for every mutation and every method.
 	validSnippet := `{"kind":"snippet","label":"L","body":"` + snippetSecret + `"}`
 	for _, tc := range ergoMutationRedCases(cfg) {
 		assertBoundedRefusal(t, "POST "+tc.name, c.post(validSnippet, tc.mutate), tc.status, snippetSecret)
@@ -546,7 +546,7 @@ func TestSnippetAndPreferencesAPIRefuseCaseFoldedKeys(t *testing.T) {
 	}
 }
 
-// Advisor freeze edit E2: two devices flood the idempotent upsert, each
+// Two devices flood the idempotent upsert, each
 // retrying against the current revision after a stale 412, and the store
 // ends with exactly one OSC record, every manual clip intact, and no
 // response other than 200 or 412 on the way.

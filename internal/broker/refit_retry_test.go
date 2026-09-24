@@ -193,8 +193,8 @@ func TestRefitOperationLedgerRejectsTupleReuseAndFailsClosedAtBound(t *testing.T
 	}
 }
 
-// TestRefitExactRefitRetryIsIdempotent is the independent review's natural C2
-// regression test: replaying the exact immutable request after a lost success reply
+// TestRefitExactRefitRetryIsIdempotent verifies that replaying the exact immutable
+// request after a lost success reply
 // returns the original result and must not execute a second composite.
 func TestRefitExactRefitRetryIsIdempotent(t *testing.T) {
 	fixture := newAdoptionFixture(t, 4)

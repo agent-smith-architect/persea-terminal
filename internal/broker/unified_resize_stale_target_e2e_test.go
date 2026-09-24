@@ -17,7 +17,7 @@ import (
 // leaves a dead attachment open behind a passing notice. The fixture lives in
 // unified_resize_post_issue_e2e_test.go.
 
-// Finding 2: identity drift underneath a live attachment is fatal at the
+// Identity drift underneath a live attachment is fatal at the
 // resize gate, and the gate says so with stale_target before anything is
 // issued; tmux geometry is untouched by the refused request.
 func TestUnifiedResizeStaleTargetIsFatalNotOperational(t *testing.T) {

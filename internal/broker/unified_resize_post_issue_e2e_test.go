@@ -24,7 +24,7 @@ import (
 // the attachment PTY resize, or the durable commit — ends the attachment
 // fatally, because tmux may hold the new geometry while the journal does not;
 // the generation is faulted so nothing further is published under the old
-// grid. The shared fixture here is also used by the finding-2 regression tests in
+// grid. The shared fixture here is also used by the stale-target regression tests in
 // unified_resize_stale_target_e2e_test.go.
 
 // unifiedResizeFixture is one adopted session with a live Control attachment
@@ -191,7 +191,7 @@ func isOperationalResizeCode(code string) bool {
 	return code == "resize_failed" || code == "resize_rejected"
 }
 
-// Finding 1: failures after the guarded command was issued are fatal. Each
+// Failures after the guarded command was issued are fatal. Each
 // edge is reached through the transaction's own edge seam, and the failure
 // inflicted there is real: tmux's pane set changes, or the journal generation
 // is invalidated by an ordinary over-cap append. In every case tmux holds the

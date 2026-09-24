@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-// Post-ship F2 (advisor review of fc59cbc, 2026-08-27): a quota-filling stale
+// Without early supersession, a quota-filling stale
 // generation could not reach its own cleanup. BeginReconstructedPane created
 // the successor header, the broker journaled the bootstrap, and only Commit —
 // after that append — swept the same-session stale generation and refunded
@@ -119,10 +119,10 @@ func occupiedSlots(realm *Realm) int64 {
 	return realm.retention.reserved
 }
 
-// TestSupersessionLogicalFullStaleGenerationIsSupersededBeforeBootstrap is
-// the advisor's receipt verbatim: a 64-byte realm filled by one recovered
+// TestSupersessionLogicalFullStaleGenerationIsSupersededBeforeBootstrap uses
+// a 64-byte realm filled by one recovered
 // stale birth generation, a successor reservation, and a one-byte bootstrap.
-// At c4c1dc0 the bootstrap is refused with ErrQuota. The stale generation's
+// Without early supersession the bootstrap is refused with ErrQuota. The stale generation's
 // bytes must instead be proven gone and refunded before the bootstrap, the
 // refunded room must be the successor's alone, and Commit must settle both
 // ledgers and the slot exactly.
@@ -208,8 +208,8 @@ func TestSupersessionLogicalFullStaleGenerationIsSupersededBeforeBootstrap(t *te
 
 // TestSupersessionPhysicalFullStaleGenerationIsSupersededBeforeHeader: the
 // physical ledger is the one that binds. The stale file occupies the whole
-// physical realm cap, so at c4c1dc0 not even the successor header can be
-// created. The refunded physical charge must carry the header and the
+// physical realm cap, so the successor header cannot be created without
+// supersession. The refunded physical charge must carry the header and the
 // bootstrap, and the ledger must settle to exactly the successor's file size.
 func TestSupersessionPhysicalFullStaleGenerationIsSupersededBeforeHeader(t *testing.T) {
 	options := journalOptions(t)

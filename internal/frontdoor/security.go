@@ -86,8 +86,8 @@ func trustedContext(ctx context.Context, c net.Conn) context.Context {
 // three static assets, an optional favicon, the workspace-record slot, one
 // shared inventory snapshot, and six times (adoption, initial upgrade refused
 // lease_held, the takeover helper's CSRF-refresh GET, takeover, replacement
-// upgrade) — 36 requests, 37 with the favicon — with no refill in between
-// (M9 packet §1d [F2]; W1B-R1 counts the CSRF refresh). Refill is unchanged.
+// upgrade) — 36 requests, 37 with the favicon — with no refill
+// between requests.
 const (
 	operatorBurst  = 40.0
 	operatorRefill = 10.0
@@ -282,7 +282,7 @@ func csrfFromRequest(r *http.Request) (string, bool) {
 }
 
 // deny refuses before securityHeaders runs, so it stamps no-store itself: a
-// refusal on a secret-bearing route (M4) must never be a cacheable document.
+// refusal on a secret-bearing route must never be a cacheable document.
 func deny(w http.ResponseWriter, reason string, uid uint32) {
 	logIngress(reason, uid)
 	w.Header().Set("Cache-Control", "no-store")

@@ -124,7 +124,7 @@ func TestAdoptionReservationCommitSupersedesStaleGeneration(t *testing.T) {
 	if err != nil {
 		t.Fatalf("re-adoption admission: %v", err)
 	}
-	// Post-ship F2: the same-session stale generation is superseded by proof
+	// The same-session stale generation is superseded by proof
 	// at Begin, before the successor exists — file, map entry, and charge —
 	// and the refunded charge is held for this reservation until Commit
 	// releases it (adoption_supersession_capacity_test.go pins the hold).

@@ -164,8 +164,8 @@ func TestCanceledBeginGeometryCannotStrandPause(t *testing.T) {
 // displaced attachment is still unwinding a canceled BeginGeometry. The
 // canceled begin must enqueue its pause_end ahead of that later pause_start;
 // otherwise end1 resumes publication inside barrier2.
-func TestAdvisorCanceledBeginCannotEndInsideConcurrentSamePaneBegin(t *testing.T) {
-	h := newGeometryBarrierHarness(t, "advisor-same-pane-cancel-interleave")
+func TestCanceledBeginCannotEndInsideConcurrentSamePaneBegin(t *testing.T) {
+	h := newGeometryBarrierHarness(t, "same-pane-cancel-interleave")
 	runtime := h.registry.retention
 
 	h.journalMu.Lock()
@@ -273,7 +273,7 @@ func TestAdvisorCanceledBeginCannotEndInsideConcurrentSamePaneBegin(t *testing.T
 	if err := runtime.WritePane(h.key, []byte("LEAK")); err != nil {
 		t.Fatalf("write inside second barrier: %v", err)
 	}
-	if err := runtime.Boundary(h.key, "advisor_probe"); err != nil {
+	if err := runtime.Boundary(h.key, "geometry_boundary_probe"); err != nil {
 		t.Fatalf("probe boundary: %v", err)
 	}
 	time.Sleep(200 * time.Millisecond)

@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// M9 W1b: the workspace document is served by the same index handler as the
+// The workspace document is served by the same index handler as the
 // terminal document, and its CSP capability is keyed on the same byte-exact
 // query string.
 func TestWorkspaceDocumentCSPCapabilityRequiresExactSelector(t *testing.T) {
@@ -97,7 +97,7 @@ func remainingTokens(s *Server) float64 {
 }
 
 // The cold six-pane workspace load, request by request, as the product
-// really performs it (W1B-R1): document + three static assets (+ optional
+// really performs it: document + three static assets (+ optional
 // favicon) + the workspace-record slot + ONE shared inventory snapshot + six
 // × (adoption, initial upgrade answered lease_held, the takeover helper's
 // CSRF-refresh GET of /api/inventory, takeover, replacement upgrade). The
@@ -114,9 +114,8 @@ func coldWorkspaceLoad(withFavicon bool) [][2]string {
 	if withFavicon {
 		requests = append(requests, [2]string{http.MethodGet, "/favicon.ico"})
 	}
-	// W1 keeps its arrangement in the tab (no store yet); the slot is charged
-	// anyway so the arithmetic already covers W2's record GET.
-	// The ONE shared workspace inventory snapshot (single-flight, W1B-F7).
+	// Include the durable workspace record GET and one shared, single-flight
+	// workspace inventory snapshot.
 	requests = append(requests, [2]string{http.MethodGet, "/api/workspaces"}, [2]string{http.MethodGet, "/api/inventory"})
 	for pane := 0; pane < 6; pane++ {
 		requests = append(requests,
@@ -131,8 +130,8 @@ func coldWorkspaceLoad(withFavicon bool) [][2]string {
 	return requests
 }
 
-// regression test W1B-F8 / FW-M2-cold (W1B-R1 arithmetic): with the operator burst
-// at its W1 value and no refill, the coldest six-pane load produces zero 429
+// Cold inventory request budgeting: with the operator burst
+// at its configured value and no refill, the coldest six-pane load produces zero 429
 // and leaves EXACTLY three tokens in the favicon form (37 charged) and four
 // without it (36 charged). A burst of 36 makes the favicon form refuse its
 // last request — that mutant is the RED receipt for the margin.

@@ -75,8 +75,7 @@ type retentionPaneRuntime struct {
 	// but it is the one piece of pane state observed from outside the
 	// manager under runtime.mu (the geometry owner settle path reads it), so
 	// it is written only through setPaused, under runtime.mu. A bare manager
-	// write racing an mu-guarded read is the data race the race gate
-	// reported (PSF-R2).
+	// write racing a mu-guarded read would be a data race.
 	paused    bool
 	failed    bool
 	discarded int64

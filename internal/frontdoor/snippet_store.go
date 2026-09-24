@@ -27,8 +27,8 @@ import (
 // protected. Expired entries are reclaimed on load, persist, and maintenance.
 //
 // One global, server-owned distinguished clip — the OSC 52 record, id
-// snippetOSCID — is the sink for automatic pane output (advisor freeze edit
-// E2). It is reached only through the idempotent upsert (upsertOSC, served
+// snippetOSCID — is the sink for automatic pane output.
+// It is reached only through the idempotent upsert (upsertOSC, served
 // as PUT /api/snippets/osc52), never through create. Its private publication
 // state is omitted from lists; each value atomically renews an ordinary,
 // editable canonical entry. The latest canonical entry is outside the ring;
@@ -560,8 +560,8 @@ func (s *snippetStore) enforceCapacityLocked(now time.Time, keep string) error {
 	return nil
 }
 
-// upsertOSC is the idempotent write to the distinguished OSC 52 record
-// (advisor E2). A nil expect is unconditional (last committed write wins);
+// upsertOSC is the idempotent write to the distinguished OSC 52 record.
+// A nil expect is unconditional (last committed write wins);
 // a non-nil expect must equal the current revision (0 when the record is
 // absent or expired) or errSnippetConflict returns the current record. The
 // record keeps its fixed id and updates its origin and revision. Each write
