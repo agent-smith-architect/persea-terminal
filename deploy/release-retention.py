@@ -9,12 +9,26 @@ import stat
 import sys
 import tempfile
 import secrets
+from typing import NamedTuple
 
 
 RELEASE = re.compile(r"[0-9a-f]{40}-[0-9a-f]{16}")
 ORDER = ".release-order.json"
 QUARANTINE = re.compile(r"\.prune-[0-9a-f]{32}")
 DIRECTORY_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+
+
+class Inventory(NamedTuple):
+    top: os.stat_result
+    objects: dict
+    children: dict
+
+
+def object_metadata(info: os.stat_result) -> tuple:
+    # Directory size, link count and timestamps change as we remove children.
+    # Keep the stable security attributes, including type in st_mode.
+    return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode,
+            info.st_nlink if stat.S_ISREG(info.st_mode) else None)
 
 
 def witness(info: os.stat_result) -> tuple:
@@ -46,22 +60,28 @@ def metadata(path: Path, uid: int, gid: int, mode: int, directory: bool) -> os.s
     return value
 
 
-def release_metadata(path: Path, uid: int, gid: int, device: int) -> os.stat_result:
+def release_metadata(path: Path, uid: int, gid: int, device: int) -> Inventory:
     top = metadata(path, uid, gid, 0o555, True)
     require(top.st_dev == device, "release crosses a filesystem boundary")
     files = set()
     folders = set()
+    objects = {"": object_metadata(top)}
+    children = {}
     for parent, directories, names in os.walk(path, followlinks=False):
+        relative_parent = Path(parent).relative_to(path).as_posix()
+        children["" if relative_parent == "." else relative_parent] = frozenset(directories + names)
         for name in directories:
             directory = Path(parent) / name
             folders.add(directory.relative_to(path).as_posix())
             info = metadata(directory, uid, gid, 0o555, True)
+            objects[directory.relative_to(path).as_posix()] = object_metadata(info)
             require(info.st_dev == device, "release directory crosses a filesystem boundary")
         for name in names:
             item = Path(parent) / name
             relative = item.relative_to(path).as_posix()
             mode = 0o555 if relative == "bin/persea-terminal" else 0o444
             info = metadata(item, uid, gid, mode, False)
+            objects[relative] = object_metadata(info)
             require(info.st_dev == device, "release file crosses a filesystem boundary")
             files.add(relative)
     required = {"MANIFEST.sha256", "config/host.json", "config/resolved-host.json",
@@ -81,7 +101,7 @@ def release_metadata(path: Path, uid: int, gid: int, device: int) -> os.stat_res
     expected_folders = {parent.as_posix() for name in manifest
                         for parent in Path(name).parents if parent != Path(".")}
     require(folders == expected_folders, "unexpected release directory inventory")
-    return top
+    return Inventory(top, objects, children)
 
 
 def require_no_mounts(path: Path) -> None:
@@ -152,45 +172,67 @@ def mount_id(fd: int) -> str:
     raise ValueError("cannot identify directory mount")
 
 
-def remove_tree(fd: int, device: int, mount: str, uid: int, gid: int) -> None:
-    info = os.fstat(fd)
-    require(info.st_dev == device and mount_id(fd) == mount,
-            "removal crosses a mount boundary")
-    require((info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) == (uid, gid, 0o555),
-            "directory changed before removal")
+def child_path(relative: str, name: str) -> str:
+    return f"{relative}/{name}" if relative else name
+
+
+def check_directory(fd: int, mount: str, inventory: Inventory, relative: str,
+                    remaining: set, writable: bool = False) -> None:
+    expected = inventory.objects[relative]
+    if writable:
+        expected = (*expected[:4], stat.S_IFDIR | 0o755, expected[5])
+    require(object_metadata(os.fstat(fd)) == expected and mount_id(fd) == mount,
+            "validated directory replaced, changed or mounted")
+    require(set(os.listdir(fd)) == remaining, "validated directory entry set changed")
+    # Check all immediate entries before changing this directory or touching any
+    # child. A same-mode replacement is not a newly acceptable removal target.
+    for name in remaining:
+        info = os.stat(name, dir_fd=fd, follow_symlinks=False)
+        require(object_metadata(info) == inventory.objects[child_path(relative, name)],
+                "validated descendant replaced or changed")
+
+
+def remove_tree(fd: int, mount: str, inventory: Inventory, relative: str = "") -> None:
+    remaining = set(inventory.children[relative])
+    check_directory(fd, mount, inventory, relative, remaining)
     # This changes only the opened, checked directory; no pathname chmod walk.
     os.fchmod(fd, 0o755)
-    for name in os.listdir(fd):
-        before = os.stat(name, dir_fd=fd, follow_symlinks=False)
-        require(before.st_dev == device and (before.st_uid, before.st_gid) == (uid, gid),
-                "entry changed before removal")
-        if stat.S_ISDIR(before.st_mode):
+    for name in sorted(remaining):
+        check_directory(fd, mount, inventory, relative, remaining, writable=True)
+        path = child_path(relative, name)
+        expected = inventory.objects[path]
+        if path in inventory.children:
             child = os.open(name, DIRECTORY_FLAGS, dir_fd=fd)
             try:
-                require(identity(os.fstat(child)) == identity(before),
-                        "directory replaced before removal")
-                remove_tree(child, device, mount, uid, gid)
-                require(identity(os.stat(name, dir_fd=fd, follow_symlinks=False)) == identity(before),
+                remove_tree(child, mount, inventory, path)
+                changed = (*expected[:4], stat.S_IFDIR | 0o755, expected[5])
+                require(object_metadata(os.stat(name, dir_fd=fd, follow_symlinks=False)) == changed,
                         "directory replaced during removal")
+                check_directory(child, mount, inventory, path, set(), writable=True)
+                require(set(os.listdir(fd)) == remaining, "validated directory entry set changed")
                 os.rmdir(name, dir_fd=fd)
             finally:
                 os.close(child)
         else:
-            require(stat.S_ISREG(before.st_mode) and before.st_nlink == 1
-                    and stat.S_IMODE(before.st_mode) in (0o444, 0o555),
-                    "unexpected file during removal")
             # O_PATH does not read contents or block on a substituted special file.
+            before = os.stat(name, dir_fd=fd, follow_symlinks=False)
             child = os.open(name, os.O_PATH | os.O_NOFOLLOW | os.O_CLOEXEC, dir_fd=fd)
             try:
-                require(witness(os.fstat(child)) == witness(before) and mount_id(child) == mount,
+                opened = os.fstat(child)
+                require(object_metadata(opened) == expected and witness(opened) == witness(before)
+                        and mount_id(child) == mount,
                         "file replaced or mounted during removal")
+                check_directory(fd, mount, inventory, relative, remaining, writable=True)
                 os.unlink(name, dir_fd=fd)
             finally:
                 os.close(child)
+        remaining.remove(name)
+    check_directory(fd, mount, inventory, relative, remaining, writable=True)
 
 
-def remove_release(root: Path, parent: int, name: str, expected: os.stat_result,
+def remove_release(root: Path, parent: int, name: str, inventory: Inventory,
                    entries: dict, pointers: dict, uid: int, gid: int) -> None:
+    expected = inventory.top
     victim = os.open(name, DIRECTORY_FLAGS, dir_fd=parent)
     quarantine = None
     quarantine_fd = None
@@ -211,6 +253,7 @@ def remove_release(root: Path, parent: int, name: str, expected: os.stat_result,
                 "release pointers changed before removal")
         require(witness(os.stat(name, dir_fd=parent, follow_symlinks=False)) == witness(expected),
                 "release replaced before quarantine")
+        check_directory(victim, mount_id(parent), inventory, "", set(inventory.children[""]))
         # Moving a directory between parents requires owner write permission to
         # update '..' when exercising this same path without root in tests.
         os.fchmod(victim, 0o755)
@@ -220,11 +263,13 @@ def remove_release(root: Path, parent: int, name: str, expected: os.stat_result,
         require(identity(os.stat(name, dir_fd=quarantine_fd, follow_symlinks=False)) == identity(expected),
                 "quarantined release identity changed")
         require(identity(os.fstat(victim)) == identity(expected), "opened release identity changed")
+        check_directory(victim, mount_id(parent), inventory, "", set(inventory.children[""]),
+                        writable=True)
         os.fchmod(victim, 0o555)
         _, fresh_pointers = protected_pointers(root, uid, entries)
         require(fresh_pointers == pointers, "release pointers changed during quarantine")
         require_no_mounts(root / "releases" / quarantine)
-        remove_tree(victim, expected.st_dev, mount_id(parent), uid, gid)
+        remove_tree(victim, mount_id(parent), inventory)
         require(identity(os.stat(name, dir_fd=quarantine_fd, follow_symlinks=False)) == identity(expected),
                 "quarantined release replaced during removal")
         os.rmdir(name, dir_fd=quarantine_fd)
@@ -295,7 +340,7 @@ def prune(root: Path, keep: int, uid: int, gid: int, live_binaries: list[str]) -
     # mtimes at nanosecond precision, with an explicit deterministic tie breaker.
     order = [name for name in order if name in entries]
     known = set(order)
-    order += sorted(entries.keys() - known, key=lambda name: (entries[name].st_mtime_ns, name))
+    order += sorted(entries.keys() - known, key=lambda name: (entries[name].top.st_mtime_ns, name))
     write_order(root, order)
     if keep == 0:
         return
@@ -311,8 +356,8 @@ def prune(root: Path, keep: int, uid: int, gid: int, live_binaries: list[str]) -
     # Recheck the complete plan before the first deletion. Cooperative installers,
     # rollback and uninstall hold the same lock throughout their transactions.
     fresh, fresh_protected, fresh_pointers = snapshot(root, uid, gid)
-    require({name: witness(info) for name, info in fresh.items()} ==
-            {name: witness(info) for name, info in entries.items()} and
+    require({name: (witness(info.top), info.objects, info.children) for name, info in fresh.items()} ==
+            {name: (witness(info.top), info.objects, info.children) for name, info in entries.items()} and
             fresh_protected | running == protected and fresh_pointers == pointers,
             "release tree or pointers changed during retention")
     releases = root / "releases"

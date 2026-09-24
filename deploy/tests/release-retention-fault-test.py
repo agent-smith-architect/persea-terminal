@@ -147,6 +147,86 @@ class RetentionFaultTests(unittest.TestCase):
             self.prune()
         self.assertTrue((self.root / "current/bin/persea-terminal").is_file())
 
+    def test_nested_directory_exchange_preserves_both_trees(self):
+        original = self.helper.remove_tree
+        moved = self.work / "validated-config"
+        replacement = None
+        self.outside.chmod(0o555)
+        self.sentinel.chmod(0o444)
+        def exchange(*args, **kwargs):
+            nonlocal replacement
+            if replacement is None:
+                quarantine = next(self.releases.glob(".prune-*"))
+                replacement = quarantine / self.victim.name / "config"
+                replacement.parent.chmod(0o755)
+                replacement.chmod(0o755)
+                replacement.rename(moved)
+                moved.chmod(0o555)
+                self.outside.chmod(0o755)
+                self.outside.rename(replacement)
+                replacement.chmod(0o555)
+                replacement.parent.chmod(0o555)
+            return original(*args, **kwargs)
+        with patch.object(self.helper, "remove_tree", exchange), self.assertRaises((ValueError, OSError)):
+            self.prune()
+        self.assertIsNotNone(replacement, "exchange injection did not run")
+        self.assertEqual((replacement / "sentinel").read_text(), "preserve\n")
+        self.assertEqual(replacement.stat().st_mode & 0o7777, 0o555)
+        self.assertEqual((replacement / "sentinel").stat().st_mode & 0o7777, 0o444)
+        self.assertEqual(moved.stat().st_mode & 0o7777, 0o555)
+        self.assertEqual({item.name for item in moved.iterdir()},
+                         {"host.json", "resolved-host.json", "managed-units"})
+        for item in moved.iterdir():
+            self.assertEqual(item.read_text(), "fixture\n")
+            self.assertEqual(item.stat().st_mode & 0o7777, 0o444)
+
+    def assert_inventory_refusal(self, change):
+        original = self.helper.remove_tree
+        target = None
+        def inject(*args, **kwargs):
+            nonlocal target
+            if target is None:
+                target = next(self.releases.glob(".prune-*")) / self.victim.name / "config"
+                change(target)
+            return original(*args, **kwargs)
+        with patch.object(self.helper, "remove_tree", inject), self.assertRaises((ValueError, OSError)):
+            self.prune()
+        self.assertIsNotNone(target, "inventory mutation did not run")
+        self.assertEqual(target.stat().st_mode & 0o7777, 0o555)
+        return target
+
+    def test_added_nested_entry_is_retained_without_chmod(self):
+        def add(target):
+            target.chmod(0o755)
+            (target / "addition").write_text("preserve\n")
+            (target / "addition").chmod(0o444)
+            target.chmod(0o555)
+        target = self.assert_inventory_refusal(add)
+        self.assertEqual((target / "addition").read_text(), "preserve\n")
+        self.assertEqual((target / "addition").stat().st_mode & 0o7777, 0o444)
+        self.assertEqual((target / "host.json").read_text(), "fixture\n")
+
+    def test_replaced_nested_file_preserves_both_files(self):
+        moved = self.work / "validated-host.json"
+        def replace(target):
+            target.chmod(0o755)
+            (target / "host.json").rename(moved)
+            self.sentinel.rename(target / "host.json")
+            (target / "host.json").chmod(0o444)
+            target.chmod(0o555)
+        target = self.assert_inventory_refusal(replace)
+        self.assertEqual((target / "host.json").read_text(), "preserve\n")
+        self.assertEqual((target / "host.json").stat().st_mode & 0o7777, 0o444)
+        self.assertEqual(moved.read_text(), "fixture\n")
+        self.assertEqual(moved.stat().st_mode & 0o7777, 0o444)
+
+    def test_new_hardlink_is_retained(self):
+        def link(target):
+            os.link(target / "host.json", self.outside / "alias")
+        target = self.assert_inventory_refusal(link)
+        self.assertEqual((target / "host.json").stat().st_nlink, 2)
+        self.assertEqual((self.outside / "alias").read_text(), "fixture\n")
+
     def mount_case(self, after_mount_check):
         if not MOUNT_WORKER:
             prefix = [] if os.geteuid() == 0 else ["sudo", "-n"]
