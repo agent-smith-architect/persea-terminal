@@ -13,8 +13,9 @@ their tools and dependencies in advance.
 UI development dependencies use `latest`; run `npm update` to refresh the
 lockfile, then run the normal tests, including browser checks. `npm ci` deliberately
 reproduces that recorded dependency set. Dependabot proposes weekly lockfile,
-Go module and GitHub Action updates. Actions track their stable major release,
-receiving minor and patch updates automatically. Go modules require concrete
+Go module and GitHub Action updates. Workflows pin each action to a full commit
+SHA with its release tag in a comment; Dependabot updates both, and each update
+arrives as a reviewable pull request. Go modules require concrete
 versions; update them with `go get -u ./...` and run the race checks.
 
 The xterm dependency remains exact because its patch is version-specific.

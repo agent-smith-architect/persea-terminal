@@ -1,0 +1,118 @@
+name: Release
+
+# Publishes a release for an annotated vX.Y.Z tag on main whose commit has
+# already passed the CI workflow on main. If a check fails, re-run the failed
+# job after fixing the cause; the attestation always names the tagged commit.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+      id-token: write
+      attestations: write
+    defaults:
+      run:
+        shell: bash
+    env:
+      TAG: ${{ github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check the tag
+        run: |
+          [[ $TAG =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]] || { echo "::error::not a release tag: $TAG"; exit 1; }
+          git fetch --force --quiet origin "refs/tags/$TAG:refs/tags/$TAG" "refs/heads/main:refs/remotes/origin/main"
+          [[ $(git cat-file -t "refs/tags/$TAG") == tag ]] || { echo "::error::$TAG must be an annotated tag"; exit 1; }
+          sha=$(git rev-parse "refs/tags/$TAG^{commit}")
+          [[ $sha == "$GITHUB_SHA" ]] || { echo "::error::$TAG moved after this run started"; exit 1; }
+          git merge-base --is-ancestor "$sha" refs/remotes/origin/main || { echo "::error::$TAG is not on main"; exit 1; }
+          echo "SHA=$sha" >> "$GITHUB_ENV"
+          echo "VERSION=${TAG#v}" >> "$GITHUB_ENV"
+
+      - name: Check CI for the tagged commit
+        run: |
+          gh api "repos/$GH_REPO/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&branch=main&per_page=100" \
+            | jq --arg sha "$SHA" --arg repo "$GH_REPO" '[.workflow_runs[]
+                | select(.path == ".github/workflows/ci.yml" and .head_sha == $sha and .head_branch == "main"
+                         and .event == "push" and .repository.full_name == $repo and .head_repository.full_name == $repo)]
+                | max_by(.created_at) // {}' > run.json
+          run_id=$(jq -r '.id // empty' run.json)
+          [[ -n $run_id ]] || { echo "::error::no CI run on main for $SHA"; exit 1; }
+          echo "CI run $run_id attempt $(jq -r .run_attempt run.json): $(jq -r .status run.json) $(jq -r .conclusion run.json)"
+          [[ $(jq -r '.status + " " + .conclusion' run.json) == 'completed success' ]] \
+            || { echo "::error::the latest CI run on main for $SHA has not succeeded; re-run this job after it passes"; exit 1; }
+          gh api "repos/$GH_REPO/actions/runs/$run_id/attempts/$(jq -r .run_attempt run.json)/jobs?per_page=100" \
+            | jq '[.jobs[] | {(.name): .conclusion}] | add // {}' > jobs.json
+          missing=0
+          for job in 'Go' 'UI (Contracts)' 'UI (Dashboard)' 'UI (Terminal)' 'UI (Controls)' 'UI (Workspace)' 'Deploy tooling'; do
+            result=$(jq -r --arg j "$job" '.[$j] // "missing"' jobs.json)
+            echo "$job: $result"
+            [[ $result == success ]] || missing=1
+          done
+          ((missing == 0)) || { echo "::error::a required CI job did not succeed for $SHA"; exit 1; }
+
+      - name: Extract release notes
+        run: |
+          git show "refs/tags/$TAG:CHANGELOG.md" > changelog.md
+          awk -v v="$VERSION" '
+            /^## / { if (found) exit; split(substr($0, 4), words, " "); if (words[1] == v) { found = 1; next } }
+            found { print }
+            END { if (!found) exit 1 }
+          ' changelog.md > notes.md || { echo "::error::CHANGELOG.md has no section for $VERSION"; exit 1; }
+          [[ -n $(tr -d '[:space:]' < notes.md) ]] || { echo "::error::the $VERSION changelog section is empty"; exit 1; }
+          cat >> notes.md <<EOF
+
+          ### Verify the source archive
+
+          The archive is built from commit \`$SHA\`. Compare it with
+          \`git rev-parse $TAG^{commit}\` in your checkout, then run:
+
+          \`\`\`sh
+          sha256sum -c SHA256SUMS
+          gh attestation verify persea-terminal-$VERSION.tar.gz --repo $GH_REPO \\
+            --signer-workflow $GH_REPO/.github/workflows/release.yml \\
+            --source-ref refs/tags/$TAG --source-digest $SHA --deny-self-hosted-runners
+          \`\`\`
+          EOF
+
+      - name: Build the source archive
+        run: |
+          mkdir dist
+          archive="persea-terminal-$VERSION.tar.gz"
+          git archive --format=tar.gz --prefix="persea-terminal-$VERSION/" -o "dist/$archive" "$SHA"
+          (cd dist && sha256sum "$archive" > SHA256SUMS && cat SHA256SUMS)
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/persea-terminal-*.tar.gz
+
+      - name: Publish
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            gh release upload "$TAG" dist/* --clobber
+          else
+            flags=(--verify-tag --title "Persea Terminal $VERSION" --notes-file notes.md)
+            [[ $VERSION == *-* ]] && flags+=(--prerelease)
+            gh release create "$TAG" dist/* "${flags[@]}"
+          fi
