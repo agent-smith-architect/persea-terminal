@@ -32,9 +32,14 @@ async function main() {
         const inventory = await requestJSON(fixture.origin + '/api/inventory'); const session = inventory.realms[0].servers[0].sessions[0];
         await page.goto(`${fixture.origin}/terminal?engine=unified-dev#${new URLSearchParams({ handle: session.handles.control, mode: 'control', history: '500', name: session.name, draft_scope: fixture.draftScope, engine: 'unified-dev' })}`);
         await page.waitForFunction(() => document.querySelector('.xterm-rows')?.textContent.includes('fixture-live'));
-        const top = async () => {
+        const top = async (expectedText) => {
           await page.locator('.persea-unified-scroll').evaluate(node => { node.scrollTop = 0; node.dispatchEvent(new Event('scroll')); });
-          await page.waitForTimeout(120);
+          if (expectedText) {
+            await page.waitForFunction(text => document.querySelector('.persea-unified-scroll')?.scrollTop === 0
+              && document.querySelector('.xterm-rows')?.textContent.includes(text), expectedText);
+          } else {
+            await page.waitForTimeout(120);
+          }
           return page.locator('.xterm-rows').innerText();
         };
         const initialTop = await top();
@@ -55,8 +60,11 @@ async function main() {
           throw Error('History did not reconnect and replay');
         };
         const replayed = await waitReplay(before.counters.replays);
-        await page.waitForFunction(() => document.querySelector('.xterm-rows')?.textContent.includes('SCROLL-'));
-        assert((await top()).includes('SCROLL-00000'), 'Increasing and reloading did not recover older recorded rows');
+        // READY is the server's receipt, not the browser's COMMIT/LIVE render.
+        // The old viewport is at history's head, so this tail marker identifies
+        // the newly replayed attachment before we ask it to display the top.
+        await page.waitForFunction(() => document.querySelector('.xterm-rows')?.textContent.includes('fixture-live'));
+        assert((await top('SCROLL-00000')).includes('SCROLL-00000'), 'Increasing and reloading did not recover older recorded rows');
         await openMenu(); await select.selectOption('0');
         await menu.getByRole('button', { name: 'Close terminal menu', exact: true }).click();
         const screenOnly = await top();
