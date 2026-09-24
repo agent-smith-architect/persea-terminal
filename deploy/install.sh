@@ -11,9 +11,6 @@ source "$SCRIPT_DIR/lib.sh"
 [[ $REPO_ROOT == "$PROJECT_DIR" ]] || persea_die 'installer must run from the standalone repository root'
 
 activate_local=0
-# Used by lib.sh when re-executing under the deployment lock.
-# shellcheck disable=SC2034
-PERSEA_DEPLOY_ARGUMENTS=("$@")
 keep_releases=${PERSEA_KEEP_RELEASES:-5}
 while (($#)); do
   case $1 in

@@ -223,7 +223,8 @@ activate_unit() {
     socket="$runtime/tailscaled.sock"
     mkdir -m 0700 -p "$runtime" "$state"
     if [[ ! -S $socket ]]; then
-      /usr/bin/python3 -c 'import os,select,socket,sys; p=sys.argv[1]; s=socket.socket(socket.AF_UNIX); s.bind(p); os.chmod(p,0o666); s.listen(8); [(lambda c:(c.close()))(s.accept()[0]) for _ in iter(lambda: select.select([s],[],[]), None)]' "$socket" </dev/null >/dev/null 2>&1 &
+      # Real systemd starts services outside the client's descriptor table.
+      /usr/bin/python3 -c 'import os,select,socket,sys; os.closerange(3, os.sysconf("SC_OPEN_MAX")); p=sys.argv[1]; s=socket.socket(socket.AF_UNIX); s.bind(p); os.chmod(p,0o666); s.listen(8); [(lambda c:(c.close()))(s.accept()[0]) for _ in iter(lambda: select.select([s],[],[]), None)]' "$socket" </dev/null >/dev/null 2>&1 &
       server_pid=$!
       printf '%s\n' "$server_pid" >>"$FAKE_STATE/sidecar-server-pids"
       for _ in {1..100}; do [[ -S $socket ]] && break; sleep 0.01; done
@@ -1013,6 +1014,9 @@ for marker in config/host.json config/resolved-host.json config/managed-units MA
   chmod 0555 -- "$(dirname -- "$release_path/$marker")"
 done
 pass 'unsupported release shapes are refused before lifecycle mutation'
+
+python3 "$SCRIPT_DIR/deployment-lock-test.py"
+pass 'launcher signals preserve deployment exclusion through child steps and restoration'
 
 python3 "$SCRIPT_DIR/release-retention-test.py" "$release_path" "$TMP"
 pass 'release retention preserves protected releases and refuses ambiguous or unsafe trees'

@@ -5,9 +5,6 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
 
-# Used by lib.sh when re-executing under the deployment lock.
-# shellcheck disable=SC2034
-PERSEA_DEPLOY_ARGUMENTS=("$@")
 (($# == 0)) || persea_die 'uninstall.sh takes no arguments'
 persea_init_root locked
 persea_require_root

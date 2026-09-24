@@ -743,13 +743,18 @@ persea_lock_deployment() {
     [[ -f $lock && ! -L $lock && $(stat -c '%u:%g:%a:%h' -- "$lock") == "$owner:$group:600:1" ]] ||
       persea_die 'deployment lock is unsafe'
   fi
-  [[ ${PERSEA_DEPLOY_LOCK_PID:-} == "$$" ]] && return 0
   caller_umask=$(umask)
-  # flock owns the descriptor in the supervisor, not in build/service children.
-  # Re-exec before loading host data so a waiter reads the committed snapshot.
-  exec /bin/bash -c 'umask 0077; exec flock --exclusive --close -- "$@"' persea-lock \
-    "$lock" /bin/bash -c 'umask "$1"; shift; export PERSEA_DEPLOY_LOCK_PID=$$; exec "$@"' persea-deploy \
-    "$caller_umask" "$0" "${PERSEA_DEPLOY_ARGUMENTS[@]}"
+  umask 0077
+  exec {PERSEA_DEPLOY_LOCK_FD}>>"$lock"
+  umask "$caller_umask"
+  # The transaction shell owns this descriptor through its EXIT/restoration
+  # traps. Synchronous steps inherit it so killing the shell cannot unlock a
+  # still-running step. Never explicitly unlock the shared open description.
+  # Detached children must close their copy; systemd starts services separately.
+  if ! flock --exclusive --nonblock "$PERSEA_DEPLOY_LOCK_FD"; then
+    printf 'persea-terminal deploy: waiting for deployment lock (a surviving transaction child may still hold it)\n' >&2
+    flock --exclusive "$PERSEA_DEPLOY_LOCK_FD"
+  fi
 }
 
 persea_validate_keep_releases() {

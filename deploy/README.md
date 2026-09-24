@@ -238,8 +238,12 @@ than the requested count; a pruning failure never fails a successful deployment.
 
 Install, rollback and uninstall serialize through
 `/run/persea-terminal-deploy.lock`; the lock is held through verification and
-retention, and is not inherited by service processes. Do not run older deploy
-tooling concurrently. Deletion uses Python's symlink-resistant, directory-FD
+retention, including restoration and exit cleanup. The transaction shell owns
+the lock directly. Its synchronous steps inherit it so killing the launcher
+cannot unlock a step still in progress. Services started by systemd do not
+inherit it; any deliberately detached child must close its copy. A surviving
+child can keep a later deployment waiting, with a diagnostic, until it exits.
+Do not run older deploy tooling concurrently. Deletion uses Python's symlink-resistant, directory-FD
 relative removal (Python 3.11 or later; older Python skips pruning with a warning).
 Durable front stores and activation evidence are outside the
 release tree and are never pruned.

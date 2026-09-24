@@ -6,9 +6,6 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 source "$SCRIPT_DIR/lib.sh"
 
 target=
-# Used by lib.sh when re-executing under the deployment lock.
-# shellcheck disable=SC2034
-PERSEA_DEPLOY_ARGUMENTS=("$@")
 activate_local=0
 keep_releases=${PERSEA_KEEP_RELEASES:-5}
 while (($#)); do
