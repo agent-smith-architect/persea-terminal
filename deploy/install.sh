@@ -11,14 +11,21 @@ source "$SCRIPT_DIR/lib.sh"
 [[ $REPO_ROOT == "$PROJECT_DIR" ]] || persea_die 'installer must run from the standalone repository root'
 
 activate_local=0
+# Used by lib.sh when re-executing under the deployment lock.
+# shellcheck disable=SC2034
+PERSEA_DEPLOY_ARGUMENTS=("$@")
+keep_releases=${PERSEA_KEEP_RELEASES:-5}
 while (($#)); do
   case $1 in
     --activate-local) activate_local=1; shift ;;
+    --keep-releases) [[ $# -ge 2 ]] || persea_die 'missing --keep-releases value'; keep_releases=$2; shift 2 ;;
+    --no-prune) keep_releases=0; shift ;;
     *) persea_die "unknown argument: $1" ;;
   esac
 done
+persea_validate_keep_releases "$keep_releases"
 
-persea_init_root
+persea_init_root locked public
 persea_require_root
 new_units=("${PERSEA_UNITS[@]}")
 new_broker_units=("${PERSEA_BROKER_UNITS[@]}")
@@ -421,7 +428,7 @@ new_target="releases/$release_id"
 current_new="$install_root/.current.new.$$"
 temporary_targets+=("$current_new")
 ln -s -- "$new_target" "$current_new"
-if [[ -n $old_target ]]; then
+if [[ -n $old_target && $old_target != "$new_target" ]]; then
   previous_new="$install_root/.previous.new.$$"
   temporary_targets+=("$previous_new")
   ln -s -- "$old_target" "$previous_new"
@@ -463,4 +470,5 @@ fi
 trap - ERR INT TERM HUP
 mutation_armed=0
 
+persea_prune_releases "$keep_releases"
 printf 'RELEASE=%s\nCURRENT=%s\nLOCAL_ACTIVATION=%s\n' "$release_dir" "$new_target" "$activate_local"

@@ -256,7 +256,7 @@ case ${1:-} in
         printf '%s/etc/systemd/system/%s\n' "$PERSEA_DEPLOY_ROOT" "$unit"
       fi
     elif [[ $* == *'--property=MainPID'* ]]; then
-      pid_for_unit "$unit"
+      if [[ -e $FAKE_STATE/active/$unit ]]; then pid_for_unit "$unit"; else printf '0\n'; fi
     elif [[ $* == *'--property=MemoryHigh'* ]]; then
       [[ $unit =~ ^persea-terminal-broker-(desk-a7|lab-k4|ops-m9)\.service$ ]] || exit 1
       [[ ${FAKE_UNIFIED_PROPERTY_DRIFT:-0} == high ]] && printf '1\n' || printf '891289600\n'
@@ -1008,6 +1008,46 @@ for marker in config/host.json config/resolved-host.json config/managed-units MA
   chmod 0555 -- "$(dirname -- "$release_path/$marker")"
 done
 pass 'unsupported release shapes are refused before lifecycle mutation'
+
+python3 "$SCRIPT_DIR/release-retention-test.py" "$release_path" "$TMP"
+pass 'release retention preserves protected releases and refuses ambiguous or unsafe trees'
+
+# Isolate integration checks from the active-unit scenarios below.
+RETENTION_ROOT=$(new_root)
+RETENTION_STATE="$TMP/retention-state"
+mkdir -m 0700 "$RETENTION_STATE"
+retention_env=("${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$RETENTION_ROOT" "FAKE_STATE=$RETENTION_STATE")
+retention_count() { find "$RETENTION_ROOT/opt/persea-terminal/releases" -mindepth 1 -maxdepth 1 -type d | wc -l; }
+for number in 1 2 3 4 5 6; do
+  printf -v retention_head '%040d' "$number"
+  env "${retention_env[@]}" "PERSEA_TEST_HEAD=$retention_head" "$DEPLOY_DIR/install.sh" --no-prune >/dev/null
+done
+[[ $(retention_count) == 6 ]] || fail 'disable switch pruned releases'
+env "${retention_env[@]}" "$DEPLOY_DIR/rollback.sh" --keep-releases 20 >/dev/null
+[[ $(retention_count) == 6 ]] || fail 'limit above count removed releases'
+env "${retention_env[@]}" "$DEPLOY_DIR/rollback.sh" --no-prune >/dev/null
+[[ $(retention_count) == 6 ]] || fail 'rollback disable switch pruned releases'
+env "${retention_env[@]}" "$DEPLOY_DIR/rollback.sh" >/dev/null
+[[ $(retention_count) == 5 ]] || fail 'rollback did not apply default retention'
+env "${retention_env[@]}" PERSEA_KEEP_RELEASES=2 "$DEPLOY_DIR/rollback.sh" --keep-releases 3 >/dev/null
+[[ $(retention_count) == 3 ]] || fail 'rollback flag did not override environment'
+env "${retention_env[@]}" PERSEA_KEEP_RELEASES=2 "$DEPLOY_DIR/install.sh" >/dev/null
+[[ $(retention_count) == 2 ]] || fail 'install did not apply environment retention'
+env "${retention_env[@]}" "$DEPLOY_DIR/verify.sh" >/dev/null
+retention_previous=$(readlink -- "$RETENTION_ROOT/opt/persea-terminal/previous")
+mkdir "$RETENTION_ROOT/opt/persea-terminal/releases/foreign"
+env "${retention_env[@]}" "$DEPLOY_DIR/install.sh" --keep-releases 2 >"$TMP/retention-skip.out" 2>&1
+grep -Fq 'warning: release retention:' "$TMP/retention-skip.out" || fail 'foreign entry did not warn'
+[[ $(retention_count) == 3 ]] || fail 'foreign entry did not skip pruning'
+[[ $(readlink -- "$RETENTION_ROOT/opt/persea-terminal/previous") == "$retention_previous" ]] || fail 'reinstall lost the rollback target'
+rmdir "$RETENTION_ROOT/opt/persea-terminal/releases/foreign"
+for invalid in 1 -1 02 text; do
+  if env "${retention_env[@]}" "$DEPLOY_DIR/install.sh" --keep-releases "$invalid" >"$TMP/retention-invalid.out" 2>&1; then
+    fail "invalid retention limit $invalid was accepted"
+  fi
+  grep -Fq 'keep-releases must be an integer' "$TMP/retention-invalid.out" || fail 'invalid limit lacked its witness'
+done
+pass 'install and rollback enforce retention limits, defaults, override and disable options'
 
 for app_unit in persea-terminal-broker-desk-a7.service persea-terminal-broker-lab-k4.service persea-terminal-front.service; do
   ! grep -n -E '^PrivateTmp=' "$candidate_a/units/$app_unit" >/dev/null || fail 'application unit uses PrivateTmp'

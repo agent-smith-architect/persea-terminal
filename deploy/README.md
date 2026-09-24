@@ -198,7 +198,7 @@ An installation missing that shape is unsupported and is refused before upgrade.
 
 Rollback restores the target host snapshot, exact unit inventory/bytes,
 symlinks, and requested lifecycle. Uninstall removes only the current manifest's
-application units and package pointers. Both preserve releases, tmux state, the
+application units and package pointers. Both preserve tmux state, the
 front's durable stores (aliases, preferences, snippets), and activation evidence:
 
 ```sh
@@ -206,6 +206,43 @@ sudo deploy/rollback.sh --activate-local
 sudo deploy/rollback.sh --to-release releases/<release-id> --activate-local
 sudo deploy/uninstall.sh
 ```
+
+### Release retention
+
+After a successful install (including activation when requested) or rollback,
+the installer keeps at most five immutable releases. Set
+`--keep-releases <n>` on either command, or `PERSEA_KEEP_RELEASES=<n>`, to choose
+another limit of at least two. Flags override the environment. Use
+`--no-prune`, `--keep-releases 0`, or `PERSEA_KEEP_RELEASES=0` to disable
+deletion. Uninstall preserves all remaining releases.
+
+`current`, `previous`, and every other install-root symlink that resolves to
+a release are protected, as are releases whose executable is still used by a
+managed unit's MainPID (unchanged brokers can outlive several upgrades).
+Unidentifiable running executables also skip pruning. Remaining places go to the newest releases in
+`.release-order.json`, an atomic, owner-only ledger outside the immutable
+payloads. A release gets its position on the first successful maintenance pass;
+reinstalling it or rolling back does not move it to the front. Releases from
+earlier installers have no recorded order: their directory modification times
+(nanosecond precision, release ID as a deterministic tie breaker) initialize
+the ledger once. Later timestamp changes do not change recorded order.
+
+Pruning accepts only immediate release directories named as a 40-digit commit
+hash plus a 16-digit host digest, with the installer's exact ownership, modes,
+regular-file inventory and public-release shape. It refuses symlinks or
+hardlinks inside releases, paths outside the resolved install root, and
+filesystem boundary crossings. Any unexpected entry, unfinished stage,
+transaction or bridge, invalid ledger, ambiguous pointer, or protected set
+larger than the limit skips pruning with a warning. Thus safety can leave more
+than the requested count; a pruning failure never fails a successful deployment.
+
+Install, rollback and uninstall serialize through
+`/run/persea-terminal-deploy.lock`; the lock is held through verification and
+retention, and is not inherited by service processes. Do not run older deploy
+tooling concurrently. Deletion uses Python's symlink-resistant, directory-FD
+relative removal (Python 3.11 or later; older Python skips pruning with a warning).
+Durable front stores and activation evidence are outside the
+release tree and are never pruned.
 
 ### Shared clipboard and rollback
 

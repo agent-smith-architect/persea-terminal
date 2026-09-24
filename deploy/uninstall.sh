@@ -5,8 +5,11 @@ SCRIPT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 # shellcheck disable=SC1091
 source "$SCRIPT_DIR/lib.sh"
 
+# Used by lib.sh when re-executing under the deployment lock.
+# shellcheck disable=SC2034
+PERSEA_DEPLOY_ARGUMENTS=("$@")
 (($# == 0)) || persea_die 'uninstall.sh takes no arguments'
-persea_init_root
+persea_init_root locked
 persea_require_root
 if [[ $PERSEA_HERMETIC == 1 ]]; then persea_require_hermetic_mocks systemctl; fi
 install_root=$(persea_path "$PERSEA_INSTALL_ROOT")
