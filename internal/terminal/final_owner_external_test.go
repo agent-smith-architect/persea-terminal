@@ -686,6 +686,13 @@ func TestFinalOwnerInputAccountingAcrossDequeueRevokeRegrant(t *testing.T) {
 			t.Fatal(err)
 		}
 		<-pty.returned
+		deadline := time.Now().Add(time.Second)
+		for !epoch.InputAccountingSettledForTest() {
+			if time.Now().After(deadline) {
+				t.Fatal("input accounting did not settle after revocation")
+			}
+			time.Sleep(time.Millisecond)
+		}
 	}
 	if err := epoch.HandleFrame(control); err != nil {
 		t.Fatal(err)
