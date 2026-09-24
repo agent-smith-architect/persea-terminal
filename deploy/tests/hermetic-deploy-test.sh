@@ -1020,6 +1020,8 @@ pass 'launcher signals preserve deployment exclusion through child steps and res
 
 python3 "$SCRIPT_DIR/release-retention-test.py" "$release_path" "$TMP"
 pass 'release retention preserves protected releases and refuses ambiguous or unsafe trees'
+python3 "$SCRIPT_DIR/release-retention-fault-test.py"
+pass 'release removal refuses late pointer, directory replacement and mount races'
 
 # Isolate integration checks from the active-unit scenarios below.
 RETENTION_ROOT=$(new_root)
