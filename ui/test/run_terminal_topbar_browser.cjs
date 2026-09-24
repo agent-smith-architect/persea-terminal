@@ -9,17 +9,17 @@
 // that carries none of terminal topbar fails each case separately, which is what makes a
 // per-item causal-RED receipt readable from one log.
 //
-//   U1  the selection note is gone; Copy selection is an icon button whose
+//   the selection note is gone; Copy selection is an icon button whose
 //       colour state carries "a selection is ready", with no layout shift
-//   U2  no "Open legacy" control in the top bar
-//   U3  the top bar carries a session tag with a status dot and a details
+//   no "Open legacy" control in the top bar
+//   the top bar carries a session tag with a status dot and a details
 //       popover instead of the "Unified terminal (development)" caption
-//   U4  the theme control is not in the primary row at any width; view disclosure moves
+//   the theme control is not in the primary row at any width; view disclosure moves
 //       its single instance into View & appearance rather than Quick actions
-//   U5  the sheet opener is a top-bar button on every pointer; the floating
+//   the sheet opener is a top-bar button on every pointer; the floating
 //       puck does not exist
-//   C1  the composer face is the composer_font_size preference
-//   C2  the expanded composer stays inside the visible viewport above the
+//   the composer face is the composer_font_size preference
+//   the expanded composer stays inside the visible viewport above the
 //       keyboard, the key bar and the toolbar
 //
 // PERSEA_TERMINAL_TOPBAR_EVIDENCE_DIR (optional): screenshots land there.
@@ -262,8 +262,8 @@ class Tab extends BaseTab {
 
 // The software keyboard, as the only thing a headless browser cannot produce:
 // it shortens the VISUAL viewport and leaves the layout viewport alone. Every
-// device-metrics override shortens both, which is precisely NOT the state C2
-// is about. The double wraps the real visualViewport — same object identity
+// device-metrics override shortens both, unlike the keyboard state under test.
+// The double wraps the real visualViewport — same object identity
 // for listeners, same scale and offsets — and subtracts a settable inset from
 // its height, then dispatches the resize the platform would. The page under
 // test is the real bundled page reading its real inset source.
@@ -360,13 +360,13 @@ async function main() {
     evidence.desktop = { toolbarText: desktop.toolbarText, controls: desktop.toolbarControls.map((c) => c.cls || c.tag) };
     await shot(tab, "desktop-01-toolbar");
 
-    await run("U2 no Open legacy control in the top bar", async (fail) => {
+    await run("current-terminal-only no Open legacy control in the top bar", async (fail) => {
       const legacy = desktop.toolbarControls.filter((control) => /legacy/i.test(`${control.text} ${control.label} ${control.title}`));
       if (legacy.length !== 0) fail("the top bar still carries a legacy control", legacy);
       if (/open legacy/i.test(desktop.toolbarText)) fail("the top bar still renders the words Open legacy", { toolbarText: desktop.toolbarText });
     });
 
-    await run("U1 a frozen selection turns the Paste slot into Copy without moving the toolbar", async (fail) => {
+    await run("selection-feedback a frozen selection turns the Paste slot into Copy without moving the toolbar", async (fail) => {
       if (desktop.selectionStatusPresent) fail("the injected selection-status element is still in the document", null);
       if (/selection ready to copy/i.test(desktop.toolbarText)) fail("the top bar still injects the selection note", { toolbarText: desktop.toolbarText });
       const copy = desktop.copy;
@@ -416,7 +416,7 @@ async function main() {
 	  await delay(100);
     });
 
-    await run("U3 the top bar carries a session tag, a status dot and a details popover", async (fail) => {
+    await run("session-identity the top bar carries a session tag, a status dot and a details popover", async (fail) => {
       if (/unified terminal \(development\)/i.test(desktop.toolbarText)) {
         fail("the top bar still renders the build caption", { toolbarText: desktop.toolbarText });
       }
@@ -540,7 +540,7 @@ async function main() {
       await delay(200);
     });
 
-    await run("U4 theme lives on the dashboard: never in the primary row, Quick actions, or the View popover (terminal appearance §15.6)", async (fail) => {
+    await run("theme-placement theme lives on the dashboard: never in the primary row, Quick actions, or the View popover", async (fail) => {
       if (desktop.themeSelectsInPrimaryRow !== 0) fail("the primary row still carries a theme control", { count: desktop.themeSelectsInPrimaryRow });
       await tab.emulate({ width: 420, height: 768, deviceScaleFactor: 1, mobile: false }, false);
       await delay(200);
@@ -561,7 +561,7 @@ async function main() {
       await delay(150);
     });
 
-    await run("U5 one sheet opener in the top bar on every pointer, no puck", async (fail) => {
+    await run("sheet-opener one sheet opener in the top bar on every pointer, no puck", async (fail) => {
       // Fine pointer: the opener is in the control row and the puck is gone
       // from the document, not merely hidden.
       if (desktop.puckPresent) fail("the floating puck is still in the document on a fine pointer", null);
@@ -578,7 +578,7 @@ async function main() {
       await control({ reset: true });
       await tab.navigate(unifiedURL(await freshControlHandle()));
       const live = await tab.waitUntil(isLive, 10_000);
-      assert(live.state, `U5 precondition: the phone page did not reach live control: ${JSON.stringify(live.last)}`);
+      assert(live.state, `sheet-opener precondition: the phone page did not reach live control: ${JSON.stringify(live.last)}`);
       await delay(250);
       const phone = await tab.state();
       evidence.u5 = { coarse: phone.coarse, puckPresent: phone.puckPresent, opener: phone.openerRect, toolbar: phone.toolbarRect, host: phone.hostRect };
@@ -608,12 +608,12 @@ async function main() {
       if (reclosed.sheetVisible) fail("the same control did not close the sheet", { expanded: reclosed.openerExpanded });
     });
 
-    await run("C1 the composer face is the composer_font_size preference", async (fail) => {
+    await run("composer-font the composer face is the composer_font_size preference", async (fail) => {
       await tab.emulate(DESKTOP, false);
       await control({ reset: true });
       await tab.navigate(unifiedURL(await freshControlHandle()));
       const ready = await tab.waitUntil(isLive, 10_000);
-      assert(ready.state, `C1 precondition: the page did not reach live control: ${JSON.stringify(ready.last)}`);
+      assert(ready.state, `composer-font precondition: the page did not reach live control: ${JSON.stringify(ready.last)}`);
       await delay(250);
       // Open the composer so the face is measured on a rendered box.
       const before = await tab.state();
@@ -632,14 +632,14 @@ async function main() {
       const sheet = await tab.state();
       if (!sheet.sheetVisible) { fail("the sheet did not open", sheet); return; }
       if (sheet.composerFontControl || sheet.sheetPreferenceRows.length !== 0) {
-        fail("the sheet still carries a preference control (terminal appearance §15.6)", sheet.sheetPreferenceRows);
+        fail("the sheet still carries a preference control", sheet.sheetPreferenceRows);
         return;
       }
       await tab.click(sheet.openerRect);
       await delay(200);
       // A record stored elsewhere (the dashboard card, another tab), told to
       // this page the way the product tells it: the `storage` event of the
-      // preference hint key, which triggers one authoritative read (14.3b).
+      // preference hint key, which triggers one authoritative read.
       const publishRecord = async (patch) => {
         const current = await requestJSON(`${origin}/__fixture/control`);
         await control({ preferences: { ...patch, revision: current.preferences.revision + 1, stored: true } });
@@ -668,7 +668,7 @@ async function main() {
       await publishRecord({ composer_font_size: 11 });
       const small = await tab.waitUntil((state) => state.composer.fontSize === 11, 4_000);
       evidence.c1.coarseAt11 = (small.state ?? small.last).composer.fontSize;
-      if (!small.state) fail("a stored 11px face was floored or ignored on a coarse pointer (terminal appearance §15.5)", evidence.c1);
+      if (!small.state) fail("a stored 11px face was floored or ignored on a coarse pointer", evidence.c1);
       // page zoom is never capped; on a coarse pointer the textarea
       // wears a 16px face for the instant of focus (iOS decides its focus zoom
       // then) and is back at the stored 11px once focus has settled.
@@ -704,13 +704,13 @@ async function main() {
       if (!fineAt11.state) fail("the same 11px face did not apply on a fine pointer", evidence.c1);
     });
 
-    await run("C2 the expanded composer stays inside the visible viewport", async (fail) => {
+    await run("composer-inset the expanded composer stays inside the visible viewport", async (fail) => {
       await tab.cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: `${COMPOSER_EXPANDED_SEED}\n${KEYBOARD_DOUBLE}` });
       await tab.emulate(PHONE, true);
       await control({ reset: true });
       await tab.navigate(unifiedURL(await freshControlHandle()));
       const ready = await tab.waitUntil(isLive, 10_000);
-      assert(ready.state, `C2 precondition: the phone page did not reach live control: ${JSON.stringify(ready.last)}`);
+      assert(ready.state, `composer-inset precondition: the phone page did not reach live control: ${JSON.stringify(ready.last)}`);
       await delay(300);
       const start = await tab.state();
       if (start.visual === null || Math.round(start.visual.height) !== 844) {

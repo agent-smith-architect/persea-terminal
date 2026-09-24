@@ -63,7 +63,7 @@ export function writeEphemeralArrangement(storage: Pick<Storage, "setItem" | "re
   } catch { /* the arrangement simply does not survive this tab */ }
 }
 
-// Arranges N selected sessions (1..PANE_CAP) into a §2a tree: up to three in
+// Arranges N selected sessions (1..PANE_CAP) into a split tree: up to three in
 // one row, otherwise two rows. Weights equal.
 export function autoArrange(selectors: readonly SessionSelector[]): WorkspaceNode {
   const leaves = selectors.map((selector) => leaf(selector));

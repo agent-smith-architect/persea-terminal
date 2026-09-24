@@ -1466,7 +1466,7 @@ func (effects *UnifiedDevPaneEffects) releaseRotationCapacity(capacity *unifiedj
 // settleFatal owns every post-PONR terminal edge. Registry and journal
 // transactions are explicitly settled before the unit is reaped; ordinary
 // Abort/4R is forbidden because the predecessor seal is authoritative. The
-// method is idempotent so a Commit-classified F14 and the driver's deferred
+// method is idempotent so a Commit-classified fatal inconsistency and the driver's deferred
 // terminal path converge on the same cleanup without double settlement.
 func (rotation *unifiedDevRotation) settleFatal(cause error) error {
 	if rotation.settled {

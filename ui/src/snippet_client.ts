@@ -42,7 +42,7 @@ export type SnippetRecord = Readonly<{
   preview: string;
 }>;
 
-/** The fixed id of the one global, server-owned OSC 52 record (§3a, E2). */
+/** The fixed id of the one global, server-owned OSC 52 record. */
 export const OSC_SNIPPET_ID = "osc52";
 
 /** Server limits, mirrored so the UI can state them; the server is authority. */
@@ -215,7 +215,7 @@ function decodeBase64Bytes(value: string): Base64Decoded {
 }
 
 /**
- * The frozen OSC 52 parser shape (§3d, M3). `data` is everything after
+ * The OSC 52 parser contract. `data` is everything after
  * `ESC ] 52 ;`. A READ (`?`), an unknown selection, malformed base64, a
  * decoded value over 16 KiB, non-fatal-decodable UTF-8, and a body outside
  * the store's grammar are all *ignored*: the caller swallows them with `true`

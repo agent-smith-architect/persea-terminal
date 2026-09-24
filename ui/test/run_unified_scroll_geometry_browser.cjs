@@ -549,7 +549,7 @@ async function runShape(cdp, shape, report, failures) {
   report[shape.name] = { afterReplay, fitted, afterLive, parked, zoomedAnchor, zoomed, atTop, alternate, restored };
 }
 
-// Packet F6: every typed failure state renders visible text — never a blank
+// every typed failure state renders visible text — never a blank
 // page — and control-held closes offer a working take-control claim. Drives
 // the REAL page's transportClosed/reconnectStatus surface and asserts the DOM.
 async function runFailureSurface(cdp, report, failures) {
@@ -967,7 +967,7 @@ async function runMobileComposerDock(cdp, report, failures) {
   // / unrestricted-zoom: the composer face is the operator's chosen size on
   // every pointer, the viewport never caps page zoom (WCAG 1.4.4), and the iOS
   // focus zoom is prevented at the composer instead — a 16px face for the
-  // instant of focus on a coarse pointer, measured by terminal topbar C1 on the phone.
+  // instant of focus on a coarse pointer, measured by the terminal topbar test on the phone.
   const viewportMeta = (fs.readFileSync(path.join(UI, "index.html"), "utf8").match(/<meta name="viewport" content="([^"]+)"/) || [])[1] || "";
   const zoomCap = /(^|,)\s*maximum-scale=(0|1)(\.\d+)?(\s|,|$)/.test(viewportMeta) || /user-scalable=(no|0)/.test(viewportMeta);
   if (zoomCap) note("the viewport meta caps page zoom", { viewportMeta });
@@ -1230,8 +1230,8 @@ async function runMobilePhoneChrome(cdp, report, failures) {
     if (Math.abs(keyboard.fontSize - closed.fontSize) > 0.001) note(`${width}: the keyboard refit the font`, { before: closed.fontSize, after: keyboard.fontSize });
 
     // The composer with a long draft and two images: no counter renders
-    // (composer input §16.3) and, with nothing to act on, no status line either
-    // (§16.2) — under the text there is only the chrome row.
+    // and, with nothing to act on, no status line either — under the text
+    // there is only the chrome row.
     const togglePoint = await evaluate(cdp, "window.__harness.toolbarComposerTogglePoint()");
     if (!togglePoint.visible) note(`${width}: toolbar composer toggle not visible for the tap`, togglePoint);
     await tap(togglePoint);

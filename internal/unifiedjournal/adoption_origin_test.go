@@ -138,8 +138,8 @@ func TestAdoptionHeaderlessStillFailsClosed(t *testing.T) {
 	})
 }
 
-// TestAdoptionReconstructedRoundTripFailsClosedOnReopen pins F5's journal
-// half: a reconstructed generation keeps its origin across a reopen, is never
+// TestAdoptionReconstructedRoundTripFailsClosedOnReopen checks that a
+// reconstructed generation keeps its origin across a reopen, is never
 // resumed as live, and its key refuses re-admission — a fresh generation is
 // the only way forward.
 func TestAdoptionReconstructedRoundTripFailsClosedOnReopen(t *testing.T) {

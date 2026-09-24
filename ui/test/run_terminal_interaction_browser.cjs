@@ -215,7 +215,7 @@ async function main() {
         assert(fits && target, `${shape.name}: ${label} does not fit its box: ${JSON.stringify({ iconOnly, measure, box })}`);
         evidence.cases.push({ shape: `${shape.name}-fit-${label}`, iconOnly, ...measure, box });
       };
-      // C5: Paste opens the shared picker. Device import is a separate trusted
+      // Paste opens the shared picker. Device import is a separate trusted
       // request; refusal offers local text entry and never sends terminal input.
       if (shape.name === "desktop" && refitLifecycleEnabled("c5")) {
         await page.evaluate(() => { window.__terminal_interactionClipboard.readFail = true; });
@@ -434,7 +434,7 @@ async function main() {
       await page.waitForTimeout(1_300);
       assert(await pasteAction().getAttribute("data-paste-state") === "paste" && await pasteAction().getAttribute("aria-label") === "Open clipboard", `${shape.name}: Copied dwell did not return to Clipboard`);
       await fitsBox(selectAction(), "select"); await fitsBox(pasteAction(), "paste");
-      // (G2): a click on an enabled control paints the tap flash
+      // A click on an enabled control paints the tap flash
       // (class + the stylesheet's keyframe) and clears it after the dwell; a
       // disabled or aria-disabled control never flashes. The probe stops the
       // click at the target so the product's own handler does not run.
@@ -689,7 +689,7 @@ async function main() {
 	  }
 	  await helper.evaluate((node) => node.focus({ preventScroll: true }));
 	  await page.keyboard.type("REFIT_DURING;");
-	  // C3 natural RED: replaying the predecessor tuple while the HTTP refit is
+	  // Predecessor replay during refit: replaying the predecessor tuple while the HTTP refit is
 	  // pending must not open the exact-operation seal. Only the captured
 	  // successor COMMIT owns that transition.
 	  if (shape.name === "desktop" && refitLifecycleEnabled("c3")) {

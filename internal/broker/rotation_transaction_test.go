@@ -85,7 +85,7 @@ func (fixture *rotationFixture) successorGeneration(next controlmode.PaneWitness
 	return true, generation.admitted, generation.refs
 }
 
-// F14: a post-Validate inconsistency must fault the successor and reap the
+// a post-Validate inconsistency must fault the successor and reap the
 // unit. It must not trip the realm-wide breaker, which would destroy every
 // other session's admission and refuse re-adoption of this one.
 func TestRotationFatalCommitDoesNotTripRealmBreaker(t *testing.T) {
@@ -110,7 +110,7 @@ func TestRotationFatalCommitDoesNotTripRealmBreaker(t *testing.T) {
 	if err := txn.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	// The same post-Validate inconsistency the builder's F14 test injects.
+	// The same post-Validate inconsistency the builder's fatal-inconsistency test injects.
 	fixture.registry.retention.mu.Lock()
 	fixture.registry.retention.generations[journalKey(next)] = &retentionGeneration{key: journalKey(next)}
 	fixture.registry.retention.mu.Unlock()

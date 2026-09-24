@@ -37,7 +37,7 @@ const artifact = (path: string, id = "art"): ComposerSegment =>
   Object.freeze({ kind: "artifact" as const, id, label: id, resolve: () => path });
 const text = (value: string): ComposerSegment => Object.freeze({ kind: "text" as const, value });
 
-// --- serialize(): the exact §5.2 contract -----------------------------------
+// --- serialize(): the image serialization contract -----------------------------------
 
 // Text-only serialization is the normalized text; artifacts-only has no
 // leading space; text + artifacts joins each unit with exactly one space.

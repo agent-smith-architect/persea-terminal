@@ -182,8 +182,8 @@ const UNIFIED_EXPLAINERS: ReadonlyArray<Readonly<{ topic: UnifiedExplainerTopic;
 // sentence for each: nothing is ever dropped silently.
 export type InsertTextResult = "SENT" | "COMPOSER" | "REFUSED_NO_CONTROL" | "REFUSED_EMPTY" | "REFUSED_DESTROYED";
 
-// The fixed refusal table for every snippet/clip mutation (§3f: failure
-// honesty). Bounded, never an echo of a body, a label or a server message.
+// The fixed refusal table for every snippet/clip mutation. Bounded, never an
+// echo of a body, a label or a server message.
 const SNIPPET_REFUSALS: Readonly<Record<SnippetOutcome, string>> = Object.freeze({
   ok: "",
   conflict: "Changed on another device — list refreshed",
@@ -424,7 +424,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private readonly explainerHeading: HTMLElement;
   private readonly explainerBody: HTMLElement;
   private explainerReturnFocus?: HTMLElement;
-  // The session tag (U3) and its details popover. The dot's state is derived
+  // The session tag and its details popover. The dot's state is derived
   // from this page's existing admission/reconnect state on every render; it is
   // never latched, so it cannot disagree with the surfaces beside it.
   private readonly identityTag: HTMLButtonElement;
@@ -542,7 +542,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // --persea-visual-viewport-height. Several composer rules are written
   // against it and fall back to 100dvh; on this page nobody published it, so
   // every one of them was sizing against the WHOLE screen — which is how the
-  // expanded composer grew under the keyboard (C2). undefined means the
+  // expanded composer grew under the keyboard. undefined means the
   // fallback is deliberately in force (a pinch-zoomed page magnifies a fixed
   // layout; it does not lose screen space).
   private visualViewportHeight: number | undefined;
@@ -552,7 +552,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // signal, never latched off a stale event.
   private keyboardOpen = false;
   // The resting high-water baseline and its rotation/split-view reseed rules,
-  // extracted so the F5 open-across-rotation behavior is directly testable.
+  // extracted so the open-across-rotation behavior is directly testable.
   private readonly keyboardBaseline = new UnifiedKeyboardBaseline();
   private keyboardVerifyTimer: number | undefined;
   private keyboardWatchdog: number | undefined;
@@ -617,7 +617,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // same service; these arrays contain the fine-pointer and coarse-pointer
   // views of that one record, never independent stores.
   private preferenceSubscription?: OperatorPreferenceSubscription;
-  // The composer face (C1). Like the theme, it is presentation this page
+  // The composer face. Like the theme, it is presentation this page
   // applies immediately and a record it then writes; the applied value is a
   // custom property on the shell, so the stylesheet owns every face rule and
   // this page owns only the number.
@@ -667,7 +667,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     const toolbar = document.createElement("div");
     toolbar.className = "persea-unified-toolbar";
     // The top bar's leading slot is the session's identity, not a build
-    // caption (U3). It is a tag: a status dot whose colour is the page's OWN
+    // caption. It is a tag: a status dot whose colour is the page's OWN
     // connection/attachment state — no second state machine — and the session
     // name (with its alias when the fragment carried one) in a code face. The
     // tag is a button because the details an operator occasionally needs
@@ -821,7 +821,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     copyStatus.setAttribute("role", "status");
     copyStatus.setAttribute("aria-live", "polite");
     this.selectAnnouncement = copyStatus;
-    // The ONE quick-actions opener, on every pointer (U5). It used to be a
+    // The ONE quick-actions opener, on every pointer. It used to be a
     // floating puck on a coarse pointer and this button on a fine one, so a
     // phone paid terminal area for a control a laptop kept in the row — and
     // the two had to be swapped whenever the pointer medium changed. One
@@ -2644,8 +2644,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private insertStatus(result: InsertTextResult, via: "snippet" | "clip" | "paste"): string {
     switch (result) {
       case "SENT":
-        // the receipt says what happened. The no-Return law
-        // (§3c) is unchanged and explained in Help, not in every receipt.
+        // the receipt says what happened. Help explains that insertion never
+        // appends Return; individual receipts need not repeat it.
         return via === "paste" ? "Pasted" : via === "clip" ? "Clip inserted" : "Snippet inserted";
       case "COMPOSER":
         return "Multi-line insert needs bracketed paste — opened in the composer instead";
@@ -2659,7 +2659,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   }
 
   /**
-   * The ONE insert mechanism for snippets, clips and pastes (§3c). It never
+   * The ONE insert mechanism for snippets, clips and pastes. It never
    * appends Return: the text is normalized (hostile controls and trailing
    * newlines removed) and delivered through xterm's own paste path, so the
    * last byte on the wire is the body's last visible character. Multiline or
@@ -2740,7 +2740,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // --- keyboard state machine ------------------------------------------------
   //
   // The presence judgement — resting high-water baseline, rotation/split-view
-  // reseeding, and the F5 rule that a width-change sample taken while OPEN
+  // reseeding, and the keyboard baseline rule that a width-change sample taken while OPEN
   // and focused never becomes the baseline — lives in UnifiedKeyboardBaseline
   // (unified_keyboard_baseline.ts), where it is unit-tested directly. Every
   // evaluation re-derives the state from live getters, so a wrong belief
@@ -2870,7 +2870,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   }
 
   // Whether a text-entry element of THIS page holds focus: the xterm helper
-  // textarea or the composer's input. The F5 rule keys on it — while it holds
+  // textarea or the composer's input. The keyboard baseline rule keys on it — while it holds
   // and the keyboard reads open, a rotation/split-view sample is
   // keyboard-reduced and must not become the resting baseline.
   private pageTextEntryFocused(): boolean {
@@ -3498,7 +3498,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
 
   // --- explicit vertical fit ------------------------------------------------
 
-  // --- the session tag (U3) --------------------------------------------------
+  // --- the session tag --------------------------------------------------
   //
   // One derivation, read live on every render from the state the rest of the
   // page already keeps: the failure notice, the reconnect strip, and the
@@ -3721,8 +3721,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     }
     this.viewPopoverOpen = open;
     this.viewPopover.hidden = !open;
-    // The Fit width measurement depends on the viewport at this moment
-    // (terminal layout F2): refresh the block's availability as the popover opens.
+    // The Fit width measurement depends on the current viewport, so refresh
+    // the block's availability as the popover opens.
     if (open) this.updateGeometryControl();
     else for (const form of this.geometryForms) this.clearGeometryReason(form);
     this.geometryReadout.setAttribute("aria-expanded", open ? "true" : "false");
@@ -4113,7 +4113,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       ? this.geometryAvailability("apply", true)
       : this.geometryAvailability("fit_rows", false, rows);
     if (!active || !availability.enabled) {
-      // A typed request is never dropped silently (terminal appearance §15.3).
+      // A typed request is never dropped silently.
       if (explicit) this.showRefusalNotice(availability.message);
       return;
     }
@@ -4289,7 +4289,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.projectedRow = -1;
     if (type === "alternate") this.syncNativeScroll(true);
     else this.syncNativeScroll(this.normalAnchor.following, this.normalAnchor);
-    // Width refits are refused on the alternate screen (terminal layout F2).
+    // Width refits are refused on the alternate screen.
     this.updateGeometryControl();
   }
 
@@ -4794,7 +4794,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // decided the keyboard is open and on the page not being zoomed, and in the
   // gap between a keyboard appearing and that decision the shell is still
   // 100dvh. Bounding by both boxes is what stops the panel from being sized
-  // against screen the keyboard is covering (C2).
+  // against screen the keyboard is covering.
   private composerInsetBudget(): number {
     const shellRect = this.shell.getBoundingClientRect();
     if (!(shellRect.height > 0)) return 0;

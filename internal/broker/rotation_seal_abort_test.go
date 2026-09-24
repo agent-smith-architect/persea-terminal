@@ -239,8 +239,8 @@ func TestRotationMarkSealedWithoutSealDoesNotRelaxCommit(t *testing.T) {
 }
 
 // A stale predecessor observation after the seal (something rotation flow must never
-// produce) re-materializes unknown old-key payload. It must take the local F14
-// path rather than broadening the post-seal predecessor predicate.
+// produce) re-materializes unknown old-key payload. It must fail locally
+// rather than broadening the post-seal predecessor predicate.
 func TestRotationStalePredecessorObservationAfterSeal(t *testing.T) {
 	fixture := newRotationFixture(t)
 	other := controlmode.PaneWitness{

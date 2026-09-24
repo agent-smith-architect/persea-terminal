@@ -608,7 +608,7 @@ func TestUnifiedAdoptionRestartFailsClosedAndReadoptable(t *testing.T) {
 // pinned as a regression gate: with exactly one ordinary-admission slot plus
 // the rotation reserve, the stale reconstructed generation a restart leaves
 // behind must not keep the ordinary slot charged — the same session re-adopts
-// on the first attempt, or F1 has regressed into "unified adoption slots are
+// on the first attempt, or adoption has regressed into "unified adoption slots are
 // exhausted".
 func TestUnifiedAdoptionRestartOneSlotReadoptable(t *testing.T) {
 	runUnifiedAdoptionRestartReadoptable(t, 2)
@@ -784,7 +784,7 @@ func newTamperedAdoptionFixture(t *testing.T, adoptionSlots int) (*adoptionFixtu
 	return fixture, tamper
 }
 
-// TestUnifiedAdoptionFailureReleasesSlot is F1's failed-first-adoption pin:
+// TestUnifiedAdoptionFailureReleasesSlot checks failed-first-adoption cleanup:
 // when registry admission or the bootstrap injection fails AFTER the journal
 // reservation is taken, the reservation is aborted — the single ordinary
 // slot returns to the ledger while the rotation reserve stays protected, no

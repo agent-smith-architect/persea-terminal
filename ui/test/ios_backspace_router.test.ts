@@ -542,7 +542,7 @@ try {
     assert.equal(subject.inserted.length, 0, `${scenario}: unmatched key edit synthesized text`);
   }
 
-  // --- F2: unmodeled xterm keys end replacement authority ----------------------
+  // --- unmodeled xterm keys end replacement authority ----------------------
 
   {
     // Establish "hello", deliver ArrowLeft through
@@ -621,7 +621,7 @@ try {
     assert.equal(subject.dispatched.length, 1, "a revision after a failed dispatch erased");
   }
 
-  // --- F4: composition disables replacement for the focus session -----------------
+  // --- composition disables replacement for the focus session -----------------
 
   {
     const subject = fixture();
@@ -1030,7 +1030,7 @@ try {
     console.log(`INPUT_EVENT_PRIVACY_EVENT_SHAPES=${encoded}`);
   }
 
-  // --- TERMINAL_TOUCH-S4: WebKit/xterm #6078 retained-prefix dictation ------------
+  // --- WebKit/xterm #6078 retained-prefix dictation ------------
 
   {
     // Real iPhone dictation can keep the prior helper value and report the

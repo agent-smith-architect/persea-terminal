@@ -1125,7 +1125,7 @@ func TestUnifiedTerminalE2E1ConcurrentSnapshotAndCommit(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ISSUE25 Phase 1 — observer-connection resize boundary proof.
+// Observer-connection resize boundary proof.
 //
 // The narrow question, against real tmux: when the guarded resize is issued on
 // the observer's own control connection, is the command-completion boundary
@@ -1520,7 +1520,7 @@ func (observer *unifiedE2E1ControlObserver) trace() string {
 // condition and the same session/window/pane/pid/width/height/one-pane/start-time
 // conditions, all of which must hold in-transaction. Only the issuer changes —
 // the observer's own control connection instead of a separate tmux process —
-// which is exactly the seam Phase 1 exists to test.
+// which is the connection boundary this test exercises.
 //
 // The tmux verb is assembled from two fragments on purpose: the canonical
 // resize literal stays owned by internal/broker/attachment.go, so nothing here
@@ -1986,7 +1986,7 @@ type unifiedE2E1BoundaryCase struct {
 	backpressure bool
 }
 
-// TestUnifiedTerminalE2E1ObserverResizeBoundary is the ISSUE25 Phase-1 proof.
+// TestUnifiedTerminalE2E1ObserverResizeBoundary checks the observer resize boundary.
 func TestUnifiedTerminalE2E1ObserverResizeBoundary(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real tmux observer resize boundary proof")
@@ -2408,7 +2408,7 @@ func TestUnifiedTerminalE2E1ObserverKeepsGate1IncompleteUTF8Negative(t *testing.
 }
 
 // ---------------------------------------------------------------------------
-// ISSUE25 — explicit vertical Fit, end to end against real tmux.
+// Explicit vertical Fit, end to end against real tmux.
 //
 // One deliberate click changes the real tmux window height once, and that
 // becomes a server-side fact for the lifetime of the session. What this proves
@@ -2817,7 +2817,7 @@ func TestUnifiedTerminalE2E1ExplicitVerticalFit(t *testing.T) {
 		t.Fatalf("%s: durable journal magic=%q want PUJ2", unifiedE2E1FitRed, magic)
 	}
 	if geometryRecords != 2 {
-		t.Fatalf("%s: durable committed geometry records=%d, want the two the operator asked for", unifiedE2E1FitRed, geometryRecords)
+		t.Fatalf("%s: durable committed geometry records=%d, want the two explicitly requested row fits", unifiedE2E1FitRed, geometryRecords)
 	}
 
 	t.Logf("%s RECEIPT: birth=%dx%d fitted=%dx%d persisted=%dx%d panes=1 observers=%d N=last-of-%d journal=PUJ2 geometry_records=%d",

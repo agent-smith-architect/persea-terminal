@@ -147,9 +147,9 @@ async function main() {
     })}`;
     await page.goto(url, { waitUntil: "load" });
     await waitSession("fixture-live");
-    // ------------------------------------------------------------- workspace access F4
-    // Clipboard and Keys are task routes in the quick-actions sheet. Since U5
-    // exactly ONE control opens it, on every pointer: the top-bar opener. The
+    // ------------------------------------------------------------- quick-actions navigation
+    // Clipboard and Keys are task routes in the quick-actions sheet. Exactly
+    // ONE control opens it, on every pointer: the top-bar opener. The
     // floating puck it replaced is deleted, not hidden, so this also asserts
     // its absence from the document.
     {
@@ -180,7 +180,7 @@ async function main() {
         await sheet.waitFor({ state: "hidden" });
         assert(await opener.getAttribute("aria-expanded") === "false", "the opener did not report the sheet closed");
       } else {
-        // U5: the same opener, in the same place, on a coarse pointer.
+        // the same opener, in the same place, on a coarse pointer.
         assert(await puck.count() === 0, "the floating puck is still in the document");
         assert(await opener.isVisible(), "a coarse pointer has no sheet opener in the control row");
         const box = await opener.boundingBox();
@@ -192,7 +192,7 @@ async function main() {
         await opener.click();
         await sheet.waitFor({ state: "hidden" });
 
-        // U3 at 390pt, on the engine a phone actually runs. The row is the
+        // The session tag at 390pt, on the engine a phone actually runs. The row is the
         // only surface a phone has for naming the session, so the tag lives
         // here too: a dot at full size, a name that can ellipsise, no alias,
         // one line, and nothing outside the viewport.
@@ -397,7 +397,7 @@ async function main() {
       fs.writeFileSync(path.join(EVIDENCE, `session-switch-${ENGINE}-${POINTER}.json`), `${JSON.stringify({ ...evidence, server }, null, 2)}\n`);
     }
 
-    // F3/F4: a rotation-triggered A re-mint may resolve on either side of the
+    // a rotation-triggered A re-mint may resolve on either side of the
     // B adoption. The switch commit invalidates it in both schedules; only B
     // remains live and the stale A work never overwrites the committed URL.
     await context.close();
@@ -427,7 +427,7 @@ async function main() {
       return { scenarioContext, scenarioPage, scenarioErrors, openList };
     };
 
-    // F2 pre-commit: the inventory row was adoptable, but eligibility changed
+    // Before identity commit: the inventory row was adoptable, but eligibility changed
     // before the authoritative POST. The typed refusal leaves A byte-for-byte
     // live and consumes no B handle or socket.
     const refused = await openScenario({ sessionBState: "adoptable" });
@@ -467,7 +467,7 @@ async function main() {
       await scenario.scenarioContext.close();
     }
 
-    // C1: a reload-handle mint begun by A's PREPARE must remain owned by A's
+    // a reload-handle mint begun by A's PREPARE must remain owned by A's
     // controller operation even when its fetch ignores abort and resolves only
     // after B commits. The stored capability and an actual reload both stay B.
     const reloadAuthority = await openScenario({ sessionBState: "adoptable", holdAdoptionMs: 180 });
@@ -618,7 +618,7 @@ async function main() {
       return;
     }
 
-    // F2: the identity crosses to B before its socket can open. Exhaustion is
+    // the identity crosses to B before its socket can open. Exhaustion is
     // finite and visible, never reconnects A, and cannot write B memory because
     // no B COMMIT occurred.
     const failed = await openScenario({ sessionBState: "open", failSessionBConnections: 100 });
@@ -641,7 +641,7 @@ async function main() {
     evidence.timelines.push({ phase: "postcommit-b-exhausted", server: failedServer });
     await failed.scenarioContext.close();
 
-    // F5: a foreign B Control lease forces exactly one takeover. Switching
+    // a foreign B Control lease forces exactly one takeover. Switching
     // straight back to A leaves one A socket, no B authority, and no
     // lease_held/takeover loop while the displaced B holder settles.
     const leased = await openScenario({ sessionBState: "open", holdLeaseB: true });
@@ -664,7 +664,7 @@ async function main() {
     evidence.timelines.push({ phase: "lease-a-b-a", server: leaseRace });
     await leased.scenarioContext.close();
 
-    // ------------------------------------------------------------- workspace access F1
+    // ------------------------------------------------------------- session switching
     // Terminal topbar behavior on this engine's real bundle at this pointer medium.
     // With nothing stored on WebKit/coarse, the
     // fit floors at 9px on a 390pt phone, and the old Zoom stepped the stored

@@ -1,4 +1,4 @@
-/* Workspace shell (M9 W1a) — presentation-only split layout.
+/* Workspace shell — presentation-only split layout.
  *
  * Everything here is class-based: weights map onto the closed .ws-w-1 … .ws-w-100
  * class set (the model's integer range), so no element ever carries a style
@@ -125,7 +125,7 @@
   .ws-cell__mount .persea-unified-toolbar button.persea-unified-tag { flex: 0 1 auto; min-width: 2.5rem; max-width: 7rem; }
   .ws-cell__mount .persea-unified-tag__alias { display: none; }
   .ws-cell__mount .persea-unified-toolbar__controls { flex: 0 0 auto; justify-content: flex-end; gap: .2rem; }
-  /* The ↕ and ✎ boxes stay at 44px, which is what the workspace F15 pin
+  /* The ↕ and ✎ boxes stay at 44px, which is what the workspace touch-target test
      measures. ⇄, ☰ and ⋯ are single glyphs behind a fine pointer, where the
      44px touch law does not apply, and the 8px each gives back is what buys the
      tag its place in the row. */

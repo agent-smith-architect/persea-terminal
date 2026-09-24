@@ -1105,7 +1105,7 @@ button[data-copy-state="failed"] {
 }
 .persea-unified-preference-status[hidden] { display: none; }
 
-/* The session tag (U3). It replaces the build caption in the row's leading
+/* The session tag. It replaces the build caption in the row's leading
    slot: a status dot whose colour is the page's connection state and the
    session name (plus its alias) in a code face. It shrinks to an ellipsis
    rather than wrapping — the control row never gains a line — and it survives
@@ -1252,7 +1252,7 @@ button[data-copy-state="failed"] {
 .persea-unified-toolbar button.persea-unified-phone-view,
 .persea-unified-geometry--phone { display: none; }
 
-/* U1: readiness is the button's own state, so the row carries no text that
+/* readiness is the button's own state, so the row carries no text that
    can appear and disappear. The glyph is fixed width, so the box never moves
    when a selection is made or cleared. */
 .persea-unified-toolbar button.persea-unified-copy {
@@ -1365,7 +1365,7 @@ button[data-copy-state="failed"] {
 
 /* The inline row's fixed controls need ~640px; below 720 they collapse. */
 @container (max-width: 719px) {
-  /* U3 survives the phone. The tag is the only thing in this row that says
+  /* The session tag survives the phone. It is the only thing in this row that says
      WHICH session is on screen, so it stays: the dot at full size, the name
      truncated with an ellipsis, the alias dropped. It cannot add a line —
      every button here is `flex: none; white-space: nowrap`, and the only two
@@ -1451,7 +1451,7 @@ button[data-copy-state="failed"] {
     /* row budget at phone-360: 24 padding + 88 tag + 4 gap +
        (48 + 48 + 44 + 44 + 44 + 4×4 gaps) = 360. The tag gives 8px so the two
        word-bearing controls can hold "Select", "Copied" and "Failed" as words
-       (the operator asked for words, not glyphs). The padding is one token for
+       without truncation. The padding is one token for
        every control in the row (terminal touch law); the widths are per control. */
     .persea-unified-toolbar button.persea-unified-tag {
       min-width: 76px;
@@ -1756,7 +1756,7 @@ button[data-copy-state="failed"] {
   padding: .25rem .4rem;
   border-color: #596171;
   background: #10131a;
-  /* The operator's composer face (C1), defaulted one step below the 14px this
+  /* The operator's composer face, defaulted one step below the 14px this
      rule used to hardcode for a fine pointer. The coarse-pointer floor below
      is not negotiable by this preference. */
   font: var(--persea-composer-font-size, 11px)/1.2 ui-monospace, monospace;
@@ -2118,7 +2118,7 @@ button[data-copy-state="failed"] {
 
 /* --- Quick actions: the bottom sheet ---------------------------------------
    The sheet is the control surface both pointers share, opened by the one
-   toolbar button (U5). Class-styled only (no inline style attributes, so
+   toolbar button. Class-styled only (no inline style attributes, so
    nothing here depends on the unified route's style-src-attr relaxation). It
    lives in the dock — a column overlaying the stage that takes no pointer
    events itself — so its bottom edge is already above the composer dock and
@@ -2209,7 +2209,7 @@ button[data-copy-state="failed"] {
 .persea-unified-preference-status--sheet {
   grid-column: 1 / -1;
 }
-/* U4: the theme control is a sheet control, so it lines up with the tiles
+/* the theme control is a sheet control, so it lines up with the tiles
    and headings on the section's left edge rather than being pushed to the
    opposite side of the row from its own caption. */
 .persea-unified-preference--sheet {
@@ -2264,7 +2264,7 @@ button[data-copy-state="failed"] {
   border-color: var(--persea-chrome-fg, #e6edf3);
   background: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 16%, var(--persea-chrome-bg, #1b1e25));
 }
-/* "A selection is ready to copy" (U1). Same construction as the open composer
+/* "A selection is ready to copy". Same construction as the open composer
    toggle — the boundary is the chrome foreground, which is the one colour
    guaranteed legible against this chrome — over an accent-tinted fill, so the
    two state affordances are distinguishable from each other and both from a

@@ -42,7 +42,7 @@ const EVIDENCE = process.env.PERSEA_SESSION_MEMORY_EVIDENCE_DIR ? path.resolve(p
 const ONLY = process.env.PERSEA_SESSION_MEMORY_ONLY || "";
 const PHONE = Object.freeze({ width: 390, height: 844 });
 const DESKTOP = Object.freeze({ width: 1280, height: 900 });
-// The exact workspace access sentence (workspace access F2), asserted against its single source so a
+// The exact workspace access sentence, asserted against its single source so a
 // reworded product notice can never pass this gate by accident.
 const PHONE_STATE_NOTICE = "workspace view is not available on this device yet";
 assert(fs.readFileSync(path.join(UI, "src/workspace_posture.ts"), "utf8")
@@ -128,7 +128,7 @@ async function startStack({ tls }) {
     attachmentFailure: "",       // "" | before_prepare | after_prepare | lease_held
     adoptionDelayMs: 0,          // hold the adoption response, so a refresh can arrive mid-flight
     adopted: false,
-    // Saved workspace records the dashboard's Workspaces panel lists (workspace access F2).
+    // Saved workspace records the dashboard's Workspaces panel lists.
     workspaces: [],
     handles: new Map(),
     attachments: [],
@@ -1188,7 +1188,7 @@ async function main() {
         assert(phonePicker.value === "13" && phonePicker.floor === null, `a stored 13 px was not shown as 13 px on the phone: ${JSON.stringify(phonePicker)}`);
         await delay(300);
         assert(stack.ledgerSince(mark).filter((entry) => entry.startsWith("PUT /api/preferences")).length === 0, "rendering the picker wrote the record");
-        // (G2): the dashboard's buttons paint the tap flash too.
+        // The dashboard's buttons paint the tap flash too.
         const tap = await phone.evaluate(`(() => {
           const button = document.querySelector(".dashboard-search-clear");
           if (!button) return null;

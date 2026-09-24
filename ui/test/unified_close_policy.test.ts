@@ -15,7 +15,7 @@ const assert = {
 // TERMINAL: typed refusals of this attachment — the page must stop the retry
 // loop and render the reason. ALL
 // broker/front-door-typed refusals are terminal — including the attachment
-// protocol violations the front closes deterministically (F3): bad_liveness,
+// protocol violations the front closes deterministically: bad_liveness,
 // bad_attachment, observe_mode, websocket_message_type, and the client-side
 // liveness protocol judgement liveness_protocol.
 for (const reason of [
@@ -81,7 +81,7 @@ assert.ok(!UNIFIED_TERMINAL_REASONS.has("session_switch"), "session_switch is ne
 for (const reason of UNIFIED_TERMINAL_REASONS) assert.equal(classifyUnifiedClose(reason), "terminal");
 for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose(reason), "internal");
 
-// --- source-to-policy enumeration (F3) ---------------------------------------
+// --- source-to-policy enumeration ---------------------------------------
 // Every close reason the front door, the broker, or the client transport can
 // actually emit must be classified EXPLICITLY below. A NEW emitted code fails
 // this test instead of silently inheriting the transient fallback: decide its
@@ -227,7 +227,7 @@ for (const reason of [
   const notice = unifiedCloseNotice(reason);
   assert.ok(notice.headline.length > 0 && notice.detail.length > 0, `notice for ${reason} must have visible text`);
 }
-// The F3 additions carry reviewed copy, not just the generic degradation.
+// The protocol violations carry specific copy, not just the generic degradation.
 assert.equal(unifiedCloseNotice("observe_mode").headline, "This view is read-only");
 assert.equal(unifiedCloseNotice("bad_liveness").headline, "The connection broke protocol");
 assert.equal(unifiedCloseNotice("unified_unavailable").headline, "Unified terminal unavailable");

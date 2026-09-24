@@ -1591,8 +1591,8 @@ test("composer_mobile_repair_structure_is_shared_bounded_and_operator_vocabulary
     "Inserted ${this.lastSentLength.toLocaleString()} ch",
     "Insert anyway",
     "Restore the last cleared or inserted draft",
-  ]) assert(composer.includes(visible), `missing ruled Composer vocabulary: ${visible}`);
-  // –§16.3: no "not run" qualifier, no idle instruction line, no
+  ]) assert(composer.includes(visible), `missing Composer vocabulary: ${visible}`);
+  // No "not run" qualifier, no idle instruction line, no
   // counter, one autocorrect toggle.
   for (const retired of [
     "\\u00b7 not run",

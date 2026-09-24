@@ -59,7 +59,7 @@ func f3DialTakeover(addr, handle string) (*websocket.Conn, *http.Response, error
 	return dialer.Dial("ws://"+addr+"/ws", header)
 }
 
-// f3DialTerminalWS uses the current capability protocol and keeps a F3 row's
+// f3DialTerminalWS uses the current capability protocol and keeps each test case's
 // handshake failure attributable to that row instead of to shared test plumbing.
 func f3DialTerminalWS(t *testing.T, addr, handle, mode, prefix, mutant string) *websocket.Conn {
 	t.Helper()
@@ -100,7 +100,7 @@ func f3BrowserOracleTrustedHop(next http.Handler, ingress config.Ingress) http.H
 	})
 }
 
-// TestF3FailurePrefixesStatic keeps the dedicated F3 assertions attributable.
+// TestF3FailurePrefixesStatic checks diagnostic prefixes for the dedicated assertions.
 // websocket_integration_test.go has broader integration coverage; these
 // contracts reach it through contextual wrappers that supply the row prefix.
 func TestF3FailurePrefixesStatic(t *testing.T) {
@@ -133,7 +133,7 @@ func TestF3FailurePrefixesStatic(t *testing.T) {
 				if !ok || ident.Name != "t" || len(call.Args) == 0 {
 					return true
 				}
-				// The sole contextual wrapper preserves a caller-supplied F3-W
+				// The sole contextual wrapper preserves a caller-supplied case
 				// prefix; all other direct assertions must contain one literally.
 				if function.Name.Name == "f3ContextualFatalf" {
 					return true
@@ -187,7 +187,7 @@ type f3CandidateAttachmentObservation struct {
 }
 
 // f3ReadRawAttachmentMessage intentionally exposes the next wire message unchanged.
-// W7 needs to prove that no server output crosses the held transfer-commit boundary.
+// The transfer-commit test proves that no server output crosses the held transfer-commit boundary.
 func f3ReadRawAttachmentMessage(ws *websocket.Conn) (f3RawAttachmentMessage, error) {
 	kind, payload, err := ws.ReadMessage()
 	if err != nil {
@@ -227,7 +227,8 @@ func f3ReadSemanticAttachment(ws *websocket.Conn, first f3RawAttachmentMessage) 
 }
 
 // f3ObserveCandidateAttachment classifies the candidate's wire outcome before
-// W7/W8 evaluate it. That keeps a broadcast displacement from being mislabeled
+// the ordering and displacement checks evaluate it. That keeps a broadcast
+// displacement from being mislabeled
 // as a missing Live frame merely because the Live assertion happened first.
 func f3ObserveCandidateAttachment(ws *websocket.Conn, first f3RawAttachmentMessage, initialErr error) f3CandidateAttachmentObservation {
 	if initialErr != nil {
@@ -363,7 +364,7 @@ func (o *f3BrowserOracleProvisioner) releaseTakeoverGate(release f3TakeoverGateR
 				waiters = append(waiters, waiter)
 			}
 		}
-		// W18's ordinal gate holds A while B completes.  Arm the already-frozen
+		// The reconnect ordinal gate holds A while B completes.  Arm the already-frozen
 		// transfer-commit blocker before A is released so its commit can be
 		// observed before it presents success.
 		armNextTransferCommit = !o.gate.holdAll && len(waiters) != 0
@@ -385,7 +386,7 @@ func (o *f3BrowserOracleProvisioner) releaseTakeoverGate(release f3TakeoverGateR
 		return
 	}
 	// A second existing release request carries no parked POST.  It releases
-	// only the W18 transfer-commit blocker after the browser has observed it.
+	// only the reconnect transfer-commit blocker after the browser has observed it.
 	o.commits.mu.Lock()
 	commitRelease := o.commits.release
 	o.commits.release = nil
@@ -611,8 +612,8 @@ func TestControlTakeoverCommitBeforeBrowserSuccessAndSingleDisplacementW7W8(t *t
 	case <-time.After(100 * time.Millisecond):
 	}
 	releaseCommit()
-	// Observe once, then classify by content. W8's candidate displacement is a
-	// different failure from W7's post-commit attachment ordering.
+	// Observe once, then classify by content. Candidate displacement is a
+	// different failure from post-commit attachment ordering.
 	firstRaw := <-rawAttachment
 	candidateObservation := f3ObserveCandidateAttachment(candidate, firstRaw.message, firstRaw.err)
 	if reason := readWSCloseReasonSkippingText(t, incumbent); reason != "control_displaced" {

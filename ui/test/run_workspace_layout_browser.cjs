@@ -3,11 +3,11 @@
 //
 // Serves the harness under the BASE nonce'd CSP (no style-src-attr: the shell
 // is class-based and must not need the unified route's relaxation), mounts six
-// dummy cells, and runs the FW3 layout storm: divider drags (trusted pointer
+// dummy cells, and runs the layout storm: divider drags (trusted pointer
 // input), +/- nudges, keyboard nudges, cell resizes, window resizes, and an
 // orientation change. After every step it asserts zero calls into the stub
 // send port (the geometry sentinel), zero WebSocket constructions, zero CSP
-// violations, six cells, and no blank cell in any §7 state. Then: the
+// violations, six cells, and no blank cell in any pane state. Then: the
 // positive control (one explicit fit → exactly one RESIZE_REQUEST), coarse
 // pointer touch targets ≥ 44 px at tablet width, and the honest phone-class
 // state (zero cells, per-leaf single-terminal links, zero transports).
@@ -204,7 +204,7 @@ async function main() {
   const driver = ENGINE === "chromium" ? await chromiumDriver(origin) : await playwrightDriver(origin, ENGINE);
   const evidence = { engine: driver.name, steps: [], evidenceDir: EVIDENCE_DIR, screenshots: {} };
   try {
-    // ---- Desktop: FW3 storm + FW-blank.
+    // ---- Desktop: layout storm and pane-state visibility.
     let page = await driver.session({ viewport: DESKTOP, coarse: false });
     const audit = () => page.evaluate("window.__wsHarness.audit()");
     const check = (label, a, expectations = {}) => {
@@ -265,7 +265,7 @@ async function main() {
     }
     assert(a.treeChanges > 0 && String(a.lastTreeChange).startsWith("divider_drag:"), "drags did not report tree changes");
 
-    // +/- nudges (OQ4 fallback): trusted clicks on every nudge button.
+    // +/- nudges: trusted clicks on every nudge button.
     for (const target of (await audit()).dividers) {
       for (const direction of ["-1", "1"]) {
         const fresh = await audit();
@@ -321,7 +321,7 @@ async function main() {
 
     // FW-blank: every sample state in every cell.
     const sampleStateCount = (await audit()).sampleStateCount;
-    assert(sampleStateCount >= 16, `expected the full §7 sample, saw ${sampleStateCount}`);
+    assert(sampleStateCount >= 16, `expected the full pane-state sample, saw ${sampleStateCount}`);
     for (let index = 0; index < sampleStateCount; index += 1) {
       await page.evaluate(`window.__wsHarness.setAllStates(${index})`);
       check(`state ${index}`, await audit());

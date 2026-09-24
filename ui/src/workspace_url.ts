@@ -1,13 +1,12 @@
-// The one workspace route constructor and its parser (packet §5, freeze edit
-// [F1], regression test FW-R).
+// The workspace route constructor and its parser.
 //
 // Every workspace URL the product emits is built here and nowhere else:
 //   /workspace?engine=unified-dev#name=<bounded>
 // The query string is the CSP capability key and must remain byte-exact
 // (same invariant as unifiedTerminalURL in dashboard.ts and the boot()
 // capability check in app.ts). The fragment carries the workspace NAME only —
-// no handle, no authority (§3b doctrine: the page resolves everything at
-// load), and never `engine`, so the terminal-specific fragment self-heal in
+// no handle, no authority (the page resolves everything at load), and never
+// `engine`, so the terminal-specific fragment self-heal in
 // app.ts (fragment engine=unified-dev → replace to /terminal) can never be
 // triggered by a workspace document.
 //
@@ -89,7 +88,7 @@ export function parseWorkspaceLocation(location: LocationLike): WorkspaceRouteVe
 
 export type WorkspaceRouteNotice = Readonly<{ headline: string; detail: string; code: string }>;
 
-// Full-page copy for a typed route refusal (§7 workspace-level failure): a
+// Full-page copy for a typed route refusal: a
 // sentence, the code, and a way back to the dashboard. Closed set — every
 // refusal has reviewed wording, none falls through to a blank page.
 export function workspaceRouteNotice(refusal: WorkspaceRouteRefusal): WorkspaceRouteNotice {

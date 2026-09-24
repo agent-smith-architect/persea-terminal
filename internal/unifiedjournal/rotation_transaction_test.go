@@ -672,7 +672,7 @@ func TestRotationN1FiftySwapsConserveSlotsAndCaps(t *testing.T) {
 // reserved never exceeds the cap, on the realm and on every pane, in both
 // units. Reserved is counted because a reservation is a promise the realm has
 // already made; a ledger that is under cap only because it forgot a promise is
-// exactly the overdraw C6 removed.
+// exactly the rollback-credit overdraw.
 func rotationLedgersWithinCaps(t *testing.T, realm *Realm, stage string) {
 	t.Helper()
 	if realm.total+realm.reservedCharge > realm.options.RealmCapBytes {
@@ -1108,7 +1108,7 @@ func TestRotationCapacityMaterializationFailureKeepsCapacityReleasable(t *testin
 // of the header hold the capacity still carries, inside the same sequenced
 // operation, so the same bytes are never both charged and reserved. The
 // capacity is single-use for materialization after any storage attempt, and
-// stays eligible for the F5 path: ArmRollback, bounded replay, Release.
+// stays eligible for the rollback path: ArmRollback, bounded replay, Release.
 func TestRotationFailedMaterializationKeepsPhysicalLedgerWithinCap(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -1204,7 +1204,7 @@ func TestRotationFailedMaterializationKeepsPhysicalLedgerWithinCap(t *testing.T)
 			if retry, err := realm.BeginRotatedPane(rotationKey("$rotation-failed-materialize", 3), Geometry{Columns: 80, Rows: 24}, capacity); retry != nil || !errors.Is(err, ErrInvalidated) {
 				t.Fatalf("second materialization attempt on a spent capacity: reservation=%v err=%v", retry, err)
 			}
-			// F5: arm R1, replay the bounded tail into the predecessor, release the rest.
+			// arm R1, replay the bounded tail into the predecessor, release the rest.
 			if err := capacity.ArmRollback(); err != nil {
 				t.Fatalf("arm after failed materialization: %v", err)
 			}

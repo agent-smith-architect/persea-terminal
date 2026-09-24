@@ -187,7 +187,7 @@ func TestRefitSessionForwardsExactBoundAuthorityAndOperation(t *testing.T) {
 	}
 }
 
-// TestRefitSessionCarriesOptionalRows pins terminal layout 14.1: a request may name the
+// TestRefitSessionCarriesOptionalRows checks optional row requests: a request may name the
 // successor's rows; the front door forwards them verbatim, requires the broker
 // to echo exactly that count, and reports it in the response. Omitted rows
 // forward as 0 and the response carries the broker-echoed count instead.

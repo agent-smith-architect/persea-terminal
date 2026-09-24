@@ -1,7 +1,7 @@
-// Browser harness for the workspace layout shell (FW3 layout storm,
+// Browser harness for the workspace layout shell (layout storm,
 // FW-blank per-pane states, coarse-pointer touch targets, and the honest
 // phone-class posture). No attachment, no transport, no terminal: each cell
-// hosts a dummy pane that owns a stub send port. The stub is the FW3 sentinel:
+// hosts a dummy pane that owns a stub send port. The stub is the geometry sentinel:
 // the storm must leave it untouched, and only an explicit fit call — never
 // layout — may reach it (positive control).
 import {
@@ -37,7 +37,7 @@ const NativeWebSocket = window.WebSocket;
 };
 
 // A dummy pane: what the unified page occupies at runtime, reduced to the two
-// things FW3 cares about — a ResizeObserver that refits presentation only, and
+// behaviors the layout test checks — a ResizeObserver that refits presentation only, and
 // a send port that layout must never reach.
 class DummyPane {
   readonly port = { trySend: (frame: { type: string }): "ACCEPTED" => { sentinel.portCalls.push(frame.type); if (frame.type === "RESIZE_REQUEST") sentinel.resizeRequests += 1; return "ACCEPTED"; } };
@@ -78,7 +78,7 @@ const TREE: WorkspaceNode = split("row", [
   split("column", [leaf({ realm: "main", server: "default", name: "logs" }), split("row", [leaf({ realm: "main", server: "default", name: "deploy" }), leaf({ realm: "main", server: "default", name: "watch" })])]),
 ], [2, 1, 1]);
 
-// Every §7 state reachable through the typed constructors: each PaneState
+// Every pane state reachable through the typed constructors: each PaneState
 // kind, every projection state, and close reasons of every policy class.
 function sampleStates(): readonly PaneState[] {
   const states: PaneState[] = [];

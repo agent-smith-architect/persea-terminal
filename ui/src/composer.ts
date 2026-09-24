@@ -420,7 +420,7 @@ export class Composer {
     footer.className = "attachment-page__composer-footer";
     // the status is a conditional line — it renders only while
     // there is something to act on (guard, blocked, receipt, upload, restore,
-    // punctuation, storage) and is hidden otherwise. No counter (§16.3): a
+    // punctuation, storage) and is hidden otherwise. No counter: a
     // terminal composer has no length limit, images are visible as chips,
     // and the closed ✎ tab already carries the held count.
     this.status = document.createElement("output");
@@ -1308,7 +1308,7 @@ export class Composer {
       // panel is actually allowed. The second is not optional: a percentage of
       // the page is a percentage of a box that may extend under the software
       // keyboard, and "Taller" then grows the panel past the screen and takes
-      // the chrome row — ⊕ ⌫ ➤ — with it (C2). The budget is measured off the
+      // the chrome row — ⊕ ⌫ ➤ — with it. The budget is measured off the
       // visible band by the page that supplies it.
       //
       // The budget bounds the WHOLE panel, so the textarea may have only what
@@ -1616,7 +1616,7 @@ export class Composer {
     this.attachmentFailures += 1;
     this.render();
   }
-  // Paste interception, two-stage (design §3.3): the event is captured only
+  // Paste interception, two-stage: the event is captured only
   // when at least one image FILE item is present, so a plain text paste — the
   // phone's only clipboard route into the terminal — is never intercepted. A
   // mixed clipboard keeps both halves; an allow-listed image stages; any
