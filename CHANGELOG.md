@@ -4,10 +4,35 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+## 0.1.1 — 2026-09-24
+
+### Added
+
+- Old releases are pruned after a successful install or rollback. Five are kept by default; use `--keep-releases <n>` or `PERSEA_KEEP_RELEASES` to change the count, or `--no-prune` to keep every release. The current and previous releases are never removed.
+- Each GitHub release includes a source archive, a checksum file and a build provenance attestation.
+- Issue templates and a code of conduct.
+
+### Changed
+
+- The installer keeps its deployment lock until every step it started has finished, including cancelled steps. Build steps run without access to the lock.
+- The installer refuses to upgrade an install that predates the first public release.
+
+### Removed
+
+- Migration and rollback tools for layouts that predate the first public release.
+
 ### Fixed
 
-- Fit the terminal font to the admitted session geometry on first open while preserving explicit font preferences.
-- Let workspace session chips use available pane width instead of truncating names inside a fixed-width toolbar.
+- On first open, the automatic font size now matches what Fit font gives. Before, a desktop could stay at 24px and overflow, and a phone could open at 9px. An explicit font choice still wins.
+- Workspace session chips show the session name instead of one letter.
+- A width refit could end the previous attachment with a fault instead of refitting it.
+- Changing the composer font no longer moves the draft's scroll position, and no longer interrupts a scroll the user has started.
+- The composer no longer keeps a height measured while the temporary focus font was applied, and auto-grow no longer skips a content measurement when an inset update is already pending.
+- When recording fails before a rotation starts, the rotation now reports the storage error instead of a generic failure.
+
+### Testing notes
+
+- Browser behavior was tested in desktop Chromium and WebKit, including phone-sized viewports. iOS keyboard behavior and low-end hardware were not tested on real devices.
 
 ## 0.1.0 — 2026-09-13
 
