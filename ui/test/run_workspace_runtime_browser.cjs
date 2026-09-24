@@ -1730,7 +1730,9 @@ async function main() {
       await trustedOpen(tab);
       await waitLive(tab);
       for (let line = 0; line < 40; line += 1) await control({ writeLiveAll: `SESSION_SWITCH-L${line}` });
-      await delay(150);
+      const outputReady = await tab.waitUntil((state) => SESSIONS.every((name) =>
+        cellOf(state, name)?.rows.includes("SESSION_SWITCH-L39")), 8_000);
+      assert(outputReady.state, `${id}: final fixture output was not painted in every pane`);
       await tab.evaluate(`(() => {
         for (const cell of document.querySelectorAll(".ws-cell")) {
           const session = cell.dataset.wsSession;
@@ -1827,7 +1829,11 @@ async function main() {
       const bSwitchPoint = await tokenTab.evaluate(`(() => { const e=document.querySelector('.ws-cell[data-ws-session="ws02"] .persea-unified-tag'); if(!e)return null; const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
       assert(bSwitchPoint, `${id}: pane B session tag is unavailable`);
       await tokenTab.trustedClick(bSwitchPoint);
-      await delay(100);
+      const rowDeadline = Date.now() + 5_000;
+      while (!await tokenTab.evaluate(`!!document.querySelector('.ws-cell[data-ws-session="ws02"] .persea-session-switcher__row[aria-label="Switch to ws07"]')`)) {
+        assert(Date.now() < rowDeadline, `${id}: pane B ws07 row did not arrive`);
+        await delay(15);
+      }
       const bRowPoint = await tokenTab.evaluate(`(() => { const c=document.querySelector('.ws-cell[data-ws-session="ws02"]'); const e=[...c.querySelectorAll('.persea-session-switcher__row')].find((n)=>n.getAttribute('aria-label')==='Switch to ws07'); if(!e)return null; e.scrollIntoView({block:'center'}); const r=e.getBoundingClientRect(); return {x:r.x+r.width/2,y:r.y+r.height/2}; })()`);
       assert(bRowPoint, `${id}: pane B ws07 row is unavailable`);
       await tokenTab.trustedClick(bRowPoint);
