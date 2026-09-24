@@ -748,13 +748,25 @@ persea_lock_deployment() {
   exec {PERSEA_DEPLOY_LOCK_FD}>>"$lock"
   umask "$caller_umask"
   # The transaction shell owns this descriptor through its EXIT/restoration
-  # traps. Synchronous steps inherit it so killing the shell cannot unlock a
-  # still-running step. Never explicitly unlock the shared open description.
-  # Detached children must close their copy; systemd starts services separately.
+  # traps. Trusted synchronous steps inherit it so killing the shell cannot
+  # unlock a still-running step. Privilege/build boundaries use the waiter below.
+  # Never explicitly unlock the shared open description.
   if ! flock --exclusive --nonblock "$PERSEA_DEPLOY_LOCK_FD"; then
     printf 'persea-terminal deploy: waiting for deployment lock (a surviving transaction child may still hold it)\n' >&2
     flock --exclusive "$PERSEA_DEPLOY_LOCK_FD"
   fi
+}
+
+persea_run_without_lock() {
+  # This trusted process keeps its inherited lock until the child exits, even
+  # after launcher death. close_fds revokes every inherited non-stdio descriptor
+  # before runuser or build code runs, including copies made by enclosing shells.
+  /usr/bin/python3 -c '
+import subprocess
+import sys
+result = subprocess.run(sys.argv[1:], close_fds=True)
+sys.exit(result.returncode if result.returncode >= 0 else 128 - result.returncode)
+' "$@"
 }
 
 persea_validate_keep_releases() {

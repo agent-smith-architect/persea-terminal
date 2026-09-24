@@ -71,9 +71,9 @@ validate_build_tool() {
     done
   fi
   if [[ $PERSEA_HERMETIC != 1 ]]; then
-    /usr/sbin/runuser -u "$PERSEA_FRONT_USER" -- /usr/bin/test -x "$candidate" ||
+    persea_run_without_lock /usr/sbin/runuser -u "$PERSEA_FRONT_USER" -- /usr/bin/test -x "$candidate" ||
       persea_die "$label tool candidate is not executable by UID $PERSEA_FRONT_UID: $candidate"
-    /usr/sbin/runuser -u "$PERSEA_FRONT_USER" -- /usr/bin/test -x "$canonical" ||
+    persea_run_without_lock /usr/sbin/runuser -u "$PERSEA_FRONT_USER" -- /usr/bin/test -x "$canonical" ||
       persea_die "$label tool target is not executable by UID $PERSEA_FRONT_UID: $canonical"
   fi
   printf '%s\n' "$candidate"
@@ -202,7 +202,7 @@ run_build() {
   )
   if [[ $PERSEA_HERMETIC == 1 ]]; then
     build_env+=("FAKE_STATE=${FAKE_STATE:-}" "FAKE_STAGE_PLANT=${FAKE_STAGE_PLANT:-0}")
-    /usr/bin/env -i "${build_env[@]}" /bin/bash -c '
+    persea_run_without_lock /usr/bin/env -i "${build_env[@]}" /bin/bash -c '
       real=$(/usr/bin/id -ru)
       effective=$(/usr/bin/id -u)
       if [[ $real != "$PERSEA_EXPECT_BUILD_UID" || $effective != "$PERSEA_EXPECT_BUILD_UID" ]]; then
@@ -212,7 +212,7 @@ run_build() {
       exec "$@"
     ' persea-build "$@"
   else
-    /usr/sbin/runuser -u "$PERSEA_FRONT_USER" -- /usr/bin/env -i "${build_env[@]}" /bin/bash -c '
+    persea_run_without_lock /usr/sbin/runuser -u "$PERSEA_FRONT_USER" -- /usr/bin/env -i "${build_env[@]}" /bin/bash -c '
       real=$(/usr/bin/id -ru)
       effective=$(/usr/bin/id -u)
       if [[ $real != "$PERSEA_EXPECT_BUILD_UID" || $effective != "$PERSEA_EXPECT_BUILD_UID" ]]; then
