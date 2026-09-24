@@ -484,7 +484,10 @@ func (e *Epoch) PTYBytes(data []byte) error {
 	if internalErr != nil {
 		return internalErr
 	}
-	if activity {
+	// A journal-backed writer already owns ordered output and replay. Scheduling
+	// presentation captures here races its generation refit against this epoch's
+	// old geometry witness. Explicit initial and row cuts still use the scheduler.
+	if activity && !e.egress.writerOwnsOutput {
 		if err := e.scheduler.Activity(); err != nil {
 			e.terminate(faultTerminalCause(err))
 			return e.Err()
@@ -728,7 +731,7 @@ func (e *Epoch) HandleFrame(frame Frame) error {
 		return internalErr
 	}
 	if complete {
-		if err := e.scheduler.Complete(retry); err != nil {
+		if err := e.scheduler.Complete(retry && !e.egress.writerOwnsOutput); err != nil {
 			e.terminate(faultTerminalCause(err))
 			return e.Err()
 		}
@@ -863,7 +866,7 @@ func (e *Epoch) abandonResize(active *activeCut, lease generationLease, cause er
 	active.cut.discardAll()
 	e.finishActiveLocked()
 	e.mu.Unlock()
-	if err := e.scheduler.Complete(len(released) > 0); err != nil {
+	if err := e.scheduler.Complete(len(released) > 0 && !e.egress.writerOwnsOutput); err != nil {
 		e.terminate(faultTerminalCause(err))
 		return e.Err()
 	}
