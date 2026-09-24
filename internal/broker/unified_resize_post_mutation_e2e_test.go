@@ -17,12 +17,12 @@ import (
 
 // Post-mutation failures must retain the committed geometry boundary.
 //
-// Before this ruling a logical-cap refusal happened inside geometry Commit,
+// If a logical-cap refusal happens inside geometry Commit,
 // AFTER the guarded resize command and witness recheck: tmux had already
-// changed while the durable journal geometry had not, and the broker reported
-// that as an operational non-mutation (resize_failed) and kept the attachment
-// live at the old geometry. The journal's capacity for the geometry record and
-// its commit is now reserved BEFORE the command is issued, so the same cap
+// changed while the durable journal geometry had not. Reporting that as an
+// operational non-mutation (resize_failed) would leave the attachment live
+// at the old geometry. The journal's capacity for the geometry record and
+// its commit is reserved BEFORE the command is issued, so the same cap
 // refuses the Fit with tmux untouched, the attachment live, and the generation
 // still eligible — which is the only state resize_failed may ever describe.
 //
@@ -33,9 +33,8 @@ import (
 // fault, unrelated to the Fit — so the verbatim ordering could never observe an
 // eligible generation after ANY correct fix. Filled after the attach, the pane
 // is idle until the Fit, and the Fit's own reservation is what meets the cap.
-// At the baseline commit this ordering is RED for the same root cause the
-// advisor reported: tmux at 80x36 behind a resize_failed.
-func TestAdvisorResizeFailureAfterTmuxMutationCannotKeepEpochLive(t *testing.T) {
+// A resize_failed result must not leave tmux at 80x36 with a live epoch.
+func TestResizeFailureAfterTmuxMutationCannotKeepEpochLive(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real tmux post-mutation resize regression test")
 	}

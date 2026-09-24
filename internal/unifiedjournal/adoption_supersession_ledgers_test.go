@@ -26,7 +26,7 @@ import (
 // Rotation's record-shaped holds keep their coupling (the rotation flow suite runs
 // unchanged alongside).
 
-const ledgersRed = "PSF-R1-LEDGERS-RED"
+const ledgersRed = "SUPERSESSION-LEDGERS-FAIL"
 
 // writeFramingHeavyStaleBirth writes one birth generation holding records
 // committed one-byte records — a framing-heavy shape — and
@@ -53,9 +53,9 @@ func writeFramingHeavyStaleBirth(t *testing.T, options OpenOptions, key PaneKey,
 	return info.Size()
 }
 
-// TestSupersessionPhysicalAllowanceIsSpentIndependentlyOfLogical is the
-// advisor's receipt verbatim: 128 one-byte records, the physical cap equal
-// to that stale file, and a 256-byte successor bootstrap. At 6cabafd the
+// TestSupersessionPhysicalAllowanceIsSpentIndependentlyOfLogical uses
+// 128 one-byte records, the physical cap equal
+// to that stale file, and a 256-byte successor bootstrap. Without independent ledgers the
 // bootstrap is refused with ErrPhysicalQuota because the physical slice
 // was capped to the 128-byte logical slice plus one record's framing.
 func TestSupersessionPhysicalAllowanceIsSpentIndependentlyOfLogical(t *testing.T) {

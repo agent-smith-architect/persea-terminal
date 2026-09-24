@@ -8,8 +8,8 @@ import (
 	"strconv"
 )
 
-// GET /api/preferences and PUT /api/preferences (design packet §5b, route
-// contract M4): ingress identity on every method, CSRF on the mutation
+// GET /api/preferences and PUT /api/preferences require ingress identity
+// on every method, CSRF on the mutation
 // (the secure wrapper), Cache-Control: no-store on every response, strict
 // method and content type, bounded body before decode, closed schema, fixed
 // error text that never echoes the request.

@@ -16,9 +16,8 @@ import (
 // never a sentinel inside the range and never the absence of the key, so no
 // number is spent on it and "never chosen" is not "deliberately chose 14".
 //
-// Every case here speaks JSON rather than the Go field, so this file compiles
-// against the pre-ruling shape too and its failures are assertion failures with
-// the observed bytes, not compile errors.
+// Every case here speaks JSON rather than the Go field, so failures report
+// the observed wire bytes rather than depending on the internal field shape.
 
 // f1Preferences builds a Preferences value the way a request body does.
 func f1Preferences(t *testing.T, body string) Preferences {

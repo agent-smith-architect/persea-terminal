@@ -71,7 +71,7 @@ func ergoRequestMetered(t *testing.T, server *Server, method, target, mediaType 
 	return w
 }
 
-// ergoRedCases are the M4 clauses every ergonomics route must refuse the same
+// ergoRedCases are the route security clauses every ergonomics route must refuse the same
 // way, expressed as request mutations and the status they must produce.
 type ergoRedCase struct {
 	name   string
@@ -100,7 +100,7 @@ func ergoMutationRedCases(cfg config.Front) []ergoRedCase {
 	)
 }
 
-// assertBoundedRefusal checks the response half of M4: the fixed status, the
+// assertBoundedRefusal checks the response half of the route contract: the fixed status, the
 // no-store header, and an error body that carries none of the request bytes.
 func assertBoundedRefusal(t *testing.T, name string, w *httptest.ResponseRecorder, status int, secrets ...string) {
 	t.Helper()

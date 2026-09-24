@@ -32,7 +32,7 @@ func TestAttachmentErrorClassesAreDisjointCanonicalAndFailClosed(t *testing.T) {
 			t.Fatalf("unknown code %q did not fail closed", unknown)
 		}
 	}
-	// The operational class is the closed set the design ruling named: one
+	// The operational class is a closed set describing one
 	// request's outcome, never a verdict on the attachment.
 	want := []string{"input_refused", "observe_mode", "resize_failed", "resize_rejected"}
 	got := OperationalAttachmentCodes()

@@ -91,7 +91,7 @@ func TestPreferencesAPIContract(t *testing.T) {
 		t.Fatalf("update=%d body=%s", updated.Code, updated.Body.String())
 	}
 
-	// SF7/M4 red cases: each clause has a refusal with fixed bounded text,
+	// Route refusal cases: each clause has a refusal with fixed bounded text,
 	// no-store, and no echo of the (secret-bearing) request.
 	validBody := preferencesBody("gruvbox-dark", 18, "null")
 	for _, tc := range ergoMutationRedCases(cfg) {

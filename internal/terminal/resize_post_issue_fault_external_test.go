@@ -14,9 +14,8 @@ import (
 // durable journal do not. The epoch must fault — publishing END, refusing
 // further frames, reporting a reopen verdict — and must NOT release the held
 // bytes as LIVE output of the old cut, because they would be rendered under a
-// geometry that is no longer true. Before this ruling every resize error took
-// the operational path, which is exactly how a post-mutation journal failure
-// left a live attachment at the old geometry.
+// geometry that is no longer true. Taking the operational path here would
+// leave a live attachment at the old geometry after a journal failure.
 func TestResizeUntypedSourceFailureFaultsTheEpoch(t *testing.T) {
 	for _, variant := range []struct {
 		name  string

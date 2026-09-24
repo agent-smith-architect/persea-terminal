@@ -209,7 +209,7 @@ func (*unifiedAttachmentFrameWriter) OwnsTerminalOutput() {}
 // attachment through the same teardown every verdict takes, and reaches the
 // front door as a broker close it already classifies as a transient
 // reconnect. Without this bound the verdict — and the attachment's end — sat
-// behind the wedged write until the peer chose to read again (post-ship F1).
+// behind the wedged write until the peer chose to read again.
 // The front door's own WebSocket write timeout is an order of magnitude
 // longer, so this bound is the one that acts.
 const unifiedSubscriberCloseGrace = 1 * time.Second

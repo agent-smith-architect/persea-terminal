@@ -227,10 +227,9 @@ func b1SubscriberOf(effects *UnifiedDevPaneEffects, key unifiedjournal.PaneKey) 
 }
 
 // TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable is regression test
-// B1 verbatim, with S1's publication-latency bound and sibling subscriber
-// count assertions folded in (the lifetime test supplies the required
-// FW2 form). At e52703d the wedged attachment gets neither the triggering
-// event nor a close: step 4 times out waiting for the typed close.
+// A lagged subscriber closes within the publication-latency bound while
+// sibling subscriber counts remain unchanged. A wedged attachment must
+// receive a typed close without receiving the triggering event.
 func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T) {
 	const panes = 6
 	const wedgedIndex = panes - 1
@@ -338,12 +337,10 @@ func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T)
 		}
 	}
 
-	// 4. The wedged writer stays wedged: the peer never drains. Post-ship F1
-	// (advisor review of fc59cbc): the eviction closed the subscriber's tail,
-	// but the causal writer was parked inside writeEventLocked holding
-	// writer.mu on a downstream write the peer would never complete, so the
-	// typed close and the attachment's end waited for the peer — at c4c1dc0
-	// this step hangs until Go's timeout. The broker must end the attachment
+	// 4. The wedged writer stays wedged: the peer never drains. Eviction closes
+	// the subscriber's tail, but the causal writer holds writer.mu inside
+	// writeEventLocked on a downstream write the peer will never complete.
+	// The broker must end the attachment
 	// itself within a bound that does not depend on the peer, and must never
 	// have delivered the triggering event on the old attachment.
 	select {

@@ -2105,8 +2105,8 @@ func TestTornGeometryCommitCannotMintCapacity(t *testing.T) {
 		t.Fatalf("%s combined live charge=%d want=%d", tornCommitRed, want, 2*geometryRecordCost)
 	}
 
-	// Both torn generations land in one realm, which is the escape the reviewer
-	// found: repeat it and a realm keeps handing back capacity for durable bytes
+	// Both torn generations land in one realm. Repeating this must not
+	// hand back capacity for durable bytes
 	// that are still on disk.
 	options := journalOptions(t)
 	fresh := freshRuntime(t, options)

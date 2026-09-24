@@ -43,7 +43,7 @@ func TestRotationOrdinaryPredecessorOutputDoesNotSpendR1WhileHeld(t *testing.T) 
 	}
 }
 
-// T2 — FINDING candidate. After Abort the credit is armed; the 4R replay may
+// After Abort the credit is armed; the 4R replay may
 // legally use all 16 records with few bytes. Ordinary output resumes on the
 // predecessor as soon as the holder is re-committed (4R), i.e. BEFORE
 // capacity.Release(); it must fall through to ordinary room, not be refused.
@@ -111,7 +111,7 @@ func TestRotationRecordCapNeverTouchesUnrelatedPanes(t *testing.T) {
 	}
 }
 
-// T4 — FINDING candidate (regression vs 49a7b03). A capacity that retains R1
+// A capacity that retains R1
 // after materialization must still refuse a SECOND BeginRotatedPane: S/R2/R3
 // were transferred to the first successor, so a second materialization would
 // admit a generation with no slot, no header room check and no forward credit.

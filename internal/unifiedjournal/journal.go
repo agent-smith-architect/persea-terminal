@@ -2050,7 +2050,7 @@ func (realm *Realm) Append(key PaneKey, payload []byte) (Record, error) {
 			}
 		}
 		// The adoption allowance is two independent, proof-derived ledgers
-		// (PSF-R1): its physical hold is spent up to this append's exact
+		// whose physical hold is spent up to this append's exact
 		// physical cost whatever the logical hold contributed. A stale
 		// generation that was physical-full from framing while holding
 		// little payload refunds exactly that shape, and coupling the two

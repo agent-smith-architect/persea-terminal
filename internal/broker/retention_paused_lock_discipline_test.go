@@ -8,9 +8,7 @@ import (
 	"persea-terminal/internal/unifiedjournal"
 )
 
-// Post-ship correction PSF-R2 (2026-08-27): the race gate reported the
-// geometry owner stress test's mu-guarded read of pane.paused
-// (unified_geometry_cancel_test.go, settle loop) racing the manager's bare
+// A geometry owner's mu-guarded read of pane.paused races a bare manager
 // write in processBoundary's pause_end case. The pane runtime is
 // manager-owned, but paused is observed from outside the manager under
 // runtime.mu, so the manager's writes must be published under that mutex.

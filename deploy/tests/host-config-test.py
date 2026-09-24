@@ -790,7 +790,7 @@ class HostConfigTest(unittest.TestCase):
         return future
 
     def test_release_record_loading_pins_the_bundled_generator(self) -> None:
-        # Cross-version pin for advisor finding R2 (2026-08-21): rollback
+        # Cross-version generator pin: rollback
         # verified a target release with its bundled generator but then loaded
         # its realm records with the CURRENT tree's `records` parser. The
         # NUL-record stream is a deploy ABI; a future parser that refuses or
@@ -812,7 +812,7 @@ class HostConfigTest(unittest.TestCase):
             # tree: its bundled generator speaks for it.
             result = self.verify_release_via_lib(future, release)
             self.assertEqual(result.returncode, 0, msg=result.stderr.decode())
-            # (b) The advisor regression test: record loading under the same future
+            # (b) Record loading under the same future
             # tree must select the bundled generator too, so it still yields
             # the release's own realm inventory.
             result = self.load_release_manifest_via_lib(future, release)
