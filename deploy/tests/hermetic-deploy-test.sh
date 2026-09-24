@@ -993,77 +993,21 @@ digest_after=$(find "$ROOT/opt/persea-terminal" "$ROOT/etc/systemd/system" -type
 [[ $digest_before == "$digest_after" && $(readlink -- "$ROOT/opt/persea-terminal/current") == "$current_before" ]] || fail 'repeated install drifted'
 pass 'repeated install is deterministic and idempotent'
 
-# Model the one-time upgrade from the pre-manifest production package without
-# mutating the portable release that the installer should select.
-LEGACY_ROOT=$(new_root)
-LEGACY_STATE="$TMP/legacy-state"
-mkdir -m 0700 "$LEGACY_STATE"
-mkdir -m 0755 "$LEGACY_ROOT/etc/systemd/system"
-cp -a -- "$ROOT/opt/persea-terminal" "$LEGACY_ROOT/opt/persea-terminal"
-cp -a -- "$ROOT/etc/systemd/system/." "$LEGACY_ROOT/etc/systemd/system/"
-legacy_name=legacy-fixture-q3
-legacy_release="$LEGACY_ROOT/opt/persea-terminal/releases/$legacy_name"
-chmod u+w -- "$LEGACY_ROOT/opt/persea-terminal/releases"
-cp -a -- "$LEGACY_ROOT/opt/persea-terminal/$current_before" "$legacy_release"
-chmod -R u+w -- "$legacy_release"
-rm -f -- \
-  "$legacy_release/config/host.json" \
-  "$legacy_release/config/resolved-host.json" \
-  "$legacy_release/config/managed-units" \
-  "$legacy_release/libexec/host-config.py"
-(cd "$legacy_release" && while IFS= read -r path; do sha256sum "$path"; done < <(find bin libexec ui config units -type f -printf '%p\n' | LC_ALL=C sort) >MANIFEST.sha256)
-find "$legacy_release" -type d -exec chmod 0555 {} +
-chmod 0555 "$legacy_release/bin/persea-terminal"
-find "$legacy_release" -type f ! -path "$legacy_release/bin/persea-terminal" -exec chmod 0444 {} +
-ln -s -- "releases/$legacy_name" "$LEGACY_ROOT/opt/persea-terminal/.current.legacy"
-mv -Tf -- "$LEGACY_ROOT/opt/persea-terminal/.current.legacy" "$LEGACY_ROOT/opt/persea-terminal/current"
-rm -f -- "$LEGACY_ROOT/opt/persea-terminal/previous"
-legacy_front_unit_hash=$(sha256sum "$legacy_release/units/persea-terminal-front.service" | awk '{print $1}')
-
-legacy_failure_status=0
-env "${hermetic_env[@]}" "FAKE_STATE=$LEGACY_STATE" "PERSEA_DEPLOY_ROOT=$LEGACY_ROOT" \
-  FAKE_SIGNAL_DAEMON_RELOAD=TERM "$DEPLOY_DIR/install.sh" >"$TMP/legacy-bridge-failure.out" 2>&1 || legacy_failure_status=$?
-[[ $legacy_failure_status == 143 ]] || fail "legacy bridge interrupted install returned $legacy_failure_status instead of 143"
-[[ $(readlink -- "$LEGACY_ROOT/opt/persea-terminal/current") == "releases/$legacy_name" && ! -e $LEGACY_ROOT/opt/persea-terminal/previous ]] ||
-  fail 'legacy bridge interrupted install did not restore package pointers'
-[[ $(sha256sum "$LEGACY_ROOT/etc/systemd/system/persea-terminal-front.service" | awk '{print $1}') == "$legacy_front_unit_hash" ]] ||
-  fail 'legacy bridge interrupted install did not restore exact legacy unit bytes'
-pass 'interrupted first portable upgrade restores the untouched legacy release and exact units'
-
-rm -f -- "$LEGACY_STATE/daemon-signal-sent"
-env "${hermetic_env[@]}" "FAKE_STATE=$LEGACY_STATE" "PERSEA_DEPLOY_ROOT=$LEGACY_ROOT" "$DEPLOY_DIR/install.sh" >/dev/null
-[[ $(readlink -- "$LEGACY_ROOT/opt/persea-terminal/current") == "$current_before" ]] || fail 'legacy upgrade did not select the portable release'
-legacy_bridge_target=$(readlink -- "$LEGACY_ROOT/opt/persea-terminal/previous")
-[[ $legacy_bridge_target == releases/bridge-*-* ]] || fail 'legacy upgrade did not retain an immutable portable rollback bridge'
-legacy_bridge_release="$LEGACY_ROOT/opt/persea-terminal/$legacy_bridge_target"
-cmp -s "$legacy_release/bin/persea-terminal" "$legacy_bridge_release/bin/persea-terminal" || fail 'rollback bridge changed the legacy executable'
-[[ -f $legacy_bridge_release/config/host.json && -f $legacy_bridge_release/config/managed-units ]] || fail 'rollback bridge lacks portable release metadata'
-env "${hermetic_env[@]}" "FAKE_STATE=$LEGACY_STATE" "PERSEA_DEPLOY_ROOT=$LEGACY_ROOT" "$DEPLOY_DIR/rollback.sh" >/dev/null
-[[ $(readlink -- "$LEGACY_ROOT/opt/persea-terminal/current") == "$legacy_bridge_target" ]] || fail 'explicit rollback did not select the legacy bridge'
-env "${hermetic_env[@]}" "FAKE_STATE=$LEGACY_STATE" "PERSEA_DEPLOY_ROOT=$LEGACY_ROOT" "$DEPLOY_DIR/verify.sh" >/dev/null
-pass 'first portable upgrade creates a strict bridge that survives explicit rollback verification'
-
-env "${hermetic_env[@]}" "FAKE_STATE=$LEGACY_STATE" "PERSEA_DEPLOY_ROOT=$LEGACY_ROOT" "$DEPLOY_DIR/rollback.sh" >/dev/null
-[[ $(readlink -- "$LEGACY_ROOT/opt/persea-terminal/current") == "$current_before" ]] || fail 'second explicit rollback did not return to the portable release'
-python3 - "$LEGACY_ROOT/etc/persea-terminal/host.json" <<'PY'
-import json, sys
-path = sys.argv[1]
-value = json.load(open(path, encoding="utf-8"))
-value["realms"][0]["display_name"] = "Changed Fixture Z8"
-with open(path, "w", encoding="utf-8") as handle:
-    json.dump(value, handle, separators=(",", ":"))
-    handle.write("\n")
-PY
-ln -s -- "releases/$legacy_name" "$LEGACY_ROOT/opt/persea-terminal/.current.legacy-drift"
-mv -Tf -- "$LEGACY_ROOT/opt/persea-terminal/.current.legacy-drift" "$LEGACY_ROOT/opt/persea-terminal/current"
-rm -f -- "$LEGACY_ROOT/opt/persea-terminal/previous"
-if env "${hermetic_env[@]}" "FAKE_STATE=$LEGACY_STATE" "PERSEA_DEPLOY_ROOT=$LEGACY_ROOT" "$DEPLOY_DIR/install.sh" >"$TMP/legacy-config-drift.out" 2>&1; then
-  fail 'legacy first-upgrade configuration drift was accepted'
-fi
-grep -Fq 'migrated host manifest does not reproduce' "$TMP/legacy-config-drift.out" || fail 'legacy configuration-drift rejection lacked its exact witness'
-[[ $(readlink -- "$LEGACY_ROOT/opt/persea-terminal/current") == "releases/$legacy_name" && ! -e $LEGACY_ROOT/opt/persea-terminal/previous ]] ||
-  fail 'legacy configuration-drift rejection mutated package pointers'
-pass 'first portable upgrade rejects simultaneous realm changes before lifecycle mutation'
+# Each required public-release marker must fail closed before lifecycle writes.
+for marker in config/host.json config/resolved-host.json config/managed-units MANIFEST.sha256; do
+  chmod u+w -- "$(dirname -- "$release_path/$marker")"
+  mv -- "$release_path/$marker" "$TMP/public-release-marker"
+  : >"$FAKE_STATE/systemctl.log"
+  if env "${hermetic_env[@]}" "PERSEA_DEPLOY_ROOT=$ROOT" "$DEPLOY_DIR/install.sh" >"$TMP/unsupported-release.out" 2>&1; then
+    fail "unsupported release without $marker was accepted"
+  fi
+  grep -Fq 'install predates the first public release' "$TMP/unsupported-release.out" || fail 'unsupported layout lacked its refusal message'
+  [[ $(readlink -- "$ROOT/opt/persea-terminal/current") == "$current_before" ]] || fail 'unsupported layout changed current'
+  [[ ! -s $FAKE_STATE/systemctl.log ]] || fail 'unsupported layout reached lifecycle commands'
+  mv -- "$TMP/public-release-marker" "$release_path/$marker"
+  chmod 0555 -- "$(dirname -- "$release_path/$marker")"
+done
+pass 'unsupported release shapes are refused before lifecycle mutation'
 
 for app_unit in persea-terminal-broker-desk-a7.service persea-terminal-broker-lab-k4.service persea-terminal-front.service; do
   ! grep -n -E '^PrivateTmp=' "$candidate_a/units/$app_unit" >/dev/null || fail 'application unit uses PrivateTmp'

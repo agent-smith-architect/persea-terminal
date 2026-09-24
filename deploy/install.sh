@@ -97,7 +97,7 @@ release_root="$install_root/releases"
 unit_root=$(persea_path "$PERSEA_UNIT_ROOT")
 persea_require_safe_directory "$(dirname -- "$install_root")"
 persea_require_safe_directory "$install_root" 1
-if [[ -e $install_root/current ]]; then
+if [[ -e $install_root/current || -L $install_root/current ]]; then
   [[ -L $install_root/current ]] || persea_die 'unsafe pre-existing current target'
   old_target=$(readlink -- "$install_root/current")
   [[ $old_target == releases/* && $old_target != *'..'* && -d $install_root/$old_target && ! -L $install_root/$old_target ]] || persea_die 'unsafe current symlink target'
@@ -113,21 +113,12 @@ if [[ -e $install_root/previous || -L $install_root/previous ]]; then
   old_previous_present=1
 fi
 persea_require_safe_directory "$(dirname -- "$unit_root")"
-old_is_legacy=0
 if [[ -n $old_target ]]; then
   old_release="$install_root/$old_target"
-  if [[ -f $old_release/config/host.json && ! -L $old_release/config/host.json ]]; then
-    persea_verify_release "$old_release"
-    persea_assert_installed_units "$old_release" "$unit_root"
-    persea_read_release_inventory "$old_release" old_units
-  else
-    old_is_legacy=1
-    old_units=("${new_units[@]}")
-    persea_verify_legacy_release "$old_release"
-    persea_assert_legacy_installed_units "$old_release" "$unit_root" "${old_units[@]}"
-    legacy_installed_count=$(find "$unit_root" -mindepth 1 -maxdepth 1 \( -name 'persea-terminal-broker-*.service' -o -name 'persea-terminal-front.service' \) | wc -l)
-    [[ $legacy_installed_count == "${#old_units[@]}" ]] || persea_die 'legacy installed application-unit inventory is ambiguous'
-  fi
+  persea_require_public_release "$old_release"
+  persea_verify_release "$old_release"
+  persea_assert_installed_units "$old_release" "$unit_root"
+  persea_read_release_inventory "$old_release" old_units
 else
   old_units=()
   ((old_previous_present == 0)) || persea_die 'previous release exists without a current package'
@@ -236,10 +227,6 @@ run_build /bin/bash -c 'cd "$1" && CGO_ENABLED=1 CC=/usr/bin/clang "$2" build -t
 
 # Revoke the build UID's pathname access before root validates or imports artifacts.
 chmod 0700 -- "$build_root"
-# The UI payload THIS tree produces. The installable-shell assets (session memory) belong
-# to a new release only: the legacy rollback bridge below still copies the old
-# release's own four assets, because a release is judged by its own artifacts and
-# must never be asked for files it never shipped.
 new_release_ui_assets=(index.html app.js app.css xterm.css app.js.gz app.css.gz xterm.css.gz THIRD_PARTY_NOTICES.txt manifest.webmanifest icon-192.png icon-512.png apple-touch-icon.png)
 for asset in "${new_release_ui_assets[@]}"; do
   [[ -f $src/ui/dist/$asset && ! -L $src/ui/dist/$asset ]] || persea_die "fresh UI build is missing regular $asset"
@@ -309,37 +296,6 @@ release_id="$head-$host_hash"
 release_dir=
 import_release_stage "$stage" "$release_id" release_dir
 
-recoverable_target=$old_target
-if ((old_is_legacy)); then
-  legacy_config_count=$(find "$old_release/config" -maxdepth 1 -type f \( -name 'front.json' -o -name 'broker-*.json' \) | wc -l)
-  [[ $legacy_config_count == $((${#new_broker_units[@]} + 1)) ]] || persea_die 'legacy release application-config inventory is ambiguous'
-  cmp -s "$old_release/config/front.json" "$rendered/config/front.json" || persea_die 'migrated host manifest does not reproduce the legacy front configuration'
-  for unit in "${new_broker_units[@]}"; do
-    realm_id=${unit#persea-terminal-broker-}; realm_id=${realm_id%.service}
-    cmp -s "$old_release/config/broker-$realm_id.json" "$rendered/config/broker-$realm_id.json" ||
-      persea_die "migrated host manifest does not reproduce legacy broker configuration: $realm_id"
-  done
-
-  bridge_stage="$build_root/bridge-stage"
-  mkdir -m 0700 -- "$bridge_stage" "$bridge_stage/bin" "$bridge_stage/ui" "$bridge_stage/libexec" "$bridge_stage/config" "$bridge_stage/units"
-  cp -- "$old_release/bin/persea-terminal" "$bridge_stage/bin/persea-terminal"
-  # The bridge carries the OLD release's binary and the OLD release's assets:
-  # its UI payload is whatever that release shipped, never this tree's list.
-  for asset in index.html app.js app.css xterm.css; do cp -- "$old_release/ui/$asset" "$bridge_stage/ui/$asset"; done
-  cp -- "$old_release/libexec/probe-unix.py" "$bridge_stage/libexec/probe-unix.py"
-  cp -- "$SCRIPT_DIR/host-config.py" "$bridge_stage/libexec/host-config.py"
-  cp -a -- "$rendered/config/." "$bridge_stage/config/"
-  cp -a -- "$rendered/units/." "$bridge_stage/units/"
-  finalize_release_stage "$bridge_stage"
-  read -r legacy_manifest_hash _ < <(sha256sum "$old_release/MANIFEST.sha256")
-  [[ $legacy_manifest_hash =~ ^[0-9a-f]{64}$ ]] || persea_die 'cannot derive legacy rollback identity'
-  bridge_id="bridge-${legacy_manifest_hash:0:16}-$host_hash"
-  bridge_release_dir=
-  import_release_stage "$bridge_stage" "$bridge_id" bridge_release_dir
-  recoverable_target=${bridge_release_dir#"$install_root/"}
-  [[ $recoverable_target == releases/* ]] || persea_die 'legacy rollback bridge escaped the install root'
-fi
-
 declare -A old_unit_set=() new_unit_set=()
 for unit in "${old_units[@]}"; do old_unit_set[$unit]=1; done
 for unit in "${new_units[@]}"; do new_unit_set[$unit]=1; done
@@ -351,7 +307,7 @@ changed_broker_units=()
 unchanged_broker_units=()
 for unit in "${new_broker_units[@]}"; do
   realm_id=${unit#persea-terminal-broker-}; realm_id=${realm_id%.service}
-  if ((old_is_legacy == 0)) && [[ -n $old_target && -n ${old_unit_set[$unit]+x} ]] &&
+  if [[ -n $old_target && -n ${old_unit_set[$unit]+x} ]] &&
     cmp -s "$install_root/$old_target/bin/persea-terminal" "$release_dir/bin/persea-terminal" &&
     cmp -s "$install_root/$old_target/units/$unit" "$release_dir/units/$unit" &&
     cmp -s "$install_root/$old_target/config/broker-$realm_id.json" "$release_dir/config/broker-$realm_id.json"; then
@@ -387,11 +343,7 @@ restore_install_state() {
       systemctl disable "${transition_units[@]}" || cleanup_rc=1
     fi
     if [[ -n $old_target ]]; then
-      if ((old_is_legacy)); then
-        persea_install_legacy_units "$install_root/$old_target" "$unit_root" "${old_units[@]}" || cleanup_rc=1
-      else
-        persea_install_release_units "$install_root/$old_target" "$unit_root" || cleanup_rc=1
-      fi
+      persea_install_release_units "$install_root/$old_target" "$unit_root" || cleanup_rc=1
       persea_remove_installed_units "$unit_root" "${new_only_units[@]}" || cleanup_rc=1
     else
       persea_remove_installed_units "$unit_root" "${transition_units[@]}" || cleanup_rc=1
@@ -417,11 +369,7 @@ restore_install_state() {
       done
     fi
     if [[ -n $old_target ]]; then
-      if ((old_is_legacy)); then
-        persea_assert_legacy_installed_units "$install_root/$old_target" "$unit_root" "${old_units[@]}" || cleanup_rc=1
-      else
-        persea_assert_installed_units "$install_root/$old_target" "$unit_root" || cleanup_rc=1
-      fi
+      persea_assert_installed_units "$install_root/$old_target" "$unit_root" || cleanup_rc=1
     else
       persea_assert_no_installed_units "$unit_root" || cleanup_rc=1
     fi
@@ -476,7 +424,7 @@ ln -s -- "$new_target" "$current_new"
 if [[ -n $old_target ]]; then
   previous_new="$install_root/.previous.new.$$"
   temporary_targets+=("$previous_new")
-  ln -s -- "$recoverable_target" "$previous_new"
+  ln -s -- "$old_target" "$previous_new"
   mv -Tf -- "$previous_new" "$install_root/previous"
 fi
 mv -Tf -- "$current_new" "$install_root/current"
