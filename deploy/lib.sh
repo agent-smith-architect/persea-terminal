@@ -657,7 +657,7 @@ persea_prepare_evidence_root() {
 }
 
 persea_verify_release_metadata() {
-  local release=$1 allow_legacy=${2:-0} expected_owner expected_group path mode owner group links count hash relative
+  local release=$1 expected_owner expected_group path mode owner group links count hash relative
   local -a manifest_paths
   local -A seen_paths
   [[ -d $release && ! -L $release ]] || persea_die "release is not a real directory: $release"
@@ -707,8 +707,16 @@ persea_verify_release_metadata() {
     python3 "$PERSEA_RELEASE_GENERATOR" verify-release "$release/config/host.json" "$release" ||
       persea_die 'release host snapshot and generated files disagree'
   else
-    [[ $allow_legacy == 1 ]] || persea_die 'release host snapshot is missing'
+    persea_die 'release host snapshot is missing'
   fi
+}
+
+persea_require_public_release() {
+  local release=$1 relative
+  for relative in config/host.json config/resolved-host.json config/managed-units MANIFEST.sha256; do
+    [[ -f $release/$relative && ! -L $release/$relative ]] ||
+      persea_die 'install predates the first public release (0.1.0) or lacks its required release shape; unsupported'
+  done
 }
 
 persea_verify_release() {
@@ -716,24 +724,6 @@ persea_verify_release() {
   [[ -d $release && ! -L $release ]] || persea_die "release is not a real directory: $release"
   (cd "$release" && sha256sum -c MANIFEST.sha256 >/dev/null) || persea_die "release manifest mismatch: $release"
   persea_verify_release_metadata "$release"
-}
-
-persea_verify_legacy_release() {
-  local release=$1 relative
-  local -a required=(
-    bin/persea-terminal
-    ui/index.html ui/app.js ui/app.css ui/xterm.css
-    libexec/probe-unix.py
-    config/front.json
-    units/persea-terminal-front.service units/persea-terminal-tailscaled.service
-  )
-  [[ -d $release && ! -L $release && ! -e $release/config/host.json && ! -L $release/config/host.json ]] ||
-    persea_die 'legacy release shape is ambiguous'
-  (cd "$release" && sha256sum -c MANIFEST.sha256 >/dev/null) || persea_die "legacy release manifest mismatch: $release"
-  persea_verify_release_metadata "$release" 1
-  for relative in "${required[@]}"; do
-    [[ -f $release/$relative && ! -L $release/$relative ]] || persea_die "legacy release payload is missing or unsafe: $relative"
-  done
 }
 
 persea_validate_managed_unit_name() {
@@ -814,40 +804,6 @@ persea_install_release_units() {
   for unit in "${release_units[@]}"; do
     mv -Tf -- "$unit_root/.${unit}.new.$$" "$unit_root/$unit"
   done
-}
-
-persea_assert_legacy_installed_units() {
-  local release=$1 unit_root=$2 unit expected_owner expected_group owner group mode
-  shift 2
-  persea_require_safe_directory "$unit_root"
-  expected_owner=$(persea_expected_root_owner)
-  expected_group=0
-  [[ $PERSEA_HERMETIC == 1 ]] && expected_group=$(id -g)
-  for unit in "$@"; do
-    persea_validate_managed_unit_name "$unit" || persea_die "unsafe legacy managed unit: $unit"
-    [[ -f $release/units/$unit && ! -L $release/units/$unit ]] || persea_die "legacy release unit is missing: $unit"
-    [[ -f $unit_root/$unit && ! -L $unit_root/$unit ]] || persea_die "legacy installed unit is missing or unsafe: $unit"
-    cmp -s "$release/units/$unit" "$unit_root/$unit" || persea_die "legacy installed unit drift: $unit"
-    read -r owner group mode < <(stat -Lc '%u %g %a' -- "$unit_root/$unit")
-    [[ $owner == "$expected_owner" && $group == "$expected_group" && $mode == 444 ]] || persea_die "legacy installed unit metadata drift: $unit"
-  done
-}
-
-persea_install_legacy_units() {
-  local release=$1 unit_root=$2 unit unit_new
-  shift 2
-  persea_require_safe_directory "$unit_root"
-  for unit in "$@"; do
-    persea_validate_managed_unit_name "$unit" || persea_die "unsafe legacy managed unit: $unit"
-    unit_new="$unit_root/.${unit}.new.$$"
-    temporary_targets+=("$unit_new")
-    if [[ $PERSEA_HERMETIC == 1 ]]; then
-      install -m 0444 "$release/units/$unit" "$unit_new"
-    else
-      install -o root -g root -m 0444 "$release/units/$unit" "$unit_new"
-    fi
-  done
-  for unit in "$@"; do mv -Tf -- "$unit_root/.${unit}.new.$$" "$unit_root/$unit"; done
 }
 
 persea_remove_installed_units() {

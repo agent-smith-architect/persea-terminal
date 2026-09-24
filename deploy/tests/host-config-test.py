@@ -15,7 +15,6 @@ from pathlib import Path
 DEPLOY = Path(__file__).resolve().parents[1]
 PROJECT = DEPLOY.parent
 HELPER = DEPLOY / "host-config.py"
-LEGACY = DEPLOY / "legacy-migrate.py"
 
 
 def fixture() -> dict:
@@ -75,21 +74,6 @@ class HostConfigTest(unittest.TestCase):
     def run_helper(self, *args: object, success: bool = True) -> subprocess.CompletedProcess[bytes]:
         result = subprocess.run(
             ["python3", os.fspath(HELPER), *(os.fspath(value) for value in args)],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-        )
-        self.assertEqual(
-            result.returncode == 0,
-            success,
-            msg=f"stdout={result.stdout!r} stderr={result.stderr!r}",
-        )
-        return result
-
-    def run_legacy(self, *args: object, success: bool = True) -> subprocess.CompletedProcess[bytes]:
-        result = subprocess.run(
-            ["python3", os.fspath(LEGACY), *(os.fspath(value) for value in args)],
-            env={**os.environ, "PERSEA_MIGRATION_HERMETIC": "1"},
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             check=False,
@@ -877,86 +861,6 @@ class HostConfigTest(unittest.TestCase):
             self.assertIn(b"host manifest parser returned an incomplete record stream", result.stderr)
         finally:
             self.unseal_release(release)
-
-    def legacy_fixture(self) -> tuple[Path, Path, Path, Path, Path, Path, Path]:
-        # Historical migration data is immutable and deliberately cannot be
-        # produced by the current serving renderer.
-        historical = Path(__file__).parent / "fixtures/pre-unified-host"
-        manifest = self.root / "source-host.json"
-        shutil.copyfile(historical / "source-host.json", manifest)
-        release = self.root / "legacy-release"
-        shutil.copytree(historical / "release", release)
-        # A legacy (pre-manifest) release predates the preferences and
-        # snippet stores; the migrator fingerprints that era's exact front
-        # config, so the synthetic release must not carry the later keys.
-        front_path = release / "config/front.json"
-        front = json.loads(front_path.read_text(encoding="utf-8"))
-        for key in ("preferences_store_path", "snippet_store_path", "workspace_store_path", "keyboard_preferences_store_path"):
-            front.pop(key)
-        front_path.write_text(json.dumps(front, separators=(",", ":")), encoding="utf-8")
-        unit_root = self.root / "units"
-        unit_root.mkdir()
-        for unit in json.loads((release / "config/resolved-host.json").read_text(encoding="utf-8"))["managed_units"]:
-            (unit_root / unit).write_bytes((release / "units" / unit).read_bytes())
-        accounts = self.write(
-            {
-                "users": {"termop_q7": 42001, "tmuxbot_k4": 42002},
-                "groups": {"termshare_x9": {"gid": 42003, "members": ["termop_q7", "tmuxbot_k4"]}},
-            },
-            "accounts.json",
-        )
-        main_status = self.write(
-            {"BackendState": "Running", "Self": {"DNSName": "console.testing-f8.ts.net."}, "MagicDNSSuffix": "testing-f8.ts.net"},
-            "main-status.json",
-        )
-        sidecar_status = self.write(
-            {
-                "BackendState": "Running",
-                "Self": {"DNSName": "terminal-sidecar.testing-f8.ts.net.", "Tags": ["tag:terminal-service"]},
-                "MagicDNSSuffix": "testing-f8.ts.net",
-            },
-            "sidecar-status.json",
-        )
-        sidecar_prefs = self.write({"AdvertiseServices": ["svc:terminal"]}, "sidecar-prefs.json")
-        return manifest, release, unit_root, accounts, main_status, sidecar_status, sidecar_prefs
-
-    def test_legacy_migration_round_trip_is_exact_and_synthetic(self) -> None:
-        source, release, unit_root, accounts, main_status, sidecar_status, sidecar_prefs = self.legacy_fixture()
-        output = self.root / "migrated.json"
-        self.run_legacy(
-            "--release", release,
-            "--unit-root", unit_root,
-            "--main-status", main_status,
-            "--sidecar-status", sidecar_status,
-            "--sidecar-prefs", sidecar_prefs,
-            "--accounts-json", accounts,
-            "--output", output,
-        )
-        self.assertEqual(json.loads(output.read_text(encoding="utf-8")), json.loads(source.read_text(encoding="utf-8")))
-        self.assertEqual(output.stat().st_mode & 0o777, 0o600)
-
-    def test_legacy_migration_rejects_ambiguous_units_services_and_overwrite(self) -> None:
-        _source, release, unit_root, accounts, main_status, sidecar_status, sidecar_prefs = self.legacy_fixture()
-        output = self.root / "migrated.json"
-        extra = unit_root / "persea-terminal-broker-extra-z3.service"
-        extra.write_text("[Unit]\n", encoding="utf-8")
-        common = [
-            "--release", release,
-            "--unit-root", unit_root,
-            "--main-status", main_status,
-            "--sidecar-status", sidecar_status,
-            "--sidecar-prefs", sidecar_prefs,
-            "--accounts-json", accounts,
-            "--output", output,
-        ]
-        self.run_legacy(*common, success=False)
-        extra.unlink()
-        sidecar_prefs.write_text(json.dumps({"AdvertiseServices": ["svc:terminal", "svc:extra"]}), encoding="utf-8")
-        self.run_legacy(*common, success=False)
-        sidecar_prefs.write_text(json.dumps({"AdvertiseServices": ["svc:terminal"]}), encoding="utf-8")
-        output.write_text("sentinel\n", encoding="utf-8")
-        self.run_legacy(*common, success=False)
-        self.assertEqual(output.read_text(encoding="utf-8"), "sentinel\n")
 
     def test_checked_in_tests_and_example_exclude_live_host_identities(self) -> None:
         live = Path("/etc/persea-terminal/host.json")

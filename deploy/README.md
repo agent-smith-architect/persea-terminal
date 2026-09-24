@@ -94,18 +94,6 @@ Removal stops and removes only that broker service and never touches its
 configured tmux socket or sessions. A manifest edit without installation is
 reported as drift and has no implicit runtime effect.
 
-For an existing pre-manifest installation, run the one-time read-only derivation
-before installing this release:
-
-```sh
-sudo deploy/migrate-legacy-host.sh
-```
-
-It refuses overwrite or ambiguous state, derives the current identities and
-realms from the verified immutable release, installed units, and both Tailscale
-endpoints, and proves byte-identical Serve readback before atomically creating
-`/etc/persea-terminal/host.json`.
-
 ## Candidate, install, verify, rollback
 
 Generate a side-effect-free review candidate from any regular fixture:
@@ -204,6 +192,10 @@ the recoverable prior target. Generated `config/host.json`,
 `config/resolved-host.json`, and `config/managed-units` bind every release to the
 complete manifest digest. Every payload is covered by `MANIFEST.sha256`.
 
+Upgrades require the release shape shipped with the first public release, 0.1.0:
+a host snapshot, resolved host, managed-unit inventory, and checksum manifest.
+An installation missing that shape is unsupported and is refused before upgrade.
+
 Rollback restores the target host snapshot, exact unit inventory/bytes,
 symlinks, and requested lifecycle. Uninstall removes only the current manifest's
 application units and package pointers. Both preserve releases, tmux state, the
@@ -234,25 +226,17 @@ formats, and reclamation behavior.
 During healthy maintenance, the running front removes expired text and image
 data within one maintenance interval, even without a browser. I/O failures
 retry, and a faulted store requires restart. Disabling uploads preserves this
-cleanup. Before upgrading across these format changes, retain an owner-only
-backup of the snippets file, image directory, and clipboard preference file if
-present. A package rollback preserves durable stores; it does not downgrade
-their schema. For an older binary, restore the matching pre-upgrade clipboard
-backup with the front stopped and preserve original ownership and permissions.
-Keep the binary, UI, and configuration together when rolling back. Restoring
-the backup discards clipboard changes made after it was taken.
+cleanup. A package rollback preserves durable stores; it does not downgrade
+their schema. Keep the binary, UI, and configuration together when rolling back.
 
 ### Shared keyboard preferences and rollback
 
 The front stores shared keyboard defaults in `keyboard-v1.json`, alongside
 `preferences.json`, with the same owner-only durable-file rules. Generated
-front configuration includes `keyboard_preferences_store_path`; older/dev
-configurations may omit it. An unavailable keyboard store leaves terminal
+front configuration includes `keyboard_preferences_store_path`. An unavailable keyboard store leaves terminal
 service running: its GET reports `available:false`, and mutations return 503.
 The store does not change the appearance preference schema. Roll back using
-the target release's configuration and binary together; older releases ignore
-the separate keyboard file, and rolling forward recovers it. Do not run an
-older binary against the newer strict front configuration.
+the target release's configuration and binary together.
 
 `GET/PUT /api/keyboard-preferences` uses the operator identity, Origin/CSRF,
 no-store, ETag and If-Match contracts of `/api/preferences`. The complete value
@@ -276,32 +260,6 @@ keys. Legacy convenience IDs are not accepted by this new endpoint: clients
 normalize `tmux:n`, `tmux:p`, `tmux:o`, `screen:n`, and `screen:p` into canonical
 sequences before writing. Device overrides belong to browser storage and are
 not uploaded automatically by the server.
-
-### Rolling back past the font tri-state
-
-Rollback preserves the front's durable stores. Automatic font sizing stores
-`"font_size": null` in `preferences.json`; releases without tri-state font support
-reject the entire file because they require an integer from 9 to 24.
-`GET /api/preferences` then returns defaults with `"available": false`, and PUT
-requests return `503`. The stored preferences remain intact. Restore the newer
-release or convert null font sizes before rolling back.
-
-Before activating a release older than the font tri-state:
-
-```sh
-sudo systemctl stop persea-terminal-front.service
-sudo deploy/preferences-store-downgrade.sh            # --dry-run to preview
-sudo deploy/rollback.sh --to-release releases/<release-id> --activate-local
-```
-
-The script rewrites every `"font_size": null` to `14` — the default that release
-shipped — keeping each record's theme, default session and revision, writing a
-timestamped `.bak` beside the store, and refusing to run while the front unit is
-active (the front would overwrite the repair on its next write). It is
-idempotent: a second run reports that every record is already explicit and
-changes nothing. Rolling **forward** again needs no step at all; the repaired
-operators simply hold an explicit `14` instead of auto, and can set themselves
-back to auto with the `Fit font` control.
 
 ## Isolated Tailscale Service identity
 
