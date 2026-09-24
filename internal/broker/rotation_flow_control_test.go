@@ -441,7 +441,8 @@ func TestRotationBoundaryManagerFailureDrainsPublishedEffectsBeforeRollback(t *t
 
 	var captured *unifiedDevRotation
 	fixture.effects.rotationEdge = func(_ string, edge string) {
-		if edge != "before_bootstrap_wait" {
+		// Initial recording can fail before the bootstrap boundary is admitted.
+		if edge != "successor_materialized" {
 			return
 		}
 		fixture.effects.mu.Lock()

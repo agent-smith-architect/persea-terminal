@@ -838,7 +838,7 @@ func (unit *unifiedDevUnit) runRotation(ctx context.Context, decoder *controlmod
 	}
 	bootstrapDone, boundaryErr := rotation.registry.retention.startBoundary(rotation.newKey, "rotation_bootstrap", false)
 	if boundaryErr != nil {
-		return rotation.refitStageError(refitFailureSubmitBoundary, boundaryErr)
+		return rotation.refitStageError(refitFailureSubmitBoundary, rotation.waitBoundarySettlement(nil, boundaryErr))
 	}
 	if edge := effects.rotationEdge; edge != nil {
 		edge(rotation.session, "before_bootstrap_wait")
@@ -1308,6 +1308,13 @@ func (rotation *unifiedDevRotation) cancelAndSettleBoundary(done <-chan error, c
 func (rotation *unifiedDevRotation) waitBoundarySettlement(done <-chan error, cause error) error {
 	if done != nil {
 		cause = errors.Join(cause, rotation.waitDependency(nil, done))
+	}
+	if rotation.initial != nil {
+		// Initial recording may fail and revoke the successor before its
+		// boundary is submitted. Keep that typed cause after its work settles.
+		cause = errors.Join(cause, rotation.waitDependency(rotation.initial.done, nil))
+		_, initialErr := rotation.initial.result()
+		cause = errors.Join(cause, initialErr)
 	}
 	if rotation.registry != nil && rotation.registry.retention != nil {
 		dispatched, err := rotation.registry.retention.startDispatchFence()
