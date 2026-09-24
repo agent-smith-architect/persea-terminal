@@ -13,7 +13,7 @@ import (
 // font it is a PLAIN NUMBER with a default, not a tri-state — the composer has
 // no auto-fit to hand the decision back to, so "auto" would mean nothing.
 //
-// A record in the pre-C1 shape loads, and its absent composer face reads as the
+// A record from before configurable composer fonts loads, and its absent composer face reads as the
 // default rather than as a zero. The fixture is literal JSON so this case says
 // what an existing production file actually contains.
 func TestPreferencesStoreReadsPreComposerFontRecord(t *testing.T) {
@@ -27,11 +27,11 @@ func TestPreferencesStoreReadsPreComposerFontRecord(t *testing.T) {
 	}
 	s, err := newPreferencesStore(path)
 	if err != nil {
-		t.Fatalf("a record in the pre-C1 shape was refused: %v", err)
+		t.Fatalf("a record from before configurable composer fonts was refused: %v", err)
 	}
 	got := s.get("operator@example.com")
 	if !got.Stored || got.Revision != 3 || got.Theme != "dracula" || !fontIs(got.FontSize, 16) {
-		t.Fatalf("pre-C1 record lost fidelity: %+v", got)
+		t.Fatalf("record from before configurable composer fonts lost fidelity: %+v", got)
 	}
 	if got.ComposerFontSize != preferenceDefaultComposerFontSize {
 		t.Fatalf("an absent composer face read as %d, want the default %d", got.ComposerFontSize, preferenceDefaultComposerFontSize)
@@ -43,7 +43,7 @@ func TestPreferencesStoreReadsPreComposerFontRecord(t *testing.T) {
 		DefaultSession: &DefaultSession{Realm: "desk-a7", Server: "primary", Name: "work"},
 	}, 3)
 	if err != nil || next.ComposerFontSize != 11 || next.Revision != 4 {
-		t.Fatalf("write over a pre-C1 record: %+v err=%v", next, err)
+		t.Fatalf("write over a record from before configurable composer fonts: %+v err=%v", next, err)
 	}
 	raw, err := os.ReadFile(path)
 	if err != nil {
