@@ -12,14 +12,14 @@ import (
 	"persea-terminal/internal/controlmode"
 )
 
-// TestUnifiedAdoptionRejectsObserverFlowControl is the advisor's A6 adoption
-// falsifier. A test-only scheduling edge holds the production observer after
+// TestUnifiedAdoptionRejectsObserverFlowControl is an adoption
+// regression test. A test-only scheduling edge holds the production observer after
 // readiness while a second real same-server client enables tmux flow control
 // and pauses the target pane. The pane then floods unique rows before the exact
 // production adoption composite runs.
 func TestUnifiedAdoptionRejectsObserverFlowControl(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real tmux flow-control adoption falsifier")
+		t.Skip("real tmux flow-control adoption regression test")
 	}
 	fixture := newAdoptionFixture(t, 4)
 	sessionID := fixture.startPaneCommand(t, "flow-control", "sh")
@@ -68,7 +68,7 @@ func TestUnifiedAdoptionRejectsObserverFlowControl(t *testing.T) {
 	}
 	adoption, err := fixture.effects.AdoptSession(context.Background(), sessionID)
 
-	// Exercise the advisor's final "then continue" step if the vulnerable
+	// Exercise continued output if the vulnerable
 	// observer survived. A corrected unit has already died, so tmux rejects the
 	// stale client target and there is nothing to resume.
 	_, _ = tmuxCombinedOutput(fixture.disposable.path, "refresh-client", "-t", observerClient, "-A", paneID+":continue")
@@ -77,7 +77,7 @@ func TestUnifiedAdoptionRejectsObserverFlowControl(t *testing.T) {
 			t.Fatalf("flow-control adoption error=%v, want typed fatal %v", err, ErrUnifiedObserverFlowControl)
 		}
 		time.Sleep(250 * time.Millisecond)
-		if err := fixture.registry.retention.Boundary(adoption.Key, "flow_control_falsifier"); err != nil {
+		if err := fixture.registry.retention.Boundary(adoption.Key, "flow_control_regression"); err != nil {
 			t.Fatalf("seal vulnerable journal: %v", err)
 		}
 		deadline := time.Now().Add(5 * time.Second)

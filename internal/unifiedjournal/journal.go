@@ -25,7 +25,7 @@ const (
 	DefaultRealmCapBytes int64 = 64 << 20
 
 	// AdoptionBootstrapCapBytes and AdoptionBootstrapCapRecords are the fixed
-	// successor-bootstrap replay shape ratified by the M11 journal-rotation
+	// successor-bootstrap replay shape required by the journal-rotation
 	// contract. The broker coalesces 2 MiB into at most 32 64-KiB records.
 	// Exporting both dimensions lets the broker and journal pin the same shape;
 	// bytes alone cannot bound append+commit framing.
@@ -38,7 +38,7 @@ const (
 	RotationPendingCapRecords int64 = 16
 
 	// Keep package-internal spellings while existing package tests and the
-	// broker migration are moved to the exported contract in P2b.
+	// broker share these limits through the exported contract.
 	adoptionBootstrapCapBytes   = AdoptionBootstrapCapBytes
 	adoptionBootstrapCapRecords = AdoptionBootstrapCapRecords
 	rotationPendingCapBytes     = RotationPendingCapBytes
@@ -2264,7 +2264,7 @@ func (realm *Realm) PhysicalBudget() (charged, reserved, cap int64) {
 }
 
 // LogicalBudget reports the realm's semantic-byte ledger. It mirrors
-// PhysicalBudget so lifecycle falsifiers can prove terminal cleanup returned
+// PhysicalBudget so lifecycle regression tests can prove terminal cleanup returned
 // both independent durable ledgers to their exact baseline.
 func (realm *Realm) LogicalBudget() (charged, reserved, cap int64) {
 	return realm.total, realm.reservedCharge, realm.options.RealmCapBytes

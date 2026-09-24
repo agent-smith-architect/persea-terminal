@@ -1493,7 +1493,7 @@ func TestTruncationAtEveryByteNeverForgesCommittedEvents(t *testing.T) {
 	}
 }
 
-// TestRemovedGeometryRecordFailsClosed is the falsifier for sequence numbering.
+// TestRemovedGeometryRecordFailsClosed is the regression test for sequence numbering.
 // Consecutive geometry records share one byte offset, so a byte-offset journal
 // cannot notice that one of them is gone: the event would silently disappear
 // from replay while every remaining record still validated.

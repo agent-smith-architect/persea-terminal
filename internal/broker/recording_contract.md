@@ -177,7 +177,7 @@ Startup configures at most 128 held/provisional leases for 64 sources. Proven
 inventory matches associate surviving journals with their exact current source,
 including geometry drift that makes replay ambiguous. This association grants
 no replay authority. A valid non-live associated file may pass the full-slot
-capture pre-check; unknown and live current files may not.
+capture precheck; unknown and live current files may not.
 Later association recomputes the existing header incarnation from explicit source
 facts and that header's original geometry; it never parses the opaque value.
 Every unknown recovered file consumes one allowance against **every** prospective

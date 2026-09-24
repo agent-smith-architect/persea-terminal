@@ -18,13 +18,13 @@ import (
 	"persea-terminal/internal/terminal"
 )
 
-// Resize review (2026-08-23) falsifiers against a real tmux — finding 1.
+// Resize failure regressions against a real tmux.
 //
 // A failure AFTER the guarded resize command was issued — the witness recheck,
 // the attachment PTY resize, or the durable commit — ends the attachment
 // fatally, because tmux may hold the new geometry while the journal does not;
 // the generation is faulted so nothing further is published under the old
-// grid. The shared fixture here is also used by the finding-2 falsifiers in
+// grid. The shared fixture here is also used by the finding-2 regression tests in
 // unified_resize_stale_target_e2e_test.go.
 
 // unifiedResizeFixture is one adopted session with a live Control attachment
@@ -200,7 +200,7 @@ func isOperationalResizeCode(code string) bool {
 // so no byte is published under the old grid.
 func TestUnifiedResizePostIssueFailureIsFatalAndFaultsGeneration(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real tmux post-issue resize falsifiers")
+		t.Skip("real tmux post-issue resize regression tests")
 	}
 	for _, variant := range []struct {
 		name string

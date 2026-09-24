@@ -25,14 +25,14 @@ import (
 	"persea-terminal/internal/unifiedjournal"
 )
 
-type ux17RefitResponse struct {
+type refit_failureRefitResponse struct {
 	Operation       string `json:"operation"`
 	Columns         int    `json:"columns"`
 	Rows            int    `json:"rows"`
 	SuccessorSource string `json:"successor_source"`
 }
 
-func ux17PostRefit(t *testing.T, client *http.Client, source string, columns, rows int, operation string) ux17RefitResponse {
+func refit_failurePostRefit(t *testing.T, client *http.Client, source string, columns, rows int, operation string) refit_failureRefitResponse {
 	t.Helper()
 	body, err := json.Marshal(map[string]any{
 		"source": source, "columns": columns, "rows": rows, "operation": operation,
@@ -44,9 +44,9 @@ func ux17PostRefit(t *testing.T, client *http.Client, source string, columns, ro
 	if err != nil {
 		t.Fatal(err)
 	}
-	req.Header = m11F1SecureHeaders()
+	req.Header = frontdoorRotationSecureHeaders()
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Persea-CSRF", m11F1CSRF)
+	req.Header.Set("X-Persea-CSRF", frontdoorRotationCSRF)
 	response, err := client.Do(req)
 	if err != nil {
 		t.Fatalf("refit request: %v", err)
@@ -56,7 +56,7 @@ func ux17PostRefit(t *testing.T, client *http.Client, source string, columns, ro
 		payload, _ := io.ReadAll(io.LimitReader(response.Body, 4096))
 		t.Fatalf("refit status=%d body=%q", response.StatusCode, payload)
 	}
-	var result ux17RefitResponse
+	var result refit_failureRefitResponse
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
 		t.Fatal(err)
 	}
@@ -70,13 +70,13 @@ func ux17PostRefit(t *testing.T, client *http.Client, source string, columns, ro
 	return result
 }
 
-// TestUX17PostPONRCaptureFailureCarriesClosedMetadata is the independent
-// verifier's real-tmux falsifier promoted into the permanent suite. The refit
+// TestRefitPostPONRCaptureFailureCarriesClosedMetadata is the independent
+// A real tmux refit
 // composite conservatively crosses PONR before the capture is judged, so even
 // a capture drift must retain a closed stage/class through fatal settlement.
-func TestUX17PostPONRCaptureFailureCarriesClosedMetadata(t *testing.T) {
+func TestRefitPostPONRCaptureFailureCarriesClosedMetadata(t *testing.T) {
 	fixture := newAdoptionFixture(t, 4)
-	sessionID := fixture.startPaneCommand(t, "ux17-post-ponr-capture", `sh -c 'stty -echo; while :; do sleep 1; done'`)
+	sessionID := fixture.startPaneCommand(t, "refit_failure-post-ponr-capture", `sh -c 'stty -echo; while :; do sleep 1; done'`)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if _, err := fixture.effects.AdoptSession(ctx, sessionID); err != nil {
@@ -96,7 +96,7 @@ func TestUX17PostPONRCaptureFailureCarriesClosedMetadata(t *testing.T) {
 		t.Fatal(err)
 	}
 	wantColumns := source.Columns + 11
-	fixture.effects.adoptionPostTamper = func(_ int, post string) string { return post + " UX17_CAPTURE_DRIFT" }
+	fixture.effects.adoptionPostTamper = func(_ int, post string) string { return post + " REFIT_FAILURE_CAPTURE_DRIFT" }
 	operation := strings.Repeat("v", 43)
 	err = fixture.effects.refitSession(ctx, authority, source, wantColumns, operation)
 	if !errors.Is(err, ErrUnifiedRefitFatal) {
@@ -134,7 +134,7 @@ func TestUX17PostPONRCaptureFailureCarriesClosedMetadata(t *testing.T) {
 	}
 }
 
-func ux17WriteAndObserve(t *testing.T, ws *websocket.Conn, prepared terminal.Frame, marker string) {
+func refit_failureWriteAndObserve(t *testing.T, ws *websocket.Conn, prepared terminal.Frame, marker string) {
 	t.Helper()
 	input, err := attachmentwire.Encode(terminal.Frame{
 		Version: terminal.ProtocolVersion, Type: terminal.FrameInput,
@@ -171,7 +171,7 @@ func ux17WriteAndObserve(t *testing.T, ws *websocket.Conn, prepared terminal.Fra
 	}
 }
 
-func ux17PreparedCount(prepared terminal.Frame, marker string) int {
+func refit_failurePreparedCount(prepared terminal.Frame, marker string) int {
 	return bytes.Count(prepared.Replay, []byte(marker)) +
 		bytes.Count([]byte(strings.Join(prepared.History, "\n")), []byte(marker))
 }
@@ -180,9 +180,9 @@ func ux17PreparedCount(prepared terminal.Frame, marker string) int {
 // model: each successful refit closes one attached controller, the front door
 // mints a distinct one-time handle, and the successor COMMIT publishes a fresh
 // source binding before the next explicit refit.
-func TestUX17FrontdoorRepeatedRefitAfterFreshController(t *testing.T) {
+func TestRefitFrontdoorRepeatedRefitAfterFreshController(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real tmux/frontdoor repeated-refit falsifier")
+		t.Skip("real tmux/frontdoor repeated-refit regression test")
 	}
 	disposable := newDisposable(t)
 	tmuxServer := config.TmuxServer{Label: "main", SocketPath: disposable.path}
@@ -223,10 +223,10 @@ func TestUX17FrontdoorRepeatedRefitAfterFreshController(t *testing.T) {
 			t.Error("broker did not stop")
 		}
 	})
-	frontSocket, client := m11F1StartFrontdoor(t, listener.Addr().String())
+	frontSocket, client := frontdoorRotationStartFrontdoor(t, listener.Addr().String())
 
-	disposable.run("new-session", "-d", "-s", "ux17_refit", "-x", "80", "-y", "24", "sh", "-c", "stty -echo; exec sh")
-	sessionID := strings.TrimSpace(disposable.run("display-message", "-p", "-t", "ux17_refit:", "#{session_id}"))
+	disposable.run("new-session", "-d", "-s", "refit_failure_refit", "-x", "80", "-y", "24", "sh", "-c", "stty -echo; exec sh")
+	sessionID := strings.TrimSpace(disposable.run("display-message", "-p", "-t", "refit_failure_refit:", "#{session_id}"))
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	adoption, err := effects.AdoptSession(ctx, sessionID)
@@ -246,55 +246,55 @@ func TestUX17FrontdoorRepeatedRefitAfterFreshController(t *testing.T) {
 	pBefore, qBefore, eBefore, bBefore, oBefore := registry.retention.pUsed, registry.retention.qUsed, registry.retention.eUsed, registry.retention.bUsed, registry.retention.oUsed
 	registry.retention.mu.Unlock()
 
-	firstHandle := m11F1InventoryHandle(t, client, sessionID)
-	firstWS := m11F1DialController(t, frontSocket, firstHandle)
-	firstPrepared := m11F1CommitController(t, firstWS)
-	ux17WriteAndObserve(t, firstWS, firstPrepared, "UX17-BEFORE-FIRST")
-	firstClose := m11F1DrainUntilClosed(firstWS)
+	firstHandle := frontdoorRotationInventoryHandle(t, client, sessionID)
+	firstWS := frontdoorRotationDialController(t, frontSocket, firstHandle)
+	firstPrepared := frontdoorRotationCommitController(t, firstWS)
+	refit_failureWriteAndObserve(t, firstWS, firstPrepared, "REFIT_FAILURE-BEFORE-FIRST")
+	firstClose := frontdoorRotationDrainUntilClosed(firstWS)
 	firstRows := firstPrepared.Rows + 1
-	firstResult := ux17PostRefit(t, client, firstPrepared.Source, 97, firstRows, strings.Repeat("a", 43))
+	firstResult := refit_failurePostRefit(t, client, firstPrepared.Source, 97, firstRows, strings.Repeat("a", 43))
 	if reason := <-firstClose; reason != string(proto.SubscriberClosedGenerationRefit) {
 		t.Fatalf("first close=%q want=%q", reason, proto.SubscriberClosedGenerationRefit)
 	}
 	_ = firstWS.Close()
 
-	secondHandle := m11F1InventoryHandle(t, client, sessionID)
+	secondHandle := frontdoorRotationInventoryHandle(t, client, sessionID)
 	if secondHandle == firstHandle {
 		t.Fatal("first successor reused consumed handle")
 	}
-	secondWS := m11F1DialController(t, frontSocket, secondHandle)
-	secondPrepared := m11F1CommitController(t, secondWS)
+	secondWS := frontdoorRotationDialController(t, frontSocket, secondHandle)
+	secondPrepared := frontdoorRotationCommitController(t, secondWS)
 	if secondPrepared.Source != firstResult.SuccessorSource || secondPrepared.Columns != 97 || secondPrepared.Rows != firstRows {
 		t.Fatalf("first successor PREPARE=%+v response=%+v", secondPrepared, firstResult)
 	}
-	if count := ux17PreparedCount(secondPrepared, "UX17-BEFORE-FIRST"); count != 1 {
+	if count := refit_failurePreparedCount(secondPrepared, "REFIT_FAILURE-BEFORE-FIRST"); count != 1 {
 		t.Fatalf("first successor predecessor transcript count=%d want=1", count)
 	}
-	ux17WriteAndObserve(t, secondWS, secondPrepared, "UX17-BETWEEN-REFITS")
-	secondClose := m11F1DrainUntilClosed(secondWS)
-	secondResult := ux17PostRefit(t, client, secondPrepared.Source, firstPrepared.Columns, firstPrepared.Rows, strings.Repeat("b", 43))
+	refit_failureWriteAndObserve(t, secondWS, secondPrepared, "REFIT_FAILURE-BETWEEN-REFITS")
+	secondClose := frontdoorRotationDrainUntilClosed(secondWS)
+	secondResult := refit_failurePostRefit(t, client, secondPrepared.Source, firstPrepared.Columns, firstPrepared.Rows, strings.Repeat("b", 43))
 	if reason := <-secondClose; reason != string(proto.SubscriberClosedGenerationRefit) {
 		t.Fatalf("second close=%q want=%q", reason, proto.SubscriberClosedGenerationRefit)
 	}
 	_ = secondWS.Close()
 
-	thirdHandle := m11F1InventoryHandle(t, client, sessionID)
+	thirdHandle := frontdoorRotationInventoryHandle(t, client, sessionID)
 	if thirdHandle == firstHandle || thirdHandle == secondHandle {
 		t.Fatal("second successor reused a consumed handle")
 	}
-	thirdWS := m11F1DialController(t, frontSocket, thirdHandle)
+	thirdWS := frontdoorRotationDialController(t, frontSocket, thirdHandle)
 	defer thirdWS.Close()
-	thirdPrepared := m11F1CommitController(t, thirdWS)
+	thirdPrepared := frontdoorRotationCommitController(t, thirdWS)
 	if thirdPrepared.Source != secondResult.SuccessorSource || thirdPrepared.Columns != firstPrepared.Columns || thirdPrepared.Rows != firstPrepared.Rows {
 		t.Fatalf("second successor PREPARE=%+v response=%+v", thirdPrepared, secondResult)
 	}
-	if count := ux17PreparedCount(thirdPrepared, "UX17-BEFORE-FIRST"); count != 1 {
+	if count := refit_failurePreparedCount(thirdPrepared, "REFIT_FAILURE-BEFORE-FIRST"); count != 1 {
 		t.Fatalf("second successor predecessor transcript count=%d want=1", count)
 	}
-	if count := ux17PreparedCount(thirdPrepared, "UX17-BETWEEN-REFITS"); count != 1 {
+	if count := refit_failurePreparedCount(thirdPrepared, "REFIT_FAILURE-BETWEEN-REFITS"); count != 1 {
 		t.Fatalf("second successor inter-refit transcript count=%d want=1", count)
 	}
-	ux17WriteAndObserve(t, thirdWS, thirdPrepared, "UX17-AFTER-SECOND")
+	refit_failureWriteAndObserve(t, thirdWS, thirdPrepared, "REFIT_FAILURE-AFTER-SECOND")
 
 	pollUntil(t, 10*time.Second, "repeated frontdoor refit resource settlement", func() bool {
 		effects.journalMu.Lock()
@@ -314,7 +314,7 @@ func TestUX17FrontdoorRepeatedRefitAfterFreshController(t *testing.T) {
 	}
 }
 
-func TestUX17PostMutationRefitStageFailuresNeverRevivePredecessor(t *testing.T) {
+func TestRefitPostMutationRefitStageFailuresNeverRevivePredecessor(t *testing.T) {
 	stages := []struct {
 		stage unifiedRefitFailureStage
 		cause error
@@ -335,7 +335,7 @@ func TestUX17PostMutationRefitStageFailuresNeverRevivePredecessor(t *testing.T) 
 		t.Run(string(item.stage), func(t *testing.T) {
 			stage := item.stage
 			fixture := newAdoptionFixture(t, 4)
-			sessionID := fixture.startPaneCommand(t, "ux17-stage-"+string(stage), `sh -c 'stty -echo; printf "UX17-STAGE-BEFORE\n"; while :; do sleep 1; done'`)
+			sessionID := fixture.startPaneCommand(t, "refit_failure-stage-"+string(stage), `sh -c 'stty -echo; printf "REFIT_FAILURE-STAGE-BEFORE\n"; while :; do sleep 1; done'`)
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			adoption, err := fixture.effects.AdoptSession(ctx, sessionID)
@@ -361,7 +361,7 @@ func TestUX17PostMutationRefitStageFailuresNeverRevivePredecessor(t *testing.T) 
 				t.Fatal(err)
 			}
 			wantColumns := source.Columns + 11
-			injected := fmt.Errorf("%w: UX17_PRIVATE_STAGE_ERROR_MUST_NOT_ESCAPE", item.cause)
+			injected := fmt.Errorf("%w: REFIT_FAILURE_PRIVATE_STAGE_ERROR_MUST_NOT_ESCAPE", item.cause)
 			fixture.effects.refitStageFault = func(gotSession string, gotStage unifiedRefitFailureStage) error {
 				if gotSession == sessionID && gotStage == stage {
 					return injected
@@ -437,7 +437,7 @@ func TestUX17PostMutationRefitStageFailuresNeverRevivePredecessor(t *testing.T) 
 	}
 }
 
-func TestUX17PostCommitRefitStageFailuresCarryClosedMetadata(t *testing.T) {
+func TestRefitPostCommitRefitStageFailuresCarryClosedMetadata(t *testing.T) {
 	stages := []struct {
 		stage unifiedRefitFailureStage
 		cause error
@@ -452,7 +452,7 @@ func TestUX17PostCommitRefitStageFailuresCarryClosedMetadata(t *testing.T) {
 		t.Run(string(item.stage), func(t *testing.T) {
 			stage := item.stage
 			fixture := newAdoptionFixture(t, 4)
-			sessionID := fixture.startPaneCommand(t, "ux17-commit-"+string(stage), `sh -c 'stty -echo; while :; do sleep 1; done'`)
+			sessionID := fixture.startPaneCommand(t, "refit_failure-commit-"+string(stage), `sh -c 'stty -echo; while :; do sleep 1; done'`)
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
 			if _, err := fixture.effects.AdoptSession(ctx, sessionID); err != nil {
@@ -477,7 +477,7 @@ func TestUX17PostCommitRefitStageFailuresCarryClosedMetadata(t *testing.T) {
 				t.Fatal(err)
 			}
 			wantColumns := source.Columns + 11
-			injected := fmt.Errorf("%w: UX17_PRIVATE_POST_COMMIT_ERROR", item.cause)
+			injected := fmt.Errorf("%w: REFIT_FAILURE_PRIVATE_POST_COMMIT_ERROR", item.cause)
 			fixture.effects.refitStageFault = func(gotSession string, gotStage unifiedRefitFailureStage) error {
 				if gotSession == sessionID && gotStage == stage {
 					return injected
@@ -520,9 +520,9 @@ func TestUX17PostCommitRefitStageFailuresCarryClosedMetadata(t *testing.T) {
 	}
 }
 
-func TestUX17BrokerNeverEmitsUntypedRefitFault(t *testing.T) {
+func TestRefitBrokerNeverEmitsUntypedRefitFault(t *testing.T) {
 	fixture := newAdoptionFixture(t, 4)
-	sessionID := fixture.startPaneCommand(t, "ux17-broker-metadata-guard", `sh -c 'stty -echo; while :; do sleep 1; done'`)
+	sessionID := fixture.startPaneCommand(t, "refit_failure-broker-metadata-guard", `sh -c 'stty -echo; while :; do sleep 1; done'`)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if _, err := fixture.effects.AdoptSession(ctx, sessionID); err != nil {
@@ -572,7 +572,7 @@ func TestUX17BrokerNeverEmitsUntypedRefitFault(t *testing.T) {
 	}
 }
 
-func TestUX17RefitFailureMetadataRejectsConflictingPairs(t *testing.T) {
+func TestRefitFailureMetadataRejectsConflictingPairs(t *testing.T) {
 	first := &unifiedRefitStageError{stage: refitFailureCapture, class: proto.RefitFailureInternal, cause: io.EOF}
 	duplicate := &unifiedRefitStageError{stage: refitFailureCapture, class: proto.RefitFailureInternal, cause: unifiedjournal.ErrStorage}
 	if stage, class, ok := refitFailureMetadata(errors.Join(first, duplicate)); !ok || stage != refitFailureCapture || class != proto.RefitFailureInternal {

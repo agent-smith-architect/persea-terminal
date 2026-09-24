@@ -44,7 +44,7 @@ const WSWriteTimeout = 10 * time.Second
 const WSReadTimeout = 40 * time.Second
 const BrokerPingInterval = 30 * time.Second
 
-// The static bundle a release must contain. E-P6 added the installable
+// The static bundle a release must contain. session memory added the installable
 // shell: a manifest and three icons, all REGULAR files in the release, all
 // hash-covered by the release MANIFEST. A release is judged by its own
 // binary, so an older release keeps its own (shorter) list.
@@ -461,7 +461,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 	csp := strings.Replace(baseContentSecurityPolicy, "style-src 'self'", "style-src 'self' 'nonce-"+nonce+"'", 1)
 	// The query string is the CSP capability key and must stay byte-exact. A
 	// workspace document hosts N unified xterm instances and needs exactly
-	// what one needs (packet §2c, §5): the same relaxation on the same key.
+	// what one needs: the same relaxation on the same key.
 	if (r.URL.Path == "/terminal" || r.URL.Path == "/workspace") && r.URL.RawQuery == "engine=unified-dev" {
 		csp += "; style-src-attr 'unsafe-inline'"
 	}

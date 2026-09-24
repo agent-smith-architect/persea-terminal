@@ -203,7 +203,7 @@ type unifiedRefitOperation struct {
 // unifiedRotationPending is the post-capture, pre-swap byte tail. It stores
 // bytes rather than Observations: the witness is fixed by the transaction and
 // a slice of per-byte Observation structs would leave heap and journal framing
-// unbounded. Replaying in 64 KiB pieces pins the P1b reservation's exported
+// unbounded. Replaying in 64 KiB pieces pins the rotation flow reservation's exported
 // one-MiB/sixteen-record shape.
 type unifiedRotationPending struct {
 	data   []byte

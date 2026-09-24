@@ -12,12 +12,12 @@ import (
 	"persea-terminal/internal/unifiedjournal"
 )
 
-func TestP2AReview6HistoricalDisconnectRequiresRouterEligibility(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationHistoricalDisconnectRequiresRouterEligibility(t *testing.T) {
+	fixture := newRotationFixture(t)
 	previous := fixture.previous
-	fixture.review4Die()
-	current := fixture.review4Readopt(t, previous, 2)
-	// review4Die publishes its Disconnect through the asynchronous retention
+	fixture.lifecycleDie()
+	current := fixture.lifecycleReadopt(t, previous, 2)
+	// lifecycleDie publishes its Disconnect through the asynchronous retention
 	// command plane. Quiesce that fixture-owned command before taking the R14
 	// ledger baseline; otherwise its nine E credits can settle between the two
 	// snapshots and masquerade as mutation by the historical Disconnect below.
@@ -43,10 +43,10 @@ func TestP2AReview6HistoricalDisconnectRequiresRouterEligibility(t *testing.T) {
 		t.Fatalf("historical eligibility old=%v current=%v want false/true", oldEligible, currentEligible)
 	}
 
-	var baseline p2aReview3Ledger
+	var baseline rotationLedger
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		baseline = p2aReview3RuntimeLedger(fixture.registry.retention)
+		baseline = rotationRuntimeLedger(fixture.registry.retention)
 		if baseline.e == 0 {
 			break
 		}
@@ -76,7 +76,7 @@ func TestP2AReview6HistoricalDisconnectRequiresRouterEligibility(t *testing.T) {
 	if got := reserves.Load(); got != 0 {
 		t.Fatalf("historical Disconnect reserved %d times want 0", got)
 	}
-	if got := p2aReview3RuntimeLedger(fixture.registry.retention); got != baseline {
+	if got := rotationRuntimeLedger(fixture.registry.retention); got != baseline {
 		t.Fatalf("historical Disconnect ledger=%+v want %+v", got, baseline)
 	}
 	fixture.registry.retention.mu.Lock()
@@ -91,8 +91,8 @@ func TestP2AReview6HistoricalDisconnectRequiresRouterEligibility(t *testing.T) {
 	}
 }
 
-func TestP2AReview6SnapshotReadDoesNotHoldSubscriberAuthority(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationSnapshotReadDoesNotHoldSubscriberAuthority(t *testing.T) {
+	fixture := newRotationFixture(t)
 	key := journalKey(fixture.previous)
 	entered := make(chan struct{})
 	var once sync.Once
@@ -122,13 +122,13 @@ func TestP2AReview6SnapshotReadDoesNotHoldSubscriberAuthority(t *testing.T) {
 	}
 	fixture.effects.subscriberMu.Unlock()
 
-	// Exercise publication and typed close on a sibling subscriber. P2b tracks
+	// Exercise publication and typed close on a sibling subscriber. rotation flow tracks
 	// the publication head for every key, so injecting an unjournaled event into
 	// the candidate key would correctly force its registration retry forever;
 	// the sibling proves the realm-wide subscriber authority remains live
 	// without constructing that impossible journal/publication state.
 	sideKey := key
-	sideKey.Pane = "%review6-side"
+	sideKey.Pane = "%snapshot-side"
 	sideSubscriber := &unifiedDevSubscriber{data: make(chan unifiedjournal.Event, 1), done: make(chan struct{})}
 	fixture.effects.subscriberMu.Lock()
 	fixture.effects.subscribers[sideKey] = map[*unifiedDevSubscriber]struct{}{sideSubscriber: {}}
@@ -178,9 +178,9 @@ func TestP2AReview6SnapshotReadDoesNotHoldSubscriberAuthority(t *testing.T) {
 	}
 }
 
-func TestP2AReview6SnapshotRegistrationPublishesConcurrentCommitExactlyOnce(t *testing.T) {
-	fixture := newP2AFixture(t)
-	marker := []byte("review6-after-snapshot")
+func TestRotationSnapshotRegistrationPublishesConcurrentCommitExactlyOnce(t *testing.T) {
+	fixture := newRotationFixture(t)
+	marker := []byte("snapshot-after-snapshot")
 	started := make(chan struct{})
 	finished := make(chan error, 1)
 	var once sync.Once
@@ -192,7 +192,7 @@ func TestP2AReview6SnapshotRegistrationPublishesConcurrentCommitExactlyOnce(t *t
 					Kind: controlmode.ObservationOutput, Witness: fixture.previous, Data: marker,
 				})
 				if err == nil {
-					err = fixture.registry.retentionBoundary(fixture.previous, "review6_exact_once")
+					err = fixture.registry.retentionBoundary(fixture.previous, "snapshot_exact_once")
 				}
 				finished <- err
 			}()
@@ -250,9 +250,9 @@ func TestP2AReview6SnapshotRegistrationPublishesConcurrentCommitExactlyOnce(t *t
 	}
 }
 
-func TestP2AReview6SnapshotRetriesAcrossRotationCommit(t *testing.T) {
-	fixture := newP2AFixture(t)
-	rotation := p2aReview5PrepareRotation(t, fixture)
+func TestRotationSnapshotRetriesAcrossRotationCommit(t *testing.T) {
+	fixture := newRotationFixture(t)
+	rotation := rotationPrepareRotation(t, fixture)
 	entered := make(chan struct{})
 	var once sync.Once
 	fixture.effects.snapshotReadEdge = func() { once.Do(func() { close(entered) }) }
@@ -294,7 +294,7 @@ func TestP2AReview6SnapshotRetriesAcrossRotationCommit(t *testing.T) {
 	}
 	foundBootstrap := false
 	for _, event := range result.events {
-		if bytes.Equal(event.Payload, []byte("review4-bootstrap")) {
+		if bytes.Equal(event.Payload, []byte("lifecycle-bootstrap")) {
 			foundBootstrap = true
 		}
 	}

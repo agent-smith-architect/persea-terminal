@@ -1,10 +1,5 @@
 package broker
 
-// Provenance: Fable re-check of M11 P2a candidate ffb3c32
-// (docs: 2026-08-27_p2a_adjudication.md, "Re-check (ffb3c32)"). Independent
-// slot-conservation scenario across rotations, unit death and re-adoption;
-// the 7b→7c reap interval; reap of a never-activated unit; R10 ingress pins.
-
 import (
 	"errors"
 	"sync"
@@ -15,12 +10,12 @@ import (
 	"persea-terminal/internal/unifiedjournal"
 )
 
-// review4Rotate drives the frozen mainline (§3.3 7-pre..7d) for the fixture's
+// lifecycleRotate drives rotation settlement for the fixture's
 // current witness and returns the committed successor witness. swapActive is
-// retained for the independent review fixture's original call shape; the
-// corrected Commit now owns active-key publication atomically, so the extra
+// used to exercise repeated publication; Commit owns active-key publication
+// atomically, so the extra
 // assignment is deliberately idempotent.
-func (fixture *p2aFixture) review4Rotate(t *testing.T, previous controlmode.PaneWitness, generation uint64, swapActive bool) controlmode.PaneWitness {
+func (fixture *rotationFixture) lifecycleRotate(t *testing.T, previous controlmode.PaneWitness, generation uint64, swapActive bool) controlmode.PaneWitness {
 	t.Helper()
 	next := previous
 	next.Session.ControlGeneration = generation
@@ -74,16 +69,16 @@ func (fixture *p2aFixture) review4Rotate(t *testing.T, previous controlmode.Pane
 	return next
 }
 
-func (fixture *p2aFixture) review4Retention() (generations, pUsed, qUsed int) {
+func (fixture *rotationFixture) lifecycleRetention() (generations, pUsed, qUsed int) {
 	fixture.registry.retention.mu.Lock()
 	defer fixture.registry.retention.mu.Unlock()
 	return len(fixture.registry.retention.generations), fixture.registry.retention.pUsed, fixture.registry.retention.qUsed
 }
 
-func (fixture *p2aFixture) review4WaitRetention(want [3]int) [3]int {
+func (fixture *rotationFixture) lifecycleWaitRetention(want [3]int) [3]int {
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		g, p, q := fixture.review4Retention()
+		g, p, q := fixture.lifecycleRetention()
 		got := [3]int{g, p, q}
 		if got == want || time.Now().After(deadline) {
 			return got
@@ -92,10 +87,10 @@ func (fixture *p2aFixture) review4WaitRetention(want [3]int) [3]int {
 	}
 }
 
-// review4Revive installs a fresh unit for the session on its current active
+// lifecycleRevive installs a fresh unit for the session on its current active
 // witness (the builder's re-reap shape, but the following rotations mint new
 // generation numbers rather than re-reaping one fixed key).
-func (fixture *p2aFixture) review4Revive(witness controlmode.PaneWitness) {
+func (fixture *rotationFixture) lifecycleRevive(witness controlmode.PaneWitness) {
 	base := fixture.effects.UnifiedDevPaneEffects
 	unit := &unifiedDevUnit{owner: base, sessionID: witness.Session.Session, done: make(chan struct{}), witnesses: []controlmode.PaneWitness{witness}}
 	base.mu.Lock()
@@ -105,10 +100,10 @@ func (fixture *p2aFixture) review4Revive(witness controlmode.PaneWitness) {
 	fixture.unit = unit
 }
 
-// review4Readopt models the ordinary lifecycle after a unit death: a new unit
+// lifecycleReadopt models the ordinary lifecycle after a unit death: a new unit
 // for the same session with a freshly minted control generation on the same
 // physical pane, admitted through the registry like birth/adoption.
-func (fixture *p2aFixture) review4Readopt(t *testing.T, previous controlmode.PaneWitness, generation uint64) controlmode.PaneWitness {
+func (fixture *rotationFixture) lifecycleReadopt(t *testing.T, previous controlmode.PaneWitness, generation uint64) controlmode.PaneWitness {
 	t.Helper()
 	witness := previous
 	witness.Session.ControlGeneration = generation
@@ -130,17 +125,17 @@ func (fixture *p2aFixture) review4Readopt(t *testing.T, previous controlmode.Pan
 		t.Fatalf("readopt registry %d: %v", generation, err)
 	}
 	commitRecordingInitialForTest(t, fixture.registry, witness, nil)
-	fixture.review4Revive(witness)
+	fixture.lifecycleRevive(witness)
 	return witness
 }
 
-func (fixture *p2aFixture) review4Die() {
+func (fixture *rotationFixture) lifecycleDie() {
 	close(fixture.unit.done)
 	fixture.effects.reapFaultedUnit(fixture.unit)
 }
 
-// review4CountReserves records the builder's own ingress measurement point.
-func (fixture *p2aFixture) review4CountReserves() (func(unifiedjournal.PaneKey) int, func()) {
+// lifecycleCountReserves records the builder's own ingress measurement point.
+func (fixture *rotationFixture) lifecycleCountReserves() (func(unifiedjournal.PaneKey) int, func()) {
 	counts := make(map[unifiedjournal.PaneKey]int)
 	var mu sync.Mutex
 	fixture.registry.retention.setHook(func(point string, key unifiedjournal.PaneKey) {
@@ -159,7 +154,7 @@ func (fixture *p2aFixture) review4CountReserves() (func(unifiedjournal.PaneKey) 
 		}
 }
 
-// Slot conservation over the lifecycle P2b will produce: the session is
+// Slot conservation over the lifecycle rotation flow will produce: the session is
 // re-adopted with a fresh control generation, rotated twice, and its unit
 // dies — 64 times with monotonically fresh generation numbers. Re-admission
 // of a fresh generation is base behaviour (see the diagnostic below), so the
@@ -167,36 +162,36 @@ func (fixture *p2aFixture) review4CountReserves() (func(unifiedjournal.PaneKey) 
 // each re-adoption, two rotations plus the death must return the ledger to
 // exactly that snapshot, with one Disconnect on the active successor and none
 // on either retired predecessor.
-func TestP2AReview4SlotsConservedAcrossRotationsAndDeaths(t *testing.T) {
+func TestRotationSlotsConservedAcrossRotationsAndDeaths(t *testing.T) {
 	savedCaps := unifiedJournalCaps
 	unifiedJournalCaps.panePhysical = 64 << 20
 	unifiedJournalCaps.realmPhysical = 1 << 30
 	t.Cleanup(func() { unifiedJournalCaps = savedCaps })
-	fixture := newP2AFixtureWithSlots(t, 256)
+	fixture := newRotationFixtureWithSlots(t, 256)
 	fixture.registry.retention.mu.Lock()
 	fixture.registry.retention.options.maxPanes = 256
 	fixture.registry.retention.mu.Unlock()
 	witness := fixture.previous
 	generation := uint64(1)
-	count, stop := fixture.review4CountReserves()
+	count, stop := fixture.lifecycleCountReserves()
 	defer stop()
 	for repetition := 0; repetition < 64; repetition++ {
 		if repetition > 0 {
 			generation++
-			witness = fixture.review4Readopt(t, witness, generation)
+			witness = fixture.lifecycleReadopt(t, witness, generation)
 		}
-		g, p, q := fixture.review4Retention()
+		g, p, q := fixture.lifecycleRetention()
 		snapshot := [3]int{g, p, q}
 		predecessor := witness
-		witness = fixture.review4Rotate(t, witness, generation+1, true)
+		witness = fixture.lifecycleRotate(t, witness, generation+1, true)
 		middle := witness
-		witness = fixture.review4Rotate(t, witness, generation+2, true)
+		witness = fixture.lifecycleRotate(t, witness, generation+2, true)
 		generation += 2
-		if got := fixture.review4WaitRetention(snapshot); got != snapshot {
+		if got := fixture.lifecycleWaitRetention(snapshot); got != snapshot {
 			t.Fatalf("repetition %d after two rotations: retention=%v want snapshot %v", repetition, got, snapshot)
 		}
-		fixture.review4Die()
-		if got := fixture.review4WaitRetention(snapshot); got != snapshot {
+		fixture.lifecycleDie()
+		if got := fixture.lifecycleWaitRetention(snapshot); got != snapshot {
 			t.Fatalf("repetition %d after unit death: retention=%v want snapshot %v (rotation slot leak)", repetition, got, snapshot)
 		}
 		if count(journalKey(predecessor)) != 0 || count(journalKey(middle)) != 0 || count(journalKey(witness)) != 1 {
@@ -210,7 +205,7 @@ func TestP2AReview4SlotsConservedAcrossRotationsAndDeaths(t *testing.T) {
 			t.Fatalf("repetition %d: realm breaker tripped", repetition)
 		}
 	}
-	g, p, q := fixture.review4Retention()
+	g, p, q := fixture.lifecycleRetention()
 	t.Logf("after 64 repetitions (63 fresh-generation re-adoptions): generations=%d pUsed=%d qUsed=%d", g, p, q)
 }
 
@@ -218,24 +213,24 @@ func TestP2AReview4SlotsConservedAcrossRotationsAndDeaths(t *testing.T) {
 // control generation after a death, with and without a rotation in between.
 // Growth that appears in both columns belongs to the base admission path
 // (a Disconnect submits a retire=false "reconnect" boundary and AdmitPane of
-// a fresh generation never retires the dead one — neither is in P2a's diff);
-// growth that appears only with rotation would be P2a's.
-func TestP2AReview4ReadoptionWithFreshGenerationAccounting(t *testing.T) {
+// a fresh generation never retires the dead one — neither is in Rotation's diff);
+// growth that appears only with rotation would be Rotation's.
+func TestRotationReadoptionWithFreshGenerationAccounting(t *testing.T) {
 	growth := map[bool][3]int{}
 	for _, rotate := range []bool{false, true} {
-		fixture := newP2AFixture(t)
+		fixture := newRotationFixture(t)
 		witness := fixture.previous
 		generation := uint64(1)
 		var history [][3]int
 		for repetition := 0; repetition < 4; repetition++ {
 			if rotate {
-				witness = fixture.review4Rotate(t, witness, generation+1, true)
+				witness = fixture.lifecycleRotate(t, witness, generation+1, true)
 				generation++
 			}
-			fixture.review4Die()
+			fixture.lifecycleDie()
 			generation++
-			witness = fixture.review4Readopt(t, witness, generation)
-			g, p, q := fixture.review4Retention()
+			witness = fixture.lifecycleReadopt(t, witness, generation)
+			g, p, q := fixture.lifecycleRetention()
 			history = append(history, [3]int{g, p, q})
 		}
 		t.Logf("rotate=%v retention after each readoption (generations,pUsed,qUsed): %v", rotate, history)
@@ -244,7 +239,7 @@ func TestP2AReview4ReadoptionWithFreshGenerationAccounting(t *testing.T) {
 			// A retiring predecessor's final reference is settled by the retention
 			// dispatcher. Compare the quiescent accounting shape, not a transient
 			// snapshot taken between boundary completion and reference release.
-			growth[rotate] = fixture.review4WaitRetention(growth[false])
+			growth[rotate] = fixture.lifecycleWaitRetention(growth[false])
 		}
 	}
 	if growth[true] != growth[false] {
@@ -255,12 +250,12 @@ func TestP2AReview4ReadoptionWithFreshGenerationAccounting(t *testing.T) {
 // The corrected post-Commit state installs the successor witness, admission,
 // active key and predecessor-subscriber close atomically. A unit death at the
 // first observable point after Commit must disconnect the successor route.
-func TestP2AReview4ReapBetweenCommitAndActiveSwapDisconnectsSuccessor(t *testing.T) {
-	fixture := newP2AFixture(t)
-	count, stop := fixture.review4CountReserves()
+func TestRotationReapBetweenCommitAndActiveSwapDisconnectsSuccessor(t *testing.T) {
+	fixture := newRotationFixture(t)
+	count, stop := fixture.lifecycleCountReserves()
 	defer stop()
-	successor := fixture.review4Rotate(t, fixture.previous, 2, false)
-	fixture.review4Die()
+	successor := fixture.lifecycleRotate(t, fixture.previous, 2, false)
+	fixture.lifecycleDie()
 	fixture.registry.mu.Lock()
 	_, admitted := fixture.registry.admitted[routeCoordinateKey(successor)]
 	session := fixture.registry.sessions[sessionKey(successor.Session)]
@@ -278,15 +273,15 @@ func TestP2AReview4ReapBetweenCommitAndActiveSwapDisconnectsSuccessor(t *testing
 // assignment). Before ffb3c32 the reap disconnected every witness; now only
 // the captured active key. The admitted route must not be left routable with
 // no unit behind it.
-func TestP2AReview4ReapOfNeverActivatedUnitDisconnectsItsAdmission(t *testing.T) {
-	fixture := newP2AFixture(t)
-	count, stop := fixture.review4CountReserves()
+func TestRotationReapOfNeverActivatedUnitDisconnectsItsAdmission(t *testing.T) {
+	fixture := newRotationFixture(t)
+	count, stop := fixture.lifecycleCountReserves()
 	defer stop()
 	base := fixture.effects.UnifiedDevPaneEffects
 	base.mu.Lock()
 	delete(base.active, fixture.unit.sessionID)
 	base.mu.Unlock()
-	fixture.review4Die()
+	fixture.lifecycleDie()
 	fixture.registry.mu.Lock()
 	session := fixture.registry.sessions[sessionKey(fixture.previous.Session)]
 	_, admitted := fixture.registry.admitted[routeCoordinateKey(fixture.previous)]
@@ -301,8 +296,8 @@ func TestP2AReview4ReapOfNeverActivatedUnitDisconnectsItsAdmission(t *testing.T)
 // R10 pins: after a pre-seal Abort with the bootstrap writer still holding a
 // reference, no new staging, reservation or write may attach to the abandoned
 // successor, and it retires to baseline once the writer settles.
-func TestP2AReview4AbandonedSuccessorRefusesAllIngress(t *testing.T) {
-	fixture := newP2AFixture(t)
+func TestRotationAbandonedSuccessorRefusesAllIngress(t *testing.T) {
+	fixture := newRotationFixture(t)
 	next := fixture.next(2)
 	reservation := fixture.materialize(next)
 	txn, err := fixture.registry.BeginPaneRotation(fixture.previous, next)
@@ -331,7 +326,7 @@ func TestP2AReview4AbandonedSuccessorRefusesAllIngress(t *testing.T) {
 	}
 	deadline := time.Now().Add(2 * time.Second)
 	for {
-		if _, _, refs := fixture.reviewSuccessorGeneration(next); refs > 0 {
+		if _, _, refs := fixture.successorGeneration(next); refs > 0 {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -351,7 +346,7 @@ func TestP2AReview4AbandonedSuccessorRefusesAllIngress(t *testing.T) {
 	fixture.effects.lockProbe = nil
 	fixture.effects.mu.Unlock()
 	fixture.waitSuccessorQuiescent(next)
-	got := fixture.review4WaitRetention([3]int{1, 1, 2})
+	got := fixture.lifecycleWaitRetention([3]int{1, 1, 2})
 	for name, err := range map[string]error{"ensureGeneration": ensureErr, "reserve": reserveErr, "WritePane": writeErr} {
 		if !errors.Is(err, unifiedjournal.ErrInvalidated) {
 			t.Errorf("%s on abandoned successor = %v, want ErrInvalidated", name, err)
@@ -371,10 +366,10 @@ func TestP2AReview4AbandonedSuccessorRefusesAllIngress(t *testing.T) {
 // never deleted by a Disconnect, so a single-route predicate that counts every
 // admitted entry of the session — live or dead — refuses every later rotation
 // of that session for the rest of the broker's life.
-func TestP2AReview4RotationStillPossibleAfterDeathAndReadoption(t *testing.T) {
-	fixture := newP2AFixture(t)
-	fixture.review4Die()
-	witness := fixture.review4Readopt(t, fixture.previous, 2)
+func TestRotationRotationStillPossibleAfterDeathAndReadoption(t *testing.T) {
+	fixture := newRotationFixture(t)
+	fixture.lifecycleDie()
+	witness := fixture.lifecycleReadopt(t, fixture.previous, 2)
 	next := witness
 	next.Session.ControlGeneration = 3
 	reservation := fixture.materialize(next)

@@ -5,38 +5,34 @@ import (
 	"testing"
 )
 
-func reviewFillPane(t *testing.T, realm *Realm, key PaneKey, size int64) {
+func fillRotationPane(t *testing.T, realm *Realm, key PaneKey, size int64) {
 	t.Helper()
 	if _, err := realm.Append(key, make([]byte, size)); err != nil {
 		t.Fatalf("fill %v with %d bytes: %v", key, size, err)
 	}
 }
 
-func reviewLedger(realm *Realm) (slots int64, logical, physical int64) {
+func rotationLedger(realm *Realm) (slots int64, logical, physical int64) {
 	realm.retention.mu.Lock()
 	slots = realm.retention.reserved
 	realm.retention.mu.Unlock()
 	return slots, realm.reservedCharge, realm.physicalReserved
 }
 
-// E1a — FINDING (expected FAIL on 49a7b03). Pre-materialization abort: the flow
-// holds only the RotationCapacity, the boundary has flipped, and 4R must replay
-// the bounded tail (<= rotationPendingCapBytes) back into the predecessor
-// "from R1's reserved capacity" BEFORE releasing the capacity (packet §3.3 4R,
-// F12). With R1 held, the predecessor's Append checks room EXCLUDING R1, so a
-// predecessor that had exactly R1 of headroom (the case R1 exists for) is
-// refused — and invalidated with ReasonQuota.
-func TestReviewR1FundsRollbackReplayWhileCapacityHeld(t *testing.T) {
+// On pre-materialization abort, rollback must replay the bounded tail into
+// the predecessor using its reserved capacity before releasing that capacity.
+// A predecessor with exactly the reserved headroom must remain eligible.
+func TestRotationR1FundsRollbackReplayWhileCapacityHeld(t *testing.T) {
 	options := rotationOptions(t)
 	realm, err := openRealm(options, realJournalOps())
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer realm.Close()
-	predecessor := rotationKey("$review-r1-held", 1)
+	predecessor := rotationKey("$rotation-r1-held", 1)
 	admitRotationPredecessor(t, realm, predecessor)
 	// Leave exactly rotationPendingCapBytes of logical headroom.
-	reviewFillPane(t, realm, predecessor, options.PaneCapBytes-rotationPendingCapBytes)
+	fillRotationPane(t, realm, predecessor, options.PaneCapBytes-rotationPendingCapBytes)
 	capacity, err := realm.BeginRotationCapacity(predecessor)
 	if err != nil {
 		t.Fatalf("capacity with exactly R1 headroom refused: %v", err)
@@ -48,26 +44,18 @@ func TestReviewR1FundsRollbackReplayWhileCapacityHeld(t *testing.T) {
 	// 4R: replay the bounded tail into the predecessor. Packet: "R1 guarantees
 	// both the capacity and the record count for it".
 	if _, err := realm.Append(predecessor, make([]byte, rotationPendingCapBytes)); err != nil {
-		t.Fatalf("FINDING: rollback replay of exactly R1 bytes refused while R1 held: %v (predecessor eligible=%v reason=%v)", err, realm.UnifiedEligible(predecessor), realm.Reason(predecessor))
+		t.Fatalf("rollback replay of exactly R1 bytes refused while R1 held: %v (predecessor eligible=%v reason=%v)", err, realm.UnifiedEligible(predecessor), realm.Reason(predecessor))
 	}
 	if !realm.UnifiedEligible(predecessor) {
 		t.Fatalf("predecessor not live after rollback replay: reason=%v", realm.Reason(predecessor))
 	}
 }
 
-// E1b — superseded. The adopted form of this falsifier let a competitor take
-// R2+R3+17 bytes after Abort (one byte into R1's room) and asserted success,
-// which is the wrong expectation: R1 stays reserved until the 4R replay
-// consumes it or Release settles it (correction C6). The correct competitor
-// allowance after Abort is exactly R2+R3+slack, then ErrQuota. The replacement
-// is E1b' — TestReviewR1SurvivesAbortAndCompetitorTakesOnlyNonR1Room in
-// zz_p1b_review3_test.go — which pins both halves.
-
-func TestReviewCrashMidRotationOfBornSessionIsSupersededOnReopen(t *testing.T) {
+func TestRotationCrashMidRotationOfBornSessionIsSupersededOnReopen(t *testing.T) {
 	options := rotationOptions(t)
 	options.CompletePaneSlots = 2
-	predecessor := rotationKey("$review-crash", 1)
-	successor := rotationKey("$review-crash", 2)
+	predecessor := rotationKey("$rotation-crash", 1)
+	successor := rotationKey("$rotation-crash", 2)
 	crashed, err := openRealm(options, realJournalOps())
 	if err != nil {
 		t.Fatal(err)
@@ -119,7 +107,7 @@ func TestReviewCrashMidRotationOfBornSessionIsSupersededOnReopen(t *testing.T) {
 	if staleLogical != int64(len("born-committed")+len("rotated-bootstrap")+len("in-flight")) {
 		t.Fatalf("scan charge=%d", staleLogical)
 	}
-	fresh := rotationKey("$review-crash", 3)
+	fresh := rotationKey("$rotation-crash", 3)
 	adoption, err := reopened.BeginReconstructedPane(fresh, Geometry{Columns: 80, Rows: 24})
 	if err != nil {
 		t.Fatalf("adoption after crash refused: %v", err)

@@ -8,8 +8,7 @@ package broker
 // operational refusal — but the queued pause must be paired with a pause_end
 // that something owns, or the late pause lands with no ticket to release it
 // and the pane holds output forever behind a Fit the epoch recorded as a
-// non-mutation. The deterministic falsifier below was adopted from the
-// 2026-08-23 advisor resize-closure review; the stress variant additionally
+// non-mutation. The deterministic test exercises that window; the stress test
 // pins that the pairing survives repeated races against output, later Fits on
 // the same pane, and the journal lock being held across the queue/ack window.
 // ---------------------------------------------------------------------------
@@ -780,7 +779,7 @@ func TestCanceledBeginGeometryStressKeepsPauseOwnership(t *testing.T) {
 		issuers[pane] = &unifiedGeometryIssuer{provider: provider, registry: registry, session: session}
 	}
 
-	// The jitter holder recreates the falsified strand window under load: while
+	// The jitter holder recreates the stranded-pause window under load: while
 	// it owns the journal lock, every queued pause_start sits consumed by the
 	// manager but unacknowledged, which is exactly where cancellations must not
 	// abandon release ownership.

@@ -2771,7 +2771,7 @@ func TestRetentionMetaCapacityRejectedReplacementPreservesOldAuthority(t *testin
 // after one. If a refusal left the hold in place, the pane would keep accreting
 // held output until a reservation failed and the generation died, from a request
 // the design calls "rejected without mutation". That silent stall is what these
-// falsifiers exist to catch.
+// regression tests exist to catch.
 // ---------------------------------------------------------------------------
 
 const geometryBarrierRed = "ISSUE25/GEOMETRY_BARRIER/CANDIDATE_RED"
@@ -3105,7 +3105,7 @@ func (ticket *recordingGeometryTicket) Commit(context.Context, int, int) error {
 func (ticket *recordingGeometryTicket) Release() { ticket.releases++ }
 
 // TestGuardedResizeAlwaysReleasesItsGeometryTicket drives the canonical resize
-// transaction itself. It is the falsifier for the mutant "barrier installed but
+// transaction itself. It is the regression test for the mutant "barrier installed but
 // never released on the resize-failure path": the transaction owns the release
 // obligation, and no caller can be trusted to remember it.
 func TestGuardedResizeAlwaysReleasesItsGeometryTicket(t *testing.T) {

@@ -13,7 +13,7 @@ import (
 
 // M9 W1b: the workspace document is served by the same index handler as the
 // terminal document, and its CSP capability is keyed on the same byte-exact
-// query string (packet §5, falsifier W1B-F11).
+// query string.
 func TestWorkspaceDocumentCSPCapabilityRequiresExactSelector(t *testing.T) {
 	staticDir := writeTestStaticBundle(t, `<html><head><meta name="persea-style-nonce" content="`+styleNoncePlaceholder+`"></head><body><script src="/app.js"></script></body></html>`)
 	s := newServer(config.Front{HandleTTLSeconds: 1, HandleCapacity: 1}, staticDir, "127.0.0.1:8080")
@@ -131,7 +131,7 @@ func coldWorkspaceLoad(withFavicon bool) [][2]string {
 	return requests
 }
 
-// Falsifier W1B-F8 / FW-M2-cold (W1B-R1 arithmetic): with the operator burst
+// regression test W1B-F8 / FW-M2-cold (W1B-R1 arithmetic): with the operator burst
 // at its W1 value and no refill, the coldest six-pane load produces zero 429
 // and leaves EXACTLY three tokens in the favicon form (37 charged) and four
 // without it (36 charged). A burst of 36 makes the favicon form refuse its

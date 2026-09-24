@@ -18,14 +18,13 @@ import (
 	"persea-terminal/internal/terminal"
 )
 
-// TestUX12TransportLossAfterRefitPONRRetainsUncertainPredecessor is the
-// independent review's natural C1 falsifier. A dead observer transport is not
+// A dead observer transport is not
 // proof that tmux's exact owner disappeared, so the already durable generation
 // and every byte/slot charge must remain until an authoritative disposition
 // owns cleanup.
-func TestUX12TransportLossAfterRefitPONRRetainsUncertainPredecessor(t *testing.T) {
+func TestRefitTransportLossAfterRefitPONRRetainsUncertainPredecessor(t *testing.T) {
 	fixture := newAdoptionFixture(t, 4)
-	sessionID := fixture.startPaneCommand(t, "ux12-transport-loss", `sh -c 'stty -echo; printf "UX12-TRANSPORT-LOSS\n"; while :; do sleep 1; done'`)
+	sessionID := fixture.startPaneCommand(t, "refit-transport-loss", `sh -c 'stty -echo; printf "REFIT-TRANSPORT-LOSS\n"; while :; do sleep 1; done'`)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	adoption, err := fixture.effects.AdoptSession(ctx, sessionID)
@@ -33,7 +32,7 @@ func TestUX12TransportLossAfterRefitPONRRetainsUncertainPredecessor(t *testing.T
 		t.Fatal(err)
 	}
 	pollUntil(t, 10*time.Second, "predecessor output", func() bool {
-		return strings.Contains(string(fixture.journalBytes(t, adoption.Key)), "UX12-TRANSPORT-LOSS")
+		return strings.Contains(string(fixture.journalBytes(t, adoption.Key)), "REFIT-TRANSPORT-LOSS")
 	})
 	detail, err := details(fixture.server, sessionID)
 	if err != nil {
@@ -79,7 +78,7 @@ func TestUX12TransportLossAfterRefitPONRRetainsUncertainPredecessor(t *testing.T
 	}
 }
 
-func TestUX12RefitSourceDispositionUsesStableOwnerAcrossWidthChange(t *testing.T) {
+func TestRefitSourceDispositionUsesStableOwnerAcrossWidthChange(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		want observerSourceDisposition
@@ -99,7 +98,7 @@ func TestUX12RefitSourceDispositionUsesStableOwnerAcrossWidthChange(t *testing.T
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fixture := newAdoptionFixture(t, 4)
-			sessionID := fixture.startPaneCommand(t, "ux12-source-"+tc.name, `sh -c 'stty -echo; while :; do sleep 1; done'`)
+			sessionID := fixture.startPaneCommand(t, "refit-source-"+tc.name, `sh -c 'stty -echo; while :; do sleep 1; done'`)
 			ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 			defer cancel()
 			adoption, err := fixture.effects.AdoptSession(ctx, sessionID)
@@ -123,11 +122,11 @@ func TestUX12RefitSourceDispositionUsesStableOwnerAcrossWidthChange(t *testing.T
 	}
 }
 
-// TestUX12ConcurrentExactRefitSharesOneComposite pins the in-flight half of
+// TestRefitConcurrentExactRefitSharesOneComposite pins the in-flight half of
 // C2. Both callers carry the same immutable operation, but only the ledger
 // owner may cross the capacity/composite boundary; the follower receives the
 // owner's typed result after settlement.
-func TestUX12ConcurrentExactRefitSharesOneComposite(t *testing.T) {
+func TestRefitConcurrentExactRefitSharesOneComposite(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	authority := proto.Authority{Realm: "r", Server: "s", SessionID: "$1", SessionCreated: 1}
@@ -166,11 +165,11 @@ func TestUX12ConcurrentExactRefitSharesOneComposite(t *testing.T) {
 	}
 }
 
-// TestUX12RefitOperationLedgerRejectsTupleReuseAndFailsClosedAtBound pins the
+// TestRefitOperationLedgerRejectsTupleReuseAndFailsClosedAtBound pins the
 // token collision and bounded-cleanup contract without invoking tmux. Exact
 // completed entries remain replayable at the ceiling; new ambiguity is
 // refused instead of evicting an old token and reopening execution.
-func TestUX12RefitOperationLedgerRejectsTupleReuseAndFailsClosedAtBound(t *testing.T) {
+func TestRefitOperationLedgerRejectsTupleReuseAndFailsClosedAtBound(t *testing.T) {
 	authority := proto.Authority{Realm: "r", Server: "s", SessionID: "$1", SessionCreated: 1}
 	source := terminal.SourceWitness{Incarnation: "inc", SessionID: "$1", Columns: 80, Rows: 24}
 	effects := &UnifiedDevPaneEffects{refitOperations: make(map[unifiedRefitOperationKey]*unifiedRefitOperation)}
@@ -194,12 +193,12 @@ func TestUX12RefitOperationLedgerRejectsTupleReuseAndFailsClosedAtBound(t *testi
 	}
 }
 
-// TestUX12ExactRefitRetryIsIdempotent is the independent review's natural C2
-// falsifier: replaying the exact immutable request after a lost success reply
+// TestRefitExactRefitRetryIsIdempotent is the independent review's natural C2
+// regression test: replaying the exact immutable request after a lost success reply
 // returns the original result and must not execute a second composite.
-func TestUX12ExactRefitRetryIsIdempotent(t *testing.T) {
+func TestRefitExactRefitRetryIsIdempotent(t *testing.T) {
 	fixture := newAdoptionFixture(t, 4)
-	sessionID := fixture.startPaneCommand(t, "ux12-idempotent", `sh -c 'stty -echo; while :; do sleep 1; done'`)
+	sessionID := fixture.startPaneCommand(t, "refit-idempotent", `sh -c 'stty -echo; while :; do sleep 1; done'`)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	if _, err := fixture.effects.AdoptSession(ctx, sessionID); err != nil {
@@ -236,14 +235,14 @@ func TestUX12ExactRefitRetryIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestUX12BrokerRefitRetryPrecedesWitnessRevalidation pins the production
+// TestRefitBrokerRefitRetryPrecedesWitnessRevalidation pins the production
 // request boundary: a lost success reply remains replayable from immutable
 // authority+token even after tmux can no longer reconstruct the old request's
 // current witness. The retry returns the original successor and issues no
 // second observer composite.
-func TestUX12BrokerRefitRetryPrecedesWitnessRevalidation(t *testing.T) {
+func TestRefitBrokerRefitRetryPrecedesWitnessRevalidation(t *testing.T) {
 	fixture := newAdoptionFixture(t, 4)
-	sessionID := fixture.startPaneCommand(t, "ux12-broker-idempotent", `sh -c 'stty -echo; while :; do sleep 1; done'`)
+	sessionID := fixture.startPaneCommand(t, "refit-broker-idempotent", `sh -c 'stty -echo; while :; do sleep 1; done'`)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	if _, err := fixture.effects.AdoptSession(ctx, sessionID); err != nil {

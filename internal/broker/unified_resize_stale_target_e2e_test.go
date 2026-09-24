@@ -9,7 +9,7 @@ import (
 	"persea-terminal/internal/terminal"
 )
 
-// Resize review (2026-08-23) falsifiers against a real tmux — finding 2.
+// Resize failure regressions against a real tmux.
 //
 // A Fit on a source that can no longer be witnessed as the one this attachment
 // bound — server gone, session replaced, pane changed, columns moved — is a
@@ -22,7 +22,7 @@ import (
 // issued; tmux geometry is untouched by the refused request.
 func TestUnifiedResizeStaleTargetIsFatalNotOperational(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real tmux stale-target resize falsifiers")
+		t.Skip("real tmux stale-target resize regression tests")
 	}
 	for _, variant := range []struct {
 		name  string
@@ -107,7 +107,7 @@ func TestUnifiedResizeStaleTargetIsFatalNotOperational(t *testing.T) {
 // attachment carries on to a correct Fit.
 func TestUnifiedResizeBrowserColumnMismatchStaysOperational(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real tmux request-policy resize falsifier")
+		t.Skip("real tmux request-policy resize regression test")
 	}
 	fixture := newUnifiedResizeFixture(t, nil)
 	wrong, err := attachmentwire.Encode(terminal.Frame{

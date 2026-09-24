@@ -612,7 +612,7 @@ func TestUnifiedAllowsConsultsJournalActiveBySessionID(t *testing.T) {
 
 func TestUnifiedTerminalE2E1SelectorRequiresConcreteDevProvider(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real tmux E2E-1 falsifier")
+		t.Skip("real tmux E2E-1 regression test")
 	}
 	disposable := newDisposable(t)
 	disposable.run("new-session", "-d", "-s", "e2e1-natural-red", "-x", "80", "-y", "24", "sh")
@@ -2184,7 +2184,7 @@ func unifiedE2E1RunResizeBoundary(t *testing.T, item unifiedE2E1BoundaryCase) {
 	if midIndex > firstEnd && midIndex < blocks[1].begin {
 		// MID landed between the two blocks, so the pane wrote it before the
 		// resize took effect. Sequence N must not precede it. This is the
-		// assertion that makes the choice of N falsifiable: taking the first
+		// assertion that makes the choice of N testable: taking the first
 		// %end as N turns this into a red.
 		if midIndex >= boundary {
 			t.Fatalf("%s: pre-resize output classified between the command blocks is not ordered before N (mid=%d N=%d): the first %%end is not a sound boundary\n%s",
@@ -2275,7 +2275,7 @@ func unifiedE2E1RunResizeBoundary(t *testing.T, item unifiedE2E1BoundaryCase) {
 	}
 
 	// Rejection shape, recorded here because the Phase-3 barrier-release
-	// falsifier depends on it: the same command with a now-stale witness must
+	// regression test depends on it: the same command with a now-stale witness must
 	// leave the geometry alone.
 	staleMark := len(observer.events)
 	observer.response = nil

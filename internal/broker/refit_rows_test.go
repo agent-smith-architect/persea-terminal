@@ -13,10 +13,10 @@ import (
 	"persea-terminal/internal/terminal"
 )
 
-// TestUX14RefitGeometryPolicy pins the refit request policy: columns inside
+// TestRefitRowsRefitGeometryPolicy pins the refit request policy: columns inside
 // the explicit width band, rows either omitted or inside the closed row policy
 // the live rows-only Fit obeys. Reject, never clamp.
-func TestUX14RefitGeometryPolicy(t *testing.T) {
+func TestRefitRowsRefitGeometryPolicy(t *testing.T) {
 	for name, tc := range map[string]struct {
 		columns, rows int
 		want          bool
@@ -46,10 +46,10 @@ func TestUX14RefitGeometryPolicy(t *testing.T) {
 	}
 }
 
-// TestUX14RefitCompositeLineCarriesRows pins the tmux line: the guarded
+// TestRefitRowsRefitCompositeLineCarriesRows pins the tmux line: the guarded
 // resize targets the requested columns×rows, and a rows-less request resolves
 // to the predecessor's rows before the line is built.
-func TestUX14RefitCompositeLineCarriesRows(t *testing.T) {
+func TestRefitRowsRefitCompositeLineCarriesRows(t *testing.T) {
 	authority := proto.Authority{Realm: "r", Server: "s", SessionID: "$1", SessionCreated: 1}
 	source := terminal.SourceWitness{Incarnation: "inc", SessionID: "$1", WindowID: "@1", PaneID: "%1", Columns: 80, Rows: 24}
 	withRows := refitCompositeLine(authority, source, 120, 45)
@@ -65,11 +65,11 @@ func TestUX14RefitCompositeLineCarriesRows(t *testing.T) {
 	}
 }
 
-// TestUX14RefitLedgerTupleIncludesRows pins idempotency over the full tuple:
+// TestRefitRowsRefitLedgerTupleIncludesRows pins idempotency over the full tuple:
 // a recorded token replayed with the same columns and rows returns the recorded
 // result; the same token with different rows is a different request and is
 // refused as malformed. No tmux is involved.
-func TestUX14RefitLedgerTupleIncludesRows(t *testing.T) {
+func TestRefitRowsRefitLedgerTupleIncludesRows(t *testing.T) {
 	authority := proto.Authority{Realm: "r", Server: "s", SessionID: "$1", SessionCreated: 1}
 	source := terminal.SourceWitness{Incarnation: "inc", SessionID: "$1", Columns: 80, Rows: 24}
 	effects := &UnifiedDevPaneEffects{refitOperations: make(map[unifiedRefitOperationKey]*unifiedRefitOperation)}
@@ -105,12 +105,12 @@ func TestUX14RefitLedgerTupleIncludesRows(t *testing.T) {
 	}
 }
 
-// TestUX14ExplicitRefitCarriesRows is the tmux-backed proof: an explicit refit
+// TestRefitRowsExplicitRefitCarriesRows is the tmux-backed proof: an explicit refit
 // that names rows lands columns×rows on the real pane, echoes those rows, and a
 // following rows-less refit keeps the landed rows.
-func TestUX14ExplicitRefitCarriesRows(t *testing.T) {
+func TestRefitRowsExplicitRefitCarriesRows(t *testing.T) {
 	fixture := newAdoptionFixture(t, 4)
-	sessionID := fixture.startPaneCommand(t, "ux14-refit-rows", `sh -c 'stty -echo; while :; do sleep 1; done'`)
+	sessionID := fixture.startPaneCommand(t, "terminal_layout-refit-rows", `sh -c 'stty -echo; while :; do sleep 1; done'`)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
 	if _, err := fixture.effects.AdoptSession(ctx, sessionID); err != nil {

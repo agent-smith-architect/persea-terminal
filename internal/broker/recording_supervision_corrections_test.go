@@ -151,7 +151,7 @@ func testLateRetirementAfterShutdown(t *testing.T, stage string) {
 	effects.transients.mutex().Lock()
 	owners := effects.transients.units
 	effects.transients.mutex().Unlock()
-	// Explicit cleanup of the falsifier's retained obligation, after observation.
+	// Explicit cleanup of the regression test's retained obligation, after observation.
 	effects.stopTerminalRetirements()
 	if pending != 0 || owners != 0 {
 		t.Fatalf("late reap created owner after shutdown: pending=%d retryReady=%v chargedUnits=%d lifecycleInFlight=%d", pending, ready, owners, effects.lifecycle.snapshot().InFlight)
@@ -212,7 +212,7 @@ func TestRecordingSupervisionCorrectionPublicationBeforeRegistration(t *testing.
 func TestRecordingSupervisionCorrectionRotationPublicationOrder(t *testing.T) {
 	for _, publishFirst := range []bool{false, true} {
 		t.Run(map[bool]string{false: "cutoff_first", true: "publication_first"}[publishFirst], func(t *testing.T) {
-			fixture := newP2AFixture(t)
+			fixture := newRotationFixture(t)
 			fixture.coordinator.mu.Lock()
 			fixture.coordinator.attachments = nil // fixture's placeholder is not a constructed Epoch
 			fixture.coordinator.mu.Unlock()

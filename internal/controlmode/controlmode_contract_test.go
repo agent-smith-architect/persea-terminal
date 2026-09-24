@@ -241,7 +241,7 @@ func TestStrictDecoderCommandBlocksCannotBecomePaneOutput(t *testing.T) {
 	}
 }
 
-func TestStrictDecoderTmux34ObserverNotificationsAreTyped(t *testing.T) {
+func TestStrictDecoderTmterminalObserverNotificationsAreTyped(t *testing.T) {
 	cases := []struct {
 		name string
 		args string

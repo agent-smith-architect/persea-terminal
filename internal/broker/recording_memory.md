@@ -124,7 +124,7 @@ Recovery marks clean surviving journals Legacy, not Continuous. A fresh broker
 has no recovered reader leases. Production snapshot admission checks Continuous
 eligibility before reserving/copying. A full recovered projection plus snapshots
 read directly from those same Legacy journals is an allocation over-approximation,
-not a reachable production state. Keep its GC result as a falsifier rather than
+not a reachable production state. Keep its GC result as a regression test rather than
 using it to select service limits.
 
 The mixed experiment retains 48 MiB of source-attributed Legacy records and
@@ -226,7 +226,7 @@ network, source-health and sustained qualification is mandatory before productio
 acceptance. Toolchain, native build, geometry/mode or supported-profile changes
 must repeat the relevant qualification. The padded cumulative-scratch
 lane and the unreachable full-Legacy-plus-Legacy-snapshot lane remain recorded
-as conservative GC falsifiers; neither is hidden by subtracting uncollected bytes.
+as conservative GC regression tests; neither is hidden by subtracting uncollected bytes.
 
 Native clients require separate accounting from their source tmux server.
 The held-client test has shown flat broker-child private memory while the private

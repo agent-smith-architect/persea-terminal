@@ -24,7 +24,7 @@ func preferencesFixture(theme string, size int) Preferences {
 	return Preferences{Version: 1, Theme: theme, FontSize: fontPtr(size), ComposerFontSize: preferenceDefaultComposerFontSize, DefaultSession: &DefaultSession{Realm: "desk-a7", Server: "primary", Name: "work"}}
 }
 
-// preferencesAuto is the same fixture with the font left on "auto" (J-UX-9).
+// preferencesAuto is the same fixture with the font left on "auto".
 func preferencesAuto(theme string) Preferences {
 	return Preferences{Version: 1, Theme: theme, ComposerFontSize: preferenceDefaultComposerFontSize, DefaultSession: &DefaultSession{Realm: "desk-a7", Server: "primary", Name: "work"}}
 }

@@ -233,7 +233,7 @@ func f3EndpointSignatureFailure(got f3HTTPResult) string {
 	return f3CodeEndpointSignatureFailure(got, http.StatusGone)
 }
 
-func f3EndpointSignatureFalsifierControls(t *testing.T, cfg config.Front, claim string) {
+func f3EndpointSignatureRegressionControls(t *testing.T, cfg config.Front, claim string) {
 	t.Helper()
 	html := http.NewServeMux()
 	html.HandleFunc("/api/control-takeovers", func(w http.ResponseWriter, _ *http.Request) {
@@ -242,7 +242,7 @@ func f3EndpointSignatureFalsifierControls(t *testing.T, cfg config.Front, claim 
 		_, _ = io.WriteString(w, "<!doctype html><title>SPA fallback</title>")
 	})
 	if reason := f3EndpointSignatureFailure(f3SecurePOST(t, html, cfg, claim, nil)); reason == "" {
-		t.Fatal("F3-W1 falsifier control: registered 200 HTML endpoint was admitted")
+		t.Fatal("F3-W1 regression test control: registered 200 HTML endpoint was admitted")
 	}
 
 	gone := http.NewServeMux()
@@ -253,11 +253,11 @@ func f3EndpointSignatureFalsifierControls(t *testing.T, cfg config.Front, claim 
 		_, _ = io.WriteString(w, `{"code":"nonempty"}`)
 	})
 	if reason := f3EndpointSignatureFailure(f3SecurePOST(t, gone, cfg, claim, nil)); reason != "" {
-		t.Fatalf("F3-W1 falsifier control: valid 410 JSON endpoint was rejected: %s", reason)
+		t.Fatalf("F3-W1 regression test control: valid 410 JSON endpoint was rejected: %s", reason)
 	}
 }
 
-func f3EndpointHelperMappingFalsifierControl(t *testing.T, cfg config.Front, claim string) {
+func f3EndpointHelperMappingRegressionControl(t *testing.T, cfg config.Front, claim string) {
 	t.Helper()
 	handle := base64.RawURLEncoding.EncodeToString(make([]byte, 32))
 	created := http.NewServeMux()
@@ -388,8 +388,8 @@ func f3StageOfferWithGate(t *testing.T, name, prefix, mutant string) (*Server, *
 func TestControlTakeoverSecurePostMatrixW1(t *testing.T) {
 	_, handler, cfg := f3SecureServer(t)
 	claim := fmt.Sprintf(`{"request_id":"%s","offer":"%s"}`, f3RandomClaimToken(t), f3RandomClaimToken(t))
-	f3EndpointSignatureFalsifierControls(t, cfg, claim)
-	f3EndpointHelperMappingFalsifierControl(t, cfg, claim)
+	f3EndpointSignatureRegressionControls(t, cfg, claim)
+	f3EndpointHelperMappingRegressionControl(t, cfg, claim)
 	pristine := f3SecurePOST(t, handler, cfg, claim, nil)
 	f3RequireCodeEndpoint(t, pristine, http.StatusGone, f3BaselineEndpointPrefix, f3Mutants["W1"])
 	mutations := []struct {

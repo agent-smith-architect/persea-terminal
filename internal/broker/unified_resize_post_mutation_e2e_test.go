@@ -15,7 +15,7 @@ import (
 	"persea-terminal/internal/unifiedjournal"
 )
 
-// The advisor's post-mutation falsifier (2026-08-23 resize review, BLOCKER).
+// Post-mutation failures must retain the committed geometry boundary.
 //
 // Before this ruling a logical-cap refusal happened inside geometry Commit,
 // AFTER the guarded resize command and witness recheck: tmux had already
@@ -26,7 +26,7 @@ import (
 // refuses the Fit with tmux untouched, the attachment live, and the generation
 // still eligible — which is the only state resize_failed may ever describe.
 //
-// One deviation from the advisor's verbatim fixture: the logical cap is filled
+// One deviation from the basic fixture: the logical cap is filled
 // AFTER the control attachment opens, not before. Attaching the shadow client
 // makes tmux redraw the pane (about 220 bytes of output), and a pane filled to
 // zero headroom before that redraw fails closed on it — an ordinary output-cap
@@ -37,7 +37,7 @@ import (
 // advisor reported: tmux at 80x36 behind a resize_failed.
 func TestAdvisorResizeFailureAfterTmuxMutationCannotKeepEpochLive(t *testing.T) {
 	if testing.Short() {
-		t.Skip("real tmux post-mutation resize falsifier")
+		t.Skip("real tmux post-mutation resize regression test")
 	}
 	saved := unifiedJournalCaps
 	unifiedJournalCaps.pane = 64 << 10

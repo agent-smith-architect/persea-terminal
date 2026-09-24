@@ -6,8 +6,7 @@ import (
 	"testing"
 )
 
-// Post-ship F2 correction PSF-R1 (advisor adjudication of 6cabafd,
-// 2026-08-27): the supersession allowance is two independent ledgers, and
+// The supersession allowance is two independent ledgers, and
 // Append must spend each in its own unit. The first F2 cut reused rotation's
 // record-shaped drawdown, which caps the physical slice of one record to
 // the logical slice plus one record's framing. That coupling is exact for a
@@ -24,13 +23,13 @@ import (
 // beyond the logical allowance still meets the ordinary logical caps, and
 // any physical cost beyond the physical allowance still meets the ordinary
 // physical caps; and Commit and Abort settle both units on their own.
-// Rotation's record-shaped holds keep their coupling (the P1b suite runs
+// Rotation's record-shaped holds keep their coupling (the rotation flow suite runs
 // unchanged alongside).
 
 const ledgersRed = "PSF-R1-LEDGERS-RED"
 
 // writeFramingHeavyStaleBirth writes one birth generation holding records
-// committed one-byte records — the advisor's framing-heavy shape — and
+// committed one-byte records — a framing-heavy shape — and
 // returns the file size the reopen will charge physically.
 func writeFramingHeavyStaleBirth(t *testing.T, options OpenOptions, key PaneKey, records int) int64 {
 	t.Helper()

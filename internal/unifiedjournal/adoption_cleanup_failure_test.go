@@ -31,7 +31,7 @@ func requireRetentionPathPresent(t *testing.T, path string) {
 }
 
 // TestAdoptionAbortUnlinkFailureRetainsChargeAndTombstone is R1's Abort
-// falsifier: when the aborted reservation's unlink fails, the bytes are still
+// regression test: when the aborted reservation's unlink fails, the bytes are still
 // on disk, so the realm charge must stay. The provisional slot is still
 // retired — a failed adoption never holds admission capacity — but the
 // invalidated tombstone and its charge survive until cleanup provably
@@ -94,7 +94,7 @@ func TestAdoptionAbortUnlinkFailureRetainsChargeAndTombstone(t *testing.T) {
 }
 
 // TestAdoptionCommitSupersessionUnlinkFailureRetainsStaleCharge is R1's
-// Commit falsifier: supersession of a slot-retired stale generation may
+// Commit regression test: supersession of a slot-retired stale generation may
 // refund its realm charge and drop its map entry only after the stale file is
 // provably gone. On unlink failure the stale generation and its charge stay,
 // and the next supersession for the session retries the cleanup.

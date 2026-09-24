@@ -187,7 +187,7 @@ func TestRefitSessionForwardsExactBoundAuthorityAndOperation(t *testing.T) {
 	}
 }
 
-// TestRefitSessionCarriesOptionalRows pins UX-14 14.1: a request may name the
+// TestRefitSessionCarriesOptionalRows pins terminal layout 14.1: a request may name the
 // successor's rows; the front door forwards them verbatim, requires the broker
 // to echo exactly that count, and reports it in the response. Omitted rows
 // forward as 0 and the response carries the broker-echoed count instead.
@@ -272,7 +272,7 @@ func TestRefitSessionRejectsUnboundMalformedAndWidthBearingShapes(t *testing.T) 
 		"below_policy":  `{"source":"` + source + `","columns":19,"operation":"` + operation + `"}`,
 		"above_policy":  `{"source":"` + source + `","columns":301,"operation":"` + operation + `"}`,
 		"bad_operation": `{"source":"` + source + `","columns":90,"operation":"short"}`,
-		// Rows are optional since UX-14, but a given count obeys the closed row
+		// Rows are optional , but a given count obeys the closed row
 		// policy (MinFitRows..MaxFitRows, cell cap): reject, never clamp.
 		"rows_below_policy": `{"source":"` + source + `","columns":90,"rows":7,"operation":"` + operation + `"}`,
 		"rows_above_policy": `{"source":"` + source + `","columns":90,"rows":121,"operation":"` + operation + `"}`,

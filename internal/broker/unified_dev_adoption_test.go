@@ -181,7 +181,7 @@ func splitAdoptionJournal(t *testing.T, data []byte, pending string) (bootstrap,
 	return data[:boundary], data[boundary:]
 }
 
-// TestUnifiedAdoptionTextEquivalence is falsifier F4's Go half plus the
+// TestUnifiedAdoptionTextEquivalence is text-equivalence coverage plus the
 // registration contract: the adopted bootstrap's painted rows equal tmux
 // capture-pane ground truth byte for byte (SGR presence included), marker
 // parity holds while streaming afterward, the generation is stamped
@@ -271,7 +271,7 @@ func TestUnifiedAdoptionTextEquivalence(t *testing.T) {
 	}
 }
 
-// TestUnifiedAdoptionBoundaryMarkerConservation is falsifier F2: sequential
+// TestUnifiedAdoptionBoundaryMarkerConservation verifies: sequential
 // markers stream across the adoption boundary and every marker survives
 // exactly once — pre-boundary markers only through the capture, post-boundary
 // markers only through the tail — in set equality with tmux's own capture as
@@ -375,7 +375,7 @@ func TestUnifiedAdoptionBoundaryMarkerConservation(t *testing.T) {
 	}
 }
 
-// TestUnifiedAdoptionSplitSequenceSeam is falsifier F2b: adoption taken while
+// TestUnifiedAdoptionSplitSequenceSeam verifies: adoption taken while
 // the pane is stalled mid-escape-sequence must journal the pending parser
 // prefix as the bootstrap's last bytes, and the pane's continuation must land
 // immediately after it, so the joined bytes form the complete valid sequence
@@ -443,7 +443,7 @@ func TestUnifiedAdoptionSplitSequenceSeam(t *testing.T) {
 	}
 }
 
-// TestUnifiedAdoptionRefusalsAreTypedAndArtifactFree is falsifier F3: every
+// TestUnifiedAdoptionRefusalsAreTypedAndArtifactFree verifies: every
 // ineligible target refuses with its own typed error and leaves no journal
 // file, no active projection, no in-progress marker, and no registered unit.
 func TestUnifiedAdoptionRefusalsAreTypedAndArtifactFree(t *testing.T) {
@@ -533,7 +533,7 @@ func TestUnifiedAdoptionRefusalsAreTypedAndArtifactFree(t *testing.T) {
 	})
 }
 
-// TestUnifiedAdoptionCompositeAtomicityUnderFlood is falsifier F1: under
+// TestUnifiedAdoptionCompositeAtomicityUnderFlood verifies: under
 // unthrottled pane flood, repeated adoption composites classify ZERO %output
 // events inside any submission span — the measured tmux 3.4 atomicity as a
 // regression gate — and the PRE!=POST retry path is exercisable through the
@@ -595,7 +595,7 @@ func TestUnifiedAdoptionCompositeAtomicityUnderFlood(t *testing.T) {
 	})
 }
 
-// TestUnifiedAdoptionRestartFailsClosedAndReadoptable is falsifier F5's broker
+// TestUnifiedAdoptionRestartFailsClosedAndReadoptable is restart coverage in the broker
 // half: after a simulated broker restart over a surviving runtime directory,
 // the adopted generation is never resumed as live — it reopens fail-closed and
 // origin-honest — the provider starts with no active sessions, and the same
@@ -604,7 +604,7 @@ func TestUnifiedAdoptionRestartFailsClosedAndReadoptable(t *testing.T) {
 	runUnifiedAdoptionRestartReadoptable(t, 0)
 }
 
-// TestUnifiedAdoptionRestartOneSlotReadoptable is the advisor's F1 falsifier
+// TestUnifiedAdoptionRestartOneSlotReadoptable is the one-slot restart regression test
 // pinned as a regression gate: with exactly one ordinary-admission slot plus
 // the rotation reserve, the stale reconstructed generation a restart leaves
 // behind must not keep the ordinary slot charged — the same session re-adopts

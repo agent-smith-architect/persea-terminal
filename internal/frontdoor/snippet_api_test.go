@@ -411,7 +411,7 @@ func TestSnippetAPISharesOperatorLimiter(t *testing.T) {
 	}
 }
 
-// Adjudication F1 (c1_osc_slot): the distinguished OSC 52 record has its own
+// contract F1 (c1_osc_slot): the distinguished OSC 52 record has its own
 // slot outside the 20-clip manual ring — creating it never evicts a manual
 // clip, and manual clips never evict it.
 func TestSnippetAPIOSCFirstWriteNeverEvictsManualClip(t *testing.T) {
@@ -502,7 +502,7 @@ func TestSnippetAPIManualClipsNeverEvictOSCRecord(t *testing.T) {
 	}
 }
 
-// Adjudication F2 (c2_canonical_keys): encoding/json matches object keys
+// contract F2 (c2_canonical_keys): encoding/json matches object keys
 // case-insensitively, so a closed schema must refuse non-canonical spellings
 // before decoding — on every route, including nested objects.
 func TestSnippetAndPreferencesAPIRefuseCaseFoldedKeys(t *testing.T) {

@@ -85,7 +85,7 @@ func TestValidateStaticDirRejectsNonRegularBundleEntry(t *testing.T) {
 	}
 }
 
-// E-P6 — the installable shell is release payload, never a runtime download.
+// session memory — the installable shell is release payload, never a runtime download.
 // The manifest and the three icons are ordinary static files that a release
 // must contain as REGULAR files; a release missing or symlinking one does not
 // start. A rollback runs the OLD release's binary against the OLD release's

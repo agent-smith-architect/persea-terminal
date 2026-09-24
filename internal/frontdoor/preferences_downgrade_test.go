@@ -10,16 +10,16 @@ import (
 	"time"
 )
 
-// UX8-F1 rollback (ruling J-UX-9). The tri-state is a one-way door for the
-// store file: a release older than J-UX-9 decodes `"font_size": null` into a
+// font-auto-preference rollback. The tri-state is a one-way door for the
+// store file: a release without configurable font sizes decodes `"font_size": null` into a
 // plain `int` as a no-op zero and then fails its own 9…24 range check, which
 // rejects the WHOLE file — one operator on auto costs every other operator
 // their theme and default session. `deploy/preferences-store-downgrade.sh` is
 // the repair, and these cases are what say it works.
 //
 // The old rule is not paraphrased here, it is re-declared: legacyPreferenceEntry
-// carries the pre-J-UX-9 `FontSize int`, and loadLegacyPreferencesStore is the
-// pre-J-UX-9 load path. A test that merely asserted "no nulls remain" would pass
+// carries the older `FontSize int`, and loadLegacyPreferencesStore is the
+// older load path. A test that merely asserted "no nulls remain" would pass
 // against a file the old binary still rejects.
 
 type legacyPreferenceEntry struct {
@@ -37,7 +37,7 @@ type legacyPreferencesStoreFile struct {
 	Operators []legacyPreferenceEntry `json:"operators"`
 }
 
-// loadLegacyPreferencesStore reproduces the pre-J-UX-9 loader, including its
+// loadLegacyPreferencesStore reproduces the older loader, including its
 // strict decode (unknown fields are fatal, which is why the repair may only
 // change values and never add a key) and its unconditional font-size range
 // check on a non-pointer int.
@@ -58,7 +58,7 @@ func loadLegacyPreferencesStore(b []byte) error {
 			return errors.New("duplicate preferences operator")
 		}
 		seen[e.Operator] = true
-		// The pre-J-UX-9 validatePreferences, verbatim in its font clause.
+		// The older validatePreferences, verbatim in its font clause.
 		if !preferenceThemes[e.Theme] || e.FontSize < preferenceFontSizeMin || e.FontSize > preferenceFontSizeMax || !validDefaultSession(e.DefaultSession) {
 			return errors.New("invalid preferences record")
 		}

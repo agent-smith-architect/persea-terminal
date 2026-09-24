@@ -1102,7 +1102,7 @@ func TestRotationCapacityMaterializationFailureKeepsCapacityReleasable(t *testin
 	}
 }
 
-// P1B-R1 (correction C7). A successor header that fails to write is charged
+// A successor header that fails to write is charged
 // before the write and refunded only when the cleanup unlink proves the bytes
 // gone. When the unlink also fails, the retained charge must be converted out
 // of the header hold the capacity still carries, inside the same sequenced

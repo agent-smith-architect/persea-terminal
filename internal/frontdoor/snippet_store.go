@@ -15,7 +15,7 @@ import (
 	"unicode/utf8"
 )
 
-// Snippets / clips store (design packet §3a): one global store in the alias
+// Snippets / clips store: one global store in the alias
 // store's shape. Bodies are terminal text and may carry secrets: the file is
 // 0600 under the front's 0700 state directory, bodies are never logged, and
 // the API never places them in a URL.
