@@ -79,7 +79,7 @@ type SnippetRecord struct {
 }
 
 // snippetView is the list shape: the record plus, for clips, an 80-rune
-// preview derived from the body (§3b).
+// preview derived from the body.
 type snippetView struct {
 	SnippetRecord
 	Preview string `json:"preview,omitempty"`

@@ -200,7 +200,7 @@ async function main(): Promise<void> {
 }
 
 {
-  // J-UX state law: transport and parsing are fallible preparation. The one
+  // Transport and parsing are fallible preparation. The one
   // visible transition is a synchronous publication after the complete strong
   // CAS record exists; no subscriber may observe a half-applied identity.
   const remote = server();
@@ -365,7 +365,7 @@ for (const etag of [null, 'W/"0"', "*", '"0", "1"']) {
   assert.equal(DEFAULT_OPERATOR_PREFERENCES.fontSize, null, "the shipped default is not auto");
 }
 {
-  // C1: the composer face is a plain number with a default, one step below the
+  // the composer face is a plain number with a default, one step below the
   // 14px the stylesheet used to hardcode for a fine pointer.
   assert.equal(DEFAULT_OPERATOR_PREFERENCES.composerFontSize, 11, "the shipped composer face default moved");
   assert.equal(DEFAULT_COMPOSER_FONT_SIZE, 11, "the exported composer face default moved");
@@ -407,8 +407,8 @@ for (const etag of [null, 'W/"0"', "*", '"0", "1"']) {
   const storage = new MemoryStorage();
   storage.setItem(OPERATOR_PREFERENCES_HINT_KEY, JSON.stringify({ version: 1, theme: "gruvbox-dark", font_size: 18, default_session: null }));
   const service = new OperatorPreferencesService({ storage, fetch: async () => new Response("", { status: 503 }), csrf: () => "csrf-token" });
-  assert.equal(service.snapshot().preferences.theme, "gruvbox-dark", "a pre-C1 hint was discarded whole");
-  assert.equal(service.snapshot().preferences.composerFontSize, 11, "a pre-C1 hint did not read the composer face as the default");
+  assert.equal(service.snapshot().preferences.theme, "gruvbox-dark", "a hint without composer_font_size was discarded whole");
+  assert.equal(service.snapshot().preferences.composerFontSize, 11, "a hint without composer_font_size did not read the composer face as the default");
 }
 {
   // A record whose font is auto parses, and reads back as auto.
@@ -653,7 +653,7 @@ for (const leg of ["success", "conflict", "unavailable"] as const) {
   assert.equal(requests.length, 3, `${leg}: A/B/C operation count was not linear`);
 }
 
-// (amended after F5): cross-document propagation. A publication
+// cross-document propagation. A publication
 // writes the hint, which is only a SIGNAL to sibling documents; the record is
 // always taken from the server by refresh(), which re-reads, publishes nothing
 // for an unchanged revision, and never publishes "unavailable" for a transient
@@ -688,7 +688,7 @@ for (const leg of ["success", "conflict", "unavailable"] as const) {
   // A PUT after refresh carries the read revision, so it is not stale.
   assert.equal(await reader.update({ theme: "rose-pine" }), "saved", "the refreshed revision was stale for the next write");
   assert.equal(remote.current().revision, 6);
-  // Hostile hint (F5 regression test): a same-origin hint that names a different
+  // Hostile hint: a same-origin hint that names a different
   // profile's record with a higher revision paints before load and is then
   // replaced by the server record; after load it is never consulted at all.
   const hostileHint = JSON.stringify({ version: 1, theme: "dracula", font_size: null, composer_font_size: 24, default_session: null });

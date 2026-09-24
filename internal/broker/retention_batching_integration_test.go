@@ -2768,7 +2768,7 @@ func TestRetentionMetaCapacityRejectedReplacementPreservesOldAuthority(t *testin
 }
 
 // ---------------------------------------------------------------------------
-// ISSUE25 — geometry barrier release.
+// Geometry barrier release.
 //
 // The barrier is installed BEFORE the guarded command is issued, so every path
 // out of that command — success, refusal, fault — has to release it. Nothing
@@ -2779,7 +2779,7 @@ func TestRetentionMetaCapacityRejectedReplacementPreservesOldAuthority(t *testin
 // regression tests exist to catch.
 // ---------------------------------------------------------------------------
 
-const geometryBarrierRed = "ISSUE25/GEOMETRY_BARRIER/CANDIDATE_RED"
+const geometryBarrierRed = "GEOMETRY_BARRIER"
 
 type geometryBarrierDownstream struct {
 	mu        sync.Mutex

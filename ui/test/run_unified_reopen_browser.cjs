@@ -7,11 +7,11 @@
 // live control without a hand. Two production defects sat behind the reported
 // dead end ("This terminal is unavailable · code: input_refused"):
 //
-//   R1  the page sent its first INPUT (xterm's focus-in report, emitted by
+//   input-before-control  the page sent its first INPUT (xterm's focus-in report, emitted by
 //       terminal.focus() once the replayed journal had enabled DECSET 1004)
 //       BEFORE the MODE_REQUEST, the broker refused it, and the front door
 //       closed the attachment with input_refused — a terminal class;
-//   R2  a consumed or expired fragment handle answered 410 at /ws, the
+//   consumed-handle-reopen  a consumed or expired fragment handle answered 410 at /ws, the
 //       transport knew no source binding, and the retry exhausted into
 //       source_binding_unavailable.
 //
@@ -77,7 +77,7 @@ class Tab extends BaseTab {
 
 const isLive = (state) => state.screen.includes("fixture-live") && state.noticeHidden && state.connection === "";
 const hasNotice = (state) => !state.noticeHidden;
-// Packet F6: no typed failure state may render a blank page.
+// no typed failure state may render a blank page.
 const nonBlank = (state) => !state.noticeHidden && state.headline.length > 0 && state.detail.length > 0 && state.code.length > 0 && state.dashboardHref === "/";
 
 async function main() {
@@ -146,7 +146,7 @@ async function main() {
     evidence.retiredRoutes = retiredRoutes;
     await tabA.cdp.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 844, deviceScaleFactor: 1, mobile: false });
 
-    // --- S0 precondition: a fresh inventory handle opens into live control ----
+    // --- Precondition: a fresh inventory handle opens into live control ----
     await control({ reset: true });
     const firstURL = unifiedURL(await freshControlHandle());
     await tabA.navigate(firstURL);
@@ -160,7 +160,7 @@ async function main() {
     assert(s0.state.reloadHandle, "S0 precondition: the page did not remember a reload handle");
     evidence.s0 = { frames: s0Attachment.frames, navigationType: s0.state.navigationType };
 
-    // --- R1 no INPUT before the control grant (the production trigger) ---------
+    // --- input-before-control no INPUT before the control grant (the production trigger) ---------
     // The broker refuses INPUT while its automaton is still in observe mode,
     // and the front door turns that refusal into a socket close. The page must
     // therefore never emit INPUT — a keystroke OR xterm's focus-in report,
@@ -180,21 +180,21 @@ async function main() {
     const r1PreGrantInput = r1Attachment.frames.filter((frame, index) => frame.startsWith("INPUT:") && (r1Attachment.mode !== "CONTROL"));
     evidence.r1 = { frames: r1Attachment.frames, closeReason: r1Attachment.closeReason, windowed: r1Windowed.state ?? r1Windowed.last };
     if (r1EarlyInput || r1PreGrantInput.length > 0 || r1Attachment.closeReason === "input_refused") {
-      fail("R1", "the page sent INPUT to the broker before the control grant, so the broker refused it (input_refused)", evidence.r1);
+      fail("input-before-control", "the page sent INPUT to the broker before the control grant, so the broker refused it (input_refused)", evidence.r1);
     }
     // Release the grant: the page must now be live and typed input must land.
     await control({ releaseMode: true });
     const r1Live = await tabA.waitUntil(isLive);
     if (!r1Live.state) {
-      fail("R1", "after the control grant the page did not reach live control", { evidence: evidence.r1, state: r1Live.last });
+      fail("input-before-control", "after the control grant the page did not reach live control", { evidence: evidence.r1, state: r1Live.last });
     } else {
       await tabA.type("j");
       await delay(150);
       r1Attachment = await lastAttachment();
-      if (!r1Attachment.inputs.includes("j")) fail("R1", "typed input after the grant was not delivered", r1Attachment);
+      if (!r1Attachment.inputs.includes("j")) fail("input-before-control", "typed input after the grant was not delivered", r1Attachment);
     }
 
-    // --- R2 consumed handle, fresh document (tab restored / URL reopened) ------
+    // --- consumed-handle-reopen consumed handle, fresh document (tab restored / URL reopened) ------
     await control({ replayFocusReporting: true });
     // The fragment still carries the consumed handle; /ws answers 410 before the
     // upgrade. The page must re-mint from the identity in the fragment and land
@@ -211,31 +211,31 @@ async function main() {
       frames: r2Attachment?.frames,
     };
     if (!r2.state || !isLive(r2.state)) {
-      fail("R2", "reopening the unified page with its consumed handle dead-ended instead of re-minting", evidence.r2);
+      fail("consumed-handle-reopen", "reopening the unified page with its consumed handle dead-ended instead of re-minting", evidence.r2);
     } else {
-      if (!r2.strips.some((text) => text.includes("Reconnecting to alpha"))) fail("R2", "no 'Reconnecting to alpha…' strip was shown while re-minting", evidence.r2);
-      if (evidence.r2.inventoryFetches < 1) fail("R2", "the page re-attached without resolving its identity through the inventory", evidence.r2);
+      if (!r2.strips.some((text) => text.includes("Reconnecting to alpha"))) fail("consumed-handle-reopen", "no 'Reconnecting to alpha…' strip was shown while re-minting", evidence.r2);
+      if (evidence.r2.inventoryFetches < 1) fail("consumed-handle-reopen", "the page re-attached without resolving its identity through the inventory", evidence.r2);
       const r2Mode = r2Attachment.frames.indexOf("MODE_REQUEST");
       const r2Input = firstInputIndex(r2Attachment.frames);
-      if (r2Mode < 0 || (r2Input >= 0 && r2Input < r2Mode)) fail("R2", "the re-minted attachment sent input before its control grant", evidence.r2);
+      if (r2Mode < 0 || (r2Input >= 0 && r2Input < r2Mode)) fail("consumed-handle-reopen", "the re-minted attachment sent input before its control grant", evidence.r2);
       await tabA.type("m");
       await delay(150);
       const typed = await lastAttachment();
-      if (!typed.inputs.includes("m")) fail("R2", "typed input after the silent re-attach was not delivered", typed);
+      if (!typed.inputs.includes("m")) fail("consumed-handle-reopen", "typed input after the silent re-attach was not delivered", typed);
     }
 
-    // --- R3 control: a document reload still reopens into live control --------
+    // --- reload-reopen control: a document reload still reopens into live control --------
     // (The remembered reload handle carries the reload; a fresh navigate is the
-    // re-mint path proven by R2. This is the regression guard that the reload
+    // re-mint path proven by consumed-handle-reopen. This is the regression guard that the reload
     // path was not disturbed.)
     const beforeR3 = await snapshot();
     await tabA.reload();
     const r3 = await tabA.waitUntil((state) => state.navigationType === "reload" && (isLive(state) || hasNotice(state)));
     const afterR3 = await snapshot();
     evidence.r3 = { state: r3.state ?? r3.last, websockets: afterR3.counters.websockets - beforeR3.counters.websockets };
-    if (!r3.state || !isLive(r3.state)) fail("R3", "a document reload did not reopen into live control", evidence.r3);
+    if (!r3.state || !isLive(r3.state)) fail("reload-reopen", "a document reload did not reopen into live control", evidence.r3);
 
-    // --- R4 cross-device: another tab reopens the same URL while this one holds
+    // --- cross-device-takeover cross-device: another tab reopens the same URL while this one holds
     // control. Reopening is explicit intent: the newcomer takes control by
     // itself; the displaced tab shows the displacement with a working manual
     // claim, so the operator can take it back from either side.
@@ -248,11 +248,11 @@ async function main() {
     const afterR4 = await snapshot();
     evidence.r4 = { tabB: r4B.state ?? r4B.last, stripsB: r4B.strips, tabA: r4A.state ?? r4A.last, takeovers: afterR4.counters.takeovers - beforeR4.counters.takeovers, lease: afterR4.leaseAttachment, attachments: afterR4.attachments.slice(-3).map((item) => ({ id: item.id, takeover: item.takeover, closeReason: item.closeReason, live: item.live })) };
     if (!r4B.state || !isLive(r4B.state)) {
-      fail("R4", "a second device reopening the session did not take control automatically", evidence.r4);
+      fail("cross-device-takeover", "a second device reopening the session did not take control automatically", evidence.r4);
     } else {
-      if (evidence.r4.takeovers !== 1) fail("R4", "the newcomer did not claim control through exactly one takeover", evidence.r4);
+      if (evidence.r4.takeovers !== 1) fail("cross-device-takeover", "the newcomer did not claim control through exactly one takeover", evidence.r4);
       if (!r4A.state || !nonBlank(r4A.state) || !r4A.state.code.includes("control_displaced") || r4A.state.takeHidden) {
-        fail("R4", "the displaced tab did not show control_displaced with a manual take-control claim", evidence.r4);
+        fail("cross-device-takeover", "the displaced tab did not show control_displaced with a manual take-control claim", evidence.r4);
       } else {
         // Reclaim from the displaced tab. Liveness here is proven FUNCTIONALLY
         // by input delivery, not by scraped DOM text: after a displace→reclaim
@@ -274,9 +274,9 @@ async function main() {
           attachments: afterBack.attachments.slice(-3).map((item) => ({ id: item.id, takeover: item.takeover, frames: item.frames, closeReason: item.closeReason, live: item.live, mode: item.mode })),
         };
         if (!reclaimed.state) {
-          fail("R4", "the manual claim from the displaced tab did not clear the displacement notice", evidence.r4.back);
+          fail("cross-device-takeover", "the manual claim from the displaced tab did not clear the displacement notice", evidence.r4.back);
         } else if (evidence.r4.back.takeovers !== 1) {
-          fail("R4", "the manual reclaim did not issue exactly one takeover", evidence.r4.back);
+          fail("cross-device-takeover", "the manual reclaim did not issue exactly one takeover", evidence.r4.back);
         } else {
           await tabA.type("a");
           const inputDeadline = Date.now() + 8_000;
@@ -286,17 +286,17 @@ async function main() {
             typed = await lastAttachment();
           }
           evidence.r4.back.reclaimInputs = typed.inputs.slice();
-          if (!typed.inputs.includes("a")) fail("R4", "the reclaimed tab did not deliver input to the session (not live)", evidence.r4.back);
+          if (!typed.inputs.includes("a")) fail("cross-device-takeover", "the reclaimed tab did not deliver input to the session (not live)", evidence.r4.back);
           const bDisplaced = await tabB.waitUntil((state) => hasNotice(state) && state.code.includes("control_displaced"), 4_000);
           evidence.r4.back.tabB = bDisplaced.state ?? bDisplaced.last;
-          if (!bDisplaced.state || !nonBlank(bDisplaced.state)) fail("R4", "the newcomer was not shown its displacement non-blank", evidence.r4.back);
+          if (!bDisplaced.state || !nonBlank(bDisplaced.state)) fail("cross-device-takeover", "the newcomer was not shown its displacement non-blank", evidence.r4.back);
         }
       }
     }
     await tabB.close(debugPort);
     tabs.pop();
 
-    // --- R5 mid-session input_refused: re-attach, never a dead end ------------
+    // --- input-refusal-reconnect mid-session input_refused: re-attach, never a dead end ------------
     await control({ reset: true });
     await tabA.navigate(unifiedURL(await freshControlHandle()));
     const r5Live = await tabA.waitUntil(isLive);
@@ -309,16 +309,16 @@ async function main() {
     const afterR5 = await snapshot();
     evidence.r5 = { strips: [...new Set([...r5.strips, ...r5Recovered.strips])], state: r5Recovered.state ?? r5Recovered.last, attachments: afterR5.attachments.length - beforeR5.attachments.length, reasons: afterR5.attachments.map((item) => item.closeReason) };
     if (!r5Recovered.state || !isLive(r5Recovered.state)) {
-      fail("R5", "an input_refused close stranded the page instead of re-attaching", evidence.r5);
+      fail("input-refusal-reconnect", "an input_refused close stranded the page instead of re-attaching", evidence.r5);
     } else {
-      if (!evidence.r5.strips.some((text) => text.includes("Reconnecting to alpha"))) fail("R5", "no reconnecting strip was shown during the re-attach", evidence.r5);
+      if (!evidence.r5.strips.some((text) => text.includes("Reconnecting to alpha"))) fail("input-refusal-reconnect", "no reconnecting strip was shown during the re-attach", evidence.r5);
       await tabA.type("z");
       await delay(150);
       const typed = await lastAttachment();
-      if (!typed.inputs.includes("z")) fail("R5", "input after the re-attach was not delivered", typed);
+      if (!typed.inputs.includes("z")) fail("input-refusal-reconnect", "input after the re-attach was not delivered", typed);
     }
 
-    // --- R6 a refusal burst degrades to a visible terminal notice, never a loop
+    // --- refusal-burst-notice a refusal burst degrades to a visible terminal notice, never a loop
     await control({ refuseInputs: 50 });
     let r6 = null;
     for (let round = 0; round < 8 && !r6; round += 1) {
@@ -330,10 +330,10 @@ async function main() {
     }
     const afterR6 = await snapshot();
     evidence.r6 = { state: r6, attachments: afterR6.attachments.length, liveSockets: afterR6.attachments.filter((item) => item.live).length };
-    if (!r6 || !nonBlank(r6)) fail("R6", "a burst of refusals did not settle into a visible terminal notice", evidence.r6);
-    else if (afterR6.attachments.length > 8) fail("R6", "the re-attach loop is unbounded", evidence.r6);
+    if (!r6 || !nonBlank(r6)) fail("refusal-burst-notice", "a burst of refusals did not settle into a visible terminal notice", evidence.r6);
+    else if (afterR6.attachments.length > 8) fail("refusal-burst-notice", "the re-attach loop is unbounded", evidence.r6);
 
-    // --- R7 genuinely unresolvable: the session is gone ------------------------
+    // --- session-gone-notice genuinely unresolvable: the session is gone ------------------------
     await control({ reset: true });
     const goneURL = unifiedURL(await freshControlHandle());
     await tabA.navigate(goneURL);
@@ -343,10 +343,10 @@ async function main() {
     const r7 = await tabA.waitUntil(hasNotice);
     evidence.r7 = { state: r7.state ?? r7.last, strips: r7.strips };
     if (!r7.state || !nonBlank(r7.state) || !r7.state.code.includes("session_gone")) {
-      fail("R7", "a vanished session did not land on the session_gone dead end with a dashboard way out", evidence.r7);
+      fail("session-gone-notice", "a vanished session did not land on the session_gone dead end with a dashboard way out", evidence.r7);
     }
 
-    // --- R8 adoptable session (broker restarted since): adopt, then attach ---
+    // --- adoptable-session-reopen adoptable session (broker restarted since): adopt, then attach ---
     // The realistic reopen: the tab was live, the tab closed, and the session
     // fell back to adoptable (its journal lost). The fragment handle is now
     // consumed, so the reopen re-mints from identity, which adopts the idle
@@ -362,10 +362,10 @@ async function main() {
     const afterR8 = await snapshot();
     evidence.r8 = { state: r8.state ?? r8.last, adoptions: afterR8.counters.adoptions - beforeR8.counters.adoptions, strips: r8.strips };
     if (!r8.state || !isLive(r8.state) || evidence.r8.adoptions !== 1) {
-      fail("R8", "an adoptable session was not adopted and attached on reopen", evidence.r8);
+      fail("adoptable-session-reopen", "an adoptable session was not adopted and attached on reopen", evidence.r8);
     }
 
-    // --- R9 an in-band resize_failed is a passing notice, never a close -------
+    // --- resize-refusal-notice an in-band resize_failed is a passing notice, never a close -------
     // The operator's iPhone report: the explicit Fit on an adopted session
     // failed and the page showed "This terminal is unavailable ·
     // code: resize_failed". A current front door relays an operational
@@ -394,35 +394,35 @@ async function main() {
       resizes: r9Attachment?.resizes, refusals: r9Attachment?.refusals, live: r9Attachment?.live, closeReason: r9Attachment?.closeReason,
     };
     if (!r9.state || !r9.state.refusal.includes("resize_failed") || hasNotice(r9.state) || r9.state.connection !== "") {
-      fail("R9", "an in-band resize_failed did not render as a passing refusal notice on a live page", evidence.r9);
+      fail("resize-refusal-notice", "an in-band resize_failed did not render as a passing refusal notice on a live page", evidence.r9);
     } else {
-      if (evidence.r9.resizes !== 1 || evidence.r9.refusals !== 1) fail("R9", "the Fit click did not produce exactly one RESIZE_REQUEST and one refusal", evidence.r9);
-      if (evidence.r9.websockets !== 0 || !evidence.r9.live) fail("R9", "the refusal cost the page its attachment (reconnect or close)", evidence.r9);
-      if (!r9Settled.state) fail("R9", "the Fit control was not restored after the refusal", evidence.r9);
+      if (evidence.r9.resizes !== 1 || evidence.r9.refusals !== 1) fail("resize-refusal-notice", "the Fit click did not produce exactly one RESIZE_REQUEST and one refusal", evidence.r9);
+      if (evidence.r9.websockets !== 0 || !evidence.r9.live) fail("resize-refusal-notice", "the refusal cost the page its attachment (reconnect or close)", evidence.r9);
+      if (!r9Settled.state) fail("resize-refusal-notice", "the Fit control was not restored after the refusal", evidence.r9);
       await tabA.type("f");
       await delay(150);
       const typed = await lastAttachment();
-      if (!typed.inputs.includes("f")) fail("R9", "input after the refused Fit was not delivered on the same attachment", typed);
+      if (!typed.inputs.includes("f")) fail("resize-refusal-notice", "input after the refused Fit was not delivered on the same attachment", typed);
       // The notice is passing: it leaves by itself.
       const gone = await tabA.waitUntil((state) => state.refusal === "" && state.noticeHidden, 8_000);
-      if (!gone.state) fail("R9", "the refusal notice did not dismiss itself", gone.last);
+      if (!gone.state) fail("resize-refusal-notice", "the refusal notice did not dismiss itself", gone.last);
       // Once the cause is gone the same attachment fits.
       await control({ refuseResize: "" });
       const r9Again = await tabA.waitUntil((state) => !state.fitDisabled && state.fitPoint !== null, 4_000);
-      if (!r9Again.state) fail("R9", "the Fit control did not re-enable for a second attempt", r9Again.last);
+      if (!r9Again.state) fail("resize-refusal-notice", "the Fit control did not re-enable for a second attempt", r9Again.last);
       else {
         const rowsBefore = r9Again.state.terminalRows;
         await tabA.trustedClick(r9Again.state.fitPoint);
         const fitted = await tabA.waitUntil((state) => state.terminalRows !== rowsBefore && !state.fitDisabled, 8_000);
         const afterFit = await lastAttachment();
         evidence.r9.secondFit = { rowsBefore, state: fitted.state ?? fitted.last, resizes: afterFit.resizes, live: afterFit.live };
-        if (!fitted.state || afterFit.resizes !== 2 || !afterFit.live) fail("R9", "a Fit after the refused one did not apply on the same attachment", evidence.r9.secondFit);
+        if (!fitted.state || afterFit.resizes !== 2 || !afterFit.live) fail("resize-refusal-notice", "a Fit after the refused one did not apply on the same attachment", evidence.r9.secondFit);
       }
     }
 
     await tabA.cdp.send("Emulation.clearDeviceMetricsOverride");
 
-    // --- R10 an in-band input_refused is a passing notice, never a re-attach ---
+    // --- input-refusal-notice an in-band input_refused is a passing notice, never a re-attach ---
     await control({ reset: true });
     await tabA.navigate(unifiedURL(await freshControlHandle()));
     assert((await tabA.waitUntil(isLive)).state, "R10 precondition: fresh open did not reach live control");
@@ -436,12 +436,12 @@ async function main() {
     const r10Attachment = afterR10.attachments[afterR10.attachments.length - 1];
     evidence.r10 = { state: r10.state ?? r10.last, websockets: afterR10.counters.websockets - beforeR10.counters.websockets, inputs: r10Attachment?.inputs, refusals: r10Attachment?.refusals, live: r10Attachment?.live };
     if (!r10.state || !r10.state.refusal.includes("input_refused") || hasNotice(r10.state) || r10.state.connection !== "") {
-      fail("R10", "an in-band input_refused did not render as a passing refusal notice on a live page", evidence.r10);
+      fail("input-refusal-notice", "an in-band input_refused did not render as a passing refusal notice on a live page", evidence.r10);
     } else if (evidence.r10.websockets !== 0 || !evidence.r10.live || !r10Attachment.inputs.includes("z") || r10Attachment.inputs.includes("y")) {
-      fail("R10", "the in-band refusal was not the end of it: the page reconnected, or the next keystroke was lost", evidence.r10);
+      fail("input-refusal-notice", "the in-band refusal was not the end of it: the page reconnected, or the next keystroke was lost", evidence.r10);
     }
 
-    // --- R11 a fatal post-mutation resize closes; the reopen re-mints into live
+    // --- fatal-resize-notice a fatal post-mutation resize closes; the reopen re-mints into live
     // The broker's verdict on a Fit whose transaction failed AFTER tmux was
     // mutated (witness recheck, attachment PTY resize, or durable commit) is
     // attachment_failed: never an in-band refusal that would leave a dead
@@ -470,10 +470,10 @@ async function main() {
       resizes: r11Attachment?.resizes, closeReason: r11Attachment?.closeReason, live: r11Attachment?.live,
     };
     if (!r11.state || !nonBlank(r11.state) || !r11.state.code.includes("attachment_failed")) {
-      fail("R11", "a fatal post-mutation resize close did not land on a terminal notice carrying attachment_failed", evidence.r11);
+      fail("fatal-resize-notice", "a fatal post-mutation resize close did not land on a terminal notice carrying attachment_failed", evidence.r11);
     } else {
-      if (evidence.r11.websockets !== 0 || evidence.r11.live) fail("R11", "the page retried a typed fatal verdict instead of stopping", evidence.r11);
-      if (evidence.r11.resizes !== 1 || evidence.r11.closeReason !== "attachment_failed") fail("R11", "the Fit did not produce exactly one RESIZE_REQUEST closed with attachment_failed", evidence.r11);
+      if (evidence.r11.websockets !== 0 || evidence.r11.live) fail("fatal-resize-notice", "the page retried a typed fatal verdict instead of stopping", evidence.r11);
+      if (evidence.r11.resizes !== 1 || evidence.r11.closeReason !== "attachment_failed") fail("fatal-resize-notice", "the Fit did not produce exactly one RESIZE_REQUEST closed with attachment_failed", evidence.r11);
       // The reopen: the fragment handle is consumed, so the page re-mints from
       // identity and lands in live control on a fresh attachment.
       const beforeReopen = await snapshot();
@@ -488,20 +488,20 @@ async function main() {
         websockets: afterReopen.counters.websockets - beforeReopen.counters.websockets,
       };
       if (!reopened.state || !isLive(reopened.state)) {
-        fail("R11", "reopening after a fatal resize close did not re-mint into live control", evidence.r11.reopen);
+        fail("fatal-resize-notice", "reopening after a fatal resize close did not re-mint into live control", evidence.r11.reopen);
       } else {
-        if (evidence.r11.reopen.handleRequests < 1) fail("R11", "the reopen reused a consumed handle instead of re-minting", evidence.r11.reopen);
+        if (evidence.r11.reopen.handleRequests < 1) fail("fatal-resize-notice", "the reopen reused a consumed handle instead of re-minting", evidence.r11.reopen);
         const rowsBefore = reopened.state.terminalRows;
         await tabA.trustedClick(reopened.state.fitPoint);
         const fitted = await tabA.waitUntil((state) => state.terminalRows !== rowsBefore && !state.fitDisabled, 8_000);
         const afterFit = await lastAttachment();
         evidence.r11.reopen.fit = { rowsBefore, state: fitted.state ?? fitted.last, resizes: afterFit.resizes, live: afterFit.live };
-        if (!fitted.state || afterFit.resizes !== 1 || !afterFit.live) fail("R11", "a Fit on the re-minted attachment did not apply", evidence.r11.reopen.fit);
+        if (!fitted.state || afterFit.resizes !== 1 || !afterFit.live) fail("fatal-resize-notice", "a Fit on the re-minted attachment did not apply", evidence.r11.reopen.fit);
       }
     }
     await tabA.cdp.send("Emulation.clearDeviceMetricsOverride");
 
-    // --- R12 subscriber_lagged: a typed subscriber close re-attaches, never a dead end
+    // --- subscriber-lag-reconnect subscriber_lagged: a typed subscriber close re-attaches, never a dead end
     // The broker evicts a journal subscriber that fell behind the committed
     // stream and ends that attachment with the typed reason subscriber_lagged
     // and the front door closes the socket with it. The page must
@@ -530,17 +530,17 @@ async function main() {
       newMode: r12New?.mode, newLive: r12New?.live, newCloseReason: r12New?.closeReason,
     };
     if (!r12Recovered.state || !isLive(r12Recovered.state)) {
-      fail("R12", "a subscriber_lagged close stranded the page instead of re-attaching", evidence.r12);
+      fail("subscriber-lag-reconnect", "a subscriber_lagged close stranded the page instead of re-attaching", evidence.r12);
     } else {
-      if (evidence.r12.oldCloseReason !== "subscriber_lagged" || evidence.r12.oldLive) fail("R12", "the evicted attachment was not closed with subscriber_lagged", evidence.r12);
-      if (evidence.r12.attachments !== 1 || evidence.r12.websockets !== 1 || evidence.r12.handleRequests < 1) fail("R12", "the page did not re-mint and re-attach exactly once", evidence.r12);
-      if (evidence.r12.newMode !== "CONTROL" || !evidence.r12.newLive || evidence.r12.newCloseReason) fail("R12", "the re-attached session is not live in control mode", evidence.r12);
-      if (!evidence.r12.strips.some((text) => text.includes("Reconnecting to alpha"))) fail("R12", "no reconnecting strip was shown during the re-attach", evidence.r12);
+      if (evidence.r12.oldCloseReason !== "subscriber_lagged" || evidence.r12.oldLive) fail("subscriber-lag-reconnect", "the evicted attachment was not closed with subscriber_lagged", evidence.r12);
+      if (evidence.r12.attachments !== 1 || evidence.r12.websockets !== 1 || evidence.r12.handleRequests < 1) fail("subscriber-lag-reconnect", "the page did not re-mint and re-attach exactly once", evidence.r12);
+      if (evidence.r12.newMode !== "CONTROL" || !evidence.r12.newLive || evidence.r12.newCloseReason) fail("subscriber-lag-reconnect", "the re-attached session is not live in control mode", evidence.r12);
+      if (!evidence.r12.strips.some((text) => text.includes("Reconnecting to alpha"))) fail("subscriber-lag-reconnect", "no reconnecting strip was shown during the re-attach", evidence.r12);
       await tabA.type("w");
       await delay(150);
       const typed = await lastAttachment();
       evidence.r12.inputs = typed.inputs.slice();
-      if (!typed.inputs.includes("w")) fail("R12", "input after the re-attach was not delivered", evidence.r12);
+      if (!typed.inputs.includes("w")) fail("subscriber-lag-reconnect", "input after the re-attach was not delivered", evidence.r12);
     }
 
     // --- console triage ---------------------------------------------------------

@@ -599,7 +599,7 @@ async function compositionAdversaries(): Promise<void> {
   }
 }
 
-// F2/F4 through the direct shared-router host and real xterm: an
+// Replacement-authority checks through the direct shared-router host and real xterm: an
 // xterm-handled key between establishment and revision ends replacement
 // authority (the revision goes raw at the moved cursor, never erased), and a
 // composition event disables replacement for the remainder of the focus
@@ -653,7 +653,7 @@ async function dictationReplacementAuthority(): Promise<void> {
     assert(iosInstrumentation(subject).replacementRewrites === 1, "control rewrite was not counted");
     assert(iosInstrumentation(subject).trackedEmissionCount === 11, "control rewrite did not re-establish the run");
 
-    // F2 vectors: navigation, a modified chord, and Delete each reach xterm's
+    // Unmodeled-key vectors: navigation, a modified chord, and Delete each reach xterm's
     // key evaluator, so replacement authority ends and the next full-field
     // revision is forwarded raw.
     const vectors: ReadonlyArray<readonly [string, number, Partial<Record<"altKey" | "ctrlKey" | "metaKey" | "shiftKey", boolean>>]> = [
@@ -681,7 +681,7 @@ async function dictationReplacementAuthority(): Promise<void> {
       );
     }
 
-    // F4: composition in this focus session disables replacement until
+    // composition in this focus session disables replacement until
     // blur/refocus, even for a later clean dictation-shape run.
     reset();
     textarea.dispatchEvent(new CompositionEvent("compositionstart", { data: "", bubbles: true, composed: true }));
@@ -856,7 +856,7 @@ async function dictationTailAndCommitShapes(): Promise<void> {
     assert(iosInstrumentation(subject).trackedEmissionCount === null, "empty-run refusal changed the pre-establishment tracking state");
     assert(iosInstrumentation(subject).lineDelimiterRefusals === 1, "empty-run refusal was not counted exactly once");
 
-    // F6: commits. The first establishes an empty field; the next two extend
+    // commits. The first establishes an empty field; the next two extend
     // it; WebKit's trailing NBSP after a typed space must not churn.
     assert(commit("first,") === "first,", "empty-inputType commit was not sent");
     assert(iosInstrumentation(subject).trackedEmissionCount === 6, "commit did not establish the run");
@@ -882,11 +882,11 @@ async function dictationTailAndCommitShapes(): Promise<void> {
     assert(iosInstrumentation(subject).fieldDiffRewrites === 3, "field-diff rewrites were not counted");
     assert(replay(emittedText(subject).slice(runStart)) === "first, 123", `PTY after commits: ${show(emittedText(subject).slice(runStart))}`);
 
-    // F7: modeled Backspaces keep the run.
+    // modeled Backspaces keep the run.
     assert(backspace() === "\x7f" && backspace() === "\x7f" && backspace() === "\x7f", "modeled Backspaces did not route one DEL each");
     assert(textarea.value === "first, " && iosInstrumentation(subject).trackedEmissionCount === 7, `Backspaces ended the run: ${JSON.stringify(iosInstrumentation(subject))}`);
 
-    // F5: interim previews over the tail span, then the final commit shape.
+    // interim previews over the tail span, then the final commit shape.
     assert(append("o") === "o", "append after Backspaces was rewritten");
     assert(insertAt(7, 8, "on") === "n", "tail preview 'on' was not minimized");
     assert(insertAt(7, 9, "one") === "e", "tail preview 'one' was not minimized");

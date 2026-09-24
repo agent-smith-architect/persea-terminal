@@ -138,7 +138,7 @@ export function leafCount(root: WorkspaceNode): number { return leafEntries(root
 
 // Fail-closed structural validation of a typed tree. The typed shape does not
 // guarantee runtime integrity (weights can be fractional, children can exceed
-// the arity), so every semantic rule of §2a is checked here.
+// the arity), so every tree invariant is checked here.
 export function validateWorkspaceTree(root: WorkspaceNode): WorkspaceResult<readonly LeafEntry[]> {
   const seen = new Map<string, string>();
   let leaves = 0;
@@ -206,7 +206,7 @@ function averageWeight(weights: readonly number[]): number {
 // already runs in the requested direction and has room, the addition joins as
 // a sibling (keeping depth flat, tmux-style); otherwise the leaf becomes a
 // two-child split. Refused when the result breaks the cap, depth, or the
-// duplicate-leaf rule (OQ1).
+// duplicate-leaf rule.
 export function splitLeaf(root: WorkspaceNode, path: NodePath, direction: SplitDirection, addition: WorkspaceLeaf): WorkspaceResult<WorkspaceNode> {
   const target = nodeAt(root, path);
   if (target === undefined) return refuse({ code: "path_not_found", path: pathLabel(path) });
@@ -314,14 +314,14 @@ export function dragDivider(root: WorkspaceNode, path: NodePath, divider: number
   return pairAdjust(root, path, divider, (pairTotal) => Math.round(bounded * pairTotal));
 }
 
-// +/- fallback (OQ4): moves `delta` units from the right/bottom cell to the
+// +/- fallback: moves `delta` units from the right/bottom cell to the
 // left/top cell (negative delta moves the other way).
 export function nudgeDivider(root: WorkspaceNode, path: NodePath, divider: number, delta: number = DIVIDER_NUDGE_STEP): WorkspaceResult<WorkspaceNode> {
   const step = Number.isFinite(delta) ? Math.trunc(delta) : 0;
   return pairAdjust(root, path, divider, (_pairTotal, currentLeft) => currentLeft + step);
 }
 
-// --- Serialization: the version-1 tree shape from packet §3a (snake_case wire
+// --- Serialization: the version-1 tree shape (snake_case wire
 // keys; strict — unknown fields and unknown kinds fail closed, mirroring the
 // alias store's DisallowUnknownFields walker).
 
@@ -400,7 +400,7 @@ export function parseWorkspaceTree(value: unknown): WorkspaceResult<WorkspaceNod
 }
 
 // Envelope parser for the future store record's `root` under a file-level
-// version (§3a). Unknown versions fail closed; the tree schema is versioned by
+// version. Unknown versions fail closed; the tree schema is versioned by
 // the file version, so a v1 reader never guesses at unknown fields.
 export function parseWorkspace(value: unknown): WorkspaceResult<WorkspaceNode> {
   const record = objectKeys(value, "workspace", ["version", "root"]);

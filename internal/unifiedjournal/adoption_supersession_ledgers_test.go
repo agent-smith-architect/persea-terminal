@@ -7,7 +7,7 @@ import (
 )
 
 // The supersession allowance is two independent ledgers, and
-// Append must spend each in its own unit. The first F2 cut reused rotation's
+// Append must spend each in its own unit. The incorrect implementation reused rotation's
 // record-shaped drawdown, which caps the physical slice of one record to
 // the logical slice plus one record's framing. That coupling is exact for a
 // rotation record (R2/R3 are sized per record) but wrong for proof-derived

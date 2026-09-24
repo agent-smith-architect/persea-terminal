@@ -190,7 +190,7 @@ func (attachment *b1Attachment) replayBytes() []byte {
 
 // b1Commit commits one payload to the journal and publishes it the way the
 // retention runtime does after a durable commit, returning how long the
-// publication itself took: the S1 latency bound is on publication, never on
+// publication itself took: the subscriber-close latency bound is on publication, never on
 // fsync.
 func b1Commit(t *testing.T, effects *UnifiedDevPaneEffects, key unifiedjournal.PaneKey, payload []byte) time.Duration {
 	t.Helper()
@@ -314,7 +314,7 @@ func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T)
 	if maxPublish > publishLatencyBound {
 		t.Fatalf("S1: publication latency %v exceeded %v while one subscriber was wedged", maxPublish, publishLatencyBound)
 	}
-	// S1: the five sibling keys keep exactly the subscriber they had.
+	// the five sibling keys keep exactly the subscriber they had.
 	for index := 0; index < wedgedIndex; index++ {
 		if got := b1SubscriberCount(effects, keys[index]); got != 1 {
 			t.Fatalf("S1: sibling pane %d subscribers=%d after eviction, want 1", index+1, got)
@@ -563,7 +563,7 @@ func TestUnifiedCloseSubscribersIsTheSharedTypedPrimitive(t *testing.T) {
 }
 
 // TestUnifiedSubscriberVerdictIsBoundedWhileDownstreamStaysWedged is the
-// permanent F1 pin in its purest shape: one attachment, its writer parked on
+// stalled-subscriber regression test: one attachment, its writer parked on
 // a downstream write to a peer that never reads again, and a typed verdict
 // delivered through closeSubscribers — the primitive journal rotation calls
 // at step 7c. The broker must end the attachment within

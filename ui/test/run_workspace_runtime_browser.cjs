@@ -109,7 +109,7 @@ const STATE = `(() => {
       composeCount: c.querySelectorAll(".persea-unified-composer-toggle").length,
       moreCount: c.querySelectorAll(".persea-unified-toolbar__more").length,
       quickActionsCount: c.querySelectorAll(".persea-unified-quick-actions").length,
-      // U3 inside a cell. Six panes on
+      // The session tag inside a cell. Six panes on
       // screen, so the one thing a pane must say is which session it is
       // showing. Laid out is not shown: the bar's controls come later in
       // document order, so an over-subscribed bar paints them on top of a tag
@@ -1580,7 +1580,7 @@ async function main() {
         && !openViews[0].viewPopover.horizontalScroll,
       "one compact View popover must stay inside its six-pane workspace cell and viewport", { directViewOpen, openViews });
       check(id, workspaceAppearance.selects === 0 && workspaceAppearance.pickers === 0 && workspaceAppearance.zoom === 1 && workspaceAppearance.size === 1,
-      "six-pane View must carry zoom and the size block only (terminal appearance §15.6)", workspaceAppearance);
+      "six-pane View must carry zoom and the size block only", workspaceAppearance);
       await tab.screenshot("terminal_touch_view_popover_six_pane.png");
       await tab.pressKey("Escape");
       const escapeFocus = await tab.evaluate(`(() => {
@@ -1813,7 +1813,7 @@ async function main() {
       await tab.screenshot("session_switch_workspace_switch.png");
       await tab.close(debugPort);
 
-      // C3: C's held reconnect belongs to C while B switches. A module-global
+      // C's held reconnect belongs to C while B switches. A module-global
       // operation token would let B invalidate C and strand its minted handle.
       await control({ reset: true, sessions: candidates });
       const tokenTab = await openTab("session_switch-controller-token");
@@ -1875,7 +1875,7 @@ async function main() {
       // no pane carries a theme control. The theme is a record
       // stored elsewhere (the dashboard card, another tab) and reaches the
       // document's ONE preference service through the `storage` signal, which
-      // is exactly one authoritative GET per signal (14.3b) — never one per
+      // is exactly one authoritative GET per signal — never one per
       // pane controller.
       const publishRecord = async (patch) => {
         const current = await snapshot();

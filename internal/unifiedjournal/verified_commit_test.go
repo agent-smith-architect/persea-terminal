@@ -11,7 +11,7 @@ import (
 	"time"
 )
 
-// Keep the Phase 0 workload fixed: all historical appends share one commit,
+// Keep the historical workload fixed: all historical appends share one commit,
 // then measure only committing one more 64 KiB record.
 func TestRecordingCommitWorkIndependentOfHistory(t *testing.T) {
 	for _, prior := range []int{100, 1000, 10000, 32000} {

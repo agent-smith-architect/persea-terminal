@@ -11,7 +11,7 @@ import (
 // Commit. Retirement clears the predecessor generation's admitted flag and
 // may delete the generation outright once its references drop. Commit is
 // infallible after a green Validate and must therefore not re-require a live
-// predecessor generation; if it does, every real rotation takes the F14
+// predecessor generation; if it does, every real rotation takes the
 // fatal path.
 func TestRotationCommitSucceedsAfterPredecessorSeal(t *testing.T) {
 	fixture := newRotationFixture(t)

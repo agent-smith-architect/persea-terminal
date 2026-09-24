@@ -29,7 +29,7 @@ type paneRotationWitnessStage interface {
 }
 
 // paneRotationCommitDisposition is closed: Commit either installed the whole
-// successor atomically, already took the authoritative F14 fatal path, or is
+// successor atomically, already took the authoritative fatal path, or is
 // observing a transaction that was explicitly aborted before the seal. It is
 // not an error and never licenses rollback after the predecessor seal.
 type paneRotationCommitDisposition uint8
@@ -384,7 +384,7 @@ func (txn *paneRotationTxn) Validate() error {
 }
 
 // Commit rechecks the exact receipt and ownership before bounded in-memory
-// installation. A violated post-Validate assumption is F14, so it faults the
+// installation. A violated post-Validate assumption is fatal, so it faults the
 // successor and reaps the unit rather than attempting a partial swap or
 // returning an error past the seal.
 func (txn *paneRotationTxn) Commit() paneRotationCommitDisposition {
@@ -418,7 +418,7 @@ func (txn *paneRotationTxn) commitProviderLocked(providerValid bool, installWitn
 		valid = err == nil
 	}
 	if !valid {
-		// F14 is classified while the transaction still owns newKey. This keeps
+		// The fatal inconsistency is classified while the transaction still owns newKey. This keeps
 		// the unadmitted successor fault local instead of falling through the
 		// missing-admission path to the realm-wide breaker.
 		var cleanup *retentionCommand

@@ -575,7 +575,7 @@ async function main() {
         });
         // the theme is a dashboard setting; the terminal follows the
         // record. Each theme is set on the fixture record and reaches the page
-        // through its foreground re-read (14.3b), exactly as another tab's save
+        // through its foreground re-read, exactly as another tab's save
         // would.
         const themeValues = [...fs.readFileSync(path.join(UI, 'src/unified_themes.ts'), "utf8").match(/UNIFIED_THEME_IDS = Object\.freeze\(\[([^\]]+)\]/)[1].matchAll(/"([a-z0-9-]+)"/g)].map((match) => match[1]);
         assert(themeValues.length === 8, `theme id list not found: ${JSON.stringify(themeValues)}`);

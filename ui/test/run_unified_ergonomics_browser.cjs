@@ -8,18 +8,18 @@
 // (unified_reopen_fixture.cjs), under `(pointer: coarse)` emulation at iPhone
 // metrics, with a fine-pointer golden alongside.
 //
-//   QF1  no keyboard on first open / reconnect / lease_held takeover / sheet
+//   Coarse-pointer focus: no keyboard on first open / reconnect / lease_held takeover / sheet
 //        open+close on a coarse pointer; zero INPUT before MODE(CONTROL)
-//   QF2  fine pointer: the textarea holds focus after COMMIT, as before
-//   QF3  every Keys tile emits its bytes with the textarea unfocused; arrows
+//   fine-pointer-focus  fine pointer: the textarea holds focus after COMMIT, as before
+//   key-tile-input  every Keys tile emits its bytes with the textarea unfocused; arrows
 //        flip to ESC O A under application-cursor mode
-//   QF5  sheet, Keys, View tiles: no RESIZE_REQUEST, no font change except
+//   presentation-only-controls  sheet, Keys, View tiles: no RESIZE_REQUEST, no font change except
 //        the zoom tiles' own ±1; the ↕ tile emits exactly one
-//   QF6  keyboard open at the close → restored on reconnect; closed → not
-//   D1   composer status on its own full-width line above the button row
-//   D10  the newcomer shows "Control taken from another window" for ~3s
-//   D11  the one-time "Tap ↕ to fit rows" hint beside ↕
-//   T44  every visible interactive element on the phone terminal page (opener,
+//   keyboard-restore  keyboard open at the close → restored on reconnect; closed → not
+//   composer-status-layout   composer status on its own full-width line above the button row
+//   takeover-notice  the newcomer shows "Control taken from another window" for ~3s
+//   compact-fit-control  the one-time "Tap ↕ to fit rows" hint beside ↕
+//   touch-target-size  every visible interactive element on the phone terminal page (opener,
 //        sheet open, keyboard open, composer open) and the dashboard ≥ 44×44
 //
 // PERSEA_TERMINAL_EVIDENCE_DIR (optional): screenshots and the census land there.
@@ -180,7 +180,7 @@ const STATE = `(() => {
       ".persea-unified-sheet__tile",
       ".persea-unified-sheet__label",
     ].join(", "))).map(controlContrast),
-    // The session tag's status dot (U3). Its meaning is carried by a fill
+    // The session tag's status dot. Its meaning is carried by a fill
     // rather than by text, so WCAG 1.4.11 applies: the fill must clear 3:1
     // against the surface that actually paints behind it, on every theme.
     //
@@ -380,11 +380,11 @@ class Tab extends BaseTab {
 const isLive = (state) => state.screen.includes("fixture-live") && state.noticeHidden && state.connection === "";
 const hasNotice = (state) => !state.noticeHidden;
 // The composer grip is a drag handle with its own law (≥24px tall, asserted
-// in D1); every other target is 44×44.
+// in composer-status-layout); every other target is 44×44.
 const under44 = (census) => census.filter((item) => item.cls !== "attachment-page__composer-grip" && (item.w < 43.5 || item.h < 43.5));
 // While the sheet is open the opener may cover no tile: each tile's box is
 // clipped to the sheet's visible box first (a tile scrolled out of the sheet
-// is not on screen), then tested against the opener's box. Since U5 the
+// is not on screen), then tested against the opener's box. The
 // opener is a control-row button and the sheet is docked to the stage's
 // bottom edge, so this holds by composition — it is asserted anyway, because
 // that composition is exactly what a later layout change could break.
@@ -425,7 +425,7 @@ async function main() {
     const tabA = await Tab.open("A", chrome.debugPort, origin);
     tabs.push(tabA);
 
-    // --- QF2 fine pointer golden: the textarea holds focus after COMMIT ------
+    // --- fine-pointer-focus fine pointer golden: the textarea holds focus after COMMIT ------
     await tabA.emulate(DESKTOP, false);
     await control({ reset: true });
     await tabA.navigate(unifiedURL(await freshControlHandle()));
@@ -434,20 +434,20 @@ async function main() {
     await delay(100);
     const fineState = await tabA.state();
     evidence.qf2 = { activeKind: fineState.activeKind, keyBarHidden: fineState.keyBarHidden, openerVisible: fineState.openerVisible, puckPresent: fineState.puckPresent, coarse: fineState.coarse };
-    if (fineState.coarse) fail("QF2", "the fine-pointer emulation did not take", evidence.qf2);
-    if (fineState.puckPresent) fail("QF2", "the floating puck is still in the document", evidence.qf2);
-    if (!fineState.openerVisible) fail("QF2", "a fine pointer has no sheet opener in the control row", evidence.qf2);
-    if (fineState.activeKind !== "xterm") fail("QF2", "on a fine pointer the textarea does not hold focus after COMMIT", evidence.qf2);
+    if (fineState.coarse) fail("fine-pointer-focus", "the fine-pointer emulation did not take", evidence.qf2);
+    if (fineState.puckPresent) fail("fine-pointer-focus", "the floating puck is still in the document", evidence.qf2);
+    if (!fineState.openerVisible) fail("fine-pointer-focus", "a fine pointer has no sheet opener in the control row", evidence.qf2);
+    if (fineState.activeKind !== "xterm") fail("fine-pointer-focus", "on a fine pointer the textarea does not hold focus after COMMIT", evidence.qf2);
     await shot(tabA, "desktop-00-terminal-fine-pointer");
-    if (!fineState.keyBarHidden) fail("QF2", "a fine pointer sees the key bar", evidence.qf2);
+    if (!fineState.keyBarHidden) fail("fine-pointer-focus", "a fine pointer sees the key bar", evidence.qf2);
     // A reconnect on a fine pointer claims focus again, as before.
     await control({ closeLive: "websocket_read" });
     const fineBack = await tabA.waitUntil((state) => isLive(state) && state.activeKind === "xterm", 8_000);
-    if (!fineBack.state) fail("QF2", "after a reconnect on a fine pointer the textarea did not hold focus", fineBack.last);
+    if (!fineBack.state) fail("fine-pointer-focus", "after a reconnect on a fine pointer the textarea did not hold focus", fineBack.last);
 
-    // --- QF1a coarse first open: no focus, no key bar, zero INPUT ---------------
-    // (QF1: keyboard only when asked. A first admission never arms the
-    // one-shot restore; QF6 below is the only path that focuses after COMMIT.)
+    // --- coarse-first-open coarse first open: no focus, no key bar, zero INPUT ---------------
+    // (Keyboard only when asked. A first admission never arms the
+    // one-shot restore; keyboard-restore below is the only path that focuses after COMMIT.)
     await tabA.emulate(PHONE, true);
     await control({ reset: true, replayFocusReporting: true });
     const firstURL = unifiedURL(await freshControlHandle());
@@ -457,7 +457,7 @@ async function main() {
     await delay(300);
     const firstState = await tabA.state();
     const firstAttachment = await lastAttachment();
-    // F1: the wire RESIZE_REQUEST count, recorded before the sheet is first
+    // the wire RESIZE_REQUEST count, recorded before the sheet is first
     // opened. Every presentation action below — sheet open/close, every Keys
     // action, both Control-latch transitions, each View action — must leave
     // it unchanged; only the trusted ↕ may advance it, by exactly one.
@@ -466,45 +466,45 @@ async function main() {
     const assertNoResize = async (label) => {
       const now = (await lastAttachment()).resizes || 0;
       evidence.qf5.unchangedAfter.push({ label, resizes: now });
-      if (now !== resizeBaseline) fail("QF5", `${label} emitted RESIZE_REQUEST (wire count ${resizeBaseline} → ${now})`, { label, resizeBaseline, now });
+      if (now !== resizeBaseline) fail("presentation-only-controls", `${label} emitted RESIZE_REQUEST (wire count ${resizeBaseline} → ${now})`, { label, resizeBaseline, now });
     };
     evidence.qf1a = { activeKind: firstState.activeKind, keyBarHidden: firstState.keyBarHidden, openerVisible: firstState.openerVisible, openerRect: firstState.openerRect, moreVisible: firstState.moreVisible, frames: firstAttachment.frames, inputs: firstAttachment.inputs, coarse: firstState.coarse };
-    if (!firstState.coarse) fail("QF1a", "the coarse-pointer emulation did not take", evidence.qf1a);
-    if (firstState.activeKind === "xterm" || firstState.activeKind === "composer") fail("QF1a", "a coarse first open focused a text entry (keyboard raised without being asked)", evidence.qf1a);
-    if (!firstState.keyBarHidden) fail("QF1a", "the key bar showed with the keyboard closed", evidence.qf1a);
-    if (!firstState.openerVisible || firstState.openerRect.w < 43.5 || firstState.openerRect.h < 43.5) fail("QF1a", "the sheet opener is absent or under 44px", evidence.qf1a);
-    if (firstState.moreVisible) fail("QF1a", "the toolbar ⋯ renders on a coarse pointer", evidence.qf1a);
-    if (firstAttachment.frames[0] !== "READY" || firstAttachment.frames[1] !== "MODE_REQUEST") fail("QF1a", "the attachment did not carry READY then MODE_REQUEST", evidence.qf1a);
-    if (firstInputIndex(firstAttachment.frames) !== -1) fail("QF1a", "the page emitted INPUT (a focus-in report) on a coarse first open", evidence.qf1a);
+    if (!firstState.coarse) fail("coarse-first-open", "the coarse-pointer emulation did not take", evidence.qf1a);
+    if (firstState.activeKind === "xterm" || firstState.activeKind === "composer") fail("coarse-first-open", "a coarse first open focused a text entry (keyboard raised without being asked)", evidence.qf1a);
+    if (!firstState.keyBarHidden) fail("coarse-first-open", "the key bar showed with the keyboard closed", evidence.qf1a);
+    if (!firstState.openerVisible || firstState.openerRect.w < 43.5 || firstState.openerRect.h < 43.5) fail("coarse-first-open", "the sheet opener is absent or under 44px", evidence.qf1a);
+    if (firstState.moreVisible) fail("coarse-first-open", "the toolbar ⋯ renders on a coarse pointer", evidence.qf1a);
+    if (firstAttachment.frames[0] !== "READY" || firstAttachment.frames[1] !== "MODE_REQUEST") fail("coarse-first-open", "the attachment did not carry READY then MODE_REQUEST", evidence.qf1a);
+    if (firstInputIndex(firstAttachment.frames) !== -1) fail("coarse-first-open", "the page emitted INPUT (a focus-in report) on a coarse first open", evidence.qf1a);
     await shot(tabA, "phone-01-terminal-closed-keyboard-opener");
 
-    // --- D11 the compact phone fit affordance ---------------------------------
+    // --- compact-fit-control the compact phone fit affordance ---------------------------------
     // terminal interaction reserves the fixed six-control phone row for tag · ↕ · Aa · Copy ·
     // ☰ · ✎. The one-time prose hint therefore stays out of the compact row;
     // the always-present ↕ control remains the sole explicit-fit affordance.
     evidence.d11 = { hintVisible: firstState.fitHintVisible, hintRect: firstState.fitHintRect, terminalRows: firstState.terminalRows, cellHeight: firstState.cellHeight };
-    if (firstState.fitHintVisible) fail("D11", "the retired prose hint consumed compact phone-row space", evidence.d11);
+    if (firstState.fitHintVisible) fail("compact-fit-control", "the retired prose hint consumed compact phone-row space", evidence.d11);
 
-    // --- QF1d + sheet: open/close makes no focus call; tiles present ----------
+    // --- sheet-focus + sheet: open/close makes no focus call; tiles present ----------
     await tabA.tap((await tabA.state()).openerRect); // always the live rect
     await delay(150);
     const open = await tabA.state();
     await assertNoResize("sheet open");
     evidence.qf1d = { open: { sheetVisible: open.sheetVisible, openerExpanded: open.openerExpanded, activeKind: open.activeKind, keyBarHidden: open.keyBarHidden, sheetRect: open.sheetRect, tiles: Object.fromEntries(Object.entries(open.tiles).map(([k, v]) => [k, { disabled: v.disabled, reason: v.reason, w: v.rect && v.rect.w, h: v.rect && v.rect.h }])) } };
-    if (!open.sheetVisible || open.openerExpanded !== "true") fail("QF1d", "the opener did not open the sheet", evidence.qf1d);
+    if (!open.sheetVisible || open.openerExpanded !== "true") fail("sheet-focus", "the opener did not open the sheet", evidence.qf1d);
     // The tap's synthesized click must not reach a tile that the opening
     // sheet placed under the finger (it navigated to the legacy page once).
-    if (open.href !== firstState.href) fail("QF1d", "the opener tap's synthesized click reached a tile: the page navigated", { before: firstState.href, after: open.href });
-    if (open.activeKind !== firstState.activeKind || open.keyboardInset) fail("QF1d", "opening the sheet changed focus or showed the key bar", evidence.qf1d);
-    if (open.sheetRect && (open.sheetRect.y < 0 || open.sheetRect.y + open.sheetRect.h > open.innerHeight + 1)) fail("QF1d", "the task menu exceeds the viewport", evidence.qf1d);
+    if (open.href !== firstState.href) fail("sheet-focus", "the opener tap's synthesized click reached a tile: the page navigated", { before: firstState.href, after: open.href });
+    if (open.activeKind !== firstState.activeKind || open.keyboardInset) fail("sheet-focus", "opening the sheet changed focus or showed the key bar", evidence.qf1d);
+    if (open.sheetRect && (open.sheetRect.y < 0 || open.sheetRect.y + open.sheetRect.h > open.innerHeight + 1)) fail("sheet-focus", "the task menu exceeds the viewport", evidence.qf1d);
     evidence.qf1d.open.clippedLabels = Object.entries(open.tiles).filter(([, t]) => t.labelClipped).map(([label]) => label);
-    if (evidence.qf1d.open.clippedLabels.length) fail("QF1d", "a tile's primary label ellipsizes at 390pt", evidence.qf1d.open.clippedLabels);
+    if (evidence.qf1d.open.clippedLabels.length) fail("sheet-focus", "a tile's primary label ellipsizes at 390pt", evidence.qf1d.open.clippedLabels);
     evidence.qf1d.open.tilesUnderOpener = tilesUnderOpener(open);
     evidence.qf1d.open.openerRect = open.openerRect;
-    if (evidence.qf1d.open.tilesUnderOpener.length) fail("QF1d", "the opener covers sheet tiles while the sheet is open", { tiles: evidence.qf1d.open.tilesUnderOpener, opener: open.openerRect, sheet: open.sheetRect });
-    if (open.openerRect && open.sheetRect && open.openerRect.y + open.openerRect.h > open.sheetRect.y + 0.5) fail("QF1d", "the opener is not above the sheet it opens", { opener: open.openerRect, sheet: open.sheetRect });
+    if (evidence.qf1d.open.tilesUnderOpener.length) fail("sheet-focus", "the opener covers sheet tiles while the sheet is open", { tiles: evidence.qf1d.open.tilesUnderOpener, opener: open.openerRect, sheet: open.sheetRect });
+    if (open.openerRect && open.sheetRect && open.openerRect.y + open.openerRect.h > open.sheetRect.y + 0.5) fail("sheet-focus", "the opener is not above the sheet it opens", { opener: open.openerRect, sheet: open.sheetRect });
 	for (const label of ["Clipboard", "Keys", "Composer", "Dashboard", "Switch session", "Attach image", "Show keyboard", "Hide keyboard"]) {
-      if (!open.tiles[label]) fail("QF1d", `sheet tile ${label} is absent`, Object.keys(open.tiles));
+      if (!open.tiles[label]) fail("sheet-focus", `sheet tile ${label} is absent`, Object.keys(open.tiles));
     }
 	const primaryClipboard = await tabA.evaluate(`(() => {
 	  const select = document.querySelector(".persea-unified-select-context");
@@ -515,24 +515,24 @@ async function main() {
 	  };
 	})()`);
 	evidence.qf1d.open.primaryClipboard = primaryClipboard;
-	if (!primaryClipboard.select || primaryClipboard.select.text !== "Select" || primaryClipboard.select.disabled || primaryClipboard.select.state !== "select") fail("QF1d", "primary contextual Select is absent or unavailable", primaryClipboard);
-	if (!primaryClipboard.paste || primaryClipboard.paste.label !== "Open clipboard" || primaryClipboard.paste.popup !== "dialog" || primaryClipboard.paste.icons !== 1 || primaryClipboard.paste.disabled) fail("QF1d", "primary Paste is absent or unavailable", primaryClipboard);
-	if (open.tiles.Select || open.tiles.Copy || open.tiles.Paste) fail("QF1d", "Quick actions duplicates a primary clipboard control", { Select: open.tiles.Select, Copy: open.tiles.Copy, Paste: open.tiles.Paste });
+	if (!primaryClipboard.select || primaryClipboard.select.text !== "Select" || primaryClipboard.select.disabled || primaryClipboard.select.state !== "select") fail("sheet-focus", "primary contextual Select is absent or unavailable", primaryClipboard);
+	if (!primaryClipboard.paste || primaryClipboard.paste.label !== "Open clipboard" || primaryClipboard.paste.popup !== "dialog" || primaryClipboard.paste.icons !== 1 || primaryClipboard.paste.disabled) fail("sheet-focus", "primary Paste is absent or unavailable", primaryClipboard);
+	if (open.tiles.Select || open.tiles.Copy || open.tiles.Paste) fail("sheet-focus", "Quick actions duplicates a primary clipboard control", { Select: open.tiles.Select, Copy: open.tiles.Copy, Paste: open.tiles.Paste });
     // TERMINAL-3: clipboard, session switch and preferences are all real; no future-phase placeholder
     // tile and no header for an empty section remains in the composed sheet.
     const placeholders = [];
     const placeholderReasons = Object.entries(open.tiles).filter(([, t]) => /Coming soon/i.test(t.reason)).map(([label]) => label);
     evidence.qf1d.open.placeholders = placeholders;
     evidence.qf1d.open.headings = open.sheetHeadings;
-    if (placeholders.length || placeholderReasons.length) fail("QF1d", "placeholder (coming-soon) tiles render", { placeholders, placeholderReasons });
+    if (placeholders.length || placeholderReasons.length) fail("sheet-focus", "placeholder (coming-soon) tiles render", { placeholders, placeholderReasons });
     // terminal moved Keyboard to the front so it lands inside the initial sheet
-    // viewport; CLIPBOARD-J5 below measures that it actually does.
-	if (open.sheetHeadings.join(" ") !== "Tools Keyboard Sessions Settings and help") fail("QF1d", "the task menu's sections are not Tools, Keyboard, Sessions, Settings and help", open.sheetHeadings);
-    if (["Snippets", "Clips", "Escape", "Tab", "Control"].some(label => open.tiles[label])) fail("QF1d", "retired storage tiles or individual key tiles remain in the task menu", Object.keys(open.tiles));
-    if (open.tiles.Prev || open.tiles.Next) fail("QF1d", "arbitrary Prev/Next session cycling remains in Quick actions", { Prev: open.tiles.Prev, Next: open.tiles.Next });
-    if (open.tiles[IMAGE_TILE] && (!open.tiles[IMAGE_TILE].disabled || !/Images unavailable/.test(open.tiles[IMAGE_TILE].reason))) fail("QF1d", "Attach image is not disabled with its staging reason", open.tiles[IMAGE_TILE]);
-    if (open.tiles["Show keyboard"]?.disabled) fail("QF1d", "Show keyboard is disabled with the keyboard closed", open.tiles["Show keyboard"]);
-    if (!open.tiles["Hide keyboard"]?.disabled) fail("QF1d", "Hide keyboard is enabled with the keyboard closed", open.tiles["Hide keyboard"]);
+    // viewport; clipboard touch-focus below measures that it actually does.
+	if (open.sheetHeadings.join(" ") !== "Tools Keyboard Sessions Settings and help") fail("sheet-focus", "the task menu's sections are not Tools, Keyboard, Sessions, Settings and help", open.sheetHeadings);
+    if (["Snippets", "Clips", "Escape", "Tab", "Control"].some(label => open.tiles[label])) fail("sheet-focus", "retired storage tiles or individual key tiles remain in the task menu", Object.keys(open.tiles));
+    if (open.tiles.Prev || open.tiles.Next) fail("sheet-focus", "arbitrary Prev/Next session cycling remains in Quick actions", { Prev: open.tiles.Prev, Next: open.tiles.Next });
+    if (open.tiles[IMAGE_TILE] && (!open.tiles[IMAGE_TILE].disabled || !/Images unavailable/.test(open.tiles[IMAGE_TILE].reason))) fail("sheet-focus", "Attach image is not disabled with its staging reason", open.tiles[IMAGE_TILE]);
+    if (open.tiles["Show keyboard"]?.disabled) fail("sheet-focus", "Show keyboard is disabled with the keyboard closed", open.tiles["Show keyboard"]);
+    if (!open.tiles["Hide keyboard"]?.disabled) fail("sheet-focus", "Hide keyboard is enabled with the keyboard closed", open.tiles["Hide keyboard"]);
     await shot(tabA, "phone-02-terminal-sheet-open");
     // Outside tap: the gap in the toolbar between ↕ (or its hint) and ✎.
     const gapX = ((open.fitHintVisible ? open.fitHintRect.x + open.fitHintRect.w : open.fitRect.x + open.fitRect.w) + open.composerToggleRect.x) / 2;
@@ -541,8 +541,8 @@ async function main() {
     const outside = await tabA.state();
     await assertNoResize("outside dismissal");
     evidence.qf1d.outside = { sheetVisible: outside.sheetVisible, activeKind: outside.activeKind, keyBarHidden: outside.keyBarHidden, gapX };
-    if (outside.sheetVisible) fail("QF1d", "a pointer outside the sheet did not dismiss it", evidence.qf1d.outside);
-    if (outside.activeKind !== firstState.activeKind || outside.keyboardInset) fail("QF1d", "dismissing the sheet changed focus or showed the key bar", evidence.qf1d.outside);
+    if (outside.sheetVisible) fail("sheet-focus", "a pointer outside the sheet did not dismiss it", evidence.qf1d.outside);
+    if (outside.activeKind !== firstState.activeKind || outside.keyboardInset) fail("sheet-focus", "dismissing the sheet changed focus or showed the key bar", evidence.qf1d.outside);
     await tabA.tap((await tabA.state()).openerRect); // always the live rect
     await delay(150);
     await tabA.pressKey("Escape", "Escape", 27);
@@ -550,12 +550,12 @@ async function main() {
     const escaped = await tabA.state();
     await assertNoResize("Escape dismissal");
     evidence.qf1d.escape = { sheetVisible: escaped.sheetVisible, activeKind: escaped.activeKind };
-    if (escaped.sheetVisible) fail("QF1d", "Escape did not dismiss the sheet", evidence.qf1d.escape);
-    if (escaped.activeKind !== firstState.activeKind) fail("QF1d", "Escape dismissal changed focus", evidence.qf1d.escape);
+    if (escaped.sheetVisible) fail("sheet-focus", "Escape did not dismiss the sheet", evidence.qf1d.escape);
+    if (escaped.activeKind !== firstState.activeKind) fail("sheet-focus", "Escape dismissal changed focus", evidence.qf1d.escape);
     const afterDismiss = await lastAttachment();
-    if (firstInputIndex(afterDismiss.frames) !== -1) fail("QF1d", "sheet open/close emitted INPUT", afterDismiss.frames);
+    if (firstInputIndex(afterDismiss.frames) !== -1) fail("sheet-focus", "sheet open/close emitted INPUT", afterDismiss.frames);
 
-    // --- QF3 Keys tiles with the textarea unfocused ---------------------------
+    // --- key-tile-input Keys tiles with the textarea unfocused ---------------------------
     const expectedNormal = [
       ["Escape", "\x1b"], ["Tab", "\t"], ["Left", "\x1b[D"], ["Down", "\x1b[B"], ["Up", "\x1b[A"], ["Right", "\x1b[C"],
       ["Home", "\x1b[H"], ["End", "\x1b[F"], ["Page up", "\x1b[5~"], ["Page down", "\x1b[6~"], ["Delete", "\x1b[3~"], ["Backspace", "\x7f"],
@@ -572,8 +572,8 @@ async function main() {
       const active = (await tabA.state()).activeKind;
       await assertNoResize(`${bucket} ${label}`);
       evidence.qf3[bucket][label] = { expected: JSON.stringify(expected), got: JSON.stringify(delta), activeKind: active };
-      if (delta !== expected) fail("QF3", `${bucket} ${label} emitted ${JSON.stringify(delta)}, expected ${JSON.stringify(expected)}`, evidence.qf3[bucket][label]);
-      if (active === "xterm") fail("QF3", `${label} focused the textarea (keyboard raised)`, evidence.qf3[bucket][label]);
+      if (delta !== expected) fail("key-tile-input", `${bucket} ${label} emitted ${JSON.stringify(delta)}, expected ${JSON.stringify(expected)}`, evidence.qf3[bucket][label]);
+      if (active === "xterm") fail("key-tile-input", `${label} focused the textarea (keyboard raised)`, evidence.qf3[bucket][label]);
     };
     for (const [label, expected] of expectedNormal) await keyProbe("normal", label, expected);
     // Application cursor keys: the fixture writes DECSET 1 into the live
@@ -590,13 +590,13 @@ async function main() {
       return { open: !panel.hidden, ctrl: panel.querySelector('[data-key-control="modifier:ctrl"]')?.getAttribute('aria-pressed') };
     })()`);
     await assertNoResize("Control chord panel");
-    if (!chordPanel.open || chordPanel.ctrl !== "true") fail("QF3", "Control did not open explicit composition", chordPanel);
+    if (!chordPanel.open || chordPanel.ctrl !== "true") fail("key-tile-input", "Control did not open explicit composition", chordPanel);
     await tabA.tapTile("Control");
-    if (await tabA.evaluate(`document.querySelector('.persea-terminal-keys [data-key-control="modifier:ctrl"]')?.getAttribute('aria-pressed') !== 'false'`)) fail("QF3", "a second modifier tap did not cancel Ctrl", {});
+    if (await tabA.evaluate(`document.querySelector('.persea-terminal-keys [data-key-control="modifier:ctrl"]')?.getAttribute('aria-pressed') !== 'false'`)) fail("key-tile-input", "a second modifier tap did not cancel Ctrl", {});
     await assertNoResize("Clear panel modifiers");
     await tabA.tap((await tabA.state()).openerRect);
 
-    // --- QF5 presentation only -------------------------------------------------
+    // --- presentation-only-controls presentation only -------------------------------------------------
     // The fitted font sits at its 9px floor on a phone (80 columns need
     // 433px), so zoom in first, then out.
     //
@@ -623,26 +623,26 @@ async function main() {
       fitted: fitted.fontSize, fittedPreference: fitted.fontPreference, activeKind: fitted.activeKind,
       expectedIn: Math.round(fontBefore) + 1, expectedOut: Math.round(fontBefore),
     });
-    if (beforeState.fontPreference !== "auto") fail("QF5", "the phone did not start on auto-fit", evidence.qf5);
-    if (zoomedIn.fontSize !== Math.round(fontBefore) + 1) fail("QF5", "Zoom in did not step one pixel from the rendered size", evidence.qf5);
-    if (zoomedIn.fontPreference !== String(Math.round(fontBefore) + 1)) fail("QF5", "Zoom in did not become the explicit preference", evidence.qf5);
-    if (zoomedOut.fontSize !== Math.round(fontBefore)) fail("QF5", "Zoom out did not step one pixel back", evidence.qf5);
-    if (fitted.fontPreference !== "auto") fail("QF5", "Fit font did not restore auto-fit", evidence.qf5);
-    if (fitted.activeKind === "xterm") fail("QF5", "a View tile focused the textarea", evidence.qf5);
+    if (beforeState.fontPreference !== "auto") fail("presentation-only-controls", "the phone did not start on auto-fit", evidence.qf5);
+    if (zoomedIn.fontSize !== Math.round(fontBefore) + 1) fail("presentation-only-controls", "Zoom in did not step one pixel from the rendered size", evidence.qf5);
+    if (zoomedIn.fontPreference !== String(Math.round(fontBefore) + 1)) fail("presentation-only-controls", "Zoom in did not become the explicit preference", evidence.qf5);
+    if (zoomedOut.fontSize !== Math.round(fontBefore)) fail("presentation-only-controls", "Zoom out did not step one pixel back", evidence.qf5);
+    if (fitted.fontPreference !== "auto") fail("presentation-only-controls", "Fit font did not restore auto-fit", evidence.qf5);
+    if (fitted.activeKind === "xterm") fail("presentation-only-controls", "a View tile focused the textarea", evidence.qf5);
     // The ↕ tile: the one tile on the geometry path, exactly one request.
     const fitTile = await tabA.tilePoint("Fit height");
-    if (fitTile.disabled) fail("QF5", "the ↕ tile is disabled on a live, granted attachment", { fitTile, tiles: (await tabA.state()).tiles["Fit height"] });
+    if (fitTile.disabled) fail("presentation-only-controls", "the ↕ tile is disabled on a live, granted attachment", { fitTile, tiles: (await tabA.state()).tiles["Fit height"] });
     else {
       const rowsBefore = (await tabA.state()).terminalRows;
       await tabA.tap(fitTile);
       const resized = await tabA.waitUntil((state) => state.terminalRows !== rowsBefore, 8_000);
       const afterFit = await lastAttachment();
       evidence.qf5.fit = { rowsBefore, rowsAfter: (resized.state ?? resized.last).terminalRows, resizes: afterFit.resizes, hintVisible: (resized.state ?? resized.last).fitHintVisible };
-      if (!resized.state || (afterFit.resizes || 0) !== resizeBaseline + 1) fail("QF5", "the ↕ tile did not produce exactly one RESIZE_REQUEST that applied", evidence.qf5.fit);
-      if ((resized.state ?? resized.last).fitHintVisible) fail("D11", "the fit hint survived the first explicit fit", evidence.qf5.fit);
+      if (!resized.state || (afterFit.resizes || 0) !== resizeBaseline + 1) fail("presentation-only-controls", "the ↕ tile did not produce exactly one RESIZE_REQUEST that applied", evidence.qf5.fit);
+      if ((resized.state ?? resized.last).fitHintVisible) fail("compact-fit-control", "the fit hint survived the first explicit fit", evidence.qf5.fit);
     }
 
-    // --- QF5 RED pin ---------------------------------------
+    // --- presentation-only-controls RED pin ---------------------------------------
     // A Keys action that emits a same-geometry RESIZE_REQUEST must move the
     // wire counter the assertions above read. The mutant is installed in the
     // page for one tap: the page's outgoing frames are watched for the live
@@ -678,13 +678,13 @@ async function main() {
     await delay(250);
     const mutantOff = (await lastAttachment()).resizes || 0;
     evidence.qf5.mutant = { before: mutantBefore, armed: mutantArmed, after: mutantAfter, off: mutantOff };
-    if (mutantArmed !== mutantBefore) fail("QF5-PIN", "arming the mutant (a Tab tap) itself moved the wire counter", evidence.qf5.mutant);
-    if (mutantAfter !== mutantBefore + 1) fail("QF5-PIN", "the wire counter did not observe the injected Keys RESIZE_REQUEST — the no-resize assertions would be a false GREEN", evidence.qf5.mutant);
-    if (mutantOff !== mutantAfter) fail("QF5-PIN", "the Keys tile still emits after the mutant was removed", evidence.qf5.mutant);
+    if (mutantArmed !== mutantBefore) fail("resize-sentinel-mutant", "arming the mutant (a Tab tap) itself moved the wire counter", evidence.qf5.mutant);
+    if (mutantAfter !== mutantBefore + 1) fail("resize-sentinel-mutant", "the wire counter did not observe the injected Keys RESIZE_REQUEST — the no-resize assertions would be a false GREEN", evidence.qf5.mutant);
+    if (mutantOff !== mutantAfter) fail("resize-sentinel-mutant", "the Keys tile still emits after the mutant was removed", evidence.qf5.mutant);
     await tabA.tap((await tabA.state()).openerRect); // always the live rect
     await delay(120);
 
-    // --- F2: dedicated Keys still enforces the input floor -----------------
+    // --- input-authority: dedicated Keys still enforces the input floor -----------------
     // Keys remains browsable while input is unavailable. Its dispatched action
     // reports the refusal; retired menu-tile disabled styling is no longer an owner.
     evidence.f2 = {};
@@ -693,8 +693,8 @@ async function main() {
       const after = await lastAttachment();
       const status = await tabA.evaluate(`document.querySelector('.persea-terminal-keys__status')?.textContent || ''`);
       const record = { before: before.inputs, after: after.inputs, status }; evidence.f2[name] = record;
-      if (JSON.stringify(after.inputs) !== JSON.stringify(before.inputs)) fail("F2", `${name}: unavailable key emitted input`, record);
-      if (!status.includes(reason)) fail("F2", `${name}: Keys omitted the input floor's refusal`, record);
+      if (JSON.stringify(after.inputs) !== JSON.stringify(before.inputs)) fail("input-authority", `${name}: unavailable key emitted input`, record);
+      if (!status.includes(reason)) fail("input-authority", `${name}: Keys omitted the input floor's refusal`, record);
     };
     await tabA.cdp.send("Emulation.setDeviceMetricsOverride", { ...PHONE, height: 700 }); await delay(200);
     await control({ holdResizeMs: 1800 }); const sealFit = await tabA.tilePoint("Fit height");
@@ -706,13 +706,13 @@ async function main() {
     assert((await tabA.waitUntil(state => state.connection !== "", 4000)).state, "F2: reconnect outage did not become observable");
     const outagePanel = await tabA.evaluate(`({ hidden:document.querySelector('.persea-terminal-keys')?.hidden, rows:document.querySelector('.persea-terminal-keys')?.children.length })`);
     evidence.f2.reconnect = outagePanel;
-    if (outagePanel.hidden === false) fail("F2", "transport teardown left the dedicated Keys disclosure open", outagePanel);
+    if (outagePanel.hidden === false) fail("input-authority", "transport teardown left the dedicated Keys disclosure open", outagePanel);
     assert((await tabA.waitUntil(isLive, 8000)).state, "F2: reconnect did not settle");
-    if ((await lastAttachment()).inputs.length !== 0) fail("F2", "Keys replayed input across the transport teardown", (await lastAttachment()).inputs);
+    if ((await lastAttachment()).inputs.length !== 0) fail("input-authority", "Keys replayed input across the transport teardown", (await lastAttachment()).inputs);
     const regrantedBefore = await lastAttachment(); await tabA.tapTile("Escape"); const regrantedAfter = await lastAttachment();
-    if (regrantedAfter.inputs.slice(regrantedBefore.inputs.length).join("") !== "\x1b") fail("F2", "Keys did not resume after the new control grant", regrantedAfter.inputs);
+    if (regrantedAfter.inputs.slice(regrantedBefore.inputs.length).join("") !== "\x1b") fail("input-authority", "Keys did not resume after the new control grant", regrantedAfter.inputs);
 
-    // --- QF6 the one-shot keyboard restore -------------------------
+    // --- keyboard-restore the one-shot keyboard restore -------------------------
     // Focus is not keyboard state. The restore is armed only when BOTH held at
     // the close: the classifier said OPEN (the visual viewport shrank by a
     // keyboard's height) AND a text entry of the page had focus. Four cells ×
@@ -769,14 +769,14 @@ async function main() {
         };
         evidence.qf6[key] = record;
         const expected = focused && open ? 1 : 0;
-        if (!cellOK) fail("QF6", `${key}: the cell could not be armed (probe vacuous)`, record);
-        if (!closing.state) fail("QF6", `${key}: the close was not observed (no reconnecting strip)`, record);
-        if (!back.state) fail("QF6", `${key}: the reopen did not reach live control`, record);
-        if (record.attachments !== 1) fail("QF6", `${key}: the reopen did not produce exactly one new attachment`, record);
-        if (kind === "forced" && record.adoptions !== 1) fail("QF6", `${key}: the forced reopen did not adopt in place`, record);
-        if (record.focusCalls !== expected) fail("QF6", `${key}: ${record.focusCalls} focus() after COMMIT, expected ${expected}`, record);
-        if (modeIndex < 0 || (inputIndex >= 0 && inputIndex < modeIndex)) fail("QF6", `${key}: INPUT preceded MODE_REQUEST`, record);
-        if (after.fitHintVisible) fail("D11", `${key}: the one-time hint came back on a reopen`, record);
+        if (!cellOK) fail("keyboard-restore", `${key}: the cell could not be armed (probe vacuous)`, record);
+        if (!closing.state) fail("keyboard-restore", `${key}: the close was not observed (no reconnecting strip)`, record);
+        if (!back.state) fail("keyboard-restore", `${key}: the reopen did not reach live control`, record);
+        if (record.attachments !== 1) fail("keyboard-restore", `${key}: the reopen did not produce exactly one new attachment`, record);
+        if (kind === "forced" && record.adoptions !== 1) fail("keyboard-restore", `${key}: the forced reopen did not adopt in place`, record);
+        if (record.focusCalls !== expected) fail("keyboard-restore", `${key}: ${record.focusCalls} focus() after COMMIT, expected ${expected}`, record);
+        if (modeIndex < 0 || (inputIndex >= 0 && inputIndex < modeIndex)) fail("keyboard-restore", `${key}: INPUT preceded MODE_REQUEST`, record);
+        if (after.fitHintVisible) fail("compact-fit-control", `${key}: the one-time hint came back on a reopen`, record);
         if (kind === "forced") await control({ sessionState: "open", bindingsExpired: false });
       }
     }
@@ -803,12 +803,12 @@ async function main() {
     await shot(tabA, "phone-03-terminal-keyboard-open-8-key-bar");
     const keyboardCensus = under44(await tabA.census());
     evidence.censusKeyboardOpen = keyboardCensus;
-    if (keyboardCensus.length) fail("T44", "under-44px targets with the keyboard open", keyboardCensus);
+    if (keyboardCensus.length) fail("touch-target-size", "under-44px targets with the keyboard open", keyboardCensus);
     await tabA.cdp.send("Emulation.setDeviceMetricsOverride", PHONE);
     await tabA.evaluate("document.activeElement && document.activeElement.blur()");
     await delay(300);
 
-    // --- D1 composer status line + composer targets ---------------------------
+    // --- composer-status-layout composer status line + composer targets ---------------------------
     const closedState = await tabA.state();
     await tabA.tap(closedState.composerToggleRect);
     const composerOpen = await tabA.waitUntil((state) => state.composerOpen, 4_000);
@@ -816,53 +816,53 @@ async function main() {
     // the idle composer shows NO status line; a standing
     // condition (smart punctuation in the draft) reveals it on its own
     // full-width line above the button row.
-    if (!composerOpen.state) fail("D1", "the composer did not open from the toolbar ✎", { status: idle.composerStatus });
-    else if (idle.composerStatus !== null) fail("D1", "the idle composer shows a status line", idle.composerStatus);
+    if (!composerOpen.state) fail("composer-status-layout", "the composer did not open from the toolbar ✎", { status: idle.composerStatus });
+    else if (idle.composerStatus !== null) fail("composer-status-layout", "the idle composer shows a status line", idle.composerStatus);
     await tabA.evaluate(`(() => { const t = document.querySelector(".attachment-page__composer-textarea"); if (t) { t.value = "\\u201cquoted\\u201d"; t.dispatchEvent(new Event("input", { bubbles: true })); } })()`);
     const composerCondition = await tabA.waitUntil((state) => state.composerOpen && state.composerStatus !== null, 4_000);
     const c = composerCondition.state ?? composerCondition.last;
     evidence.d1 = { idleStatus: idle.composerStatus, status: c.composerStatus, actions: c.composerActionsRect, buttons: c.composerButtons.map((b) => ({ label: b.label, w: b.rect.w, h: b.rect.h, y: b.rect.y })), grip: c.gripRect };
-    if (!composerCondition.state) fail("D1", "the status line did not appear for smart punctuation", evidence.d1);
+    if (!composerCondition.state) fail("composer-status-layout", "the status line did not appear for smart punctuation", evidence.d1);
     else {
       const status = c.composerStatus;
-      if (status.rect.w < 200) fail("D1", "the status line is narrower than 200px", evidence.d1);
-      if (status.scrollWidth > status.clientWidth + 1) fail("D1", "the status line is clipped", evidence.d1);
-      if (c.composerActionsRect && status.rect.y + status.rect.h > c.composerActionsRect.y + 0.5) fail("D1", "the status shares a row with the button row", evidence.d1);
-      for (const button of c.composerButtons) if (status.rect.y + status.rect.h > button.rect.y + 0.5) fail("D1", `the status shares a row with ${button.label}`, evidence.d1);
+      if (status.rect.w < 200) fail("composer-status-layout", "the status line is narrower than 200px", evidence.d1);
+      if (status.scrollWidth > status.clientWidth + 1) fail("composer-status-layout", "the status line is clipped", evidence.d1);
+      if (c.composerActionsRect && status.rect.y + status.rect.h > c.composerActionsRect.y + 0.5) fail("composer-status-layout", "the status shares a row with the button row", evidence.d1);
+      for (const button of c.composerButtons) if (status.rect.y + status.rect.h > button.rect.y + 0.5) fail("composer-status-layout", `the status shares a row with ${button.label}`, evidence.d1);
       const smallButtons = c.composerButtons.filter((b) => b.rect.w < 44 || b.rect.h < 44);
-      if (smallButtons.length) fail("T44", "composer buttons under 44×44", smallButtons);
-      if (!c.gripRect || c.gripRect.h < 24) fail("T44", "the composer grip is under 24px tall", c.gripRect);
+      if (smallButtons.length) fail("touch-target-size", "composer buttons under 44×44", smallButtons);
+      if (!c.gripRect || c.gripRect.h < 24) fail("touch-target-size", "the composer grip is under 24px tall", c.gripRect);
     }
     await shot(tabA, "phone-04-terminal-composer-status-line");
     const composerCensus = under44(await tabA.census());
     evidence.censusComposerOpen = composerCensus;
-    if (composerCensus.length) fail("T44", "under-44px targets with the composer open", composerCensus);
+    if (composerCensus.length) fail("touch-target-size", "under-44px targets with the composer open", composerCensus);
     await tabA.evaluate(`(() => { const t = document.querySelector(".attachment-page__composer-textarea"); if (t) { t.value = ""; t.dispatchEvent(new Event("input", { bubbles: true })); } })()`);
     await tabA.tap(closedState.composerToggleRect);
     await delay(200);
 
-    // --- T44 census: terminal page closed keyboard, then the sheet ------------
+    // --- touch-target-size census: terminal page closed keyboard, then the sheet ------------
     const closedCensus = under44(await tabA.census());
     evidence.censusClosed = closedCensus;
-    if (closedCensus.length) fail("T44", "under-44px targets on the phone terminal page", closedCensus);
+    if (closedCensus.length) fail("touch-target-size", "under-44px targets on the phone terminal page", closedCensus);
     await tabA.tap((await tabA.state()).openerRect);
     await delay(150);
     const sheetCensus = under44(await tabA.census());
     evidence.censusSheet = sheetCensus;
-    if (sheetCensus.length) fail("T44", "under-44px targets with the sheet open", sheetCensus);
+    if (sheetCensus.length) fail("touch-target-size", "under-44px targets with the sheet open", sheetCensus);
     const sheetTop = await tabA.state();
     evidence.censusSheetOpener = { top: tilesUnderOpener(sheetTop), opener: sheetTop.openerRect, sheet: sheetTop.sheetRect };
     const clippedLabels = Object.entries(sheetTop.tiles).filter(([, t]) => t.labelClipped).map(([label]) => label);
     evidence.censusSheetLabels = clippedLabels;
-    if (clippedLabels.length) fail("T44", "tile primary labels ellipsize (scrollWidth > clientWidth)", clippedLabels);
-    if (evidence.censusSheetOpener.top.length) fail("T44", "the opener covers sheet tiles (sheet at top)", evidence.censusSheetOpener);
+    if (clippedLabels.length) fail("touch-target-size", "tile primary labels ellipsize (scrollWidth > clientWidth)", clippedLabels);
+    if (evidence.censusSheetOpener.top.length) fail("touch-target-size", "the opener covers sheet tiles (sheet at top)", evidence.censusSheetOpener);
     // Scrolled to its end: the Image and Keyboard sections (Sessions and
     // Snippets render nothing until their phase); the opener still covers nothing.
     await tabA.evaluate("(() => { const s = document.querySelector('.persea-unified-sheet'); s.scrollTop = s.scrollHeight; return s.scrollTop; })()");
     await delay(120);
     const sheetBottom = await tabA.state();
     evidence.censusSheetOpener.bottom = tilesUnderOpener(sheetBottom);
-    if (evidence.censusSheetOpener.bottom.length) fail("T44", "the opener covers sheet tiles (sheet at bottom)", evidence.censusSheetOpener);
+    if (evidence.censusSheetOpener.bottom.length) fail("touch-target-size", "the opener covers sheet tiles (sheet at bottom)", evidence.censusSheetOpener);
     await shot(tabA, "phone-02b-terminal-sheet-scrolled-bottom");
     await tabA.tap((await tabA.state()).openerRect);
     await delay(150);
@@ -891,36 +891,36 @@ async function main() {
       evidence.image.composer = { open: ic.composerOpen, sheetVisible: ic.sheetVisible, attach: attach ? { w: attach.rect.w, h: attach.rect.h } : null, activeKind: ic.activeKind };
       if (!withComposer.state) fail("IMAGE", "the ⊕ tile did not open the composer and close the sheet", evidence.image.composer);
       if (!attach) fail("IMAGE", "the composer renders no ⊕ (Attach images) with staging available", evidence.image.composer);
-      else if (attach.w < 44 || attach.h < 44) fail("T44", "the composer ⊕ is under 44×44", evidence.image.composer);
+      else if (attach.w < 44 || attach.h < 44) fail("touch-target-size", "the composer ⊕ is under 44×44", evidence.image.composer);
       await shot(tabA, "phone-04b-terminal-composer-with-image-button");
       const imageCensus = under44(await tabA.census());
       evidence.censusComposerImage = imageCensus;
-      if (imageCensus.length) fail("T44", "under-44px targets with the composer open (image staging)", imageCensus);
+      if (imageCensus.length) fail("touch-target-size", "under-44px targets with the composer open (image staging)", imageCensus);
     }
     await tabA.cdp.send("Page.setInterceptFileChooserDialog", { enabled: false });
 
-    // --- F2 (c): no input before a held first PREPARE/MODE grant ----------
+    // --- input-authority (c): no input before a held first PREPARE/MODE grant ----------
     await control({ reset: true, holdPrepareMs: 2500 });
     await tabA.navigate(unifiedURL(await freshControlHandle()));
     const openerEarly = await tabA.waitUntil(state => state.openerVisible, 3000);
     assert(openerEarly.state, "F2: opener did not render before PREPARE");
     await refusedKey("firstOpen", "No terminal is attached.");
     const beforeFirstGrant = await lastAttachment();
-    if (beforeFirstGrant.inputs.length || firstInputIndex(beforeFirstGrant.frames) !== -1) fail("F2", "input reached the wire before first control", beforeFirstGrant.frames);
+    if (beforeFirstGrant.inputs.length || firstInputIndex(beforeFirstGrant.frames) !== -1) fail("input-authority", "input reached the wire before first control", beforeFirstGrant.frames);
     assert((await tabA.waitUntil(isLive, 8000)).state, "F2: first control grant did not settle");
     const firstOpenAttachment = await lastAttachment();
-    if (firstOpenAttachment.frames[0] !== "READY" || firstOpenAttachment.frames[1] !== "MODE_REQUEST") fail("F2", "first open omitted READY then MODE_REQUEST", firstOpenAttachment.frames);
+    if (firstOpenAttachment.frames[0] !== "READY" || firstOpenAttachment.frames[1] !== "MODE_REQUEST") fail("input-authority", "first open omitted READY then MODE_REQUEST", firstOpenAttachment.frames);
     await tabA.tapTile("Escape");
-    if ((await lastAttachment()).inputs.join("") !== "\x1b") fail("F2", "first granted key did not emit exactly once", (await lastAttachment()).inputs);
+    if ((await lastAttachment()).inputs.join("") !== "\x1b") fail("input-authority", "first granted key did not emit exactly once", (await lastAttachment()).inputs);
 
-    // --- D11 reopen: the compact phone row never resurrects the prose hint ----
+    // --- compact-fit-control reopen: the compact phone row never resurrects the prose hint ----
     await control({ reset: true });
     await tabA.navigate(unifiedURL(await freshControlHandle()));
     const hinted = await tabA.waitUntil((state) => isLive(state), 8_000);
-    if (!hinted.state) fail("D11", "a fresh compact page did not become live", hinted.last);
-    else if (hinted.state.fitHintVisible) fail("D11", "a fresh compact page resurrected the retired prose hint", hinted.state);
+    if (!hinted.state) fail("compact-fit-control", "a fresh compact page did not become live", hinted.last);
+    else if (hinted.state.fitHintVisible) fail("compact-fit-control", "a fresh compact page resurrected the retired prose hint", hinted.state);
 
-    // --- QF1c + D10 lease_held auto-takeover on a coarse newcomer -------------
+    // --- coarse-takeover + takeover-notice lease_held auto-takeover on a coarse newcomer -------------
     // Tab A holds control (fine pointer). Tab B, a phone, reopens the same URL:
     // lease_held → automatic takeover → live. No keyboard on B; B says once
     // that it took control from another window.
@@ -939,25 +939,25 @@ async function main() {
     const afterB = await snapshot();
     const bState = toastB.state ?? toastB.last;
     evidence.qf1c = { activeKind: bState.activeKind, keyBarHidden: bState.keyBarHidden, toast: bState.toast, takeovers: afterB.counters.takeovers - beforeB.counters.takeovers, code: bState.code, live: liveB.state ? isLive(liveB.state) : false };
-    if (!liveB.state || !isLive(liveB.state)) fail("QF1c", "the coarse newcomer did not take control automatically", evidence.qf1c);
+    if (!liveB.state || !isLive(liveB.state)) fail("coarse-takeover", "the coarse newcomer did not take control automatically", evidence.qf1c);
     else {
-      if (bState.activeKind === "xterm") fail("QF1c", "the auto-takeover COMMIT raised the keyboard on the newcomer", evidence.qf1c);
-      if (bState.keyboardInset) fail("QF1c", "the key bar showed on the newcomer", evidence.qf1c);
-      if (!toastB.state) fail("D10", "the newcomer did not show the displacement toast", evidence.qf1c);
+      if (bState.activeKind === "xterm") fail("coarse-takeover", "the auto-takeover COMMIT raised the keyboard on the newcomer", evidence.qf1c);
+      if (bState.keyboardInset) fail("coarse-takeover", "the key bar showed on the newcomer", evidence.qf1c);
+      if (!toastB.state) fail("takeover-notice", "the newcomer did not show the displacement toast", evidence.qf1c);
       else {
         const gone = await tabB.waitUntil((state) => state.toast === "", 4_500);
-        if (!gone.state) fail("D10", "the toast did not leave by itself", gone.last);
+        if (!gone.state) fail("takeover-notice", "the toast did not leave by itself", gone.last);
       }
       const bAttachment = await lastAttachment();
       const bMode = bAttachment.frames.indexOf("MODE_REQUEST");
       const bInput = firstInputIndex(bAttachment.frames);
-      if (bMode < 0 || (bInput >= 0 && bInput < bMode)) fail("QF1c", "the takeover attachment sent INPUT before its control grant", bAttachment.frames);
+      if (bMode < 0 || (bInput >= 0 && bInput < bMode)) fail("coarse-takeover", "the takeover attachment sent INPUT before its control grant", bAttachment.frames);
       const displaced = await tabA.waitUntil((state) => hasNotice(state) && state.code.includes("control_displaced"), 4_000);
-      if (!displaced.state) fail("QF1c", "the incumbent was not shown control_displaced", displaced.last);
+      if (!displaced.state) fail("coarse-takeover", "the incumbent was not shown control_displaced", displaced.last);
       // The incumbent never sees the newcomer's toast.
-      if ((await tabA.state()).toast !== "") fail("D10", "the displaced incumbent showed the takeover toast", await tabA.state());
+      if ((await tabA.state()).toast !== "") fail("takeover-notice", "the displaced incumbent showed the takeover toast", await tabA.state());
     }
-    // --- F2 (d) lease_held takeover: disabled until the control grant --------
+    // --- input-authority (d) lease_held takeover: disabled until the control grant --------
     // A fresh phone tab C reopens against B's lease with the grant held: the
     // takeover attaches and COMMITs, but the Keys tiles stay disabled with the
     // composer's reason until MODE(CONTROL), and a tap delivers nothing. (A
@@ -973,7 +973,7 @@ async function main() {
     const committedHeld = await tabC.waitUntil((state) => isLive(state) || hasNotice(state), 8_000);
     const heldSnapshot = await snapshot();
     evidence.f2.leaseHeld = { live: committedHeld.state ? isLive(committedHeld.state) : false, takeovers: heldSnapshot.counters.takeovers - beforeTakeover.counters.takeovers };
-    if (!committedHeld.state || !isLive(committedHeld.state) || evidence.f2.leaseHeld.takeovers !== 1) fail("F2", "precondition: the coarse takeover did not reach COMMIT with the grant held", { state: committedHeld.state ?? committedHeld.last, ...evidence.f2.leaseHeld });
+    if (!committedHeld.state || !isLive(committedHeld.state) || evidence.f2.leaseHeld.takeovers !== 1) fail("input-authority", "precondition: the coarse takeover did not reach COMMIT with the grant held", { state: committedHeld.state ?? committedHeld.last, ...evidence.f2.leaseHeld });
     else {
       await tabC.tap((await tabC.state()).openerRect);
       await delay(120);
@@ -981,18 +981,18 @@ async function main() {
       evidence.f2.leaseHeld.frames = ungrantedAttachment.frames;
       await tabC.tapTile("Escape"); await delay(100);
       const heldReason = await tabC.evaluate(`document.querySelector('.persea-terminal-keys__status')?.textContent || ''`);
-      if (!heldReason.includes("No terminal is attached.")) fail("F2", "takeover Keys omitted the control-grant refusal", heldReason);
-      if ((await lastAttachment()).inputs.length !== ungrantedAttachment.inputs.length) fail("F2", "held takeover key emitted input", (await lastAttachment()).inputs);
+      if (!heldReason.includes("No terminal is attached.")) fail("input-authority", "takeover Keys omitted the control-grant refusal", heldReason);
+      if ((await lastAttachment()).inputs.length !== ungrantedAttachment.inputs.length) fail("input-authority", "held takeover key emitted input", (await lastAttachment()).inputs);
       await control({ releaseMode: true });
       await delay(200);
       const grantedAttachment = await lastAttachment();
       evidence.f2.leaseHeld.after = { frames: grantedAttachment.frames, inputs: grantedAttachment.inputs };
       const modeAt = grantedAttachment.frames.indexOf("MODE_REQUEST");
       const inputAt = firstInputIndex(grantedAttachment.frames);
-      if (grantedAttachment.inputs.length !== 0 || inputAt !== -1) fail("F2", "input was delivered before the takeover's control grant", evidence.f2.leaseHeld.after);
-      if (modeAt < 0) fail("F2", "the takeover attachment carried no MODE_REQUEST", evidence.f2.leaseHeld.after);
+      if (grantedAttachment.inputs.length !== 0 || inputAt !== -1) fail("input-authority", "input was delivered before the takeover's control grant", evidence.f2.leaseHeld.after);
+      if (modeAt < 0) fail("input-authority", "the takeover attachment carried no MODE_REQUEST", evidence.f2.leaseHeld.after);
       await tabC.tapTile("Escape");
-      if ((await lastAttachment()).inputs.join("") !== "\x1b") fail("F2", "takeover key did not emit exactly once after MODE", (await lastAttachment()).inputs);
+      if ((await lastAttachment()).inputs.join("") !== "\x1b") fail("input-authority", "takeover key did not emit exactly once after MODE", (await lastAttachment()).inputs);
       await tabC.tap((await tabC.state()).openerRect);
       await delay(120);
     }
@@ -1132,7 +1132,7 @@ async function main() {
       await clipboardAction("Save"); await delay(180);
     };
 
-    // F3: opening the task menu is presentation; the shared service starts
+    // opening the task menu is presentation; the shared service starts
     // only when Clipboard is explicitly opened. The pane geometry is untouched.
     await freshClipboardPage(); const initialWire = await wire();
     await openSheet(); const beforeList = await store();
@@ -1141,7 +1141,7 @@ async function main() {
     await noWireChange(initialWire,"opening the unified Clipboard list");
     clipboard.f3.access = {beforeReads:beforeList.get,afterReads:(await store()).get};
 
-    // F2/F9/F10: editing cannot emit; Paste normalizes once, never appends
+    // Editing cannot emit; Paste normalizes once, never appends
     // Return, and multiline/tabbed text still uses the guarded composer path.
     await control({snippetWrite:[
       {kind:'snippet',label:'zero',body:'echo zero'}, {kind:'snippet',label:'one',body:'echo one\n'},
@@ -1175,7 +1175,7 @@ async function main() {
     if(markupElements!==0 || markup.draft!=='<img src=x onerror=alert(1)> & <script>')fail('clipboard-markup-safety','text preview interpreted markup',clipboard.f10.markup);
     const cancelBefore=await wire();await clipboardAction('Cancel');await noWireChange(cancelBefore,'preview Cancel');
 
-    // F1: selection is always local, but Send must obey the exact target's
+    // selection is always local, but Send must obey the exact target's
     // MODE grant and lifecycle. Opening a row is never an implicit input action.
     await freshClipboardPage({holdModeGrant:true,snippetWrite:[{kind:'snippet',label:'zero',body:'echo zero'}]});
     const ungrantedEditorWire=await wire(), ungrantedEditor=await preview('echo zero');
@@ -1206,7 +1206,7 @@ async function main() {
     clipboard.f1.disposal={readsAtDispose,readsAfterDispose};
     if(readsAfterDispose>readsAtDispose+1)fail('clipboard-local-editing','disposed pane kept polling shared text',clipboard.f1.disposal);
 
-    // F4: one document poll, cross-device publication, monotone final state.
+    // one document poll, cross-device publication, monotone final state.
     await freshClipboardPage();await openList('clips');const pollStart=await store();
     await control({snippetWrite:[{kind:'osc',body:'value from profile A',origin:'laptop'}]});
     await waitClipboard(value=>value.rows.some(row=>row.label==='value from profile A'));
@@ -1217,7 +1217,7 @@ async function main() {
     await waitClipboard(value=>value.rows.some(row=>row.label==='first overlapping publication')&&value.rows.some(row=>row.label==='second overlapping publication'),12000);
     await control({snippetDelayMs:0});
 
-    // F5: refusal/conflict/capacity remain authoritative. Extending to no
+    // refusal/conflict/capacity remain authoritative. Extending to no
     // expiry preserves one stable item; Delete uses its captured revision.
     await freshClipboardPage({snippetForce507:1});const fullBefore=await store();await addText('must not land');
     const full=await waitClipboard(value=>/full/i.test(value.status));const fullAfter=await store();
@@ -1239,7 +1239,7 @@ async function main() {
     await addText('ring replacement');const capacity=await store();clipboard.f5.capacity={snippets:capacity.snippets,manualClips:capacity.manualClips,osc:capacity.osc,body:capacity.oscBody};
     if(capacity.snippets!==256||capacity.manualClips!==21||capacity.osc!==1||capacity.oscBody!=='automatic value')fail('clipboard-full-store-refusal','manual clipboard insertion violated store capacity isolation',clipboard.f5.capacity);
 
-    // R5/F5: exact terminal-selection copying settles on the device without
+    // Exact terminal-selection copying settles on the device without
     // waiting for or depending on shared storage, including cold/warm outages,
     // failed mutation probes and text exceeding the store's 16KiB limit.
     for(const mode of ['cold','503','transport']) {
@@ -1266,7 +1266,7 @@ async function main() {
     if(Buffer.byteLength(largeText)<=16*1024)fail('clipboard-store-recovery','oversize copy precondition did not exceed store limit',clipboard.f5.oversize);
     else if(largeWrites.length!==1||largeWrites[0]!==largeText||oversizeAfter.mutations!==oversizeBefore.mutations)fail('clipboard-store-recovery','over-limit local Copy was lost or sent to shared storage',clipboard.f5.oversize);
 
-    // F6: exercise the secured requester through Add text. Only the NEXT
+    // exercise the secured requester through Add text. Only the NEXT
     // mutation is damaged; concurrent document reads remain ordinary reads.
     await freshClipboardPage();await openList('clips');
     await tabA.evaluate(`(() => {const original=window.fetch;window.__clipboardStrip=what=>{window.__clipboardLast=null;window.fetch=(input,init)=>{
@@ -1403,15 +1403,15 @@ async function main() {
       clipboard.f7.ids = finalStore.ids.filter((id) => id === "osc52" || !/^[0-9a-f]{32}$/.test(id));
       if (clipboard.f7.ids.length !== 1 || clipboard.f7.ids[0] !== "osc52") fail("clipboard-osc-budget", "the OSC path minted an id other than the one global record", finalStore.ids);
       // clipboard-osc-budget is measured by the same OSC run as clipboard-osc-parser (one corpus, one
-      // flood, one reopen). Rather than run it twice, the F8-owned facts are
+      // flood, one reopen). Rather than run it twice, the OSC budget checks are
       // surfaced under their own key so the acceptance ledger has an explicit
-      // F8 row: store economics, not decoding.
+      // OSC budget: store economics, not decoding.
       clipboard.f8 = { flood: clipboard.f7.flood, lifecycle: clipboard.f7.lifecycle, ids: clipboard.f7.ids, records: finalStore.osc, manualClips: finalStore.manualClips };
     }
 
 
 
-    // F10/J3: actual Clipboard rows render text, disclose retention, retain
+    // actual Clipboard rows render text, disclose retention, retain
     // 44px targets and native scrolling, and do not put bytes into a pane.
     await freshClipboardPage({snippetSeed:{snippets:12,clips:12},snippetWrite:[{kind:'osc',body:'automatic row',origin:'laptop'}]});
     const stylesBeforeClipboard=await tabA.evaluate(`document.querySelectorAll('style').length`);
@@ -1433,7 +1433,7 @@ async function main() {
     if(clipboardStyles.count!==stylesBeforeClipboard||clipboardStyles.unnonced!==0)fail('clipboard-markup-safety','Clipboard growth bypassed the fixed nonced style owner',clipboard.f10.styles);
     await noWireChange(beforeScroll,'native Clipboard scrolling');await shot(tabA,'phone-06-clipboard');
 
-    // R6: automatic output reaches the list without terminal input. A refused
+    // Automatic output reaches the list without terminal input. A refused
     // device copy remains visibly retryable; only a trusted copy of the owed
     // value acknowledges it. Unrelated/stale text must not replace that value.
     await freshClipboardPage();await installClipboardStub();await tabA.evaluate('window.__clipboardDevice.fail=true');
@@ -1470,7 +1470,7 @@ async function main() {
     await noWireChange(oscWire,'value-bound handoff acknowledgement');
     await closeClipboard();await openList();if((await clipboardState()).handoff)fail('clipboard-device-handoff','acknowledged handoff reappeared after reopening',{});
 
-    // R7: device import stays in the list. Explicit edits and Cancel never
+    // Device import stays in the list. Explicit edits and Cancel never
     // imply terminal Paste or resize; permission denial opens no editor.
     for(const keyboardOpen of [false,true]) {
       await freshClipboardPage();await installClipboardStub();
@@ -1492,7 +1492,7 @@ async function main() {
     await clipboardAction('Add text');await waitClipboard(value=>value.draft==='');await clipboardAction('Cancel');await noWireChange(denialWire,'explicit manual fallback Cancel');
     await closeClipboard();
 
-    // J5: keyboard actions stay discoverable in the task menu after using
+    // keyboard actions stay discoverable in the task menu after using
     // Clipboard. The menu no longer embeds a long saved-text list.
     clipboard.j5=[];
     for(const keyboardOpen of [false,true]) {
@@ -1501,7 +1501,7 @@ async function main() {
       const label=keyboardOpen?'Hide keyboard':'Show keyboard',tile=taskMenu.tiles[label];
       const inside=tile?.rect&&taskMenu.sheetRect&&tile.rect.y>=taskMenu.sheetRect.y-.5&&tile.rect.y+tile.rect.h<=taskMenu.sheetRect.y+taskMenu.sheetRect.h+.5;
       const measured={keyboardOpen,label,headings:taskMenu.sheetHeadings,inside,scroll:taskMenu.sheetScroll};clipboard.j5.push(measured);
-      if(!inside)fail('CLIPBOARD-J5','applicable keyboard action requires discovering a menu scroll',measured);
+      if(!inside)fail('clipboard touch-focus','applicable keyboard action requires discovering a menu scroll',measured);
       await tabA.tap((await tabA.state()).openerRect);await delay(100);
     }
     await tabA.emulate(DESKTOP,false);await freshClipboardPage({},false);const fine=await tabA.state();clipboard.f9.finePointer={openerVisible:fine.openerVisible,puckPresent:fine.puckPresent};
@@ -1530,7 +1530,7 @@ async function main() {
       // record another surface stored (the dashboard's Appearance card, another
       // tab): the fixture stores the record at the next revision and the page
       // is told the way the product tells it — the `storage` event of the
-      // preference hint key — which triggers one authoritative read (14.3b).
+      // preference hint key — which triggers one authoritative read.
       const HINT_KEY = "persea-terminal.operator-preferences-hint.v1";
       const publishRecord = async (patch) => {
         const current = await snapshot();
@@ -1601,7 +1601,7 @@ async function main() {
         assert(clicked, "preference-intent-ownership matrix precondition: Zoom in control absent");
       };
       // A theme "dispatched" during the matrix is a record stored elsewhere and
-      // signalled to this page (terminal appearance §15.6); the page's only preference write
+      // signalled to this page; the page's only preference write
       // is Zoom. `refresh()` is serialised behind writes, so a signal that
       // lands while a PUT is held is read only after that PUT settles.
       const dispatchTheme = async (id) => publishRecord({ theme: id });
@@ -2108,7 +2108,7 @@ async function main() {
       await shot(tabA, "phone-19-theme-preferences");
     }
 
-    // --- T44 dashboard census (Chromium, coarse) ------------------------------
+    // --- touch-target-size dashboard census (Chromium, coarse) ------------------------------
     await control({ reset: true });
     await tabA.emulate(PHONE, true);
     await tabA.navigate(`${origin}/`);
@@ -2124,7 +2124,7 @@ async function main() {
     assert(await rowReady(), "the dashboard did not render a session row");
     const dashboardCensus = under44(await tabA.census());
     evidence.censusDashboard = dashboardCensus;
-    if (dashboardCensus.length) fail("T44", "under-44px targets on the dashboard", dashboardCensus);
+    if (dashboardCensus.length) fail("touch-target-size", "under-44px targets on the dashboard", dashboardCensus);
     const dashboardRow = await tabA.evaluate(`(() => {
       const attached = document.querySelector(".session-metadata");
       const badge = document.querySelector(".alias-badge");
@@ -2134,31 +2134,31 @@ async function main() {
       return { attached: attached ? { ...rect(attached), text: attached.textContent, color: getComputedStyle(attached).color, fontSize: getComputedStyle(attached).fontSize } : null, badge: rect(badge), uid: uid ? { ...rect(uid), text: uid.textContent } : null, title: rect(title), rows: Array.from(document.querySelectorAll(".session-card")).map((card) => rect(card).h) };
     })()`);
     evidence.dashboard = dashboardRow;
-    // D8 protects a readable attachment signal. The redesigned row uses an
+    // attached-client-metadata protects a readable attachment signal. The redesigned row uses an
     // explicit count instead of an icon, so preserve the size and visibility
     // requirement and require the count's meaning to be present in the text.
-    if (!dashboardRow.attached || dashboardRow.attached.w < 12 || dashboardRow.attached.h < 12 || !(parseFloat(dashboardRow.attached.fontSize) >= 12) || !/\d+ attached/.test(dashboardRow.attached.text)) fail("D8", "the attached-client metadata is absent or unreadable", dashboardRow.attached);
-    if (dashboardRow.uid && dashboardRow.title && dashboardRow.uid.y < dashboardRow.title.y + dashboardRow.title.h - 0.5) fail("D12", "the identity caption is not under the realm heading", dashboardRow);
+    if (!dashboardRow.attached || dashboardRow.attached.w < 12 || dashboardRow.attached.h < 12 || !(parseFloat(dashboardRow.attached.fontSize) >= 12) || !/\d+ attached/.test(dashboardRow.attached.text)) fail("attached-client-metadata", "the attached-client metadata is absent or unreadable", dashboardRow.attached);
+    if (dashboardRow.uid && dashboardRow.title && dashboardRow.uid.y < dashboardRow.title.y + dashboardRow.title.h - 0.5) fail("session-information", "the identity caption is not under the realm heading", dashboardRow);
     const disclosure = await tabA.evaluate(`(() => { const b = document.querySelector(".session-disclosure"); const r = b.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2, w: r.width, h: r.height }; })()`);
     await tabA.tap(disclosure);
     await delay(300);
     // The row's information button reveals the facts directly, with no nested
     // disclosure. Preserve the real touch target and readable identity checks.
-    if (disclosure.w < 44 || disclosure.h < 44) fail("D12", "Session information has an undersized control", disclosure);
+    if (disclosure.w < 44 || disclosure.h < 44) fail("session-information", "Session information has an undersized control", disclosure);
     const information = await tabA.evaluate(`(() => { const section = document.querySelector(".session-information"); if (!section) return null; return { visible: section.getBoundingClientRect().height > 0, nested: !!section.querySelector(":scope > summary") }; })()`);
-    if (!information?.visible || information.nested) fail("D12", "Session information is not directly visible after the row action", information);
+    if (!information?.visible || information.nested) fail("session-information", "Session information is not directly visible after the row action", information);
     const identityFact = await tabA.evaluate(`(() => { const term = Array.from(document.querySelectorAll(".session-card dt")).find((node) => node.textContent === "Identity"); const value = term?.nextElementSibling; if (!value) return null; const rect = value.getBoundingClientRect(); return { text: value.textContent, width: rect.width, height: rect.height }; })()`);
     evidence.dashboardIdentity = identityFact;
-    if (!identityFact || !/UID \d+/.test(identityFact.text) || identityFact.width <= 0 || identityFact.height <= 0) fail("D12", "the session identity is not readable in Details", identityFact);
+    if (!identityFact || !/UID \d+/.test(identityFact.text) || identityFact.width <= 0 || identityFact.height <= 0) fail("session-information", "the session identity is not readable in Details", identityFact);
     const expandedCensus = under44(await tabA.census());
     evidence.censusDashboardExpanded = expandedCensus;
-    if (expandedCensus.length) fail("T44", "under-44px targets on the expanded dashboard row", expandedCensus);
+    if (expandedCensus.length) fail("touch-target-size", "under-44px targets on the expanded dashboard row", expandedCensus);
     await shot(tabA, "phone-05-dashboard");
 
     // --- console triage ---------------------------------------------------------
     // The expired binding's 410 is the forced-reopen path itself.
     const tolerated = (entry) => (/WebSocket connection to .*\/ws.*failed/.test(entry.text) && /410|Error during WebSocket handshake|Unexpected response code/.test(entry.text))
-      // QF6's forced reopens: the expired source binding answers 410 by
+      // keyboard-restore's forced reopens: the expired source binding answers 410 by
       // design, which is what sends the transport to the identity re-mint.
       || (/410/.test(entry.text) && /\/api\/attachment-handles/.test(entry.url ?? ""))
       // clipboard drives the store's refusal paths on purpose (403/400/409/413/507/503):

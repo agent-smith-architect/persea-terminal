@@ -12,7 +12,7 @@ func reservationKey(session string, generation uint64) PaneKey {
 	}
 }
 
-// TestAdoptionReservationAbortReleasesSlotAndArtifacts is F1's journal half
+// TestAdoptionReservationAbortReleasesSlotAndArtifacts checks journal slot cleanup
 // for the failed-adoption leak: a reservation aborted before activation
 // returns its slot, refunds the realm charge its bootstrap already took,
 // removes the generation's file, and leaves a fail-closed tombstone so an
@@ -69,7 +69,7 @@ func TestAdoptionReservationAbortReleasesSlotAndArtifacts(t *testing.T) {
 	}
 }
 
-// TestAdoptionReservationCommitSupersedesStaleGeneration is F1's journal half
+// TestAdoptionReservationCommitSupersedesStaleGeneration checks journal slot cleanup
 // for the restart leak: a reconstructed generation reopened under a new
 // broker incarnation is slot-retired at scan (the session stays adoptable
 // with one ordinary-admission slot plus the rotation reserve), stays

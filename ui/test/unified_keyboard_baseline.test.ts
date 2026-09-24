@@ -38,7 +38,7 @@ function openedPortrait(): UnifiedKeyboardBaseline {
   return machine;
 }
 
-// --- the pre-F5 contract stays ------------------------------------------------
+// --- resting keyboard baseline behavior ------------------------------------------------
 
 {
   const machine = new UnifiedKeyboardBaseline();
@@ -68,7 +68,7 @@ function openedPortrait(): UnifiedKeyboardBaseline {
   assert.ok(!machine.reseedPending(), "a closed-keyboard rotation left a pending reseed");
 }
 
-// --- F5: portrait-open -> landscape-open --------------------------------------
+// --- portrait-open -> landscape-open --------------------------------------
 
 {
   const machine = openedPortrait();
@@ -107,7 +107,7 @@ function openedPortrait(): UnifiedKeyboardBaseline {
   );
 }
 
-// --- F5: blur/close resolves the deferred reseed --------------------------------
+// --- blur/close resolves the deferred reseed --------------------------------
 
 {
   const machine = openedPortrait();
@@ -128,7 +128,7 @@ function openedPortrait(): UnifiedKeyboardBaseline {
   assert.equal(machine.restingViewportHeight(), LANDSCAPE.rest, "the post-blur settle did not become the resting mark");
 }
 
-// --- F5: split-view while open ---------------------------------------------------
+// --- split-view while open ---------------------------------------------------
 
 {
   const machine = openedPortrait();
@@ -143,7 +143,7 @@ function openedPortrait(): UnifiedKeyboardBaseline {
   assert.equal(machine.restingViewportHeight(), SPLIT.rest, "split view did not establish its resting mark");
 }
 
-// --- F5: return-to-portrait while still open ------------------------------------
+// --- return-to-portrait while still open ------------------------------------
 
 {
   const machine = openedPortrait();
@@ -165,7 +165,7 @@ function openedPortrait(): UnifiedKeyboardBaseline {
   assert.equal(machine.restingViewportHeight(), PORTRAIT.rest, "the round trip lost the portrait resting mark");
 }
 
-// --- F5: a pointer-class change releases the hold --------------------------------
+// --- a pointer-class change releases the hold --------------------------------
 
 {
   const machine = openedPortrait();

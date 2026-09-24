@@ -1,7 +1,7 @@
 package broker
 
 // ---------------------------------------------------------------------------
-// ISSUE25 — canceled BeginGeometry must never strand the journal pause.
+// Canceled BeginGeometry must never strand the journal pause.
 //
 // BeginGeometry queues a non-cancelable pause_start and waits for its result.
 // A request context that cancels in that window still returns a typed

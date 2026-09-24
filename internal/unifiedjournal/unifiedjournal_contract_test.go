@@ -20,9 +20,9 @@ import (
 )
 
 const (
-	journalRed     = "ISSUE25/PHASE6A1/CANDIDATE_RED/EPHEMERAL_JOURNAL"
-	sequencerRed   = "ISSUE25/PHASE6A1/CANDIDATE_RED/WRITE_AHEAD_SEQUENCER"
-	eligibilityRed = "ISSUE25/PHASE6A1/CANDIDATE_RED/CONTINUOUS_ONLY_ELIGIBILITY"
+	journalRed     = "EPHEMERAL_JOURNAL"
+	sequencerRed   = "WRITE_AHEAD_SEQUENCER"
+	eligibilityRed = "CONTINUOUS_ONLY_ELIGIBILITY"
 )
 
 func journalOptions(t *testing.T) OpenOptions {
@@ -1038,7 +1038,7 @@ func TestEligibilityStateMachineAdmitsContinuousOnlyAndFaultsSticky(t *testing.T
 }
 
 // ---------------------------------------------------------------------------
-// ISSUE25 — PUJ2 typed event log.
+// PUJ2 typed event log.
 //
 // The unified terminal's replay truth becomes an ordered event stream, not a
 // byte stream: an initial geometry, then committed OUTPUT and GEOMETRY events
@@ -1047,7 +1047,7 @@ func TestEligibilityStateMachineAdmitsContinuousOnlyAndFaultsSticky(t *testing.T
 // sequence of payload bytes can produce a geometry event.
 // ---------------------------------------------------------------------------
 
-const puj2Red = "ISSUE25/PUJ2/CANDIDATE_RED/TYPED_EVENT_JOURNAL"
+const puj2Red = "TYPED_EVENT_JOURNAL"
 
 func admitJournalPane(t *testing.T, realm *Realm, key PaneKey) Geometry {
 	t.Helper()
@@ -1727,7 +1727,7 @@ func puj2CorpusJournal(t *testing.T) (OpenOptions, PaneKey, []byte) {
 }
 
 // ---------------------------------------------------------------------------
-// ISSUE25 B1 — durable geometry cost survives a realm reopen.
+// Durable geometry cost survives a realm reopen.
 //
 // A geometry record carries no payload, so it adds nothing to the byte stream a
 // pane holds. It does occupy 128 durable bytes on disk, and live accounting
@@ -1738,7 +1738,7 @@ func puj2CorpusJournal(t *testing.T) (OpenOptions, PaneKey, []byte) {
 // cap the realm believes it is enforcing.
 // ---------------------------------------------------------------------------
 
-const budgetRed = "ISSUE25/PUJ2/CANDIDATE_RED/DURABLE_GEOMETRY_BUDGET"
+const budgetRed = "DURABLE_GEOMETRY_BUDGET"
 
 func TestCommittedGeometryChargeSurvivesReopen(t *testing.T) {
 	options := journalOptions(t)
@@ -2041,7 +2041,7 @@ func TestOutputOnlyAndByteOnlyAccountingIsUnchanged(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// ISSUE25 B1-F1 — a torn commit must not discard an already-validated geometry
+// A torn commit must not discard an already-validated geometry
 // append's charge.
 //
 // The B1 correction rebuilt the realm charge from a count accumulated while
@@ -2056,7 +2056,7 @@ func TestOutputOnlyAndByteOnlyAccountingIsUnchanged(t *testing.T) {
 // doubt at the moment it validates.
 // ---------------------------------------------------------------------------
 
-const tornCommitRed = "ISSUE25/PUJ2/CANDIDATE_RED/TORN_COMMIT_GEOMETRY_BUDGET"
+const tornCommitRed = "TORN_COMMIT_GEOMETRY_BUDGET"
 
 // tornGeometryGeneration writes one admitted pane holding exactly one validated
 // geometry append, then truncates its commit frame ten bytes in — the shape a

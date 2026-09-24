@@ -293,7 +293,7 @@ func TestRotationReapOfNeverActivatedUnitDisconnectsItsAdmission(t *testing.T) {
 	}
 }
 
-// R10 pins: after a pre-seal Abort with the bootstrap writer still holding a
+// After a pre-seal Abort with the bootstrap writer still holding a
 // reference, no new staging, reservation or write may attach to the abandoned
 // successor, and it retires to baseline once the writer settles.
 func TestRotationAbandonedSuccessorRefusesAllIngress(t *testing.T) {

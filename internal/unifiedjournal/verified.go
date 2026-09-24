@@ -244,7 +244,7 @@ func (realm *Realm) verifyCommitted(pane *paneJournal, expected Record) (verifie
 }
 
 // ProjectionUsage counts retained payload capacity and metadata structure
-// bytes. Allocator rounding and snapshot copies are separate Phase 3 budget
+// bytes. Allocator rounding and snapshot copies are separate budget
 // owners. Pending append metadata is included until verification releases it.
 func (realm *Realm) ProjectionUsage(key PaneKey) (payload, metadata, records int64) {
 	if pane := realm.panes[key]; pane != nil {

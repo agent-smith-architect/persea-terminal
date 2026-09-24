@@ -2,7 +2,7 @@
 //
 // Two documents need this answer and they must never disagree: the /workspace
 // document decides whether it opens panes or the honest phone-class state, and
-// the dashboard decides whether it may offer a workspace at all (workspace access F2 — a
+// the dashboard decides whether it may offer a workspace at all (a
 // phone must not be given a create affordance the same device then refuses to
 // open). The rule and its notice therefore live in a module that imports
 // nothing: workspace_layout.ts and workspace_page.ts already depend on

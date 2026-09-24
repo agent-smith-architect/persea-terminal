@@ -15,7 +15,7 @@
 // pending, and reseeds on a layout width change (rotation, split view) — the
 // one case where the old mark describes a different device shape.
 //
-// F5: a width-change sample taken while the state is OPEN and a text-entry
+// a width-change sample taken while the state is OPEN and a text-entry
 // element of the page still holds focus is keyboard-reduced, not at rest.
 // Learning it as the resting mark would zero the difference, hide the bar,
 // and remove the inset while the keyboard is still up — putting the cursor
@@ -64,7 +64,7 @@ export class UnifiedKeyboardBaseline {
     } else if (Math.abs(width - this.restingWidth) > 64) {
       this.restingWidth = width;
       if (this.open && coarse && focused) {
-        // F5: never learn a resting baseline from a width-change sample
+        // never learn a resting baseline from a width-change sample
         // while the prior state is OPEN and the page keeps text-entry focus.
         this.pendingReseed = true;
         this.pendingFloor = scaled;

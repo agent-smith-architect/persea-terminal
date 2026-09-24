@@ -44,7 +44,7 @@ assert(tapActivationSource.includes("const armedPointers = new Map<number,")
   && tapActivationSource.includes("armedPointers.get(event.pointerId)")
   && tapActivationSource.includes("capture.generation !== interactionGeneration()"), "tap authority must remain keyed by pointer identity and checked against the owner generation");
 
-// G2: ⇄ is absent from the row; Copy occupies its primary-row slot. The tag
+// ⇄ is absent from the row; Copy occupies its primary-row slot. The tag
 // popover is a neutral shell with identity facts and a second view over the
 // one pane-local inventory/select authority.
 assert(!source.includes('className = "persea-unified-session-switch"'), "top-bar session switch must be absent");
@@ -59,7 +59,7 @@ assert(source.includes("bindTapActivation(dashboard,") && !source.includes("bind
   "tag navigation must offer Dashboard without arbitrary Prev/Next cycling");
 assert(/bindTapActivation\(\s*switcher\.refresh,/.test(source), "tag Refresh must preserve terminal focus");
 
-// G7: the capability-free root navigation exists only in a standalone pane.
+// the capability-free root navigation exists only in a standalone pane.
 assert(/tile\("[^"]+", "Dashboard", "Open the dashboard"\)/.test(source), "the task menu must provide Dashboard");
 assert(source.includes('window.location.assign("/")'), "Dashboard must navigate to the clean root URL");
 assert(source.includes("if (!this.options.workspaceCell)"), "workspace cells must omit Dashboard rather than disable it");
@@ -93,9 +93,9 @@ assert(source.includes('"Clipboard", "Open shared clipboard"') && source.include
   "The terminal menu must open the shared Clipboard owner");
 assert(!source.includes('tile("‹", "Prev"') && !source.includes('tile("›", "Next"'), "quick actions must not expose arbitrary Prev/Next cycling");
 
-// G6/P1/P10: both controls converge on one rows-only request constructor.
+// both controls converge on one rows-only request constructor.
 assert((source.match(/type: "RESIZE_REQUEST"/g) ?? []).length === 1, "there must be exactly one direct resize-frame construction site");
-assert(source.includes("private requestRowsOnly(rows: number, explicit = false)"), "geometry emitter must be rows-only (explicit typed requests skip only the keyboard guard, terminal appearance §15.3)");
+assert(source.includes("private requestRowsOnly(rows: number, explicit = false)"), "geometry emitter must be rows-only (explicit typed requests skip only the keyboard guard)");
 assert((source.match(/this\.requestRowsOnly\(/g) ?? []).length === 2, "only trusted Fit rows and Apply activations may call the resize helper");
 assert(source.includes("private requestVerticalFit(): void") && source.includes("private applyTypedGeometry(columnsText: string, rowsText: string): void"),
   "Fit rows and the single Apply must be the two rows-only callers");
@@ -133,7 +133,7 @@ const refitBoundaryFailures = [
 assert(refitBoundaryFailures.length === 0, `refit boundary gaps: ${refitBoundaryFailures.join(", ")}`);
 assert(source.includes('/^(?:0|[1-9][0-9]*)$/'), "size inputs must use strict ASCII-decimal validation");
 
-// G8/P9: primary action and explanation use one composed recognizer, and the
+// primary action and explanation use one composed recognizer, and the
 // browser lane is a package-owned member of the canonical suite.
 assert(source.includes("bindExplainedTapActivation"), "explainer controls must use the composed gesture state machine");
 assert(source.includes('this.openExplainer("select"') && source.includes('this.openExplainer("view"'), "contextual Select/Copy and moved disclosure explanations must be wired");
@@ -145,7 +145,7 @@ assert(packageJSON.scripts?.["test:refit-accounting-browser"]?.includes("run_ref
 assert(!terminal_interactionBrowser.includes('if (false && shape.name === "desktop" && refitLifecycleEnabled("c3"))'),
   "refit lifecycle coverage must not remain behind a compile-time-disabled terminal interaction block");
 
-// R1/R3: the frozen overlay publishes the exact xterm presentation it
+// The frozen overlay publishes the exact xterm presentation it
 // captured, and passive readiness rendering cannot retire a copy outcome.
 assert(source.includes('"--persea-terminal-font-family", snapshot.fontFamily'), "frozen selection must publish xterm font family");
 assert(source.includes('"--persea-terminal-font-size", `${snapshot.fontSizePixels}px`'), "frozen selection must publish xterm font size");

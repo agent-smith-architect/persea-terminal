@@ -287,8 +287,7 @@ func Run(cfg config.Front, staticDir string) error {
 
 // openPreferencesStore keeps an unconfigured or unopenable preferences store
 // as a held error rather than a boot failure: the routes then answer with the
-// defaults (GET) or 503 (PUT), which is the honest degraded posture the
-// packet asks for (§5e TF3), and the reason is logged once at start.
+// defaults (GET) or 503 (PUT); the reason is logged once at start.
 func openPreferencesStore(path string) (*preferencesStore, error) {
 	if path == "" {
 		return nil, fmt.Errorf("%w: preferences_store_path is not configured", errPreferencesStoreUnavailable)
@@ -305,7 +304,7 @@ func openKeyboardPreferencesStore(path string) (*keyboardPreferencesStore, error
 
 // openSnippetStore mirrors openPreferencesStore: an unconfigured or
 // unopenable snippet store is held, logged once, and answered with 503 on
-// every route (§3f, SF1) rather than a partial list or a boot failure.
+// every route rather than a partial list or a boot failure.
 func openSnippetStore(path string) (*snippetStore, error) {
 	if path == "" {
 		return nil, fmt.Errorf("%w: snippet_store_path is not configured", errSnippetStoreUnavailable)

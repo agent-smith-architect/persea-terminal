@@ -84,8 +84,7 @@ export const UNIFIED_REATTACH_REASONS: ReadonlySet<string> = new Set([
 
 // The one exported terminal classification. The transport, the page, and the
 // source-to-policy enumeration test all consume THIS set; nothing else may
-// keep a private copy of it, or the copies drift apart exactly the way the
-// F3 omissions did.
+// keep a private copy of it, because separate copies can omit close reasons.
 export const UNIFIED_TERMINAL_REASONS: ReadonlySet<string> = new Set([
   ...UNIFIED_TAKEOVER_REASONS,
   // Broker-typed refusals forwarded verbatim by the front door. Every error

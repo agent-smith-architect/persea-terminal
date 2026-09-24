@@ -62,7 +62,7 @@ function integer(value: unknown, label: string, minimum = 0): number { if (typeo
 function boolean(value: unknown, label: string): boolean { if (value === undefined || value === null) return false; if (typeof value !== "boolean") throw new Error(`${label} must be a boolean`); return value; }
 function optionalString(value: unknown, label: string): string | undefined {return value === undefined ? undefined : string(value, label); }
 
-// Broker-internal attachment wrapper sessions (workspace access F3).
+// Broker-internal attachment wrapper sessions.
 //
 // While an attachment is live the broker owns one extra tmux session named
 // `persea-attach-<32 hex nonce>` (`internal/broker/attachment.go`
@@ -681,7 +681,7 @@ export class Dashboard {
     composer.addEventListener("change", () => void save({ composerFontSize: Number(composer.value) }));
     // The dashboard never re-reads preferences on focus or visibility
     // (shared-landing-inventory); another tab's save reaches the card through the `storage`
-    // signal, which triggers one authoritative server read (14.3b) — a
+    // signal, which triggers one authoritative server read — a
     // storage event never fires in the document that wrote it.
     void service.load().then(() => { if (!this.destroyed) this.cleanup.push(service.watchExternalChanges({ refetchOnForeground: false })); });
     return card;

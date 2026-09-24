@@ -1420,7 +1420,7 @@ type RotationCapacity struct {
 	// capacity to storage. A failed attempt may leave header bytes charged
 	// under a name the realm cannot reuse and may have converted part of the
 	// header hold, so the capacity is single-use for materialization even on
-	// failure. It stays eligible for the F5 path: ArmRollback, bounded replay
+	// failure. It stays eligible for the rollback path: ArmRollback, bounded replay
 	// into the predecessor, then Release of the remaining holds.
 	materializationAttempted bool
 	// materialized means a RotationReservation owns the successor; active

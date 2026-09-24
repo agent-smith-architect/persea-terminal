@@ -1,6 +1,6 @@
-// Workspace model unit suite: cap, duplicates (OQ1), structural
+// Workspace model unit suite: cap, duplicates, structural
 // refusals, split/unsplit/remove/add, reweight invariants, serialization
-// round-trip, and the "no geometry path" source scan (FW3 static half).
+// round-trip, and the "no geometry path" source scan (static geometry check).
 declare const require: (name: string) => any;
 declare const process: { stdout: { write(value: string): void } };
 declare const __dirname: string;
@@ -57,7 +57,7 @@ function javascriptFixtureValue(fixture: WorkspaceNameLawCase): string | undefin
   return undefined;
 }
 
-// The packet's §2a example, extended to the six-pane cap: row [A | column [B, C] | column [D, row [E, F]]].
+// A nested split tree at the six-pane cap: row [A | column [B, C] | column [D, row [E, F]]].
 const six: WorkspaceNode = split("row", [
   leaf(sel("qt20"), "offer", "primary-terminal"),
   split("column", [leaf(sel("build"), "create"), leaf(sel("scratch"), "skip")]),
@@ -115,12 +115,12 @@ const six: WorkspaceNode = split("row", [
   assert.equal(nodeAt(six, [9]), undefined);
   assert.equal(nodeAt(six, [0, 0]), undefined, "a leaf has no children");
 
-  // PANE_CAP is six (OQ2): a seventh leaf is refused as a whole.
+  // PANE_CAP is six: a seventh leaf is refused as a whole.
   const seven = split("row", [six.kind === "split" ? six.children[0] : six, ...(six.kind === "split" ? six.children.slice(1) : []), leaf(sel("g"))], [2, 1, 1, 1]);
   const cap = expectRefusal(validateWorkspaceTree(seven), "pane_cap_exceeded", "seventh pane");
   assert.equal(cap.code === "pane_cap_exceeded" && cap.cap, PANE_CAP);
 
-  // OQ1: the same session twice is refused, with the offending path.
+  // The same session twice is refused, with the offending path.
   const duplicate = split("row", [leaf(sel("qt20")), split("column", [leaf(sel("x")), leaf(sel("qt20"))])]);
   const dup = expectRefusal(validateWorkspaceTree(duplicate), "duplicate_leaf", "duplicate leaf");
   assert.equal(dup.code === "duplicate_leaf" && dup.path, "root/1/1");
@@ -278,7 +278,7 @@ const six: WorkspaceNode = split("row", [
   assert.deepEqual(serializeWorkspaceTree(nodeAt(nestedDrag, [2])!), serializeWorkspaceTree(nodeAt(six, [2])!), "sibling subtree untouched");
 }
 
-// --- serialization (§3a version-1 shape)
+// --- serialization (version-1 shape)
 {
   const wire = serializeWorkspace(six);
   assert.equal(wire.version, WORKSPACE_STORE_VERSION);
@@ -336,7 +336,7 @@ const six: WorkspaceNode = split("row", [
   for (const refusal of refusals) assert.ok(workspaceRefusalMessage(refusal).length > 0, `wording for ${refusal.code}`);
 }
 
-// --- FW3 (static half): no geometry path exists in the workspace code. The
+// --- Static geometry check: no geometry path exists in the workspace code. The
 // workspace modules never name a RESIZE_REQUEST, a send port, the terminal
 // page's fit request, xterm's resize, a WebSocket, or any transport module.
 {

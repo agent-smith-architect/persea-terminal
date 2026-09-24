@@ -30,7 +30,7 @@ export type IOSBackspaceInstrumentation = Readonly<{
    */
   lineDelimiterRefusals: number;
   dictationPreludePending: boolean;
-  /** F4 safe-disable: composition occurred in this focus session, so
+  /** Composition safe-disable: composition occurred in this focus session, so
    * replacement rewriting is off until blur/refocus. */
   replacementDisabledForFocusSession: boolean;
   deleteRecords: readonly IOSBackspaceDeleteRecord[];
@@ -911,7 +911,7 @@ export class IOSBackspaceRouter {
     if (selectionStart === 0 && selectionEnd === value.length
       && this.emittedCount !== null && this.emittedCount > 0) {
       if (this.compositionSeenThisFocusSession) {
-        // The F4 safe-disable: a focus session that saw composition may
+        // The composition safe-disable: a focus session that saw composition may
         // deliver post-composition insertions whose relation to the field
         // cannot be modeled without the missing real pinyin trace
         // (IMPLEMENTATION_BLOCKED_ON_REAL_CJK_TRACE). The revision goes raw
@@ -919,7 +919,7 @@ export class IOSBackspaceRouter {
         this.emittedCount = null;
         return undefined;
       }
-      // The previous text is kept only so a refused revision (R1) can put
+      // The previous text is kept only so a refused revision can put
       // the field back; it pairs with this one input and is never instrumented.
       return { ...record("replace", value.length), previousValue: value };
     }

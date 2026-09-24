@@ -1,6 +1,6 @@
 "use strict";
 
-// Real-stack WebKit F11 gate. The stack is provisioned separately because it
+// Real-stack WebKit workspace gate. The stack is provisioned separately because it
 // owns real tmux sessions, broker/frontdoor processes, and a hermetic TLS
 // ingress. The default is the timing-clean release gate. Set
 // PERSEA_WEBKIT_F11_LEDGER=1 only for the pre-navigation diagnostic ledger.
@@ -316,7 +316,7 @@ async function main() {
       });
     });
     const tabOrder = [];
-    // Updated deliberately for workspace access F4: the fine-pointer quick-actions opener
+    // The fine-pointer quick-actions opener
     // is a real toolbar control and takes its place in the row, between the ↕
     // pair and the composer toggle. This context is the 1280x800 desktop one,
     // so the opener is present here; the phone context below never sees it.

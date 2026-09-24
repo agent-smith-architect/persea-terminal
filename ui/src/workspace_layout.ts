@@ -1,15 +1,15 @@
 // Workspace layout renderer — presentation only.
 //
-// Renders a §2a split tree as nested flex containers with draggable dividers
-// (pointer math) and +/- nudge buttons (OQ4 fallback), one cell per leaf. A
+// Renders a split tree as nested flex containers with draggable dividers
+// (pointer math) and +/- nudge buttons, one cell per leaf. A
 // cell exposes a mount point for the unified page and a state slot that
-// renders every §7 per-pane state as visible text: the workspace never shows
+// renders every per-pane state as visible text: the workspace never shows
 // a blank cell or a dead-looking control.
 //
 // Layout is presentation-only; no geometry path exists in this code. Dividers
 // change CSS weight classes and nothing else. A cell resize reaches the
-// mounted page's own ResizeObserver, which refits the font (packet §2b,
-// regression test FW3). This module imports no transport, no attachment page, and
+// mounted page's own ResizeObserver, which refits the font. This module
+// imports no transport, no attachment page, and
 // no protocol frame type. Styles are class-based (workspace.css): no element
 // ever carries a style attribute, so the shell renders under the base nonce'd
 // CSP.

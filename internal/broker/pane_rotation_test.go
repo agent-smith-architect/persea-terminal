@@ -679,7 +679,7 @@ func (fixture *rotationFixture) assertFatalCommitEdgePreservesPredecessor(txn *p
 	coordinator := fixture.registry.panes[coordinateKey(fixture.previous)]
 	broken := fixture.registry.broken
 	fixture.registry.mu.Unlock()
-	// F14 may reap the owning unit and thereby disconnect its predecessor route,
+	// A fatal inconsistency may reap the owning unit and thereby disconnect its predecessor route,
 	// but the provisional successor fault remains local: it must not trip the
 	// realm breaker or install any successor authority.
 	if session != fixture.session || successorAdmitted || broken {

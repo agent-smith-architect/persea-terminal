@@ -122,8 +122,8 @@ func TestRefitSourceDispositionUsesStableOwnerAcrossWidthChange(t *testing.T) {
 	}
 }
 
-// TestRefitConcurrentExactRefitSharesOneComposite pins the in-flight half of
-// C2. Both callers carry the same immutable operation, but only the ledger
+// TestRefitConcurrentExactRefitSharesOneComposite checks in-flight deduplication.
+// Both callers carry the same immutable operation, but only the ledger
 // owner may cross the capacity/composite boundary; the follower receives the
 // owner's typed result after settlement.
 func TestRefitConcurrentExactRefitSharesOneComposite(t *testing.T) {

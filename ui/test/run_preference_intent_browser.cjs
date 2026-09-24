@@ -1,6 +1,6 @@
 "use strict";
 
-// Runner for the D1 preference-intent regression test. It bundles the real product
+// Runner for the preference-intent regression test. It bundles the real product
 // modules (UnifiedTerminalPage and OperatorPreferencesService, plus the shipped
 // @xterm/xterm build) and drives the page's own theme select and Zoom in button
 // in a real browser while a sibling preference subscriber throws.

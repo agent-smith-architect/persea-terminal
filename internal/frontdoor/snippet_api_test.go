@@ -100,7 +100,7 @@ func TestSnippetAPIContract(t *testing.T) {
 		t.Fatalf("list=%+v", list)
 	}
 
-	// PATCH / DELETE carry the revision in the body (§3b); a stale revision
+	// PATCH / DELETE carry the revision in the body; a stale revision
 	// answers 409 with the current record.
 	stale := c.patch(snippet.ID, `{"label":"Ship","revision":9}`, nil)
 	if stale.Code != http.StatusConflict || stale.Header().Get("Cache-Control") != "no-store" || decodeSnippet(t, stale).Revision != 1 {
@@ -335,7 +335,7 @@ func TestSnippetAPIFileCapIsInsufficientStorage(t *testing.T) {
 	}
 }
 
-// SF1 (API half) and §3f: a store that cannot be trusted answers 503 on
+// A store that cannot be trusted answers 503 on
 // every route, never a partial list; a store that faulted after publishing
 // still lists what is on disk and refuses further mutation.
 func TestSnippetAPIStoreUnavailable(t *testing.T) {
@@ -411,7 +411,7 @@ func TestSnippetAPISharesOperatorLimiter(t *testing.T) {
 	}
 }
 
-// contract F1 (c1_osc_slot): the distinguished OSC 52 record has its own
+// OSC slot isolation: the distinguished OSC 52 record has its own
 // slot outside the 20-clip manual ring — creating it never evicts a manual
 // clip, and manual clips never evict it.
 func TestSnippetAPIOSCFirstWriteNeverEvictsManualClip(t *testing.T) {
@@ -502,7 +502,7 @@ func TestSnippetAPIManualClipsNeverEvictOSCRecord(t *testing.T) {
 	}
 }
 
-// contract F2 (c2_canonical_keys): encoding/json matches object keys
+// Canonical key validation: encoding/json matches object keys
 // case-insensitively, so a closed schema must refuse non-canonical spellings
 // before decoding — on every route, including nested objects.
 func TestSnippetAndPreferencesAPIRefuseCaseFoldedKeys(t *testing.T) {

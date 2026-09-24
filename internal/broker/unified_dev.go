@@ -254,7 +254,7 @@ type UnifiedDevPaneEffects struct {
 
 	// adoptionSpanOutputs counts %output events classified inside an adoption
 	// composite's submission span. Measured zero on tmux 3.4 (the composite is
-	// atomic by construction); the counter exists so the F1 regression test can pin
+	// atomic by construction); the counter exists so the adoption regression test can pin
 	// the measurement as a regression gate.
 	adoptionSpanOutputs atomic.Int64
 	// adoptionRetries counts PRE!=POST capture retries, the version-drift
@@ -2566,8 +2566,8 @@ func (unit *unifiedDevUnit) commitAdoption(responses []string, holder *unifiedDe
 
 // adoptionCompositeLine is the atomic capture composite: seven semicolon
 // sub-commands submitted as ONE control-mode line, which tmux 3.4 drains in a
-// single command-queue run without processing pane reads (measured; regression test
-// F1 pins it as a regression gate). The first command rechecks this observer's
+// single command-queue run without processing pane reads (measured by the
+// adoption regression test). The first command rechecks this observer's
 // flags and the second normalizes its target subscription to pane:on before
 // PRE/capture. This is intentionally honest rather than complete tripwire
 // coverage: pane:off and no-output are signal-less in tmux, so the readiness

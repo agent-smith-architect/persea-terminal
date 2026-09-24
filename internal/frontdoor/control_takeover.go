@@ -92,7 +92,7 @@ func validTakeoverToken(value string) bool {
 	if len(value) != 43 {
 		return false
 	}
-	// Tokens are opaque string keys. Their wire shape follows FREEZE §3.1;
+	// Tokens are opaque string keys. Their wire shape is fixed;
 	// the mint source guarantees entropy, so the validator checks only that shape.
 	for index := 0; index < len(value); index++ {
 		character := value[index]

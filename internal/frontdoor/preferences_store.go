@@ -48,7 +48,7 @@ var errPreferencesConflict = errors.New("preferences revision conflict")
 var errPreferencesValidation = errors.New("invalid preferences")
 var errPreferencesStoreUnavailable = errors.New("preferences store unavailable")
 
-// DefaultSession names the session card a landing shows first (§7); the
+// DefaultSession names the session card a landing shows first; the
 // front validates its shape only, existence is a landing-time question.
 type DefaultSession struct {
 	Realm  string `json:"realm"`

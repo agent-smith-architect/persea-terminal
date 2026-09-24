@@ -8,8 +8,8 @@ import (
 )
 
 const (
-	decoderRed = "ISSUE25/PHASE6A1/CANDIDATE_RED/STRICT_CONTROL_DECODER"
-	routerRed  = "ISSUE25/PHASE6A1/CANDIDATE_RED/SESSION_SCOPED_ROUTER"
+	decoderRed = "STRICT_CONTROL_DECODER"
+	routerRed  = "SESSION_SCOPED_ROUTER"
 )
 
 func encodeControlPayload(payload []byte) []byte {

@@ -11,7 +11,7 @@ import { DEFAULT_UNIFIED_THEME, isUnifiedThemeID, type UnifiedThemeID } from "./
 
 export const OPERATOR_PREFERENCES_HINT_KEY = "persea-terminal.operator-preferences-hint.v1";
 
-// The composer's face, in px (C1). A plain number with a default, never a
+// The composer's face, in px. A plain number with a default, never a
 // tri-state: the composer has no auto-fit to hand the decision back to, so
 // there is nothing for "auto" to mean. It shares the terminal font's range
 // because the same eyes read both.
@@ -183,7 +183,7 @@ function parseRecord(value: unknown, etag: string | null): ParsedRecord | undefi
 }
 
 // The hint is a device-local paint before the server answers and a cross-tab
-// signal after it; it is never a source of record truth (terminal layout F5), so it
+// signal after it; it is never a source of record truth, so it
 // carries no revision and nothing in it is adopted after load.
 function readHint(storage: OperatorPreferencesServiceOptions["storage"]): OperatorPreferences | undefined {
   if (storage === undefined) return undefined;
@@ -280,7 +280,7 @@ export class OperatorPreferencesService implements OperatorPreferencePort {
     return this.loadPromise;
   }
 
-  // (as amended after F5): a preference saved in another tab —
+  // a preference saved in another tab —
   // the dashboard's Appearance card, another terminal — reaches this document
   // without a reload. Every publication writes the localStorage hint, so the
   // `storage` event is the cross-tab SIGNAL; the record itself is always taken
