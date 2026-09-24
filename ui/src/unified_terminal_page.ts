@@ -4474,7 +4474,9 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       }
     }
     this.terminal.options.fontSize = best / 100;
-    this.syncNativeScroll(anchor.following, anchor);
+    // A replay's fresh transcript owns the viewport; an older anchor must not move it.
+    if (this.replaying) this.scheduleReconcile();
+    else this.syncNativeScroll(anchor.following, anchor);
   }
 
   // sendInput is sealed for exactly one pending explicit Fit.
