@@ -177,12 +177,15 @@ def child_path(relative: str, name: str) -> str:
 
 
 def check_directory(fd: int, mount: str, inventory: Inventory, relative: str,
-                    remaining: set, writable: bool = False) -> None:
+                    remaining: set, writable: bool = False, checked: tuple | None = None) -> tuple:
     expected = inventory.objects[relative]
     if writable:
         expected = (*expected[:4], stat.S_IFDIR | 0o755, expected[5])
-    require(object_metadata(os.fstat(fd)) == expected and mount_id(fd) == mount,
+    before = os.fstat(fd)
+    require(object_metadata(before) == expected and mount_id(fd) == mount,
             "validated directory replaced, changed or mounted")
+    if witness(before) == checked:
+        return checked
     require(set(os.listdir(fd)) == remaining, "validated directory entry set changed")
     # Check all immediate entries before changing this directory or touching any
     # child. A same-mode replacement is not a newly acceptable removal target.
@@ -190,6 +193,8 @@ def check_directory(fd: int, mount: str, inventory: Inventory, relative: str,
         info = os.stat(name, dir_fd=fd, follow_symlinks=False)
         require(object_metadata(info) == inventory.objects[child_path(relative, name)],
                 "validated descendant replaced or changed")
+    require(witness(os.fstat(fd)) == witness(before), "directory changed during inventory check")
+    return witness(before)
 
 
 def remove_tree(fd: int, mount: str, inventory: Inventory, relative: str = "") -> None:
@@ -197,8 +202,10 @@ def remove_tree(fd: int, mount: str, inventory: Inventory, relative: str = "") -
     check_directory(fd, mount, inventory, relative, remaining)
     # This changes only the opened, checked directory; no pathname chmod walk.
     os.fchmod(fd, 0o755)
+    checked = check_directory(fd, mount, inventory, relative, remaining, writable=True)
     for name in sorted(remaining):
-        check_directory(fd, mount, inventory, relative, remaining, writable=True)
+        checked = check_directory(fd, mount, inventory, relative, remaining,
+                                  writable=True, checked=checked)
         path = child_path(relative, name)
         expected = inventory.objects[path]
         if path in inventory.children:
@@ -209,7 +216,8 @@ def remove_tree(fd: int, mount: str, inventory: Inventory, relative: str = "") -
                 require(object_metadata(os.stat(name, dir_fd=fd, follow_symlinks=False)) == changed,
                         "directory replaced during removal")
                 check_directory(child, mount, inventory, path, set(), writable=True)
-                require(set(os.listdir(fd)) == remaining, "validated directory entry set changed")
+                check_directory(fd, mount, inventory, relative, remaining,
+                                writable=True, checked=checked)
                 os.rmdir(name, dir_fd=fd)
             finally:
                 os.close(child)
@@ -222,11 +230,19 @@ def remove_tree(fd: int, mount: str, inventory: Inventory, relative: str = "") -
                 require(object_metadata(opened) == expected and witness(opened) == witness(before)
                         and mount_id(child) == mount,
                         "file replaced or mounted during removal")
-                check_directory(fd, mount, inventory, relative, remaining, writable=True)
+                check_directory(fd, mount, inventory, relative, remaining,
+                                writable=True, checked=checked)
+                require(witness(os.stat(name, dir_fd=fd, follow_symlinks=False)) == witness(opened),
+                        "file replaced or changed before unlink")
                 os.unlink(name, dir_fd=fd)
             finally:
                 os.close(child)
         remaining.remove(name)
+        # Our unlink/rmdir changes the parent witness. Accept that mutation;
+        # later unexpected changes trigger a full rescan. Each selected object
+        # is still checked against the original inventory at its own boundary,
+        # since metadata changes to a child need not change its parent witness.
+        checked = witness(os.fstat(fd))
     check_directory(fd, mount, inventory, relative, remaining, writable=True)
 
 
