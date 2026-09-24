@@ -422,6 +422,14 @@ func TestCanceledBeginLateSettledFailureFailsClosedAndReleasesOwner(t *testing.T
 
 	witness := retentionWitness("%0", "cancel-late-pause-failure-incarnation")
 	key := journalKey(witness)
+	cleanupPane := make(chan *retentionPaneRuntime, 1)
+	runtime.setHook(func(point string, observed unifiedjournal.PaneKey) {
+		if point == "before_cleanup" && observed == key {
+			// The manager owns the map. Publish its pointer before removal;
+			// only the pause flag may be observed under runtime.mu.
+			cleanupPane <- runtime.panes[key]
+		}
+	})
 	if err := realm.AdmitPane(key, unifiedjournal.Geometry{Columns: 80, Rows: 24}); err != nil {
 		t.Fatalf("admit pane: %v", err)
 	}
@@ -464,6 +472,15 @@ func TestCanceledBeginLateSettledFailureFailsClosedAndReleasesOwner(t *testing.T
 
 	journalMu.Unlock()
 	locked = false
+	var pane *retentionPaneRuntime
+	select {
+	case pane = <-cleanupPane:
+		if pane == nil {
+			t.Fatal("late failure cleanup did not find the output pane")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("late failure did not reach manager cleanup")
+	}
 	deadline := time.Now().Add(5 * time.Second)
 	for {
 		registry.mu.Lock()
@@ -473,7 +490,6 @@ func TestCanceledBeginLateSettledFailureFailsClosedAndReleasesOwner(t *testing.T
 		generation := runtime.generations[key]
 		failed := generation == nil || generation.failed
 		owner := runtime.geometryOwners[key]
-		pane := runtime.panes[key]
 		paused := pane != nil && pane.paused
 		runtime.mu.Unlock()
 		if failed && sticky && owner == 0 && !paused {
