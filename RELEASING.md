@@ -14,9 +14,22 @@ require a major release.
    fresh `Unreleased` section. Commit the changelog.
 3. Wait for CI on that commit. Create an annotated `vX.Y.Z` tag at the tested
    commit and push it. Published tags are immutable; corrections get a new version.
-4. Create the GitHub release from that tag, using its changelog section as the
-   release notes. Use pre-release status for preview versions such as
-   `0.2.0-rc.1`; ordinary 0.x releases can be marked as the latest release.
+4. The [release workflow](.github/workflows/release.yml) publishes the GitHub
+   release. It requires an annotated tag on `main` whose commit passed every
+   required job of the latest CI run on `main`, and a non-empty changelog
+   section for the version. It uses that section as the release notes and
+   attaches a source archive, `SHA256SUMS`, and a build provenance
+   attestation for the tagged commit. Versions with a pre-release suffix, such
+   as `0.2.0-rc.1`, are marked as pre-releases. If a check fails, fix the
+   cause and re-run the failed job.
+
+Install a release from a Git checkout of its tag: the installer requires a
+clean committed checkout, so it does not install from the archive. The archive
+and its attestation let you confirm what the release contains. The release
+notes name the tagged commit; compare it with `git rev-parse vX.Y.Z^{commit}`
+and run the verification commands from the notes. The installer builds and
+tests each release from source with a toolchain that only root can modify, so
+releases ship source only.
 
 ## Release checks
 
