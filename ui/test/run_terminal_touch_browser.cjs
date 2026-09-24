@@ -80,12 +80,14 @@ async function longPressTerminalColumn(page, rowNeedle, column) {
   }, { rowNeedle, column });
   await page.mouse.move(point.x, point.y);
   await page.mouse.down();
-  await delay(600);
-  await page.mouse.up();
   try {
+    // Keep the one press held until the browser processes its long-press
+    // timer. A Node-side sleep does not acknowledge browser event delivery.
     await page.locator(".persea-unified-select").waitFor({ state: "visible", timeout: 1_500 });
   } catch {
     throw new Error(`long press did not enter Select: ${JSON.stringify(point)}`);
+  } finally {
+    await page.mouse.up();
   }
   const selected = await page.evaluate(() => window.getSelection()?.toString() || "");
   return { selected, point };
@@ -374,9 +376,11 @@ async function main() {
         assert(box, `${shape.name}: missing terminal box`);
         await page.mouse.move(box.x + Math.min(90, box.width / 3), box.y + Math.min(80, box.height / 3));
         await page.mouse.down();
-        await delay(600);
-        await page.mouse.up();
-        await page.locator(".persea-unified-select").waitFor({ state: "visible", timeout: 1_500 });
+        try {
+          await page.locator(".persea-unified-select").waitFor({ state: "visible", timeout: 1_500 });
+        } finally {
+          await page.mouse.up();
+        }
         const selected = await page.evaluate(() => window.getSelection()?.toString() || "");
         assert(selected.length > 0, `${shape.name}: stationary long press did not preselect a cell/word`);
         await page.locator(".persea-unified-select-context").click();
