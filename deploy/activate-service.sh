@@ -69,7 +69,7 @@ sleep 0.05
 [[ $(stat -Lc '%d:%i' -- "$front_socket") == "$socket_before" ]] || persea_die 'front socket inode changed during preflight'
 
 python3 "$probe_helper" --socket "$front_socket" --host "$canonical_host" --login "$PERSEA_OPERATOR" || persea_die 'root-peer direct Unix probe failed'
-runuser -u "$PERSEA_FRONT_USER" -- python3 "$probe_helper" --socket "$front_socket" --host "$canonical_host" --login "$PERSEA_OPERATOR" --expect-denied || persea_die 'peer-UID mismatch probe failed'
+persea_run_without_lock runuser -u "$PERSEA_FRONT_USER" -- python3 "$probe_helper" --socket "$front_socket" --host "$canonical_host" --login "$PERSEA_OPERATOR" --expect-denied || persea_die 'peer-UID mismatch probe failed'
 python3 "$probe_helper" --socket "$front_socket" --host "$canonical_host" --login "$PERSEA_OPERATOR" || persea_die 'post-denial root-peer direct Unix probe failed'
 
 read -r deployments deployments_identity < <(persea_prepare_evidence_root)

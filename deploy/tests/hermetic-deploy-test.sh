@@ -1016,6 +1016,7 @@ done
 pass 'unsupported release shapes are refused before lifecycle mutation'
 
 python3 "$SCRIPT_DIR/deployment-lock-test.py"
+python3 "$SCRIPT_DIR/deployment-lock-privilege-test.py"
 pass 'launcher signals preserve deployment exclusion through child steps and restoration'
 
 python3 "$SCRIPT_DIR/release-retention-test.py" "$release_path" "$TMP"

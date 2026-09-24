@@ -239,11 +239,14 @@ than the requested count; a pruning failure never fails a successful deployment.
 Install, rollback and uninstall serialize through
 `/run/persea-terminal-deploy.lock`; the lock is held through verification and
 retention, including restoration and exit cleanup. The transaction shell owns
-the lock directly. Its synchronous steps inherit it so killing the launcher
-cannot unlock a step still in progress. Services started by systemd do not
-inherit it; any deliberately detached child must close its copy. A surviving
-child can keep a later deployment waiting, with a diagnostic, until it exits.
-Do not run older deploy tooling concurrently.
+the lock directly. Trusted synchronous steps inherit it. Commands that change
+user or run build code use a trusted waiting process that retains the lock but
+closes all non-stdio descriptors for its child. Unprivileged build code cannot
+unlock the deployment or retain its descriptor in a detached process. Killing
+the launcher cannot unlock a build step still in progress: the trusted waiter
+holds exclusion until that step exits. Services started by systemd do not
+inherit the lock. A surviving trusted step can keep a later deployment waiting,
+with a diagnostic, until it exits. Do not run older deploy tooling concurrently.
 
 Before each removal, pruning opens the candidate without following symlinks,
 checks its validated device/inode identity, and rechecks protected pointers.
