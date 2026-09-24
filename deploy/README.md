@@ -253,12 +253,25 @@ checks its validated device/inode identity, and rechecks protected pointers.
 It renames the candidate relative to opened directory descriptors into a fresh
 owner-only `.prune-<random>` quarantine inside `releases/`, then rechecks its
 identity. All permission changes and recursive deletion use those descriptors.
+Validation records every descendant's type, device, inode, owner, group and mode,
+each file's link count, and every directory's entry set. Removal compares opened
+objects and entry sets with that record before changing permissions, descending
+or unlinking; only permission and entry changes made by removal itself are
+allowed. Substituted directories or files and added entries are refused, even
+when their ownership and modes match the original release.
 The helper checks `/proc/self/mountinfo` immediately before deletion and checks
 device and Linux mount IDs on opened descendants; same-filesystem bind mounts
 are refused too. A mismatch stops pruning and reports the retained quarantine
 for operator inspection. Later runs report and leave recognized quarantines
 alone, while still allowing safe pruning of ordinary releases. Inspect any
 mounts and retained contents before manually removing a quarantine.
+
+These boundaries defend against concurrent deployment tools, unprivileged build
+code releasing or retaining the deployment lock, symlink/hardlink/mount tricks,
+and replacement of validated directories. A malicious concurrent root process
+outside the deployment tools is out of scope: it can already change any file,
+kill trusted processes, or race the final check and unlink. Detected changes
+still stop pruning and preserve the remaining quarantine for inspection.
 
 Retention requires Python 3.11 or later and Linux mount metadata; if these are
 unavailable it skips deletion with a warning. Durable front stores and
