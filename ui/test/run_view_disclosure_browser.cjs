@@ -109,6 +109,75 @@ async function main() {
   });
   const evidence = { engine: ENGINE, cases: [], screenshots: [] };
   try {
+    if (!MUTANT && (!process.env.PERSEA_VIEW_DISCLOSURE_CASE || process.env.PERSEA_VIEW_DISCLOSURE_CASE === "first-open-font")) {
+      for (const viewport of [{ width: 390, height: 844 }, { width: 1280, height: 800 }, { width: 1920, height: 1080 }]) {
+        for (const preference of [null, 17]) {
+          await control({ reset: true, geometryA: viewport.width < 500 ? { columns: 60, rows: 24 } : { columns: 160, rows: 48 }, preferences: { font_size: preference } });
+          const inventory = await requestJSON(`${fixture.origin}/api/inventory`);
+          const session = inventory.realms[0].servers[0].sessions[0];
+          const context = await browser.newContext({ viewport, hasTouch: viewport.width < 500, isMobile: viewport.width < 500, ignoreHTTPSErrors: true });
+          const page = await context.newPage();
+          const messages = [];
+          page.on("console", (message) => messages.push(message.text()));
+          page.on("pageerror", (error) => messages.push(String(error)));
+          // Hold the transport until the seed grid and the resize observer have
+          // rendered. Admission must fit even when it arrives after layout.
+          let release;
+          let holdFirstAdmission = true;
+          await page.routeWebSocket("**/ws**", (socket) => {
+            const server = socket.connectToServer();
+            if (!holdFirstAdmission) return;
+            const pending = [];
+            let held = true;
+            server.onMessage((message) => held ? pending.push(message) : socket.send(message));
+            release = () => { holdFirstAdmission = false; held = false; for (const message of pending) socket.send(message); };
+          });
+          const url = `${fixture.origin}/terminal?engine=unified-dev#${new URLSearchParams({ handle: session.handles.control, mode: "control", history: "1000", name: session.name, draft_scope: fixture.draftScope, engine: "unified-dev" })}`;
+          await page.goto(url);
+          const rendered = () => page.evaluate(async () => {
+            await document.fonts.ready;
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+            const viewport = document.querySelector(".persea-unified-scroll");
+            const style = getComputedStyle(document.querySelector(".persea-unified-xterm"));
+            return { font: getComputedStyle(document.querySelector(".xterm-rows")).fontSize,
+              availableWidth: viewport.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight),
+              availableHeight: viewport.clientHeight - parseFloat(style.paddingTop) - parseFloat(style.paddingBottom),
+              screen: document.querySelector(".xterm-screen").getBoundingClientRect().toJSON() };
+          });
+          await page.waitForFunction(() => document.querySelector(".xterm-screen")?.getBoundingClientRect().width > 0);
+          await rendered();
+          assert(release, "font fit transport was not intercepted");
+          release();
+          await page.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent?.includes("fixture-live"));
+          const automatic = await rendered();
+          if (preference !== null) {
+            assert(automatic.font === `${preference}px`, `explicit font lost on admission: ${JSON.stringify(automatic)}`);
+            const before = (await snapshot()).attachments.length;
+            await control({ closeSession: { session: "A", reason: "subscriber_lagged" } });
+            await page.waitForFunction((count) => fetch("/__fixture/control").then((response) => response.json())
+              .then((value) => value.attachments.length > count && value.attachments.at(-1)?.live && value.attachments.at(-1)?.mode === "CONTROL"), before);
+            assert((await rendered()).font === `${preference}px`, "explicit font lost on reattach");
+            await page.setViewportSize({ width: viewport.width - 40, height: viewport.height - 80 });
+            assert((await rendered()).font === `${preference}px`, "explicit font lost on resize");
+            assert((await snapshot()).attachments.every((attachment) => attachment.resizes === 0), "font fitting resized the session");
+            assert(messages.length === 0, `explicit font browser messages: ${JSON.stringify(messages)}`);
+            await context.close();
+            continue;
+          }
+          await page.locator(".persea-unified-view-disclosure").click();
+          await page.getByRole("button", { name: "Fit font", exact: true }).click();
+          const manual = await rendered();
+          console.log(`first-open-font ${ENGINE} ${viewport.width}: ${JSON.stringify({ automatic, manual })}`);
+          assert(automatic.font === manual.font && automatic.screen.width === manual.screen.width && automatic.screen.height === manual.screen.height,
+            `first-open-font ${ENGINE} ${viewport.width}: automatic fit differs from Fit font: ${JSON.stringify({ automatic, manual })}`);
+          assert(automatic.screen.width <= automatic.availableWidth && automatic.screen.height <= automatic.availableHeight,
+            `first-open-font overflows the viewport: ${JSON.stringify(automatic)}`);
+          assert(messages.length === 0, `first-open-font browser messages: ${JSON.stringify(messages)}`);
+          assert((await snapshot()).attachments.every((attachment) => attachment.resizes === 0), "font fitting resized the session");
+          await context.close();
+        }
+      }
+    }
     for (const shape of SHAPES) {
       await control({ reset: true, switchSessions: true, sessionBState: "open" });
       const inventory = await requestJSON(`${fixture.origin}/api/inventory`);

@@ -927,6 +927,7 @@ function startFixture(ui, options = {}) {
         if (typeof input.adopted === "boolean") state.adopted = input.adopted;
         if (typeof input.imageStaging === "boolean") state.imageStaging = input.imageStaging;
         if (input.preferences && typeof input.preferences === "object") state.preferences = { ...state.preferences, ...input.preferences };
+        if (input.geometryA) state.geometryA = { ...input.geometryA };
         if (typeof input.preferencesAvailable === "boolean") state.preferences.available = input.preferencesAvailable;
         if (typeof input.preferencesCorrupt === "boolean") state.preferencesCorrupt = input.preferencesCorrupt;
         if (typeof input.holdPreferencePuts === "number") state.holdPreferencePuts = Math.max(0, Math.floor(input.holdPreferencePuts));

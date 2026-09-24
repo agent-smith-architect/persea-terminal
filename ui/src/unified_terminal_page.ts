@@ -1722,7 +1722,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.shell.dataset.fontBaseline = fontBaselineAttribute(fontPreference);
       // Explicit overrides the fit; auto hands the decision back to the
       // viewport, which is what a fresh fit computes.
-      if (fontPreference === null) this.fitFont();
+      if (fontPreference === null) this.autoFitFont();
       else this.applyFontSize(fontPreference, this.captureAnchor());
     }
     const composerFont = this.composerFontIntent?.value ?? snapshot.preferences.composerFontSize;
@@ -3474,6 +3474,9 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.replaying = false;
       if (this.prepared !== frame || this.closed) return;
       this.syncNativeScroll(true);
+      // The resize observer can run against the seed grid before admission.
+      // Fit again with the admitted geometry after xterm has painted it.
+      requestAnimationFrame(() => this.autoFitFont());
       this.updateGeometryControl();
       this.send({ type: "READY", version: 1, source: frame.source, epoch: frame.epoch, cut: frame.cut });
     });
@@ -4259,7 +4262,10 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       ? buffer.baseY
       : Math.max(0, Math.min(buffer.baseY, Math.floor((this.viewport.scrollTop + 0.001) / cellHeight)));
     this.host.style.top = `${target * cellHeight}px`;
-    if (target === this.projectedRow && buffer.type === this.projectedBuffer) return;
+    // Font measurement can make xterm reconcile its own scrollbar after our
+    // last projection. Its live viewport must agree too; the cached row alone
+    // cannot prove that the requested history is still what it is painting.
+    if (target === this.projectedRow && buffer.type === this.projectedBuffer && buffer.viewportY === target) return;
     this.projectedRow = target;
     this.projectedBuffer = buffer.type;
     this.applyingProjection = true;
@@ -4326,6 +4332,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // The resize path. An explicit preference is not a starting point the
   // viewport may overrule, so a box change only re-anchors; auto refits.
   private autoFitFont(): void {
+    if (this.closed || !this.prepared) return;
+    if (this.fitting) {
+      requestAnimationFrame(() => this.autoFitFont());
+      return;
+    }
     if (this.fontPreference !== null) {
       this.applyFontSize(this.fontPreference, this.captureAnchor());
       return;
@@ -4340,7 +4351,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private requestAutoFont(): void {
     this.fontPreference = null;
     this.shell.dataset.fontBaseline = fontBaselineAttribute(null);
-    this.fitFont();
+    this.autoFitFont();
     this.storeFontPreference(null);
   }
 
@@ -4411,7 +4422,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.showToast("Zoom could not be saved");
   }
 
-  private applyFontSize(value: number, anchor: ScrollAnchor, verifyFit = false): void {
+  private applyFontSize(value: number, anchor: ScrollAnchor): void {
     if (this.closed || Math.abs((this.terminal.options.fontSize ?? UNIFIED_SEED_FONT_SIZE) - value) < 0.01) {
       this.syncNativeScroll(anchor.following, anchor);
       return;
@@ -4427,12 +4438,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       // Its fresh transcript owns the viewport; an older anchor must not move it.
       if (!replaying && !this.replaying && this.prepared === admission) this.syncNativeScroll(anchor.following, anchor);
       else this.scheduleReconcile();
-      if (verifyFit) this.fitFont(1);
     });
   }
 
-  private fitFont(pass = 0): void {
-    if (this.closed || this.fitting) return;
+  private fitFont(): void {
+    if (this.closed || this.fitting || !this.prepared) return;
     const screen = this.renderedScreen();
     const bounds = screen?.getBoundingClientRect();
     if (!bounds || bounds.width <= 0 || bounds.height <= 0 || this.viewport.clientWidth <= 0 || this.viewport.clientHeight <= 0) {
@@ -4444,15 +4454,27 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     const verticalPadding = Number.parseFloat(style.paddingTop) + Number.parseFloat(style.paddingBottom);
     const availableWidth = Math.max(1, this.viewport.clientWidth - horizontalPadding);
     const availableHeight = Math.max(1, this.viewport.clientHeight - verticalPadding);
-    const ratio = Math.min(availableWidth / bounds.width, availableHeight / bounds.height);
-    const current = this.terminal.options.fontSize ?? UNIFIED_SEED_FONT_SIZE;
-    const next = Math.max(9, Math.min(24, Math.floor(current * ratio * 100) / 100));
     const anchor = this.captureAnchor();
-    if (Math.abs(next - current) < 0.02 || pass >= 2) {
-      this.syncNativeScroll(anchor.following, anchor);
-      return;
+    // xterm rounds cell dimensions to device pixels, so scaling the current
+    // grid by a ratio is neither exact nor repeatable. Its DOM renderer updates
+    // dimensions synchronously on font changes. Search those actual bounds in
+    // hundredths of a pixel, within the same task so only the final size paints.
+    let lower = 900;
+    let upper = 2400;
+    let best = lower;
+    while (lower <= upper) {
+      const candidate = Math.floor((lower + upper) / 2);
+      this.terminal.options.fontSize = candidate / 100;
+      const measured = screen!.getBoundingClientRect();
+      if (measured.width <= availableWidth && measured.height <= availableHeight) {
+        best = candidate;
+        lower = candidate + 1;
+      } else {
+        upper = candidate - 1;
+      }
     }
-    this.applyFontSize(next, anchor, pass < 1);
+    this.terminal.options.fontSize = best / 100;
+    this.syncNativeScroll(anchor.following, anchor);
   }
 
   // sendInput is sealed for exactly one pending explicit Fit.
