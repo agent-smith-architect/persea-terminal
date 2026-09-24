@@ -64,11 +64,27 @@ jobs:
           check-latest: true
       - run: sudo apt-get update && sudo apt-get install -y tmux less clang
       - name: Package manager
-        run: npm install --global npm@latest
+        run: npm install --global npm@latest && npm --version
       - name: CI reachability
         run: node test/ci_reachability.cjs
       - run: npm ci
       - run: npx --no-install playwright install --with-deps chromium webkit
+      - name: Browser versions
+        run: |
+          node <<'NODE'
+          const playwright = require('playwright');
+          console.log(`Playwright ${require('playwright/package.json').version}`);
+          (async () => {
+            for (const name of ['chromium', 'webkit']) {
+              const browser = await playwright[name].launch({ headless: true });
+              try {
+                console.log(`${name} ${browser.version()}`);
+              } finally {
+                await browser.close();
+              }
+            }
+          })().catch(error => { console.error(error); process.exitCode = 1; });
+          NODE
       - run: ${{ matrix.command }}
       - name: Local runtime lifecycle
         if: matrix.name == 'Workspace'
