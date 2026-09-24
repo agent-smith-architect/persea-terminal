@@ -253,7 +253,7 @@ async function prepareFixtureUI() {
           if (MUTANT === "portal-controls-downsize" && file === "attachment_page.css") source = replace(source, '  .persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button {\n    min-width: 44px;\n    min-height: 44px;\n  }', '  .persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button {\n    min-width: 40px;\n    min-height: 40px;\n  }', 1, MUTANT), touched += 1;
           if (MUTANT === "theme-weak-palette" && file === "app.css") source = replace(source, '  --persea-chrome-control-border: var(--persea-accent);', '  --persea-chrome-control-border: color-mix(in srgb, var(--persea-chrome-fg) 38%, var(--persea-chrome-bg));', 1, MUTANT), touched += 1;
           if (MUTANT === "typography-native-disable" && file === "composer.ts") source = replace(source, "      button.disabled = false;", "      button.disabled = unavailable;", 1, MUTANT), touched += 1;
-          if (MUTANT === "typography-stale-frame-restore" && file === "composer.ts") source = replace(source, '      if (this.typographyInteractionGeneration !== interactionGeneration\n        || this.textarea.value !== value\n        || this.textarea.selectionStart !== selectionStart\n        || this.textarea.selectionEnd !== selectionEnd\n        || this.textarea.selectionDirection !== selectionDirection) return;', '      if (false) return;', 1, MUTANT), touched += 1;
+          if (MUTANT === "typography-stale-frame-restore" && file === "composer.ts") source = replace(source, '      if (gestureActive || this.textareaGestureActive()\n        || this.typographyInteractionGeneration !== interactionGeneration\n        || this.textarea.value !== value\n        || this.textarea.selectionStart !== selectionStart\n        || this.textarea.selectionEnd !== selectionEnd\n        || this.textarea.selectionDirection !== selectionDirection) return;', '      if (false) return;', 1, MUTANT), touched += 1;
           if (MUTANT === "sheet-gesture-generation-fence" && file === "tap_activation.ts") source = replace(source, '    if (!event.isTrusted || !isLive() || capture.generation !== interactionGeneration()) return;', '    if (!event.isTrusted || !isLive()) return;', 1, MUTANT), touched += 1;
           if (MUTANT === "keyboard-activation-generation-fence" && file === "tap_activation.ts") source = replace(source, '  const generationIsCurrent = (capture: Exclude<KeyboardActivationState, Readonly<{ kind: "idle" }>>): boolean =>\n    capture.generation === interactionGeneration();', '  const generationIsCurrent = (_capture: Exclude<KeyboardActivationState, Readonly<{ kind: "idle" }>>): boolean => true;', 1, MUTANT), touched += 1;
           if (MUTANT === "keyboard-canceled-tombstone" && file === "tap_activation.ts") source = replace(source, '    state = Object.freeze({ ...state, kind: "canceled" });', '    state = idle;', 1, MUTANT), touched += 1;
@@ -330,10 +330,12 @@ async function main() {
   })}`;
   const browser = await playwright[ENGINE].launch({
     headless: true,
+    ignoreDefaultArgs: ["--hide-scrollbars"],
     ...(ENGINE === "chromium" ? { executablePath: require("./browser_path.cjs")(), args: ["--no-sandbox"] } : {}),
   });
   const evidence = { engine: ENGINE, mutant: MUTANT || null, themes: THEME_IDS, cases: [] };
   try {
+    if (!MUTANT) evidence.composerScrollGestures = await require("./composer_scroll_gesture_browser.cjs")(browser, ENGINE);
     for (let shapeIndex = 0; shapeIndex < SHAPES.length; shapeIndex += 1) {
       const shape = SHAPES[shapeIndex];
       const detailed = shapeIndex === 0;

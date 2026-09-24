@@ -210,6 +210,8 @@ export class Composer {
   private typographyPositionFrame: number | undefined;
   private typographyListenersCleanup: (() => void) | undefined;
   private typographyInteractionGeneration = 0;
+  private readonly textareaPointers = new Set<number>();
+  private readonly textareaTouches = new Set<number>();
   private appliedInset = 0;
   private pendingInset: number | undefined;
   private insetGeneration = 0;
@@ -398,7 +400,13 @@ export class Composer {
     this.textarea.addEventListener("keydown", this.onTextareaKeydown);
     this.textarea.addEventListener("focus", this.onTextareaFocus);
     this.textarea.addEventListener("pointerdown", this.onTextareaPointerDown);
-    this.textarea.addEventListener("touchstart", this.onTextareaPointerDown, { passive: true });
+    this.textarea.addEventListener("touchstart", this.onTextareaTouchStart, { passive: true });
+    this.textarea.addEventListener("scroll", this.onTextareaScroll);
+    this.textarea.addEventListener("lostpointercapture", this.onTextareaPointerEnd);
+    document.addEventListener("pointerup", this.onTextareaPointerEnd, true);
+    document.addEventListener("pointercancel", this.onTextareaPointerEnd, true);
+    document.addEventListener("touchend", this.onTextareaTouchEnd, true);
+    document.addEventListener("touchcancel", this.onTextareaTouchEnd, true);
     this.textarea.addEventListener("wheel", this.onTextareaScrollIntent, { passive: true });
     this.textarea.addEventListener("touchmove", this.onTextareaScrollIntent, { passive: true });
 
@@ -610,6 +618,7 @@ export class Composer {
     const scrollLeft = this.textarea.scrollLeft;
     const value = this.textarea.value;
     const interactionGeneration = this.typographyInteractionGeneration;
+    const gestureActive = this.textareaGestureActive();
     this.options.page.style.setProperty("--persea-composer-font-size", `${state.size}px`);
     this.options.page.dataset.composerFont = String(state.size);
     const restore = () => {
@@ -632,13 +641,23 @@ export class Composer {
       // the operator's newer interaction.
       // Reflow can change the scroll offset without an interaction. Comparing
       // that offset here would reject precisely the layout repair we owe.
-      if (this.typographyInteractionGeneration !== interactionGeneration
+      if (gestureActive || this.textareaGestureActive()
+        || this.typographyInteractionGeneration !== interactionGeneration
         || this.textarea.value !== value
         || this.textarea.selectionStart !== selectionStart
         || this.textarea.selectionEnd !== selectionEnd
         || this.textarea.selectionDirection !== selectionDirection) return;
       restore();
     });
+  }
+
+  /** Intentional product navigation wins over a pending typography repair.
+   * Layout preservation writes stay internal and do not use this method. */
+  scrollDraftTo(top: number, left: number): void {
+    if (this.destroyed) return;
+    this.noteTypographyInteraction();
+    this.textarea.scrollTop = top;
+    this.textarea.scrollLeft = left;
   }
 
   instrumentation(): ComposerInstrumentation {
@@ -732,7 +751,15 @@ export class Composer {
     this.textarea.removeEventListener("keydown", this.onTextareaKeydown);
     this.textarea.removeEventListener("focus", this.onTextareaFocus);
     this.textarea.removeEventListener("pointerdown", this.onTextareaPointerDown);
-    this.textarea.removeEventListener("touchstart", this.onTextareaPointerDown);
+    this.textarea.removeEventListener("touchstart", this.onTextareaTouchStart);
+    this.textarea.removeEventListener("scroll", this.onTextareaScroll);
+    this.textarea.removeEventListener("lostpointercapture", this.onTextareaPointerEnd);
+    document.removeEventListener("pointerup", this.onTextareaPointerEnd, true);
+    document.removeEventListener("pointercancel", this.onTextareaPointerEnd, true);
+    document.removeEventListener("touchend", this.onTextareaTouchEnd, true);
+    document.removeEventListener("touchcancel", this.onTextareaTouchEnd, true);
+    this.textareaPointers.clear();
+    this.textareaTouches.clear();
     this.textarea.removeEventListener("wheel", this.onTextareaScrollIntent);
     this.textarea.removeEventListener("touchmove", this.onTextareaScrollIntent);
     this.textarea.removeEventListener("paste", this.onPaste);
@@ -1702,12 +1729,34 @@ export class Composer {
     }
     this.textarea.style.removeProperty("font-size");
   }
-  private readonly onTextareaPointerDown: EventListener = () => {
+  private readonly onTextareaPointerDown: EventListener = (event) => {
+    this.textareaPointers.add((event as PointerEvent).pointerId);
     this.noteTypographyInteraction();
     if (document.activeElement !== this.textarea) this.armFocusZoomGuard();
   };
-  // Scroll notifications also follow font reflow and our own offset writes.
-  // Only input intent may invalidate a pending typography repair.
+  private readonly onTextareaPointerEnd: EventListener = (event) => {
+    if (this.textareaPointers.delete((event as PointerEvent).pointerId)) this.noteTypographyInteraction();
+  };
+  private readonly onTextareaTouchStart: EventListener = (event) => {
+    for (const touch of Array.from((event as TouchEvent).changedTouches)) this.textareaTouches.add(touch.identifier);
+    this.noteTypographyInteraction();
+    if (document.activeElement !== this.textarea) this.armFocusZoomGuard();
+  };
+  private readonly onTextareaTouchEnd: EventListener = (event) => {
+    for (const touch of Array.from((event as TouchEvent).changedTouches)) {
+      if (this.textareaTouches.delete(touch.identifier)) this.noteTypographyInteraction();
+    }
+  };
+  private textareaGestureActive(): boolean {
+    return this.textareaPointers.size !== 0 || this.textareaTouches.size !== 0;
+  }
+  // A native thumb drag can continue without another input event. During a
+  // gesture even a layout-generated notification must yield to user intent.
+  // Without input intent, font reflow and layout offset writes still need the
+  // pending repair. Product navigation declares intent through scrollDraftTo.
+  private readonly onTextareaScroll: EventListener = () => {
+    if (this.textareaGestureActive()) this.noteTypographyInteraction();
+  };
   private readonly onTextareaScrollIntent: EventListener = () => {
     if (!this.destroyed) this.noteTypographyInteraction();
   };
