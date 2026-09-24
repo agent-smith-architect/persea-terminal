@@ -418,6 +418,55 @@ async function main() {
   const clearHolds = async () => { for (const name of SESSIONS) await control({ session: name, holdPrepareMs: 0 }); };
 
   const scenarios = [];
+    scenarios.push(["session-chip-width", async () => {
+      const browser = await require("playwright").chromium.connectOverCDP(`http://127.0.0.1:${debugPort}`);
+      const receipts = [];
+      const shapes = [1920, 1280, 844, 430, 390, 360].map((width) => ({ width, names: ["ws01"] }));
+      shapes.push({ width: 1920, names: ["build-release-candidate"] }, { width: 1920, names: SESSIONS }, { width: 1280, names: SESSIONS });
+      for (const { width, names } of shapes) {
+        await control({ reset: true, sessions: names, workspace: { name: WORKSPACE, tree: JSON.parse(arrangementFor(names)).root } });
+        const context = await browser.newContext({ viewport: { width, height: 844 } });
+        try {
+          const page = await context.newPage();
+          const messages = [];
+          page.on("console", (message) => messages.push(message.text()));
+          page.on("pageerror", (error) => messages.push(String(error)));
+          await page.goto(workspaceURL());
+          await page.getByRole("button", { name: /^Open workspace/ }).click();
+          await page.waitForFunction((count) => document.querySelectorAll('.ws-cell[data-ws-state="live"] .xterm-rows').length === count, names.length);
+          const measured = await page.evaluate(async () => {
+            await document.fonts.ready;
+            return [...document.querySelectorAll(".persea-unified-toolbar")].map((bar) => {
+              const tag = bar.querySelector(".persea-unified-tag");
+              const name = tag.querySelector(".persea-unified-tag__name");
+              const box = bar.getBoundingClientRect();
+              const controls = [...bar.querySelectorAll("button")].filter((node) => !node.closest("[hidden]") && node.getBoundingClientRect().width > 0);
+              const rects = controls.map((node) => node.getBoundingClientRect());
+              return {
+                width: innerWidth, toolbarWidth: box.width, tagWidth: tag.getBoundingClientRect().width,
+                name: name.textContent, nameWidth: name.clientWidth, nameContentWidth: name.scrollWidth,
+                controls: controls.length,
+                spareWidth: bar.querySelector(".persea-unified-toolbar__controls").getBoundingClientRect().left - tag.getBoundingClientRect().right - parseFloat(getComputedStyle(bar).columnGap),
+                contained: rects.every((r) => r.left >= box.left && r.right <= box.right && r.left >= 0 && r.right <= innerWidth),
+                overlap: rects.some((r, i) => rects.slice(i + 1).some((s) => r.left < s.right && r.right > s.left && r.top < s.bottom && r.bottom > s.top)),
+                hit: controls.every((node) => { const r = node.getBoundingClientRect(); const hit = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2); return node === hit || node.contains(hit); }),
+              };
+            });
+          });
+          for (const receipt of measured) {
+            receipts.push(receipt);
+            console.log(`session-chip-width ${JSON.stringify(receipt)}`);
+            assert(names.includes(receipt.name) && (receipt.nameWidth === receipt.nameContentWidth || (width < 500 && receipt.spareWidth < 1)),
+              `session chip truncated despite available pane width: ${JSON.stringify(receipt)}`);
+            assert(receipt.controls === 6 && receipt.contained && !receipt.overlap && receipt.hit, `session chip displaced toolbar controls: ${JSON.stringify(receipt)}`);
+          }
+          assert(messages.length === 0, `session chip browser messages: ${JSON.stringify(messages)}`);
+        } finally {
+          await context.close();
+        }
+      }
+      record("session-chip-width", { receipts });
+    }]);
     // strict-workspace-route — strict route branch and B3 non-mutation.
     scenarios.push(["strict-workspace-route", async () => {
       const id = "strict-workspace-route";

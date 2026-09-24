@@ -7,6 +7,7 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 ### Fixed
 
 - Fit the terminal font to the admitted session geometry on first open while preserving explicit font preferences.
+- Let workspace session chips use available pane width instead of truncating names inside a fixed-width toolbar.
 
 ## 0.1.0 — 2026-09-13
 
