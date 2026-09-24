@@ -253,7 +253,7 @@ async function prepareFixtureUI() {
           if (MUTANT === "portal-controls-downsize" && file === "attachment_page.css") source = replace(source, '  .persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button {\n    min-width: 44px;\n    min-height: 44px;\n  }', '  .persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button {\n    min-width: 40px;\n    min-height: 40px;\n  }', 1, MUTANT), touched += 1;
           if (MUTANT === "theme-weak-palette" && file === "app.css") source = replace(source, '  --persea-chrome-control-border: var(--persea-accent);', '  --persea-chrome-control-border: color-mix(in srgb, var(--persea-chrome-fg) 38%, var(--persea-chrome-bg));', 1, MUTANT), touched += 1;
           if (MUTANT === "typography-native-disable" && file === "composer.ts") source = replace(source, "      button.disabled = false;", "      button.disabled = unavailable;", 1, MUTANT), touched += 1;
-          if (MUTANT === "typography-stale-frame-restore" && file === "composer.ts") source = replace(source, '      if (this.typographyInteractionGeneration !== interactionGeneration\n        || this.textarea.value !== value\n        || this.textarea.selectionStart !== selectionStart\n        || this.textarea.selectionEnd !== selectionEnd\n        || this.textarea.selectionDirection !== selectionDirection\n        || this.textarea.scrollTop !== scrollTop\n        || this.textarea.scrollLeft !== scrollLeft) return;', '      if (false) return;', 1, MUTANT), touched += 1;
+          if (MUTANT === "typography-stale-frame-restore" && file === "composer.ts") source = replace(source, '      if (this.typographyInteractionGeneration !== interactionGeneration\n        || this.textarea.value !== value\n        || this.textarea.selectionStart !== selectionStart\n        || this.textarea.selectionEnd !== selectionEnd\n        || this.textarea.selectionDirection !== selectionDirection) return;', '      if (false) return;', 1, MUTANT), touched += 1;
           if (MUTANT === "sheet-gesture-generation-fence" && file === "tap_activation.ts") source = replace(source, '    if (!event.isTrusted || !isLive() || capture.generation !== interactionGeneration()) return;', '    if (!event.isTrusted || !isLive()) return;', 1, MUTANT), touched += 1;
           if (MUTANT === "keyboard-activation-generation-fence" && file === "tap_activation.ts") source = replace(source, '  const generationIsCurrent = (capture: Exclude<KeyboardActivationState, Readonly<{ kind: "idle" }>>): boolean =>\n    capture.generation === interactionGeneration();', '  const generationIsCurrent = (_capture: Exclude<KeyboardActivationState, Readonly<{ kind: "idle" }>>): boolean => true;', 1, MUTANT), touched += 1;
           if (MUTANT === "keyboard-canceled-tombstone" && file === "tap_activation.ts") source = replace(source, '    state = Object.freeze({ ...state, kind: "canceled" });', '    state = idle;', 1, MUTANT), touched += 1;
@@ -774,6 +774,12 @@ async function main() {
       assert(plusOperation.composer_font_size === 12 && plusOperation.if_match === `"${beforePlus.preferences.revision}"` && plusOperation.outcome === "saved", `${shape.name}: typography PUT/CAS drifted: ${JSON.stringify(plusOperation)}`);
       await page.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "12" && document.querySelector(".attachment-page__composer-typography-popover")?.dataset.status === "ready");
       if (observer) await observer.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "12", undefined, { timeout: 5_000 });
+      // Saving the preference precedes the frame that repairs font reflow.
+      // Observe that repair before asserting the original selection posture.
+      await page.waitForFunction(top => {
+        const textarea = document.querySelector(".attachment-page__composer-textarea");
+        return textarea instanceof HTMLTextAreaElement && Math.abs(textarea.scrollTop - top) <= 1;
+      }, selectionBefore.top, { polling: "raf", timeout: 5_000 });
       const changed = await uiState();
       assert(changed.active === "composer", `${shape.name}: typography change moved focus from textarea`);
       assert(changed.selection.start === selectionBefore.start && changed.selection.end === selectionBefore.end && changed.selection.direction === selectionBefore.direction && Math.abs(changed.selection.top - selectionBefore.top) <= 1, `${shape.name}: typography change lost selection or textarea scroll: ${JSON.stringify({ before: selectionBefore, immediateBeforePlus, after: changed.selection, finalMetrics: await typographyScrollMetrics() })}`);
@@ -836,7 +842,8 @@ async function main() {
         // A preference publication captures the textarea posture and queues
         // one repair frame. Intervene in the MutationObserver microtask after
         // capture but before that frame, then prove typing, caret movement,
-        // and manual scrolling each win over the stale snapshot.
+        // and manual scrolling each win over the stale snapshot. A scroll
+        // notification from layout alone must still allow the repair.
         const interleaveTypography = async (kind, size) => {
           await page.evaluate(({ kind, size }) => {
             const terminal = document.querySelector(".persea-unified-terminal");
@@ -856,6 +863,7 @@ async function main() {
               } else if (kind === "caret") {
                 textarea.setSelectionRange(9, 9, "none");
               } else {
+                if (kind === "scroll") textarea.dispatchEvent(new WheelEvent("wheel", { deltaY: 37 }));
                 textarea.scrollTop = Math.min(37, Math.max(1, textarea.scrollHeight - textarea.clientHeight));
                 textarea.dispatchEvent(new Event("scroll"));
               }
@@ -863,7 +871,7 @@ async function main() {
                 value: textarea.value,
                 start: textarea.selectionStart,
                 end: textarea.selectionEnd,
-                top: textarea.scrollTop,
+                top: kind === "reflow" ? 0 : textarea.scrollTop,
                 left: textarea.scrollLeft,
               };
               requestAnimationFrame(() => requestAnimationFrame(() => {
@@ -892,10 +900,12 @@ async function main() {
             : kind === "caret"
               ? proof.actual.start === proof.expected.start && proof.actual.end === proof.expected.end
               : Math.abs(proof.actual.top - proof.expected.top) <= 1 && Math.abs(proof.actual.left - proof.expected.left) <= 1;
-          assert(preserved, `${shape.name}: typography deferred restore overwrote newer interaction: ${JSON.stringify(proof)}`);
+          if (kind === "reflow") assert(preserved, `${shape.name}: typography layout scroll notification canceled repair: ${JSON.stringify(proof)}`);
+          else assert(preserved, `${shape.name}: typography deferred restore overwrote newer interaction: ${JSON.stringify(proof)}`);
           return proof;
         };
         caseEvidence.typographyDeferredInteractions = [
+          await interleaveTypography("reflow", 12),
           await interleaveTypography("type", 13),
           await interleaveTypography("caret", 14),
           await interleaveTypography("scroll", 15),

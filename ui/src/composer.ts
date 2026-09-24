@@ -399,7 +399,8 @@ export class Composer {
     this.textarea.addEventListener("focus", this.onTextareaFocus);
     this.textarea.addEventListener("pointerdown", this.onTextareaPointerDown);
     this.textarea.addEventListener("touchstart", this.onTextareaPointerDown, { passive: true });
-    this.textarea.addEventListener("scroll", this.onTextareaScroll);
+    this.textarea.addEventListener("wheel", this.onTextareaScrollIntent, { passive: true });
+    this.textarea.addEventListener("touchmove", this.onTextareaScrollIntent, { passive: true });
 
     const guardActions = document.createElement("div");
     guardActions.className = "attachment-page__composer-guard-actions";
@@ -629,13 +630,13 @@ export class Composer {
       // Input, caret movement, pointer interaction, or manual scrolling after
       // capture wins over this layout repair; stale state must never rewind
       // the operator's newer interaction.
+      // Reflow can change the scroll offset without an interaction. Comparing
+      // that offset here would reject precisely the layout repair we owe.
       if (this.typographyInteractionGeneration !== interactionGeneration
         || this.textarea.value !== value
         || this.textarea.selectionStart !== selectionStart
         || this.textarea.selectionEnd !== selectionEnd
-        || this.textarea.selectionDirection !== selectionDirection
-        || this.textarea.scrollTop !== scrollTop
-        || this.textarea.scrollLeft !== scrollLeft) return;
+        || this.textarea.selectionDirection !== selectionDirection) return;
       restore();
     });
   }
@@ -732,7 +733,8 @@ export class Composer {
     this.textarea.removeEventListener("focus", this.onTextareaFocus);
     this.textarea.removeEventListener("pointerdown", this.onTextareaPointerDown);
     this.textarea.removeEventListener("touchstart", this.onTextareaPointerDown);
-    this.textarea.removeEventListener("scroll", this.onTextareaScroll);
+    this.textarea.removeEventListener("wheel", this.onTextareaScrollIntent);
+    this.textarea.removeEventListener("touchmove", this.onTextareaScrollIntent);
     this.textarea.removeEventListener("paste", this.onPaste);
     this.fileInput?.removeEventListener("change", this.onFileInputChange);
     for (const cleanup of this.renderedActivationCleanups.splice(0)) cleanup();
@@ -1266,6 +1268,11 @@ export class Composer {
       if (this.destroyed || !this.openState) return;
       const insetBudget = Math.max(0, Math.floor(this.options.insetBudget()));
       this.panel.style.setProperty("--persea-composer-inset-budget", `${insetBudget}px`);
+      // Measuring at auto height can move the browser's internal scroll anchor.
+      // Preserve the current reading position, including an interaction that
+      // occurred after a typography change scheduled this measurement.
+      const scrollTop = this.textarea.scrollTop;
+      const scrollLeft = this.textarea.scrollLeft;
       this.textarea.style.height = "auto";
       // The percentage the operator dragged the grip to, and the height the
       // panel is actually allowed. The second is not optional: a percentage of
@@ -1289,6 +1296,8 @@ export class Composer {
       const cap = Math.min(percentCap, budgetCap);
       const height = this.resizePercent > 0 ? cap : Math.min(this.textarea.scrollHeight, cap);
       this.textarea.style.height = `${Math.max(24, height)}px`;
+      this.textarea.scrollTop = scrollTop;
+      this.textarea.scrollLeft = scrollLeft;
       // Auto-grow moves the fixed portal's anchor without a window resize.
       // Position it in the following layout frame, after the new panel and
       // trigger geometry is observable.
@@ -1697,7 +1706,9 @@ export class Composer {
     this.noteTypographyInteraction();
     if (document.activeElement !== this.textarea) this.armFocusZoomGuard();
   };
-  private readonly onTextareaScroll: EventListener = () => {
+  // Scroll notifications also follow font reflow and our own offset writes.
+  // Only input intent may invalidate a pending typography repair.
+  private readonly onTextareaScrollIntent: EventListener = () => {
     if (!this.destroyed) this.noteTypographyInteraction();
   };
   private readonly onTextareaFocus: EventListener = () => {
