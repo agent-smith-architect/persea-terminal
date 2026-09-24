@@ -2,10 +2,10 @@
 //
 // What the page knows when it decides whether COMMIT may claim focus (and so
 // raise a software keyboard). The page's own rule is the pointer rule; the
-// optional hook (M9's "which pane" rule) can only VETO a claim, never promote
+// optional hook (the workspace's designated-pane rule) can only VETO a claim, never promote
 // one: the result is structurally `pointerRuleClaims && policy(context)`, so
 // no consumer can raise a keyboard on a coarse pointer the page would not
-// have raised itself (advisor note N3).
+// have raised itself.
 export type CommitFocusContext = Readonly<{
   // `(pointer: coarse)` matched at the moment of COMMIT.
   coarsePointer: boolean;

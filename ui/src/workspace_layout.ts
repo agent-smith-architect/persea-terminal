@@ -1,4 +1,4 @@
-// Workspace layout renderer (M9 W1a) — presentation only.
+// Workspace layout renderer — presentation only.
 //
 // Renders a §2a split tree as nested flex containers with draggable dividers
 // (pointer math) and +/- nudge buttons (OQ4 fallback), one cell per leaf. A
@@ -47,7 +47,7 @@ export type PaneState =
   | Readonly<{ kind: "failed"; reason: string }>
   | Readonly<{ kind: "rate_limited" }>
   | Readonly<{ kind: "closed" }>
-  // The phone-class honest state (J-W1B-2): the session exists and could be
+  // The phone-class honest state: the session exists and could be
   // attached, but this posture opens no pane — so the card says that, never a
   // transport state that does not exist.
   | Readonly<{ kind: "not_opened" }>;
@@ -60,7 +60,7 @@ export const PANE_STATE_KINDS: readonly PaneStateKind[] = Object.freeze([
 // Derived from a record the compiler checks against the shared projection
 // type: a projection state added in dashboard.ts without an entry here fails
 // to compile, so the browser gate's FW-blank sample can never silently omit
-// one (FW-M1).
+// one.
 const PROJECTION_PANE_STATE_SET = {
   adoptable: true, blocked_alt_screen: true, blocked_multi_pane: true, blocked_multi_window: true, blocked_foreign_server: true, slots_exhausted: true, unavailable: true,
 } satisfies Record<ProjectionPaneState, true>;
@@ -347,7 +347,7 @@ export class WorkspaceLayoutView {
   private current: WorkspaceNode;
   private drag: DragState | undefined;
   // The presentation renderer stays interactive by default for its standalone
-  // harness/API. WorkspacePage explicitly seals it outside W2 edit mode.
+  // harness/API. WorkspacePage explicitly seals it outside workspace edit mode.
   private editing = true;
   private readonly handlers: WorkspaceLayoutHandlers;
 

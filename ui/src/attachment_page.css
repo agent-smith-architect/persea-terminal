@@ -2274,8 +2274,8 @@ button[data-copy-state="failed"] {
   border-color: var(--persea-chrome-fg, #e6edf3);
   background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 26%, var(--persea-chrome-bg, #1b1e25));
 }
-/* The sheet is the whole control surface on a phone, and ruling theme-contrast names
-   it explicitly: it takes the same chrome pair as the toolbar, so the
+/* The sheet is the whole control surface on a phone. It takes the same
+   chrome pair as the toolbar, so the
    preference status inside it is measured against a themed background rather
    than a fixed dark one. The tiles keep their own opaque pair. */
 .persea-unified-terminal[data-theme] .persea-unified-identity__details {

@@ -642,7 +642,7 @@ async function main() {
       if ((resized.state ?? resized.last).fitHintVisible) fail("D11", "the fit hint survived the first explicit fit", evidence.qf5.fit);
     }
 
-    // --- QF5 RED pin (advisor F1's mutant) ---------------------------------------
+    // --- QF5 RED pin ---------------------------------------
     // A Keys action that emits a same-geometry RESIZE_REQUEST must move the
     // wire counter the assertions above read. The mutant is installed in the
     // page for one tap: the page's outgoing frames are watched for the live
@@ -712,7 +712,7 @@ async function main() {
     const regrantedBefore = await lastAttachment(); await tabA.tapTile("Escape"); const regrantedAfter = await lastAttachment();
     if (regrantedAfter.inputs.slice(regrantedBefore.inputs.length).join("") !== "\x1b") fail("F2", "Keys did not resume after the new control grant", regrantedAfter.inputs);
 
-    // --- QF6 the one-shot keyboard restore (advisor M1) -------------------------
+    // --- QF6 the one-shot keyboard restore -------------------------
     // Focus is not keyboard state. The restore is armed only when BOTH held at
     // the close: the classifier said OPEN (the visual viewport shrank by a
     // keyboard's height) AND a text entry of the page had focus. Four cells ×
@@ -1548,7 +1548,7 @@ async function main() {
         return waitPreference((value) => value.preferences.theme === id);
       };
 
-      // preference-intent-ownership exact advisor regression test: the delayed Zoom publication owns 15,
+      // preference-intent-ownership: the delayed Zoom publication owns 15,
       // even when an immediate theme publication first returns the stored 14.
       await tabA.emulate(DESKTOP, false);
       await tabA.navigate("about:blank");

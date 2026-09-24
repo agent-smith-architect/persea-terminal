@@ -615,7 +615,7 @@ export class SnippetService implements SnippetServicePort {
 
   private async flushOSC(body: string): Promise<void> {
     this.counters.oscPuts += 1;
-    // No If-Match: the E2 ruling is last-committed-write-wins for the
+    // No If-Match: the last committed write wins for the
     // distinguished record, and device-local coalescing is this client's job.
     let publicationRevision = 0;
     const outcome = await this.mutate("/api/snippets/osc52", "PUT", { body, ...(this.origin ? { origin: this.origin } : {}) }, (value) => {

@@ -1,5 +1,5 @@
 "use strict";
-// M9 W1a — workspace layout shell browser gate.
+// Workspace layout shell browser gate.
 //
 // Serves the harness under the BASE nonce'd CSP (no style-src-attr: the shell
 // is class-based and must not need the unified route's relaxation), mounts six

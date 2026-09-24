@@ -1,17 +1,17 @@
-// The /workspace document (M9 W1b): the strict route branch, the landing card
-// that never auto-attaches (ergonomics B3), the honest phone-class state
-//, and the desktop runtime — one per-pane controller per
-// leaf, one single-flight inventory per workspace, pinned identities (B2), a
-// designated-pane focus veto composed over terminal's hook (F3 / N3), and the
-// W1a presentation shell.
+// The /workspace document: the strict route branch, the landing card
+// that never auto-attaches, the honest phone-class state,
+// and the desktop runtime — one per-pane controller per
+// leaf, one single-flight inventory per workspace, pinned identities, a
+// designated-pane focus veto composed over terminal's hook, and the
+// workspace layout presentation shell.
 //
-// W1 is the ephemeral phase (no store): the arrangement lives in this tab
+// An ephemeral arrangement lives in this tab
 // (sessionStorage, keyed by the workspace name) and is written exactly once,
 // at the trusted "Open workspace" tap. Nothing here writes it on layout
-// changes (W2 owns store writes and their debounce, advisory A2).
+// changes (the workspace editor owns store writes and their debounce).
 //
 // Seam law: this module imports the shared projection/close-policy types
-// through the W1a layout module and never re-declares them; it never emits
+// through the workspace layout module and never re-declares them; it never emits
 // RESIZE_REQUEST; it puts no capability, handle, socket, or incarnation key
 // into the tree model; it consumes the page's focus hook as a veto only.
 import { installTapFeedback } from "./tap_feedback";
@@ -43,7 +43,7 @@ import { parseWorkspaceLocation, workspaceRouteNotice, workspaceURL } from "./wo
 import { stablePostureEnvironment } from "./workspace_posture";
 export { stablePostureEnvironment };
 
-// --- The ephemeral arrangement (W1). Written once at the trusted open.
+// --- The ephemeral arrangement. Written once at the trusted open.
 const EPHEMERAL_PREFIX = "persea-workspace-ephemeral-v1:";
 
 export function readEphemeralArrangement(storage: Pick<Storage, "getItem">, name: string): WorkspaceNode | undefined {
@@ -195,7 +195,7 @@ export async function bootWorkspace(options: WorkspaceBootOptions): Promise<void
     renderWorkspaceUnavailable(root, workspaceAPIMessage(error));
     return;
   }
-  // The durable record is the sole W2 authority. A same-name W1 ephemeral
+  // The durable record is the sole workspace authority. A same-name ephemeral
   // arrangement is deliberately not read, merged or deleted here.
   const arrangement = record.tree;
   document.body.classList.add("ws-document");
@@ -223,7 +223,7 @@ function renderPhone(root: HTMLElement, name: string, arrangement: WorkspaceNode
     const linkable = resolution.kind === "resolved" && resolution.session.unified !== undefined
       && (resolution.session.unified.state === "open" || resolution.session.unified.state === "adoptable");
     // A session that could be attached is "not opened on this device" here —
-    // never "connecting": this posture opens no transport (J-W1B-2). Missing,
+    // never "connecting": this posture opens no transport. Missing,
     // ambiguous, and blocked projections stay what they are: inventory facts.
     const state: PaneState = linkable ? Object.freeze({ kind: "not_opened" }) : resolutionPaneState(resolution, entry.leaf);
     return Object.freeze({
@@ -429,7 +429,7 @@ export class WorkspacePage {
 
   // The trusted open: render every cell in a visible resolving state at
   // once, then attach every leaf independently and concurrently (no
-  // staggering, W0).
+  // staggering).
   async open(tree: WorkspaceNode): Promise<void> {
     if (this.opened || this.torndown) return;
     this.opened = true;
@@ -930,9 +930,9 @@ export class WorkspacePage {
     }
   }
 
-  // Structural layout updates (W2 edit mode; exercised by W1b's gate through
-  // the same path): the view keeps surviving cell elements, and this page
-  // restores focus and selection to the pane that held them (advisory A3).
+  // Structural layout updates from the workspace editor: the view keeps
+  // surviving cell elements, and this page
+  // restores focus and selection to the pane that held them.
   updateTree(tree: WorkspaceNode): boolean {
     const view = this.view;
     if (!view) return false;

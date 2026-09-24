@@ -358,7 +358,7 @@ for (const etag of [null, 'W/"0"', "*", '"0", "1"']) {
   assert.equal(service.snapshot().status, "unavailable", `non-strong ETag ${String(etag)} did not fail closed`);
 }
 
-// font-auto-preference / ruling terminal topbar: the font size is a tri-state. `null` is a stored
+// The font size is a tri-state. `null` is a stored
 // state that the service must read, merge and write without collapsing it into
 // a number, and without spending a number in 9…24 to represent it.
 {

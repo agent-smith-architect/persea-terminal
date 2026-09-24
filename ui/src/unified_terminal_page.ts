@@ -163,7 +163,7 @@ export type UnifiedViewportInsetSource = Readonly<{
 }>;
 
 // The COMMIT focus-claim context and its monotone resolution live in
-// unified_focus_claim.ts (unit-pinned); the type is re-exported for M9.
+// unified_focus_claim.ts (unit-pinned); the type is re-exported for workspaces.
 export type { CommitFocusContext } from "./unified_focus_claim";
 
 // How long the transient toast stays up.
@@ -1297,7 +1297,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       theme: initialTheme.xterm,
     });
     openTerminalWithStyleNonce(this.terminal, host, options.styleNonce);
-    // OSC 52 (§3d, M3): exactly ONE handler per xterm instance, disposed
+    // OSC 52 clipboard capture: exactly ONE handler per xterm instance, disposed
     // with that instance — no addon, no package dependency, and no global
     // parser state that could cross panes. Every sequence is consumed with
     // `true`, so a READ or a malformed payload produces no reply and no
@@ -2725,7 +2725,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // The one automatic focus on this page. Fine pointers: always, exactly as
   // before. Coarse pointers: only to restore a keyboard the operator had open
   // when the previous generation closed. The hook, when present, has the last
-  // word (M9's per-pane routing).
+  // word (workspace per-pane routing).
   private claimFocusOnCommit(): boolean {
     if (this.selectMode) return false;
     const coarsePointer = this.coarsePointerQuery?.matches === true;
@@ -3210,7 +3210,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   }
 
   // A host-driven manual claim (a workspace cell's own "Take control"
-  // affordance, M9 W1b): the same path as the notice button — one claim in
+  // affordance): the same path as the notice button — one claim in
   // flight, source-based once a PREPARE has named one.
   requestControlTakeover(): void {
     this.claimControl(false);

@@ -1,4 +1,4 @@
-// M9 W1a — workspace model unit suite: cap, duplicates (OQ1), structural
+// Workspace model unit suite: cap, duplicates (OQ1), structural
 // refusals, split/unsplit/remove/add, reweight invariants, serialization
 // round-trip, and the "no geometry path" source scan (FW3 static half).
 declare const require: (name: string) => any;
@@ -59,7 +59,7 @@ function javascriptFixtureValue(fixture: WorkspaceNameLawCase): string | undefin
 
 // The packet's §2a example, extended to the six-pane cap: row [A | column [B, C] | column [D, row [E, F]]].
 const six: WorkspaceNode = split("row", [
-  leaf(sel("qt20"), "offer", "meta-advisor"),
+  leaf(sel("qt20"), "offer", "primary-terminal"),
   split("column", [leaf(sel("build"), "create"), leaf(sel("scratch"), "skip")]),
   split("column", [leaf(sel("logs")), split("row", [leaf(sel("e")), leaf(sel("f"))])]),
 ], [2, 1, 1]);
@@ -210,7 +210,7 @@ const six: WorkspaceNode = split("row", [
   expectRefusal(addLeaf(six, leaf(sel("g")), "row"), "pane_cap_exceeded", "cap holds through addLeaf");
   expectRefusal(addLeaf(five, leaf(sel("a")), "row"), "duplicate_leaf", "OQ1 through addLeaf");
 
-  // W2 quick rename is display-only: selector and missing policy cannot move.
+  // Workspace quick rename is display-only: selector and missing policy cannot move.
   const aliased = expectOk(setLeafAliasHint(five, [0], "primary"), "set display alias");
   const aliasedLeaf = nodeAt(aliased, [0]);
   assert.deepEqual(aliasedLeaf?.kind === "leaf" ? aliasedLeaf.session : undefined, sel("a"), "alias preserves selector authority");
@@ -284,7 +284,7 @@ const six: WorkspaceNode = split("row", [
   assert.equal(wire.version, WORKSPACE_STORE_VERSION);
   const expectedRoot = {
     kind: "split", direction: "row", weights: [2, 1, 1], children: [
-      { kind: "leaf", session: { realm: "main", server: "default", name: "qt20" }, on_missing: "offer", alias_hint: "meta-advisor" },
+      { kind: "leaf", session: { realm: "main", server: "default", name: "qt20" }, on_missing: "offer", alias_hint: "primary-terminal" },
       { kind: "split", direction: "column", weights: [1, 1], children: [
         { kind: "leaf", session: { realm: "main", server: "default", name: "build" }, on_missing: "create" },
         { kind: "leaf", session: { realm: "main", server: "default", name: "scratch" }, on_missing: "skip" },

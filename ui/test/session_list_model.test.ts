@@ -1,4 +1,4 @@
-// M9 W1a — the dashboard's session list + filter as a reusable list model.
+// The dashboard's session list + filter as a reusable list model.
 // The extraction must be behaviour-identical: this suite replays the exact
 // loop the dashboard used to run inline (its previous applyPresentation body)
 // as a reference oracle and requires the same visibility and collapse verdict

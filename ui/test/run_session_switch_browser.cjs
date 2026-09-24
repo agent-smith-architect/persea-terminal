@@ -13,7 +13,7 @@ const { requestJSON: requestHTTPJSON } = require("./unified_browser_lib.cjs");
 const UI = path.resolve(__dirname, "..");
 const ENGINE = process.env.PERSEA_SESSION_SWITCH_ENGINE || "chromium";
 const POINTER = process.env.PERSEA_SESSION_SWITCH_POINTER || "coarse";
-const R2_ONLY = process.env.PERSEA_SESSION_SWITCH_R2_ONLY === "1";
+const AUTHORITY_RACES_ONLY = process.env.PERSEA_SESSION_SWITCH_AUTHORITY_RACES_ONLY === "1";
 const MODULE = process.env.PERSEA_PLAYWRIGHT_MODULE || require.resolve("playwright");
 const EVIDENCE = process.env.PERSEA_SESSION_SWITCH_EVIDENCE_DIR ? path.resolve(process.env.PERSEA_SESSION_SWITCH_EVIDENCE_DIR) : null;
 
@@ -381,7 +381,7 @@ async function main() {
     })));
     // Screenshot capture is outside the product observation interval. On
     // Playwright WebKit its utility world deliberately inserts one unnonced
-    // synchronizer stylesheet (W1B-R5); real Safari never runs that helper.
+    // synchronizer stylesheet (browser instrumentation); real Safari never runs that helper.
     assert(consoleErrors.length === 0, `browser errors: ${JSON.stringify(consoleErrors)} styles=${JSON.stringify(styleState)}`);
     assert(styleState.length === 3 && styleState.every((style) => style.nonceProperty && style.rules > 0), `xterm styles were not all nonced/applied: ${JSON.stringify(styleState)}`);
     if (EVIDENCE) {
@@ -505,7 +505,7 @@ async function main() {
     evidence.timelines.push({ phase: "reload-authority", reloadHandle, reloadRecord, server: reloaded });
     await reloadAuthority.scenarioContext.close();
 
-    // R2 source-remint and identity-remint races. In each case A work begins
+    // Source-remint and identity-remint races. In each case A work begins
     // while adoption keeps A live, settles only after B is authoritative, and
     // B then enters lease_held. The exact B offer must be the only authority
     // claimed; the stale A capability remains unconsumed.
@@ -576,7 +576,7 @@ async function main() {
       await scenario.scenarioContext.close();
     }
 
-    // R2 takeover callback race. Ignore AbortSignal only at the fixture edge so
+    // Takeover callback race. Ignore AbortSignal only at the fixture edge so
     // the already-issued B promise really resolves after A becomes current.
     // The controller token must retain A's current offer and the stale B
     // takeover handle must remain unconsumed.
@@ -613,8 +613,8 @@ async function main() {
     assert(staleTakeover.scenarioErrors.length === 0, `takeover race browser errors ${JSON.stringify(staleTakeover.scenarioErrors)}`);
     evidence.timelines.push({ phase: "takeover-authority", currentAuthority, server: takeoverFinal });
     await staleTakeover.scenarioContext.close();
-    if (R2_ONLY) {
-      process.stdout.write(`run_session_switch_browser R2 (${ENGINE}, ${POINTER}): PASS\n`);
+    if (AUTHORITY_RACES_ONLY) {
+      process.stdout.write(`run_session_switch_browser authority-races (${ENGINE}, ${POINTER}): PASS\n`);
       return;
     }
 
@@ -665,8 +665,8 @@ async function main() {
     await leased.scenarioContext.close();
 
     // ------------------------------------------------------------- workspace access F1
-    // Ruling terminal topbar on this engine's real bundle at this pointer medium. The
-    // WebKit/coarse run is the one the live smoke failed: nothing stored, the
+    // Terminal topbar behavior on this engine's real bundle at this pointer medium.
+    // With nothing stored on WebKit/coarse, the
     // fit floors at 9px on a 390pt phone, and the old Zoom stepped the stored
     // 14 to 15 — six pixels away from what the operator could see, and gone
     // again after a reload. Three legs, one behaviour: auto when nothing is

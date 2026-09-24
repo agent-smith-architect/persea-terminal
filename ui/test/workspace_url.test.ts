@@ -1,9 +1,9 @@
-// M9 W1a — FW-R route constructor regression test.
+// Workspace route constructor regression test.
 // (a) dashboard open and (b) saved-workspace reload both produce exactly
 // /workspace?engine=unified-dev#name=<bounded>; (c) a missing, different,
 // extra, or duplicated query field is a typed refusal with no navigation;
 // (d) a fragment `engine` key is rejected as unknown and never navigates;
-// (e) the /terminal self-heal ordering guard lives in app.ts — W1b.
+// (e) the /terminal self-heal ordering guard lives in app.ts.
 declare const process: { stdout: { write(value: string): void } };
 import {
   WORKSPACE_ENGINE_SEARCH, WORKSPACE_NAME_MAX_LENGTH, WORKSPACE_PATH, boundedWorkspaceName, parseWorkspaceLocation, workspaceRouteNotice, workspaceURL,
@@ -108,13 +108,13 @@ function spiedLocation(pathname: string, search: string, hash: string): { pathna
   assert.equal(boundedWorkspaceName(null), undefined);
 }
 
-// (e) TODO W1b — FW-R (e): a /terminal document with fragment `engine` still
+// A /terminal document with fragment `engine` still
 // self-heals exactly as today, and a /workspace document never reaches that
 // self-heal (window.location unchanged, no replace()). Both live in app.ts's
-// boot() ordering, which W1b owns; this stub names the case so the browser
-// gate that W1b adds has its slot. Nothing here asserts on app.ts.
+// boot() ordering, covered by the workspace runtime browser gate.
+// Nothing here asserts on app.ts.
 {
-  process.stdout.write("workspace_url.test: TODO(W1b) FW-R (e) /terminal self-heal ordering guard — app.ts boot() branch order, not testable from workspace_url.ts\n");
+  process.stdout.write("workspace_url.test: browser-covered /terminal self-heal ordering guard — app.ts boot() branch order, not testable from workspace_url.ts\n");
 }
 
 // Every refusal code has reviewed full-page copy.
