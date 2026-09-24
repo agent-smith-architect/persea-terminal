@@ -49,6 +49,7 @@ const STATE = `(() => {
         bodyText: (document.body.textContent ?? "").trim().length,
         screen: rows ? rows.textContent ?? "" : "",
         connection: document.querySelector(".persea-unified-connection")?.textContent ?? "",
+        phase: document.querySelector(".persea-unified-tag__dot")?.dataset.state ?? null,
         noticeHidden: notice ? notice.hidden : true,
         headline: document.querySelector(".persea-unified-notice__headline")?.textContent ?? "",
         detail: document.querySelector(".persea-unified-notice__detail")?.textContent ?? "",
@@ -263,7 +264,9 @@ async function main() {
         const beforeBack = await snapshot();
         await tabA.trustedClick(r4A.state.takePoint);
         // The claim resolves and re-attaches; the displacement notice clears.
-        const reclaimed = await tabA.waitUntil((state) => state.noticeHidden, 8_000);
+        // PREPARE clears the notice before replay, COMMIT, and MODE(CONTROL).
+        // The session phase and enabled Fit reflect completed admission.
+        const reclaimed = await tabA.waitUntil((state) => state.noticeHidden && state.phase === "live" && !state.fitDisabled, 8_000);
         const afterBack = await snapshot();
         evidence.r4.back = {
           tabA: reclaimed.state ?? reclaimed.last,
@@ -276,8 +279,12 @@ async function main() {
           fail("R4", "the manual reclaim did not issue exactly one takeover", evidence.r4.back);
         } else {
           await tabA.type("a");
-          await delay(200);
-          const typed = await lastAttachment();
+          const inputDeadline = Date.now() + 8_000;
+          let typed = await lastAttachment();
+          while (!typed.inputs.includes("a") && Date.now() < inputDeadline) {
+            await delay(15);
+            typed = await lastAttachment();
+          }
           evidence.r4.back.reclaimInputs = typed.inputs.slice();
           if (!typed.inputs.includes("a")) fail("R4", "the reclaimed tab did not deliver input to the session (not live)", evidence.r4.back);
           const bDisplaced = await tabB.waitUntil((state) => hasNotice(state) && state.code.includes("control_displaced"), 4_000);
