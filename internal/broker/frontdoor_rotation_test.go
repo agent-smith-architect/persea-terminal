@@ -357,7 +357,10 @@ func TestSourceAutomaticRotationFreshFrontdoorController(t *testing.T) {
 		t.Skip("real tmux/frontdoor automatic-rotation regression test")
 	}
 	saved := unifiedJournalCaps
-	unifiedJournalCaps.pane = 8 << 20
+	// Cross 75% pressure while retaining the mandatory 1 MiB rollback reserve.
+	// 57,000 rows use 4,047,000 bytes with PTY CRLF: above 3,932,160 and below
+	// 5 MiB minus that reserve. Keep the real journal and scheduler path.
+	unifiedJournalCaps.pane = 5 << 20
 	unifiedJournalCaps.realm = 64 << 20
 	unifiedJournalCaps.panePhysical = 16 << 20
 	unifiedJournalCaps.realmPhysical = 96 << 20
@@ -421,7 +424,7 @@ func TestSourceAutomaticRotationFreshFrontdoorController(t *testing.T) {
 
 	const pressureComplete = "ROTATION-PRESSURE-COMPLETE"
 	disposable.run("send-keys", "-t", "rotation_live:",
-		`awk 'BEGIN { for (i=0; i<102000; i++) printf "rotation-AUTO-%06d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", i; print "`+pressureComplete+`"; fflush() }'`, "Enter")
+		`awk 'BEGIN { for (i=0; i<57000; i++) printf "rotation-AUTO-%06d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", i; print "`+pressureComplete+`"; fflush() }'`, "Enter")
 	pollUntil(t, 15*time.Second, "automatic journal pressure", func() bool {
 		effects.journalMu.Lock()
 		logical, cap := effects.realm.PaneLogical(adoption.Key)
