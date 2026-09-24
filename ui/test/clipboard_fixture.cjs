@@ -40,7 +40,7 @@ async function startClipboardFixture(ui, options = {}) {
     state.requests.push(operation);
     if(request.method!=="GET"&&!authorized(request)){error(response,403);return true;}
     if(!stage&&url.search){error(response,400);return true;}
-    if(state.unavailable&&!stage){error(response,503);return true;}
+    if(state.unavailable&&!stage){response.setHeader("X-Persea-Test-Outage","1");error(response,503);return true;}
     if(stage){
       if(request.method!=="POST"||url.searchParams.get("realm")!=="local"){error(response,400);return true;}
       const body=await readBody(request),id=crypto.randomBytes(16).toString("hex"),media=request.headers["content-type"];

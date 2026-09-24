@@ -20,6 +20,8 @@ async function main(){
     const file=path.join(bundle,"dist/app.js");let source=fs.readFileSync(file,"utf8");
     if(mutant==="feedback-flow"){
       fs.appendFileSync(path.join(bundle,"dist/app.css"),'\n.persea-clipboard__feedback-anchor { height: auto; } .persea-clipboard__feedback { position: static; display: none; } .persea-clipboard__feedback[data-visible="true"] { display: grid; }\n');
+    }else if(mutant==="feedback-no-fade"){
+      fs.appendFileSync(path.join(bundle,"dist/app.css"),'\n.persea-clipboard__feedback { transition: none; }\n');
     }else if(mutant==="cancel"){
       const pattern=/const cancel = this\.button\("Cancel", \(\) => this\.showList\("text:" \+ (\w+)\.id\)\);/;
       assert(pattern.test(source),"Cancel mutation anchor");source=source.replace(pattern,'const cancel = this.button("Cancel", (event) => { this.options.terminal?.send(input.value, event); this.showList("text:" + $1.id); });');
@@ -54,7 +56,8 @@ async function main(){
         await context.addInitScript(value=>{window.__clipboardPNG=value;},PNG.toString("base64"));
         await context.addInitScript(installClipboardMock);
         const page=await context.newPage();page.setDefaultTimeout(6000);
-        const record={label,width,height,console:[],pageerrors:[]};evidence.pages.push(record);
+        const record={label,width,height,console:[],pageerrors:[],outageResponses:[]};evidence.pages.push(record);
+        page.on("response",response=>{if(response.status()===503&&response.headers()["x-persea-test-outage"]==="1")record.outageResponses.push({url:response.url(),phase});});
         page.on("console",message=>record.console.push({phase,type:message.type(),text:message.text(),url:message.location().url}));
         page.on("pageerror",error=>record.pageerrors.push({phase,text:String(error)}));
         return page;
@@ -108,17 +111,58 @@ async function main(){
           await shot(terminal,"image-preview");assert((await inputs()).length===1,"Image selection does not send input");
         });
         await check("image Copy starts in trusted gesture and resolves promised PNG",async()=>{
-          await button(terminal,"Done").click();await imageControl({delayReadMs:150});
+          await button(terminal,"Done").click();
+          let releaseImage;
+          const imageGate=new Promise(resolve=>{releaseImage=resolve;});
+          const imageRoute="**/api/clipboard/images/*";
+          const pendingImageReads=[];
+          const holdImageRead=route=>{
+            const pending=imageGate.then(()=>route.continue());
+            pendingImageReads.push(pending);
+            return pending;
+          };
+          await terminal.route(imageRoute,holdImageRead);
           const imageCopy=clipboard(terminal).locator('[data-clipboard-item^="image:"]').getByRole("button",{name:"Copy to device",exact:true});
           await imageCopy.scrollIntoViewIfNeeded();
+          // Start the fade probe only after feedback from the previous action
+          // is gone. Success lives for 5s and its opacity transition is 180ms.
+          evidence.feedbackInitial??=[];
+          evidence.feedbackInitial.push(await terminal.evaluate(()=>{
+            const card=document.querySelector('.persea-clipboard__feedback');
+            return {visible:card.dataset.visible,opacity:Number(getComputedStyle(card).opacity),text:card.textContent};
+          }));
+          await terminal.mouse.move(width-2,height-2);
+          await terminal.waitForFunction(()=>{
+            const card=document.querySelector('.persea-clipboard__feedback');
+            return card.dataset.visible!=='true'&&Number(getComputedStyle(card).opacity)===0;
+          },undefined,{timeout:6_000});
           await terminal.evaluate(()=>{
             const body=document.querySelector('.persea-clipboard__body'),card=document.querySelector('.persea-clipboard__feedback');
             const geometry=()=>{const r=body.getBoundingClientRect();return [r.top,r.height,body.scrollTop,body.clientHeight,body.scrollHeight];};
             const probe=window.__feedbackProbe={active:true,before:geometry(),samples:[]};
-            const sample=()=>{if(!probe.active)return;probe.samples.push({geometry:geometry(),opacity:Number(getComputedStyle(card).opacity),visible:card.dataset.visible==='true'});requestAnimationFrame(sample);};sample();
+            const takeSample=()=>probe.samples.push({geometry:geometry(),opacity:Number(getComputedStyle(card).opacity),visible:card.dataset.visible==='true'});
+            const sample=()=>{if(!probe.active)return;takeSample();requestAnimationFrame(sample);};sample();
+            // A busy renderer can miss every frame of a 180ms transition.
+            // Inspect its real computed midpoint, then restore its timeline;
+            // absent transitions still fail the original fade assertion.
+            probe.observer=new MutationObserver(()=>{
+              void getComputedStyle(card).opacity;
+              const animation=card.getAnimations().find(value=>value.transitionProperty==='opacity');
+              if(!animation)return;
+              const time=animation.currentTime,running=animation.playState==='running';
+              animation.pause();animation.currentTime=Number(animation.effect.getTiming().duration)/2;
+              takeSample();animation.currentTime=time;if(running)animation.play();
+            });
+            probe.observer.observe(card,{attributes:true,attributeFilter:['data-visible']});
           });
-          await imageCopy.click();await terminal.mouse.move(width-2,height-2);
-          const write=await terminal.evaluate(()=>window.__clipboardMock.writes.at(-1));assert(write.kind==="write"&&write.trusted&&write.active&&!write.resolved,"OS write starts before delayed image bytes resolve");
+          try {
+            await imageCopy.click();await terminal.mouse.move(width-2,height-2);
+            const write=await terminal.evaluate(()=>window.__clipboardMock.writes.at(-1));assert(write.kind==="write"&&write.trusted&&write.active&&!write.resolved,"OS write starts before delayed image bytes resolve");
+          } finally {
+            releaseImage();
+            await Promise.all(pendingImageReads);
+            await terminal.unroute(imageRoute,holdImageRead);
+          }
           await until(()=>terminal.evaluate(()=>window.__clipboardMock.writes.at(-1)?.resolved),"promised image copy resolves");
           assert(await terminal.evaluate(()=>window.__clipboardMock.items.at(-1)?.type==="image/png"&&window.__clipboardMock.items.at(-1).size>0),"OS clipboard receives PNG");
           const status=terminal.locator(".persea-clipboard__status");
@@ -130,7 +174,7 @@ async function main(){
           await pause(220);await shot(terminal,"copy-feedback");
           await pause(5300);assert((await status.textContent())==="","Successful copy feedback expires");
           const motion=await terminal.evaluate(()=>{
-            const p=window.__feedbackProbe;p.active=false;
+            const p=window.__feedbackProbe;p.active=false;p.observer.disconnect();
             return {stable:p.samples.every(s=>s.geometry.every((v,i)=>Math.abs(v-p.before[i])<.5)),entered:p.samples.some(s=>s.visible&&s.opacity>0&&s.opacity<1),exited:p.samples.some(s=>!s.visible&&s.opacity>0&&s.opacity<1),samples:p.samples.length,scrollTopBefore:p.before[2]};
           });
           evidence.feedbackMotion??=[];evidence.feedbackMotion.push({width,height,...motion});
@@ -329,6 +373,18 @@ async function main(){
     }
     const diagnostics=evidence.pages.flatMap(page=>[...page.console,...page.pageerrors]);
     evidence.expectedDiagnostics=diagnostics.filter(message=>(message.phase==="disconnect invalidates an already open row Paste action"&&/WebSocket.*410/.test(message.text))||(message.phase==="cached text remains locally copyable during server outage"&&/status of 503/.test(message.text)&&/\/api\/(snippets|clipboard\/images(?:\/[0-9a-f]{32})?)$/.test(message.url||"")));
+    // WebKit can deliver a resource console message after the test phase has
+    // advanced. Match each late message to one explicitly injected response.
+    for(const page of evidence.pages){
+      const responses=[...page.outageResponses];
+      for(const message of page.console){
+        if(!/status of 503/.test(message.text))continue;
+        const index=responses.findIndex(response=>response.url===message.url);
+        if(index<0)continue;
+        responses.splice(index,1);
+        if(!evidence.expectedDiagnostics.includes(message))evidence.expectedDiagnostics.push(message);
+      }
+    }
     const unexpected=diagnostics.filter(message=>!evidence.expectedDiagnostics.includes(message));assert(!unexpected.length,`Browser diagnostics: ${JSON.stringify(unexpected)}`);
     evidence.pass=true;
   }catch(error){evidence.pass=false;evidence.failure={phase,error:String(error),stack:error.stack};if(activePage&&!activePage.isClosed()){await activePage.screenshot({path:path.join(directory,"failure.png"),fullPage:true}).catch(()=>{});evidence.failure.visible=await activePage.locator("body").innerText().catch(()=>"");}throw error;}
