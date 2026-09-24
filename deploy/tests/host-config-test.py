@@ -839,26 +839,22 @@ class HostConfigTest(unittest.TestCase):
         finally:
             self.unseal_release(release)
 
-    def test_generatorless_release_record_loading_mirrors_verification_fallback(self) -> None:
-        # The explicit rule for generator-less releases mirrors verification:
-        # a release that genuinely bundles no libexec/host-config.py is parsed
-        # by the current source tree's generator, and when that generator no
-        # longer speaks the release's schema the load fails closed with the
-        # loader's own refusal — it never guesses at the stream.
+    def test_release_without_bundled_generator_is_refused(self) -> None:
+        # Every public release carries its own generator. Neither verification
+        # nor record loading may substitute the current checkout's schema.
         value = fixture()
         release = self.root / "release"
         self.run_helper("render", self.write(value), release)
         (release / "bin").mkdir()
         (release / "bin/persea-terminal").write_bytes(b"#!/bin/sh\nexit 0\n")
-        future = self.future_tree_refusing_old_records()
         try:
             self.seal_release(release)
             result = self.load_release_manifest_via_lib(DEPLOY, release)
-            self.assertEqual(result.returncode, 0, msg=result.stderr.decode())
-            self.assertIn(b"desk-a7", result.stdout)
-            result = self.load_release_manifest_via_lib(future, release)
             self.assertNotEqual(result.returncode, 0)
-            self.assertIn(b"host manifest parser returned an incomplete record stream", result.stderr)
+            self.assertIn(b"release bundled generator is missing or unsafe", result.stderr)
+            result = self.verify_release_via_lib(DEPLOY, release)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn(b"release bundled generator is missing or unsafe", result.stderr)
         finally:
             self.unseal_release(release)
 

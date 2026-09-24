@@ -137,20 +137,13 @@ persea_load_host_manifest() {
 # entry immediately before execution; release self-verification and
 # target-release record loading MUST both go through this one selection, so a
 # release verified by its own renderer can never be re-parsed by the current
-# tree's schema. The rules are:
-#   - bundled generator present: pin it or die — a copy that is missing from
-#     the checksum manifest, duplicated there, or whose bytes disagree is
-#     tampering, never a fallback;
-#   - bundled generator genuinely absent (pre-bundling release): fall back to
-#     the current source tree's generator, exactly as release verification
-#     does for the same shape.
-# The current tree's generator otherwise serves only the current operator
+# tree's schema. Every public release bundles this generator: a missing copy,
+# a missing/duplicate checksum entry, or disagreeing bytes is refused.
+# The current tree's generator serves only the current operator
 # manifest (persea_load_host_manifest).
 persea_select_release_generator() {
   local release=$1 hash relative manifest_hash='' generator_hash
-  PERSEA_RELEASE_GENERATOR="$SCRIPT_DIR/host-config.py"
-  [[ -e $release/libexec/host-config.py || -L $release/libexec/host-config.py ]] || return 0
-  [[ -f $release/libexec/host-config.py && ! -L $release/libexec/host-config.py ]] || persea_die 'release bundled generator is unsafe'
+  [[ -f $release/libexec/host-config.py && ! -L $release/libexec/host-config.py ]] || persea_die 'release bundled generator is missing or unsafe'
   [[ -f $release/MANIFEST.sha256 && ! -L $release/MANIFEST.sha256 ]] || persea_die 'release checksum manifest is missing or unsafe'
   while read -r hash relative; do
     [[ $relative == libexec/host-config.py ]] || continue
