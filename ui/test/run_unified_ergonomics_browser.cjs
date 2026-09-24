@@ -1,6 +1,6 @@
 "use strict";
 
-// Ergonomics gate (E-P1): keyboard only when asked, the quick-actions sheet
+// Ergonomics gate (terminal): keyboard only when asked, the quick-actions sheet
 // and its one top-bar opener, the eight-key bar, the 44px touch-target law, the composer status
 // line, the displacement toast and the one-time fit hint — every scenario
 // drives the REAL bundled page in real Chromium against the reopen fixture's
@@ -22,7 +22,7 @@
 //   T44  every visible interactive element on the phone terminal page (opener,
 //        sheet open, keyboard open, composer open) and the dashboard ≥ 44×44
 //
-// PERSEA_EP1_EVIDENCE_DIR (optional): screenshots and the census land there.
+// PERSEA_TERMINAL_EVIDENCE_DIR (optional): screenshots and the census land there.
 
 const fs = require("fs");
 const path = require("path");
@@ -30,7 +30,7 @@ const { startClipboardFixture: startFixture } = require("./clipboard_fixture.cjs
 const { assert, delay, requestJSON, Tab: BaseTab, launchChrome, stopChrome } = require("./unified_browser_lib.cjs");
 
 const UI = path.resolve(__dirname, "..");
-const EVIDENCE = process.env.PERSEA_EP1_EVIDENCE_DIR ? path.resolve(process.env.PERSEA_EP1_EVIDENCE_DIR) : null;
+const EVIDENCE = process.env.PERSEA_TERMINAL_EVIDENCE_DIR ? path.resolve(process.env.PERSEA_TERMINAL_EVIDENCE_DIR) : null;
 const PHONE = { width: 390, height: 844, deviceScaleFactor: 3, mobile: true };
 const PHONE_KEYBOARD = { width: 390, height: 508, deviceScaleFactor: 3, mobile: true };
 const DESKTOP = { width: 1024, height: 768, deviceScaleFactor: 1, mobile: false };
@@ -68,7 +68,7 @@ const STATE = `(() => {
     const backgroundLuminance = luminance(background);
     return (Math.max(foregroundLuminance, backgroundLuminance) + 0.05) / (Math.min(foregroundLuminance, backgroundLuminance) + 0.05);
   };
-  // J-EP5-1 is about what the operator sees, so a transparent element is
+  // theme-contrast is about what the operator sees, so a transparent element is
   // measured against the surface that actually paints behind it.
   const effectiveBackground = (node) => {
     for (let element = node; element; element = element.parentElement) {
@@ -135,7 +135,7 @@ const STATE = `(() => {
     sheetVisible: visible(sheet), sheetRect: rect(sheet), tiles,
     viewVisible: visible(viewPopover), viewRect: rect(viewPopover),
     // The sheet scrolls internally: its content is taller than its viewport.
-    // J-UX-5 is about what is reachable WITHOUT that scroll.
+    // terminal is about what is reachable WITHOUT that scroll.
     sheetScroll: sheet ? { top: sheet.scrollTop, scrollHeight: sheet.scrollHeight, clientHeight: sheet.clientHeight } : null,
     sheetHeadings: sheet ? Array.from(sheet.querySelectorAll(".persea-unified-sheet__heading")).filter(visible).map((h) => h.textContent) : [],
     toast: visible(toast) ? toast.textContent : "",
@@ -152,12 +152,12 @@ const STATE = `(() => {
     terminalRows: rows ? rows.children.length : 0,
     hostRect: rect(q(".persea-unified-xterm")),
     innerWidth: innerWidth, innerHeight: innerHeight,
-    focusCalls: typeof window.__ep1FocusCalls === "number" ? window.__ep1FocusCalls : null,
+    focusCalls: typeof window.__terminalFocusCalls === "number" ? window.__terminalFocusCalls : null,
     visualViewportHeight: window.visualViewport ? window.visualViewport.height : null,
     styleNodes: document.querySelectorAll("style").length,
     theme: q(".persea-unified-terminal")?.dataset.theme ?? "",
     fontBaseline: Number(q(".persea-unified-terminal")?.dataset.fontBaseline ?? "NaN"),
-    // The J-UX-9 tri-state verbatim: "9".."24" for an explicit preference, or
+    // The terminal topbar tri-state verbatim: "9".."24" for an explicit preference, or
     // "auto". fontBaseline above stays the numeric view and reads NaN on auto.
     fontPreference: q(".persea-unified-terminal")?.dataset.fontBaseline ?? null,
     bodyTheme: document.body.dataset.perseaTheme ?? "",
@@ -479,7 +479,7 @@ async function main() {
     await shot(tabA, "phone-01-terminal-closed-keyboard-opener");
 
     // --- D11 the compact phone fit affordance ---------------------------------
-    // UX-10 reserves the fixed six-control phone row for tag · ↕ · Aa · Copy ·
+    // terminal interaction reserves the fixed six-control phone row for tag · ↕ · Aa · Copy ·
     // ☰ · ✎. The one-time prose hint therefore stays out of the compact row;
     // the always-present ↕ control remains the sole explicit-fit affordance.
     evidence.d11 = { hintVisible: firstState.fitHintVisible, hintRect: firstState.fitHintRect, terminalRows: firstState.terminalRows, cellHeight: firstState.cellHeight };
@@ -518,15 +518,15 @@ async function main() {
 	if (!primaryClipboard.select || primaryClipboard.select.text !== "Select" || primaryClipboard.select.disabled || primaryClipboard.select.state !== "select") fail("QF1d", "primary contextual Select is absent or unavailable", primaryClipboard);
 	if (!primaryClipboard.paste || primaryClipboard.paste.label !== "Open clipboard" || primaryClipboard.paste.popup !== "dialog" || primaryClipboard.paste.icons !== 1 || primaryClipboard.paste.disabled) fail("QF1d", "primary Paste is absent or unavailable", primaryClipboard);
 	if (open.tiles.Select || open.tiles.Copy || open.tiles.Paste) fail("QF1d", "Quick actions duplicates a primary clipboard control", { Select: open.tiles.Select, Copy: open.tiles.Copy, Paste: open.tiles.Paste });
-    // J-EP1-3: E-P3, E-P4 and E-P5 are all real; no future-phase placeholder
+    // TERMINAL-3: clipboard, session switch and preferences are all real; no future-phase placeholder
     // tile and no header for an empty section remains in the composed sheet.
     const placeholders = [];
     const placeholderReasons = Object.entries(open.tiles).filter(([, t]) => /Coming soon/i.test(t.reason)).map(([label]) => label);
     evidence.qf1d.open.placeholders = placeholders;
     evidence.qf1d.open.headings = open.sheetHeadings;
     if (placeholders.length || placeholderReasons.length) fail("QF1d", "placeholder (coming-soon) tiles render", { placeholders, placeholderReasons });
-    // J-UX-5 moved Keyboard to the front so it lands inside the initial sheet
-    // viewport; EP3-J5 below measures that it actually does.
+    // terminal moved Keyboard to the front so it lands inside the initial sheet
+    // viewport; CLIPBOARD-J5 below measures that it actually does.
 	if (open.sheetHeadings.join(" ") !== "Tools Keyboard Sessions Settings and help") fail("QF1d", "the task menu's sections are not Tools, Keyboard, Sessions, Settings and help", open.sheetHeadings);
     if (["Snippets", "Clips", "Escape", "Tab", "Control"].some(label => open.tiles[label])) fail("QF1d", "retired storage tiles or individual key tiles remain in the task menu", Object.keys(open.tiles));
     if (open.tiles.Prev || open.tiles.Next) fail("QF1d", "arbitrary Prev/Next session cycling remains in Quick actions", { Prev: open.tiles.Prev, Next: open.tiles.Next });
@@ -600,7 +600,7 @@ async function main() {
     // The fitted font sits at its 9px floor on a phone (80 columns need
     // 433px), so zoom in first, then out.
     //
-    // J-UX-9: a zoom step is one pixel from the size xterm is RENDERING, not
+    // a zoom step is one pixel from the size xterm is RENDERING, not
     // from the stored preference. On this phone the two differ by six pixels —
     // the fit floors at 9 while nothing is stored — so an implementation that
     // steps the stored number lands on 15 here and this case says so.
@@ -666,14 +666,14 @@ async function main() {
         originalSend.call(socket, JSON.stringify({ type: "RESIZE_REQUEST", version: 1, source, epoch, columns: 80, rows }));
       };
       tile.addEventListener("pointerup", inject, true);
-      window.__ep1ResizeMutant = { off() { tile.removeEventListener("pointerup", inject, true); WebSocket.prototype.send = originalSend; } };
+      window.__terminalResizeMutant = { off() { tile.removeEventListener("pointerup", inject, true); WebSocket.prototype.send = originalSend; } };
     })()`);
     await tabA.tapTile("Tab"); // its INPUT frame shows the mutant the live socket and identity
     const mutantArmed = (await lastAttachment()).resizes || 0;
     await tabA.tapTile("Escape"); // the mutant injects here
     await delay(250);
     const mutantAfter = (await lastAttachment()).resizes || 0;
-    await tabA.evaluate("window.__ep1ResizeMutant.off()");
+    await tabA.evaluate("window.__terminalResizeMutant.off()");
     await tabA.tapTile("Escape");
     await delay(250);
     const mutantOff = (await lastAttachment()).resizes || 0;
@@ -724,11 +724,11 @@ async function main() {
     // are counted in the page, so a textarea that simply kept its focus
     // across the outage cannot pass for a restore.
     await tabA.evaluate(`(() => {
-      if (typeof window.__ep1FocusCalls === "number") return;
-      window.__ep1FocusCalls = 0;
+      if (typeof window.__terminalFocusCalls === "number") return;
+      window.__terminalFocusCalls = 0;
       const original = HTMLTextAreaElement.prototype.focus;
       HTMLTextAreaElement.prototype.focus = function (...args) {
-        if (this.classList.contains("xterm-helper-textarea")) window.__ep1FocusCalls += 1;
+        if (this.classList.contains("xterm-helper-textarea")) window.__terminalFocusCalls += 1;
         return original.apply(this, args);
       };
     })()`);
@@ -813,7 +813,7 @@ async function main() {
     await tabA.tap(closedState.composerToggleRect);
     const composerOpen = await tabA.waitUntil((state) => state.composerOpen, 4_000);
     const idle = composerOpen.state ?? composerOpen.last;
-    // UX-16 §16.2: the idle composer shows NO status line; a standing
+    // the idle composer shows NO status line; a standing
     // condition (smart punctuation in the draft) reveals it on its own
     // full-width line above the button row.
     if (!composerOpen.state) fail("D1", "the composer did not open from the toolbar ✎", { status: idle.composerStatus });
@@ -1003,21 +1003,21 @@ async function main() {
 
 
     // ======================================================================
-    // E-P3 — shared Clipboard, explicit edit/Paste, local Copy and OSC 52
+    // clipboard — shared Clipboard, explicit edit/Paste, local Copy and OSC 52
     // ======================================================================
     // The case IDs retain their original runtime responsibilities. Retired
     // last-N controls are exercised through exact terminal-selection Copy.
     // Opening text edits it; only the row's explicit Paste action emits input.
     {
-    const ep3 = { f1: {}, f2: {}, f3: {}, f4: {}, f5: {}, f6: {}, f7: {}, f9: {}, f10: {}, r6: {}, r7: {} };
-    evidence.ep3 = ep3;
+    const clipboard = { f1: {}, f2: {}, f3: {}, f4: {}, f5: {}, f6: {}, f7: {}, f9: {}, f10: {}, r6: {}, r7: {} };
+    evidence.clipboard = clipboard;
     const store = async () => (await snapshot()).snippets;
     const installFocusCounter = () => tabA.evaluate(`(() => {
-      if (typeof window.__ep1FocusCalls === "number") return;
-      window.__ep1FocusCalls = 0;
+      if (typeof window.__terminalFocusCalls === "number") return;
+      window.__terminalFocusCalls = 0;
       const original = HTMLTextAreaElement.prototype.focus;
       HTMLTextAreaElement.prototype.focus = function (...args) {
-        if (this.classList.contains("xterm-helper-textarea")) window.__ep1FocusCalls += 1;
+        if (this.classList.contains("xterm-helper-textarea")) window.__terminalFocusCalls += 1;
         return original.apply(this, args);
       };
     })()`);
@@ -1044,7 +1044,7 @@ async function main() {
       const before = await wire();
       await tabA.activate(await tabA.state(), point); await delay(100);
       if(label!=='Paste text to terminal')await noWireChange(before,`Clipboard ${label}`);
-      else {const after=await wire();if(JSON.stringify(after.map(a=>a.resizes))!==JSON.stringify(before.map(a=>a.resizes)))fail('EP3-F3','Clipboard Send changed geometry',{before,after});}
+      else {const after=await wire();if(JSON.stringify(after.map(a=>a.resizes))!==JSON.stringify(before.map(a=>a.resizes)))fail('clipboard-send-preserves-geometry','Clipboard Send changed geometry',{before,after});}
     };
     const closeClipboard = async () => { if ((await clipboardState()).visible) await clipboardAction("Close clipboard"); };
     const openSheet = async () => {
@@ -1060,12 +1060,12 @@ async function main() {
     const freshClipboardPage = async (config = {}, coarse = true) => {
       await control({ reset: true, ...config }); await tabA.emulate(coarse ? PHONE : DESKTOP, coarse);
       await tabA.navigate(unifiedURL(await freshControlHandle()));
-      assert((await tabA.waitUntil(isLive, 10_000)).state, "EP3: fresh attachment did not commit");
+      assert((await tabA.waitUntil(isLive, 10_000)).state, "clipboard: fresh attachment did not commit");
       await installFocusCounter();
     };
     const wire = async () => { const value = await snapshot(); return value.attachments.map(a=>({inputs:a.inputs.join(''),resizes:a.resizes || 0})); };
     const noWireChange = async (before, label) => {
-      const after = await wire(); if (JSON.stringify(after) !== JSON.stringify(before)) fail("EP3-F3", `${label} changed terminal input or geometry`, {before,after});
+      const after = await wire(); if (JSON.stringify(after) !== JSON.stringify(before)) fail("clipboard-send-preserves-geometry", `${label} changed terminal input or geometry`, {before,after});
     };
     const exactRow = async label => {
       await openList();
@@ -1083,7 +1083,7 @@ async function main() {
       assert(point, `Clipboard row action ${action} is absent for ${label}`);
       const before = await wire(); await tabA.activate(await tabA.state(), point); await delay(100);
       if (action !== 'Paste text to terminal') await noWireChange(before, `Clipboard row ${action}`);
-      else { const after=await wire(); if(JSON.stringify(after.map(a=>a.resizes))!==JSON.stringify(before.map(a=>a.resizes)))fail('EP3-F3','Clipboard Send changed geometry',{before,after}); }
+      else { const after=await wire(); if(JSON.stringify(after.map(a=>a.resizes))!==JSON.stringify(before.map(a=>a.resizes)))fail('clipboard-send-preserves-geometry','Clipboard Send changed geometry',{before,after}); }
     };
     const preview = async label => {
       const point = await rowPoint(label, '.persea-clipboard__open');
@@ -1095,17 +1095,17 @@ async function main() {
       await exactRow(label); const before = await lastAttachment(), beforeState = await tabA.state();
       await rowAction(label, "Paste text to terminal"); await delay(200);
       const after = await lastAttachment();
-      if (after.resizes !== before.resizes) fail("EP3-F3", "explicit text Send resized the terminal", {before:before.resizes,after:after.resizes});
+      if (after.resizes !== before.resizes) fail("clipboard-send-preserves-geometry", "explicit text Send resized the terminal", {before:before.resizes,after:after.resizes});
       return {delta:after.inputs.slice(before.inputs.length).join(''),beforeState,state:await tabA.state()};
     };
     const installClipboardStub = () => tabA.evaluate(`(() => {
-      window.__ep3Device = {writes:[],reads:0,fail:false,readFail:false,value:'device text'};
+      window.__clipboardDevice = {writes:[],reads:0,fail:false,readFail:false,value:'device text'};
       // SnippetService captures this object at boot; retain its identity so
       // automatic OSC writes and gesture writes share the same refusal mock.
       Object.defineProperties(navigator.clipboard,{
         read:{configurable:true,value:undefined},
-        writeText:{configurable:true,value(text){ const state=window.__ep3Device; if(state.fail)return Promise.reject(new Error('fixture clipboard refusal')); state.writes.push(String(text));return Promise.resolve();}},
-        readText:{configurable:true,value(){ const state=window.__ep3Device;state.reads++;return state.readFail?Promise.reject(new Error('fixture read refusal')):Promise.resolve(state.value);}}
+        writeText:{configurable:true,value(text){ const state=window.__clipboardDevice; if(state.fail)return Promise.reject(new Error('fixture clipboard refusal')); state.writes.push(String(text));return Promise.resolve();}},
+        readText:{configurable:true,value(){ const state=window.__clipboardDevice;state.reads++;return state.readFail?Promise.reject(new Error('fixture read refusal')):Promise.resolve(state.value);}}
       });
     })()`);
     const selectTerminal = async () => {
@@ -1114,7 +1114,7 @@ async function main() {
       if (!selecting) await tabA.activate(await tabA.state(), await tabA.pointFor(`document.querySelector('.persea-unified-select-context')`));
       await delay(100);
       const text = await tabA.evaluate(`(() => { const rows=[...document.querySelectorAll('.persea-unified-select__row')].filter(row=>row.textContent.trim());if(!rows.length)throw new Error('no terminal text to copy');const range=document.createRange();range.setStart(rows[0],0);range.setEnd(rows[rows.length-1],rows[rows.length-1].childNodes.length);const selection=getSelection();selection.removeAllRanges();selection.addRange(range);return rows.map(row=>row.textContent.trimEnd()).join('\\n');})()`);
-      assert(text.trim(), "EP3: terminal selection is empty");
+      assert(text.trim(), "clipboard: terminal selection is empty");
       // A prior successful copy owns its 1.2s receipt dwell. Wait for that
       // existing transaction to retire before acquiring the next Copy action.
       for(let attempt=0;attempt<100;attempt++){if(await tabA.evaluate(`document.querySelector('.persea-unified-toolbar-paste')?.dataset.pasteState==='copy'`))break;await delay(20);}
@@ -1123,7 +1123,7 @@ async function main() {
     const copyTerminal = async () => {
       const text = await selectTerminal(); const before = await wire();
       const point = await tabA.pointFor(`document.querySelector('.persea-unified-toolbar-paste[data-paste-state="copy"]')`);
-      assert(point, `EP3: exact terminal selection has no Copy action: ${JSON.stringify(await tabA.evaluate(`({state:document.querySelector('.persea-unified-toolbar-paste')?.dataset.pasteState,selected:String(getSelection()),anchor:getSelection()?.anchorNode?.parentElement?.className,focus:getSelection()?.focusNode?.parentElement?.className,overlayHidden:document.querySelector('.persea-unified-select')?.hidden,active:document.activeElement?.className})`))}`); await tabA.activate(await tabA.state(),point); await delay(180);
+      assert(point, `clipboard: exact terminal selection has no Copy action: ${JSON.stringify(await tabA.evaluate(`({state:document.querySelector('.persea-unified-toolbar-paste')?.dataset.pasteState,selected:String(getSelection()),anchor:getSelection()?.anchorNode?.parentElement?.className,focus:getSelection()?.focusNode?.parentElement?.className,overlayHidden:document.querySelector('.persea-unified-select')?.hidden,active:document.activeElement?.className})`))}`); await tabA.activate(await tabA.state(),point); await delay(180);
       await noWireChange(before,"terminal selection Copy"); return text.replace(/\r\n?/g,'\n');
     };
     const addText = async body => {
@@ -1136,10 +1136,10 @@ async function main() {
     // only when Clipboard is explicitly opened. The pane geometry is untouched.
     await freshClipboardPage(); const initialWire = await wire();
     await openSheet(); const beforeList = await store();
-    if (beforeList.get !== 0) fail("EP3-F3","task menu eagerly polled Clipboard",beforeList);
+    if (beforeList.get !== 0) fail("clipboard-send-preserves-geometry","task menu eagerly polled Clipboard",beforeList);
     await openList(); await waitClipboard(value=>/clipboard is empty/i.test(value.text));
     await noWireChange(initialWire,"opening the unified Clipboard list");
-    ep3.f3.access = {beforeReads:beforeList.get,afterReads:(await store()).get};
+    clipboard.f3.access = {beforeReads:beforeList.get,afterReads:(await store()).get};
 
     // F2/F9/F10: editing cannot emit; Paste normalizes once, never appends
     // Return, and multiline/tabbed text still uses the guarded composer path.
@@ -1151,68 +1151,68 @@ async function main() {
     await waitClipboard(value=>value.rows.length>=6);
     for(const [label,expected] of [['zero','echo zero'],['one','echo one'],['many','echo many']]) {
       const body = {zero:'echo zero',one:'echo one\n',many:'echo many\n\n\n'}[label];
-      const result=await send(body); ep3.f2[label]={expected,got:result.delta};
-      if(result.delta!==expected || /[\r\n]$/.test(result.delta))fail('EP3-F2',`${label} Send changed the no-Return contract`,ep3.f2[label]);
-      if(result.state.activeKind==='xterm')fail('EP3-F9','coarse Send summoned native terminal input',result.state.activeKind);
+      const result=await send(body); clipboard.f2[label]={expected,got:result.delta};
+      if(result.delta!==expected || /[\r\n]$/.test(result.delta))fail('clipboard-send-no-return',`${label} Send changed the no-Return contract`,clipboard.f2[label]);
+      if(result.state.activeKind==='xterm')fail('clipboard-touch-focus','coarse Send summoned native terminal input',result.state.activeKind);
     }
     for(const keyboardOpen of [false,true]) {
       if(keyboardOpen){await closeClipboard();await tabA.tapTile('Show keyboard');await tabA.emulate(PHONE_KEYBOARD,true);await delay(100);}
     for(const [label,body] of [['multi','line one\nline two'],['tabbed','col\tvalue']]) {
-      const result=await send(body);ep3.f2[label]={delta:result.delta,draft:result.state.composerDraft};
-      if(result.delta!=='' || result.state.composerDraft!==body || !result.state.composerOpen)fail('EP3-F2',`${label} did not remain in this pane's guarded composer`,ep3.f2[label]);
-      if(result.state.focusCalls!==result.beforeState.focusCalls || ['xterm','composer'].includes(result.state.activeKind) || result.state.visualViewportHeight!==result.beforeState.visualViewportHeight || Boolean(result.state.keyboardInset)!==Boolean(result.beforeState.keyboardInset))fail('EP3-R4',`${label} guarded Send changed keyboard/focus state`,{keyboardOpen,before:result.beforeState,after:result.state});
+      const result=await send(body);clipboard.f2[label]={delta:result.delta,draft:result.state.composerDraft};
+      if(result.delta!=='' || result.state.composerDraft!==body || !result.state.composerOpen)fail('clipboard-send-no-return',`${label} did not remain in this pane's guarded composer`,clipboard.f2[label]);
+      if(result.state.focusCalls!==result.beforeState.focusCalls || ['xterm','composer'].includes(result.state.activeKind) || result.state.visualViewportHeight!==result.beforeState.visualViewportHeight || Boolean(result.state.keyboardInset)!==Boolean(result.beforeState.keyboardInset))fail('clipboard-focus-ownership',`${label} guarded Send changed keyboard/focus state`,{keyboardOpen,before:result.beforeState,after:result.state});
       await tabA.evaluate(`(() => {const node=document.querySelector('.attachment-page__composer-textarea');node.value='';node.dispatchEvent(new Event('input',{bubbles:true}));})()`);
     }
       if(keyboardOpen){await closeClipboard();await tabA.tapTile('Hide keyboard');await tabA.emulate(PHONE,true);await delay(100);}
     }
     await control({writeLive:'\x1b[?2004h'});await delay(100);
-    const framed=await send('line one\nline two');ep3.f2.bracketed=framed.delta;
-    if(framed.delta!=='\x1b[200~line one\rline two\x1b[201~')fail('EP3-F2','bracketed Send was not framed exactly',framed.delta);
+    const framed=await send('line one\nline two');clipboard.f2.bracketed=framed.delta;
+    if(framed.delta!=='\x1b[200~line one\rline two\x1b[201~')fail('clipboard-send-no-return','bracketed Send was not framed exactly',framed.delta);
     await control({writeLive:'\x1b[?2004l'});
     const markup=await preview('<img src=x onerror=alert(1)> & <script>');
     const markupElements=await tabA.evaluate(`document.querySelector('.persea-clipboard__content').querySelectorAll('script,iframe,svg,object,embed,img').length`);
-    ep3.f10.markup={draft:markup.draft,elements:markupElements};
-    if(markupElements!==0 || markup.draft!=='<img src=x onerror=alert(1)> & <script>')fail('EP3-F10','text preview interpreted markup',ep3.f10.markup);
+    clipboard.f10.markup={draft:markup.draft,elements:markupElements};
+    if(markupElements!==0 || markup.draft!=='<img src=x onerror=alert(1)> & <script>')fail('clipboard-markup-safety','text preview interpreted markup',clipboard.f10.markup);
     const cancelBefore=await wire();await clipboardAction('Cancel');await noWireChange(cancelBefore,'preview Cancel');
 
     // F1: selection is always local, but Send must obey the exact target's
     // MODE grant and lifecycle. Opening a row is never an implicit input action.
     await freshClipboardPage({holdModeGrant:true,snippetWrite:[{kind:'snippet',label:'zero',body:'echo zero'}]});
     const ungrantedEditorWire=await wire(), ungrantedEditor=await preview('echo zero');
-    if(ungrantedEditor.draft!=='echo zero')fail('EP3-F1','ungranted text cannot be edited locally',ungrantedEditor.draft);
+    if(ungrantedEditor.draft!=='echo zero')fail('clipboard-local-editing','ungranted text cannot be edited locally',ungrantedEditor.draft);
     await clipboardAction('Cancel');await noWireChange(ungrantedEditorWire,'ungranted editor Cancel');
     await exactRow('echo zero'); const ungranted=await clipboardState(), heldSend=ungranted.actions.find(a=>a.label==='Paste text to terminal');
-    ep3.f1.ungranted=heldSend;
-    if(!heldSend?.unavailable || !/attached|control|available/i.test(heldSend.title))fail('EP3-F1','Send lacks the input authority refusal before MODE',heldSend);
+    clipboard.f1.ungranted=heldSend;
+    if(!heldSend?.unavailable || !/attached|control|available/i.test(heldSend.title))fail('clipboard-local-editing','Send lacks the input authority refusal before MODE',heldSend);
     const heldWire=await wire();await rowAction('echo zero','Paste text to terminal');await noWireChange(heldWire,'ungranted Send');
     await control({releaseMode:true});await delay(150);await closeClipboard();
-    const granted=await send('echo zero');if(granted.delta!=='echo zero')fail('EP3-F1','granted Send did not reach its pane',granted.delta);
-    const grantedAttachment=await lastAttachment();ep3.f1.granted={delta:granted.delta,frames:grantedAttachment.frames.slice(0,8)};
-    if(firstInputIndex(grantedAttachment.frames)<grantedAttachment.frames.indexOf('MODE_REQUEST'))fail('EP3-F1','INPUT preceded the MODE request',ep3.f1.granted);
+    const granted=await send('echo zero');if(granted.delta!=='echo zero')fail('clipboard-local-editing','granted Send did not reach its pane',granted.delta);
+    const grantedAttachment=await lastAttachment();clipboard.f1.granted={delta:granted.delta,frames:grantedAttachment.frames.slice(0,8)};
+    if(firstInputIndex(grantedAttachment.frames)<grantedAttachment.frames.indexOf('MODE_REQUEST'))fail('clipboard-local-editing','INPUT preceded the MODE request',clipboard.f1.granted);
     await exactRow('echo zero');const staleWire=await wire();
     const heldPoint=await rowPoint('echo zero','button[aria-label="Paste text to terminal"]');
     await tabA.cdp.send('Input.dispatchMouseEvent',{type:'mousePressed',x:heldPoint.x,y:heldPoint.y,button:'left',buttons:1,clickCount:1});
     await control({closeLive:'websocket_read',holdPrepareMs:700});await delay(200);
     await tabA.cdp.send('Input.dispatchMouseEvent',{type:'mouseReleased',x:heldPoint.x,y:heldPoint.y,button:'left',buttons:0,clickCount:1});
-    assert((await tabA.waitUntil(isLive,10_000)).state,'EP3-F1: reconnect did not settle');
-    const reconnectedWire=await wire();ep3.f1.stale={before:staleWire,after:reconnectedWire};
-    if(reconnectedWire.some((a,i)=>a.inputs!==(staleWire[i]?.inputs||'')))fail('EP3-F1','held Send replayed across the transport generation',ep3.f1.stale);
+    assert((await tabA.waitUntil(isLive,10_000)).state,'clipboard-local-editing: reconnect did not settle');
+    const reconnectedWire=await wire();clipboard.f1.stale={before:staleWire,after:reconnectedWire};
+    if(reconnectedWire.some((a,i)=>a.inputs!==(staleWire[i]?.inputs||'')))fail('clipboard-local-editing','held Send replayed across the transport generation',clipboard.f1.stale);
     await closeClipboard();const reconnected=await send('echo zero');
-    if(reconnected.delta!=='echo zero')fail('EP3-F1','fresh preview did not target the reconnected attachment',reconnected.delta);
+    if(reconnected.delta!=='echo zero')fail('clipboard-local-editing','fresh preview did not target the reconnected attachment',reconnected.delta);
     await control({snippetDelayMs:1500});await closeClipboard();await tabA.navigate(unifiedURL(await freshControlHandle()));
-    assert((await tabA.waitUntil(isLive)).state,'EP3-F1: fresh page did not commit');
+    assert((await tabA.waitUntil(isLive)).state,'clipboard-local-editing: fresh page did not commit');
     await tabA.tapTile('Clipboard');await delay(100);const readsAtDispose=(await store()).get;
     await tabA.navigate(origin+'/');await delay(2200);const readsAfterDispose=(await store()).get;
-    ep3.f1.disposal={readsAtDispose,readsAfterDispose};
-    if(readsAfterDispose>readsAtDispose+1)fail('EP3-F1','disposed pane kept polling shared text',ep3.f1.disposal);
+    clipboard.f1.disposal={readsAtDispose,readsAfterDispose};
+    if(readsAfterDispose>readsAtDispose+1)fail('clipboard-local-editing','disposed pane kept polling shared text',clipboard.f1.disposal);
 
     // F4: one document poll, cross-device publication, monotone final state.
     await freshClipboardPage();await openList('clips');const pollStart=await store();
     await control({snippetWrite:[{kind:'osc',body:'value from profile A',origin:'laptop'}]});
     await waitClipboard(value=>value.rows.some(row=>row.label==='value from profile A'));
     const arrived=await store();await delay(8500);const polled=await store();
-    ep3.f4={gets:polled.get-arrived.get,peak:polled.getsInFlightPeak,crossDeviceReads:arrived.get-pollStart.get};
-    if(polled.get-arrived.get>4 || polled.getsInFlightPeak!==1)fail('EP3-F4','shared text polling overlaps or scales with views',ep3.f4);
+    clipboard.f4={gets:polled.get-arrived.get,peak:polled.getsInFlightPeak,crossDeviceReads:arrived.get-pollStart.get};
+    if(polled.get-arrived.get>4 || polled.getsInFlightPeak!==1)fail('clipboard-shared-polling','shared text polling overlaps or scales with views',clipboard.f4);
     await control({snippetDelayMs:1500});await addText('first overlapping publication');await addText('second overlapping publication');
     await waitClipboard(value=>value.rows.some(row=>row.label==='first overlapping publication')&&value.rows.some(row=>row.label==='second overlapping publication'),12000);
     await control({snippetDelayMs:0});
@@ -1221,23 +1221,23 @@ async function main() {
     // expiry preserves one stable item; Delete uses its captured revision.
     await freshClipboardPage({snippetForce507:1});const fullBefore=await store();await addText('must not land');
     const full=await waitClipboard(value=>/full/i.test(value.status));const fullAfter=await store();
-    ep3.f5.full={status:full.status,before:fullBefore.items,after:fullAfter.items};
-    if(fullAfter.items!==fullBefore.items)fail('EP3-F5','full-store refusal created an optimistic item',ep3.f5.full);
+    clipboard.f5.full={status:full.status,before:fullBefore.items,after:fullAfter.items};
+    if(fullAfter.items!==fullBefore.items)fail('clipboard-full-store-refusal','full-store refusal created an optimistic item',clipboard.f5.full);
     await freshClipboardPage({snippetWrite:[{kind:'clip',label:'pin me',body:'echo pin'}]});
     const pinRow=await exactRow('echo pin'), keepWire=await wire();
     await tabA.evaluate(`(() => { const row=Array.from(document.querySelectorAll('[data-clipboard-item]')).find(node=>node.dataset.clipboardItem===${JSON.stringify(pinRow.id)});const select=row.querySelector('select');if(select.options[select.options.length-1]?.value!=='0')throw new Error('No-expiry option missing');select.focus({preventScroll:true});})()`);
     await tabA.pressKey('End','End',35);
     const permanent=await waitClipboard(value=>value.rows.some(row=>row.id===pinRow.id&&row.expiry==='No expiry'));
     await noWireChange(keepWire,'extending text expiry');
-    const kept=await store();ep3.f5.keep={snippets:kept.snippets,clips:kept.manualClips,id:pinRow.id,rows:permanent.rows};
-    if(kept.snippets!==0||kept.manualClips!==1||permanent.rows.length!==1)fail('EP3-F5','No expiry duplicated or replaced the original text',ep3.f5.keep);
+    const kept=await store();clipboard.f5.keep={snippets:kept.snippets,clips:kept.manualClips,id:pinRow.id,rows:permanent.rows};
+    if(kept.snippets!==0||kept.manualClips!==1||permanent.rows.length!==1)fail('clipboard-full-store-refusal','No expiry duplicated or replaced the original text',clipboard.f5.keep);
     await control({snippetForceConflict:1});const conflictBefore=await store();await rowAction('echo pin','Delete item');
     const conflicted=await waitClipboard(value=>/changed on another device/i.test(value.status));const conflictAfter=await store();
-    ep3.f5.conflict={status:conflicted.status,before:conflictBefore.items,after:conflictAfter.items};
-    if(conflictAfter.items!==conflictBefore.items)fail('EP3-F5','conflicted deletion changed the store',ep3.f5.conflict);
+    clipboard.f5.conflict={status:conflicted.status,before:conflictBefore.items,after:conflictAfter.items};
+    if(conflictAfter.items!==conflictBefore.items)fail('clipboard-full-store-refusal','conflicted deletion changed the store',clipboard.f5.conflict);
     await freshClipboardPage({snippetSeed:{snippets:256,clips:20},snippetWrite:[{kind:'osc',body:'automatic value'}]});
-    await addText('ring replacement');const capacity=await store();ep3.f5.capacity={snippets:capacity.snippets,manualClips:capacity.manualClips,osc:capacity.osc,body:capacity.oscBody};
-    if(capacity.snippets!==256||capacity.manualClips!==21||capacity.osc!==1||capacity.oscBody!=='automatic value')fail('EP3-F5','manual clipboard insertion violated store capacity isolation',ep3.f5.capacity);
+    await addText('ring replacement');const capacity=await store();clipboard.f5.capacity={snippets:capacity.snippets,manualClips:capacity.manualClips,osc:capacity.osc,body:capacity.oscBody};
+    if(capacity.snippets!==256||capacity.manualClips!==21||capacity.osc!==1||capacity.oscBody!=='automatic value')fail('clipboard-full-store-refusal','manual clipboard insertion violated store capacity isolation',clipboard.f5.capacity);
 
     // R5/F5: exact terminal-selection copying settles on the device without
     // waiting for or depending on shared storage, including cold/warm outages,
@@ -1249,45 +1249,45 @@ async function main() {
       const before=await store(),expected=await copyTerminal();await delay(500);const first=await store();
       const firstStatus=(await tabA.state()).toast;
       const secondExpected=await copyTerminal();await delay(300);const after=await store();
-      const writes=await tabA.evaluate('window.__ep3Device.writes');
-      ep3.f5[mode]={firstMutations:first.mutations-before.mutations,secondMutations:after.mutations-first.mutations,writes:writes.length,bytes:writes[0]?.length,status:firstStatus};
-      if(!/Copied to this device.*(?:unavailable|unreachable)/i.test(firstStatus))fail('EP3-R5a',`${mode} hid successful local Copy behind the store outage`,{firstStatus});
-      if(writes.length!==2||writes[0]!==expected||writes[1]!==secondExpected||!expected.trim())fail('EP3-R5',`${mode} outage broke local terminal Copy`,ep3.f5[mode]);
-      if(after.mutations!==first.mutations || (mode==='cold'&&first.mutations!==before.mutations))fail('EP3-R5',`${mode} kept mutating a store already known unavailable`,ep3.f5[mode]);
+      const writes=await tabA.evaluate('window.__clipboardDevice.writes');
+      clipboard.f5[mode]={firstMutations:first.mutations-before.mutations,secondMutations:after.mutations-first.mutations,writes:writes.length,bytes:writes[0]?.length,status:firstStatus};
+      if(!/Copied to this device.*(?:unavailable|unreachable)/i.test(firstStatus))fail('clipboard-store-recoverya',`${mode} hid successful local Copy behind the store outage`,{firstStatus});
+      if(writes.length!==2||writes[0]!==expected||writes[1]!==secondExpected||!expected.trim())fail('clipboard-store-recovery',`${mode} outage broke local terminal Copy`,clipboard.f5[mode]);
+      if(after.mutations!==first.mutations || (mode==='cold'&&first.mutations!==before.mutations))fail('clipboard-store-recovery',`${mode} kept mutating a store already known unavailable`,clipboard.f5[mode]);
     }
     await freshClipboardPage({snippetMutationDelayMs:1500});await installClipboardStub();await openList('clips');await waitClipboard(value=>/clipboard is empty/i.test(value.text));
-    await copyTerminal();const independent=await tabA.evaluate(`({writes:window.__ep3Device.writes.length,selecting:!document.querySelector('.persea-unified-select').hidden})`);
-    ep3.f5.localFirst=independent;if(independent.writes!==1||independent.selecting)fail('EP3-R5','local Copy waited for the shared mutation',independent);
+    await copyTerminal();const independent=await tabA.evaluate(`({writes:window.__clipboardDevice.writes.length,selecting:!document.querySelector('.persea-unified-select').hidden})`);
+    clipboard.f5.localFirst=independent;if(independent.writes!==1||independent.selecting)fail('clipboard-store-recovery','local Copy waited for the shared mutation',independent);
     await delay(1600);
     await freshClipboardPage();await installClipboardStub();await openList('clips');await closeClipboard();
     await control({writeLive:Array.from({length:320},(_,i)=>('large-'+i+' '+ 'x'.repeat(64))).join('\r\n')+'\r\n'});await delay(400);
     const oversizeBefore=await store(),largeText=await copyTerminal();await delay(250);const oversizeAfter=await store();
-    const largeWrites=await tabA.evaluate('window.__ep3Device.writes');ep3.f5.oversize={bytes:Buffer.byteLength(largeText),writes:largeWrites.length,mutations:oversizeAfter.mutations-oversizeBefore.mutations};
-    if(Buffer.byteLength(largeText)<=16*1024)fail('EP3-R5','oversize copy precondition did not exceed store limit',ep3.f5.oversize);
-    else if(largeWrites.length!==1||largeWrites[0]!==largeText||oversizeAfter.mutations!==oversizeBefore.mutations)fail('EP3-R5','over-limit local Copy was lost or sent to shared storage',ep3.f5.oversize);
+    const largeWrites=await tabA.evaluate('window.__clipboardDevice.writes');clipboard.f5.oversize={bytes:Buffer.byteLength(largeText),writes:largeWrites.length,mutations:oversizeAfter.mutations-oversizeBefore.mutations};
+    if(Buffer.byteLength(largeText)<=16*1024)fail('clipboard-store-recovery','oversize copy precondition did not exceed store limit',clipboard.f5.oversize);
+    else if(largeWrites.length!==1||largeWrites[0]!==largeText||oversizeAfter.mutations!==oversizeBefore.mutations)fail('clipboard-store-recovery','over-limit local Copy was lost or sent to shared storage',clipboard.f5.oversize);
 
     // F6: exercise the secured requester through Add text. Only the NEXT
     // mutation is damaged; concurrent document reads remain ordinary reads.
     await freshClipboardPage();await openList('clips');
-    await tabA.evaluate(`(() => {const original=window.fetch;window.__ep3Strip=what=>{window.__ep3Last=null;window.fetch=(input,init)=>{
+    await tabA.evaluate(`(() => {const original=window.fetch;window.__clipboardStrip=what=>{window.__clipboardLast=null;window.fetch=(input,init)=>{
       if(!String(input).includes('/api/snippets')||!init||!['POST','PATCH','DELETE','PUT'].includes(init.method))return original(input,init);
       const next={...init},headers={...init.headers};if(what==='csrf')delete headers['X-Persea-CSRF'];if(what==='content-type')delete headers['Content-Type'];if(what==='wrong-content-type')headers['Content-Type']='text/plain';next.headers=headers;
       if(what==='unknown-field')next.body=JSON.stringify({...JSON.parse(String(init.body)),surprise:1});if(what==='trailing')next.body=String(init.body)+' x';if(what==='oversize')next.body=JSON.stringify({kind:'clip',body:'a'.repeat(200*1024)});
-      window.fetch=original;return original(input,next).then(async response=>{const text=await response.clone().text();window.__ep3Last={status:response.status,length:text.length,text:text.slice(0,200),cache:response.headers.get('cache-control')};return response;});};};})()`);
-    ep3.f6.attacks=[];
+      window.fetch=original;return original(input,next).then(async response=>{const text=await response.clone().text();window.__clipboardLast={status:response.status,length:text.length,text:text.slice(0,200),cache:response.headers.get('cache-control')};return response;});};};})()`);
+    clipboard.f6.attacks=[];
     for(const attack of ['csrf','content-type','wrong-content-type','unknown-field','trailing','oversize']) {
-      const before=await store();await tabA.evaluate(`window.__ep3Strip(${JSON.stringify(attack)})`);await addText('security '+attack);await delay(300);
-      const after=await store(),last=await tabA.evaluate('window.__ep3Last'),state=await clipboardState();
-      const record={attack,response:last,before:before.items,after:after.items,status:state.status};ep3.f6.attacks.push(record);
-      if(!last||last.status<400||last.length>256||last.cache!=='no-store'||/a{50,}/.test(last.text)||after.items!==before.items||!state.status)fail('EP3-F6',`damaged ${attack} request was not safely refused`,record);
+      const before=await store();await tabA.evaluate(`window.__clipboardStrip(${JSON.stringify(attack)})`);await addText('security '+attack);await delay(300);
+      const after=await store(),last=await tabA.evaluate('window.__clipboardLast'),state=await clipboardState();
+      const record={attack,response:last,before:before.items,after:after.items,status:state.status};clipboard.f6.attacks.push(record);
+      if(!last||last.status<400||last.length>256||last.cache!=='no-store'||/a{50,}/.test(last.text)||after.items!==before.items||!state.status)fail('clipboard-malformed-request',`damaged ${attack} request was not safely refused`,record);
     }
     const securityBefore=await store();await addText('positive secured request');await waitClipboard(value=>value.rows.some(row=>row.label==='positive secured request'));const securityAfter=await store();
-    ep3.f6.control={before:securityBefore.items,after:securityAfter.items};if(securityAfter.items!==securityBefore.items+1)fail('EP3-F6','unmodified secured Add text did not land',ep3.f6.control);
+    clipboard.f6.control={before:securityBefore.items,after:securityAfter.items};if(securityAfter.items!==securityBefore.items+1)fail('clipboard-malformed-request','unmodified secured Add text did not land',clipboard.f6.control);
     const rawAttack=async headers=>{const response=await fetch(origin+'/api/snippets',{method:'POST',headers:{'Content-Type':'application/json',...headers},body:JSON.stringify({kind:'clip',body:'raw'})});const text=await response.text();return{status:response.status,length:text.length,cache:response.headers.get('cache-control')};};
     const rawBefore=await store(),token=require('./unified_reopen_fixture.cjs').CSRF_TOKEN;
-    ep3.f6.raw={noIdentity:await rawAttack({}),wrongToken:await rawAttack({'X-Persea-CSRF':'x'.repeat(43),Cookie:'__Host-persea-terminal-csrf='+token,Origin:origin}),crossOrigin:await rawAttack({'X-Persea-CSRF':token,Cookie:'__Host-persea-terminal-csrf='+token,Origin:'http://evil.example'})};
-    for(const [name,result]of Object.entries(ep3.f6.raw))if(result.status!==403||result.length>256||result.cache!=='no-store')fail('EP3-F6',`raw ${name} request was not safely refused`,result);
-    if((await store()).items!==rawBefore.items)fail('EP3-F6','raw unauthenticated request changed the store',ep3.f6.raw);
+    clipboard.f6.raw={noIdentity:await rawAttack({}),wrongToken:await rawAttack({'X-Persea-CSRF':'x'.repeat(43),Cookie:'__Host-persea-terminal-csrf='+token,Origin:origin}),crossOrigin:await rawAttack({'X-Persea-CSRF':token,Cookie:'__Host-persea-terminal-csrf='+token,Origin:'http://evil.example'})};
+    for(const [name,result]of Object.entries(clipboard.f6.raw))if(result.status!==403||result.length>256||result.cache!=='no-store')fail('clipboard-malformed-request',`raw ${name} request was not safely refused`,result);
+    if((await store()).items!==rawBefore.items)fail('clipboard-malformed-request','raw unauthenticated request changed the store',clipboard.f6.raw);
 
     // The source fence: every /api/snippets call site lives in ONE module and
     // goes through ONE requester. A second fetch site anywhere else is RED.
@@ -1298,24 +1298,24 @@ async function main() {
       const client = fs.readFileSync(path.join(UI, "src/snippet_client.ts"), "utf8");
       const fetchSites = (client.match(/this\.fetcher\(/g) || []).length;
       const rawFetch = (client.match(/window\.fetch\(/g) || []).length;
-      ep3.f6.fence = { offenders, fetchSites, rawFetch, sendSites: (client.match(/this\.send\(/g) || []).length };
-      if (offenders.length !== 0) fail("EP3-F6", "a module outside snippet_client.ts names /api/snippets", offenders);
-      if (fetchSites !== 1) fail("EP3-F6", "snippet_client.ts does not have exactly one transport call site", ep3.f6.fence);
-      if (rawFetch !== 1) fail("EP3-F6", "snippet_client.ts reaches window.fetch outside its injected default", ep3.f6.fence);
+      clipboard.f6.fence = { offenders, fetchSites, rawFetch, sendSites: (client.match(/this\.send\(/g) || []).length };
+      if (offenders.length !== 0) fail("clipboard-malformed-request", "a module outside snippet_client.ts names /api/snippets", offenders);
+      if (fetchSites !== 1) fail("clipboard-malformed-request", "snippet_client.ts does not have exactly one transport call site", clipboard.f6.fence);
+      if (rawFetch !== 1) fail("clipboard-malformed-request", "snippet_client.ts reaches window.fetch outside its injected default", clipboard.f6.fence);
     }
 
-    // --- EP3-F7 / EP3-F8: the OSC 52 parser and its economics ---------------
+    // --- clipboard-osc-parser / clipboard-osc-budget: the OSC 52 parser and its economics ---------------
     // Sequences are written into the LIVE stream, so xterm's own parser — the
     // single authority — is what runs. A read or a malformed payload must
     // produce zero browser-to-pane bytes and zero persistence.
     {
       await control({ reset: true, snippetSeed: { clips: 20 } });
       await tabA.navigate(unifiedURL(await freshControlHandle()));
-      assert((await tabA.waitUntil(isLive, 10_000)).state, "EP3-F7 precondition: the page did not commit");
+      assert((await tabA.waitUntil(isLive, 10_000)).state, "clipboard-osc-parser precondition: the page did not commit");
       await installFocusCounter();
       const oscSequence = (payload) => `\x1b]52;${payload}\x07`;
       const b64 = (value) => Buffer.from(value, "utf8").toString("base64");
-      ep3.f7.corpus = [];
+      clipboard.f7.corpus = [];
       const oscProbe = async (name, payload) => {
         const beforeAttachment = await lastAttachment();
         const beforeStore = await store();
@@ -1330,7 +1330,7 @@ async function main() {
           oscPutsDelta: afterStore.oscPut - beforeStore.oscPut,
           osc: afterStore.osc, manualClips: afterStore.manualClips,
         };
-        ep3.f7.corpus.push(record);
+        clipboard.f7.corpus.push(record);
         return record;
       };
       for (const [name, payload] of [
@@ -1343,21 +1343,21 @@ async function main() {
         ["control-byte", `c;${b64("bad\x07bell")}`],
       ]) {
         const record = await oscProbe(name, payload);
-        if (record.bytesDelta !== 0 || record.inputsDelta !== 0) fail("EP3-F7", `${name} put bytes into the pane`, record);
-        if (record.oscPutsDelta !== 0) fail("EP3-F7", `${name} reached the store`, record);
+        if (record.bytesDelta !== 0 || record.inputsDelta !== 0) fail("clipboard-osc-parser", `${name} put bytes into the pane`, record);
+        if (record.oscPutsDelta !== 0) fail("clipboard-osc-parser", `${name} reached the store`, record);
       }
       // Valid writes: ASCII, CJK, emoji and exactly 16 KiB each round-trip.
       for (const [name, value] of [["ascii", "echo ascii"], ["cjk", "日本語のテキスト"], ["emoji", "🎉 done"], ["exact-16k", "a".repeat(16 * 1024)]]) {
         const record = await oscProbe(name, `c;${b64(value)}`);
         const after = await store();
         record.stored = after.oscBody === value;
-        if (record.bytesDelta !== 0 || record.inputsDelta !== 0) fail("EP3-F7", `a valid ${name} write put bytes into the pane`, record);
-        if (record.oscPutsDelta !== 1) fail("EP3-F7", `a valid ${name} write did not publish exactly once`, record);
-        if (!record.stored) fail("EP3-F7", `a valid ${name} write did not store its value`, { record, oscBody: after.oscBody.slice(0, 40) });
-        if (after.osc !== 1) fail("EP3-F8", `after a ${name} write the store holds ${after.osc} OSC records`, after);
+        if (record.bytesDelta !== 0 || record.inputsDelta !== 0) fail("clipboard-osc-parser", `a valid ${name} write put bytes into the pane`, record);
+        if (record.oscPutsDelta !== 1) fail("clipboard-osc-parser", `a valid ${name} write did not publish exactly once`, record);
+        if (!record.stored) fail("clipboard-osc-parser", `a valid ${name} write did not store its value`, { record, oscBody: after.oscBody.slice(0, 40) });
+        if (after.osc !== 1) fail("clipboard-osc-budget", `after a ${name} write the store holds ${after.osc} OSC records`, after);
         // Ordinary history holds the ring of 20 plus the current canonical
         // OSC value. The internal fixed-ID publication remains separate.
-        if (after.manualClips !== 21 || after.items !== 22 || new Set(after.ids).size !== 22) fail("EP3-F8", `a ${name} write violated canonical clipboard capacity`, {manualClips:after.manualClips,items:after.items,ids:after.ids});
+        if (after.manualClips !== 21 || after.items !== 22 || new Set(after.ids).size !== 22) fail("clipboard-osc-budget", `a ${name} write violated canonical clipboard capacity`, {manualClips:after.manualClips,items:after.items,ids:after.ids});
       }
       // Thirty rapid writes coalesce into exactly one publication of the LAST
       // valid value. This is the whole economics of the distinguished record.
@@ -1368,11 +1368,11 @@ async function main() {
         }
         await delay(1_600);
         const after = await store();
-        ep3.f7.flood = { putsDelta: after.oscPut - before.oscPut, osc: after.osc, manualClips: after.manualClips, body: after.oscBody, revision: after.oscRevision };
-        if (ep3.f7.flood.putsDelta > 3) fail("EP3-F8", "a thirty-write flood was not coalesced", ep3.f7.flood);
-        if (after.oscBody !== "flood-29") fail("EP3-F7", "the coalesced publication is not the last valid value", ep3.f7.flood);
-        if (after.osc !== 1) fail("EP3-F8", "the flood produced more than one OSC record", ep3.f7.flood);
-        if (after.manualClips !== 21 || after.items !== 22 || new Set(after.ids).size !== 22) fail("EP3-F8", "the flood violated canonical clipboard capacity", ep3.f7.flood);
+        clipboard.f7.flood = { putsDelta: after.oscPut - before.oscPut, osc: after.osc, manualClips: after.manualClips, body: after.oscBody, revision: after.oscRevision };
+        if (clipboard.f7.flood.putsDelta > 3) fail("clipboard-osc-budget", "a thirty-write flood was not coalesced", clipboard.f7.flood);
+        if (after.oscBody !== "flood-29") fail("clipboard-osc-parser", "the coalesced publication is not the last valid value", clipboard.f7.flood);
+        if (after.osc !== 1) fail("clipboard-osc-budget", "the flood produced more than one OSC record", clipboard.f7.flood);
+        if (after.manualClips !== 21 || after.items !== 22 || new Set(after.ids).size !== 22) fail("clipboard-osc-budget", "the flood violated canonical clipboard capacity", clipboard.f7.flood);
       }
       // Destroy and recreate the pane: the old handler publishes nothing and
       // the new pane has exactly one handler (one write, one publication).
@@ -1382,31 +1382,31 @@ async function main() {
         await delay(600);
         const afterNavigate = await store();
         await tabA.navigate(unifiedURL(await freshControlHandle()));
-        assert((await tabA.waitUntil(isLive, 10_000)).state, "EP3-F7 precondition: the reopened page did not commit");
+        assert((await tabA.waitUntil(isLive, 10_000)).state, "clipboard-osc-parser precondition: the reopened page did not commit");
         await installFocusCounter();
         const beforeWrite = await store();
         await control({ writeLive: oscSequence(`c;${b64("after reopen")}`) });
         await delay(1_400);
         const afterWrite = await store();
-        ep3.f7.lifecycle = {
+        clipboard.f7.lifecycle = {
           postDestroyPuts: afterNavigate.oscPut - beforeNavigate.oscPut,
           reopenPuts: afterWrite.oscPut - beforeWrite.oscPut,
           osc: afterWrite.osc, body: afterWrite.oscBody,
         };
-        if (ep3.f7.lifecycle.postDestroyPuts !== 0) fail("EP3-F7", "a destroyed pane's handler published after destruction", ep3.f7.lifecycle);
-        if (ep3.f7.lifecycle.reopenPuts !== 1) fail("EP3-F7", "the reopened pane does not have exactly one OSC handler", ep3.f7.lifecycle);
-        if (afterWrite.osc !== 1) fail("EP3-F8", "the reopened pane created a second OSC record", ep3.f7.lifecycle);
+        if (clipboard.f7.lifecycle.postDestroyPuts !== 0) fail("clipboard-osc-parser", "a destroyed pane's handler published after destruction", clipboard.f7.lifecycle);
+        if (clipboard.f7.lifecycle.reopenPuts !== 1) fail("clipboard-osc-parser", "the reopened pane does not have exactly one OSC handler", clipboard.f7.lifecycle);
+        if (afterWrite.osc !== 1) fail("clipboard-osc-budget", "the reopened pane created a second OSC record", clipboard.f7.lifecycle);
       }
       // The OSC write path never uses POST and never mints a per-pane id: the
       // store's id set proves it.
       const finalStore = await store();
-      ep3.f7.ids = finalStore.ids.filter((id) => id === "osc52" || !/^[0-9a-f]{32}$/.test(id));
-      if (ep3.f7.ids.length !== 1 || ep3.f7.ids[0] !== "osc52") fail("EP3-F8", "the OSC path minted an id other than the one global record", finalStore.ids);
-      // EP3-F8 is measured by the same OSC run as EP3-F7 (one corpus, one
+      clipboard.f7.ids = finalStore.ids.filter((id) => id === "osc52" || !/^[0-9a-f]{32}$/.test(id));
+      if (clipboard.f7.ids.length !== 1 || clipboard.f7.ids[0] !== "osc52") fail("clipboard-osc-budget", "the OSC path minted an id other than the one global record", finalStore.ids);
+      // clipboard-osc-budget is measured by the same OSC run as clipboard-osc-parser (one corpus, one
       // flood, one reopen). Rather than run it twice, the F8-owned facts are
       // surfaced under their own key so the acceptance ledger has an explicit
       // F8 row: store economics, not decoding.
-      ep3.f8 = { flood: ep3.f7.flood, lifecycle: ep3.f7.lifecycle, ids: ep3.f7.ids, records: finalStore.osc, manualClips: finalStore.manualClips };
+      clipboard.f8 = { flood: clipboard.f7.flood, lifecycle: clipboard.f7.lifecycle, ids: clipboard.f7.ids, records: finalStore.osc, manualClips: finalStore.manualClips };
     }
 
 
@@ -1416,59 +1416,59 @@ async function main() {
     await freshClipboardPage({snippetSeed:{snippets:12,clips:12},snippetWrite:[{kind:'osc',body:'automatic row',origin:'laptop'}]});
     const stylesBeforeClipboard=await tabA.evaluate(`document.querySelectorAll('style').length`);
     await openList('clips');const populated=await waitClipboard(value=>value.rows.length>=13);
-    ep3.f10.rows=populated.rows;
+    clipboard.f10.rows=populated.rows;
     const panelTargets=populated.actions.filter(action=>action.rect.w>0&&action.rect.h>0);
-    if(panelTargets.some(action=>action.rect.w<43.5||action.rect.h<43.5))fail('EP3-F10','Clipboard has targets smaller than 44px',panelTargets);
-    const retention=populated.rows.map(row=>row.expiry);if(!retention.some(value=>/30 min left/.test(value))||!retention.some(value=>value==='No expiry'))fail('EP3-F10','Unified list fails to disclose each item retention',retention);
+    if(panelTargets.some(action=>action.rect.w<43.5||action.rect.h<43.5))fail('clipboard-markup-safety','Clipboard has targets smaller than 44px',panelTargets);
+    const retention=populated.rows.map(row=>row.expiry);if(!retention.some(value=>/30 min left/.test(value))||!retention.some(value=>value==='No expiry'))fail('clipboard-markup-safety','Unified list fails to disclose each item retention',retention);
     const beforeScroll=await wire();
     const bodyBox=await tabA.pointFor(`document.querySelector('.persea-clipboard__body')`);
     const scrollBefore=await tabA.evaluate(`document.querySelector('.persea-clipboard__body').scrollTop`);
     await tabA.cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:bodyBox.x,y:bodyBox.y+bodyBox.h/3}]});
     for(let step=1;step<=8;step++){await tabA.cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:bodyBox.x,y:bodyBox.y+bodyBox.h/3-step*12}]});await delay(20);}
     await tabA.cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await delay(200);
-    const scrollAfter=await tabA.evaluate(`document.querySelector('.persea-clipboard__body').scrollTop`);ep3.f10.scroll={before:scrollBefore,after:scrollAfter};
-    if(scrollAfter<=scrollBefore)fail('EP3-F10','native Clipboard drag did not scroll overflowing content',ep3.f10.scroll);
+    const scrollAfter=await tabA.evaluate(`document.querySelector('.persea-clipboard__body').scrollTop`);clipboard.f10.scroll={before:scrollBefore,after:scrollAfter};
+    if(scrollAfter<=scrollBefore)fail('clipboard-markup-safety','native Clipboard drag did not scroll overflowing content',clipboard.f10.scroll);
     const clipboardStyles=await tabA.evaluate(`({count:document.querySelectorAll('style').length,unnonced:[...document.querySelectorAll('style')].filter(node=>!node.nonce).length})`);
-    ep3.f10.styles={before:stylesBeforeClipboard,...clipboardStyles};
-    if(clipboardStyles.count!==stylesBeforeClipboard||clipboardStyles.unnonced!==0)fail('EP3-F10','Clipboard growth bypassed the fixed nonced style owner',ep3.f10.styles);
+    clipboard.f10.styles={before:stylesBeforeClipboard,...clipboardStyles};
+    if(clipboardStyles.count!==stylesBeforeClipboard||clipboardStyles.unnonced!==0)fail('clipboard-markup-safety','Clipboard growth bypassed the fixed nonced style owner',clipboard.f10.styles);
     await noWireChange(beforeScroll,'native Clipboard scrolling');await shot(tabA,'phone-06-clipboard');
 
     // R6: automatic output reaches the list without terminal input. A refused
     // device copy remains visibly retryable; only a trusted copy of the owed
     // value acknowledges it. Unrelated/stale text must not replace that value.
-    await freshClipboardPage();await installClipboardStub();await tabA.evaluate('window.__ep3Device.fail=true');
+    await freshClipboardPage();await installClipboardStub();await tabA.evaluate('window.__clipboardDevice.fail=true');
     await control({writeLive:'\x1b]52;c;'+Buffer.from('automatic A').toString('base64')+'\x07'});await delay(1200);
     await openList('clips');await waitClipboard(value=>value.handoff&&value.rows.some(row=>row.label==='automatic A'));
     const oscWire=await wire();await clipboardAction('Copy terminal text to this device');
-    const refused=await waitClipboard(value=>/refused/i.test(value.status));ep3.r6.refused={status:refused.status,handoff:refused.handoff};
-    if(!refused.handoff)fail('EP3-R6','refused trusted Copy retired the device handoff',ep3.r6.refused);
+    const refused=await waitClipboard(value=>/refused/i.test(value.status));clipboard.r6.refused={status:refused.status,handoff:refused.handoff};
+    if(!refused.handoff)fail('clipboard-device-handoff','refused trusted Copy retired the device handoff',clipboard.r6.refused);
     // The floating message intentionally covers this header-adjacent handoff.
     // Dismiss it through its visible control before retrying the owed copy.
     await clipboardAction('Dismiss clipboard message');
-    await tabA.evaluate('window.__ep3Device.fail=false');await clipboardAction('Copy terminal text to this device');
-    await waitClipboard(value=>!value.handoff);const oscWrites=await tabA.evaluate('window.__ep3Device.writes');
-    if(oscWrites.length!==1||oscWrites[0]!=='automatic A')fail('EP3-R6','trusted OSC Copy did not deliver the exact owed value',oscWrites);
+    await tabA.evaluate('window.__clipboardDevice.fail=false');await clipboardAction('Copy terminal text to this device');
+    await waitClipboard(value=>!value.handoff);const oscWrites=await tabA.evaluate('window.__clipboardDevice.writes');
+    if(oscWrites.length!==1||oscWrites[0]!=='automatic A')fail('clipboard-device-handoff','trusted OSC Copy did not deliver the exact owed value',oscWrites);
     await noWireChange(oscWire,'OSC copy retry');
-    await tabA.evaluate('window.__ep3Device.fail=true');
+    await tabA.evaluate('window.__clipboardDevice.fail=true');
     await control({writeLive:'\x1b]52;c;'+Buffer.from('automatic B').toString('base64')+'\x07'});await delay(1200);
     await waitClipboard(value=>value.handoff&&value.rows.some(row=>row.label==='automatic B'));
     await control({snippetWrite:[{kind:'clip',body:'unrelated manual copy'}]});
-    await exactRow('unrelated manual copy');await tabA.evaluate('window.__ep3Device.fail=false');await rowAction('unrelated manual copy','Copy to device');
+    await exactRow('unrelated manual copy');await tabA.evaluate('window.__clipboardDevice.fail=false');await rowAction('unrelated manual copy','Copy to device');
     const unrelated=await waitClipboard(value=>/Copied/.test(value.status));
-    if(!unrelated.handoff)fail('EP3-R6','copying unrelated manual text acknowledged the terminal handoff',unrelated);
-    const oldB=await exactRow('automatic B');await tabA.evaluate('window.__ep3Device.fail=true');
+    if(!unrelated.handoff)fail('clipboard-device-handoff','copying unrelated manual text acknowledged the terminal handoff',unrelated);
+    const oldB=await exactRow('automatic B');await tabA.evaluate('window.__clipboardDevice.fail=true');
     await control({writeLive:'\x1b]52;c;'+Buffer.from('automatic C').toString('base64')+'\x07'});await delay(1200);
     // The old canonical B row remains available while the owed copy is C.
     await waitClipboard(value=>value.rows.some(row=>row.label==='automatic C'));
-    await tabA.evaluate('window.__ep3Device.fail=false');await rowAction(oldB.id,'Copy to device');
-    const stale=await waitClipboard(value=>/Copied/.test(value.status));const staleWrites=await tabA.evaluate('window.__ep3Device.writes');ep3.r6.stale={id:oldB.id,copied:staleWrites.at(-1),handoff:stale.handoff};
-    if(staleWrites.at(-1)!=='automatic B'||!stale.handoff)fail('EP3-R6','stale preview acknowledged the newer terminal handoff',ep3.r6.stale);
+    await tabA.evaluate('window.__clipboardDevice.fail=false');await rowAction(oldB.id,'Copy to device');
+    const stale=await waitClipboard(value=>/Copied/.test(value.status));const staleWrites=await tabA.evaluate('window.__clipboardDevice.writes');clipboard.r6.stale={id:oldB.id,copied:staleWrites.at(-1),handoff:stale.handoff};
+    if(staleWrites.at(-1)!=='automatic B'||!stale.handoff)fail('clipboard-device-handoff','stale preview acknowledged the newer terminal handoff',clipboard.r6.stale);
     const beforeAcknowledge=await store();await clipboardAction('Dismiss clipboard message');await clipboardAction('Copy terminal text to this device');await waitClipboard(value=>!value.handoff);const afterAcknowledge=await store();
-    ep3.r6.writes=await tabA.evaluate('window.__ep3Device.writes');
-    if(ep3.r6.writes.at(-1)!=='automatic C')fail('EP3-R6','matching handoff copied a stale value',ep3.r6.writes);
-    if(afterAcknowledge.mutations!==beforeAcknowledge.mutations)fail('EP3-R6','acknowledging a shared handoff renewed or recreated its item',{before:beforeAcknowledge.mutations,after:afterAcknowledge.mutations});
+    clipboard.r6.writes=await tabA.evaluate('window.__clipboardDevice.writes');
+    if(clipboard.r6.writes.at(-1)!=='automatic C')fail('clipboard-device-handoff','matching handoff copied a stale value',clipboard.r6.writes);
+    if(afterAcknowledge.mutations!==beforeAcknowledge.mutations)fail('clipboard-device-handoff','acknowledging a shared handoff renewed or recreated its item',{before:beforeAcknowledge.mutations,after:afterAcknowledge.mutations});
     await noWireChange(oscWire,'value-bound handoff acknowledgement');
-    await closeClipboard();await openList();if((await clipboardState()).handoff)fail('EP3-R6','acknowledged handoff reappeared after reopening',{});
+    await closeClipboard();await openList();if((await clipboardState()).handoff)fail('clipboard-device-handoff','acknowledged handoff reappeared after reopening',{});
 
     // R7: device import stays in the list. Explicit edits and Cancel never
     // imply terminal Paste or resize; permission denial opens no editor.
@@ -1477,45 +1477,45 @@ async function main() {
       if(keyboardOpen){await tabA.tapTile('Show keyboard');await tabA.emulate(PHONE_KEYBOARD,true);await delay(100);}
       const before=await wire(),focusBefore=(await tabA.state()).focusCalls;
       await tabA.activate(await tabA.state(),await tabA.pointFor(`document.querySelector('.persea-unified-toolbar-paste')`));
-      const readsBeforeImport=await tabA.evaluate('window.__ep3Device.reads');if(readsBeforeImport!==0)fail('EP3-R7','Paste read the device clipboard before explicit Import',readsBeforeImport);
+      const readsBeforeImport=await tabA.evaluate('window.__clipboardDevice.reads');if(readsBeforeImport!==0)fail('clipboard-explicit-import','Paste read the device clipboard before explicit Import',readsBeforeImport);
       await clipboardAction('Paste from device');await waitClipboard(value=>value.draft===null&&value.rows.some(row=>row.label==='device text'));await noWireChange(before,'device import');
       await preview('device text');await noWireChange(before,'explicit imported text editor');
       await clipboardAction('Cancel');await noWireChange(before,'import Cancel');
-      if((await tabA.state()).focusCalls!==focusBefore)fail('EP3-R7','Clipboard transaction focused xterm implicitly',{keyboardOpen});
+      if((await tabA.state()).focusCalls!==focusBefore)fail('clipboard-explicit-import','Clipboard transaction focused xterm implicitly',{keyboardOpen});
       await openList();const sendBefore=await lastAttachment();await rowAction('device text','Paste text to terminal');await delay(100);const sendAfter=await lastAttachment();
-      if(sendAfter.inputs.slice(sendBefore.inputs.length).join('')!=='device text'||sendAfter.resizes!==sendBefore.resizes)fail('EP3-R7','explicit imported text Send changed bytes or geometry',{keyboardOpen});
-      ep3.r7[keyboardOpen?'open':'closed']={reads:await tabA.evaluate('window.__ep3Device.reads'),sent:sendAfter.inputs.slice(sendBefore.inputs.length).join('')};
+      if(sendAfter.inputs.slice(sendBefore.inputs.length).join('')!=='device text'||sendAfter.resizes!==sendBefore.resizes)fail('clipboard-explicit-import','explicit imported text Send changed bytes or geometry',{keyboardOpen});
+      clipboard.r7[keyboardOpen?'open':'closed']={reads:await tabA.evaluate('window.__clipboardDevice.reads'),sent:sendAfter.inputs.slice(sendBefore.inputs.length).join('')};
     }
-    await freshClipboardPage();await installClipboardStub();await tabA.evaluate('window.__ep3Device.readFail=true');await openList();const denialWire=await wire();await clipboardAction('Paste from device');
-    const denial=await waitClipboard(value=>/cancelled or blocked/.test(value.status));if(denial.draft!==null||!/Add text/.test(denial.status)||!denial.actions.some(action=>action.label==='Add image'))fail('EP3-R7','permission refusal omitted the local manual route',denial);
-    await noWireChange(denialWire,'device clipboard permission refusal');ep3.r7.denial=denial.status;
+    await freshClipboardPage();await installClipboardStub();await tabA.evaluate('window.__clipboardDevice.readFail=true');await openList();const denialWire=await wire();await clipboardAction('Paste from device');
+    const denial=await waitClipboard(value=>/cancelled or blocked/.test(value.status));if(denial.draft!==null||!/Add text/.test(denial.status)||!denial.actions.some(action=>action.label==='Add image'))fail('clipboard-explicit-import','permission refusal omitted the local manual route',denial);
+    await noWireChange(denialWire,'device clipboard permission refusal');clipboard.r7.denial=denial.status;
     await clipboardAction('Add text');await waitClipboard(value=>value.draft==='');await clipboardAction('Cancel');await noWireChange(denialWire,'explicit manual fallback Cancel');
     await closeClipboard();
 
     // J5: keyboard actions stay discoverable in the task menu after using
     // Clipboard. The menu no longer embeds a long saved-text list.
-    ep3.j5=[];
+    clipboard.j5=[];
     for(const keyboardOpen of [false,true]) {
       if(keyboardOpen){await tabA.tapTile('Show keyboard');await tabA.emulate(PHONE_KEYBOARD,true);await delay(100);}
       await openSheet();const taskMenu=await tabA.state();
       const label=keyboardOpen?'Hide keyboard':'Show keyboard',tile=taskMenu.tiles[label];
       const inside=tile?.rect&&taskMenu.sheetRect&&tile.rect.y>=taskMenu.sheetRect.y-.5&&tile.rect.y+tile.rect.h<=taskMenu.sheetRect.y+taskMenu.sheetRect.h+.5;
-      const measured={keyboardOpen,label,headings:taskMenu.sheetHeadings,inside,scroll:taskMenu.sheetScroll};ep3.j5.push(measured);
-      if(!inside)fail('EP3-J5','applicable keyboard action requires discovering a menu scroll',measured);
+      const measured={keyboardOpen,label,headings:taskMenu.sheetHeadings,inside,scroll:taskMenu.sheetScroll};clipboard.j5.push(measured);
+      if(!inside)fail('CLIPBOARD-J5','applicable keyboard action requires discovering a menu scroll',measured);
       await tabA.tap((await tabA.state()).openerRect);await delay(100);
     }
-    await tabA.emulate(DESKTOP,false);await freshClipboardPage({},false);const fine=await tabA.state();ep3.f9.finePointer={openerVisible:fine.openerVisible,puckPresent:fine.puckPresent};
-    if(!fine.openerVisible||fine.puckPresent)fail('EP3-F9','fine pointer lacks the single Clipboard route',ep3.f9.finePointer);
+    await tabA.emulate(DESKTOP,false);await freshClipboardPage({},false);const fine=await tabA.state();clipboard.f9.finePointer={openerVisible:fine.openerVisible,puckPresent:fine.puckPresent};
+    if(!fine.openerVisible||fine.puckPresent)fail('clipboard-touch-focus','fine pointer lacks the single Clipboard route',clipboard.f9.finePointer);
     await tabA.emulate(PHONE,true);
 
     }
-    // --- E-P5: one durable preference record, live themes, font baseline ----
+    // --- preferences: one durable preference record, live themes, font baseline ----
     // This uses the same real bundle/attachment as the rest of this gate. A
     // theme change must repaint that xterm in place: no second xterm, style
     // node, websocket, INPUT or RESIZE_REQUEST is permitted.
     {
-      const ep5 = { themes: [], font: {}, degraded: {}, containment: {}, interleavings: {} };
-      evidence.ep5 = ep5;
+      const preferences = { themes: [], font: {}, degraded: {}, containment: {}, interleavings: {} };
+      evidence.preferences = preferences;
       const waitPreference = async (predicate, timeout = 8_000) => {
         const deadline = Date.now() + timeout;
         let current;
@@ -1526,7 +1526,7 @@ async function main() {
         }
         return current;
       };
-      // UX15 §15.6: the terminal has no theme control. A theme reaches it as a
+      // the terminal has no theme control. A theme reaches it as a
       // record another surface stored (the dashboard's Appearance card, another
       // tab): the fixture stores the record at the next revision and the page
       // is told the way the product tells it — the `storage` event of the
@@ -1539,30 +1539,30 @@ async function main() {
           window.dispatchEvent(new StorageEvent("storage", { key: ${JSON.stringify(HINT_KEY)}, newValue: "{}" }));
           return true;
         })()`);
-        assert(signalled, "EP5 precondition: the storage signal could not be dispatched");
+        assert(signalled, "preferences precondition: the storage signal could not be dispatched");
       };
       const chooseTheme = async (id) => {
         await publishRecord({ theme: id });
         const themed = await tabA.waitUntil((state) => state.theme === id, 4_000);
-        assert(themed.state, `EP5-F1 precondition: the stored theme ${id} did not reach the terminal`);
+        assert(themed.state, `theme-persistence precondition: the stored theme ${id} did not reach the terminal`);
         return waitPreference((value) => value.preferences.theme === id);
       };
 
-      // EP5-R1 exact advisor falsifier: the delayed Zoom publication owns 15,
+      // preference-intent-ownership exact advisor regression test: the delayed Zoom publication owns 15,
       // even when an immediate theme publication first returns the stored 14.
       await tabA.emulate(DESKTOP, false);
       await tabA.navigate("about:blank");
-      // An EXPLICIT 14 in the record. Under J-UX-9 an empty record is auto, and
-      // this falsifier is about a delayed font publication owning its exact
+      // An EXPLICIT 14 in the record. Under terminal topbar an empty record is auto, and
+      // this regression test is about a delayed font publication owning its exact
       // value across an unrelated commit — it needs a known starting number,
-      // not the viewport's. The tri-state itself is measured by UX8-F1 below.
+      // not the viewport's. The tri-state itself is measured by font-auto-preference below.
       await control({ reset: true, preferences: { font_size: 14 } });
       await tabA.navigate(unifiedURL(await freshControlHandle()));
-      assert((await tabA.waitUntil(isLive, 10_000)).state, "EP5-R1 precondition: the preference page did not commit");
+      assert((await tabA.waitUntil(isLive, 10_000)).state, "preference-intent-ownership precondition: the preference page did not commit");
       const interleavingBefore = await tabA.state();
-      assert(interleavingBefore.fontBaseline === 14, "EP5-R1 precondition: the live font baseline was not 14");
-      assert(interleavingBefore.fontSize === 14, "EP5-R1 precondition: an explicit preference did not override the fit");
-      // UX15 §15.6: the theme now arrives as a stored record (another surface's
+      assert(interleavingBefore.fontBaseline === 14, "preference-intent-ownership precondition: the live font baseline was not 14");
+      assert(interleavingBefore.fontSize === 14, "preference-intent-ownership precondition: an explicit preference did not override the fit");
+      // the theme now arrives as a stored record (another surface's
       // save) while this page's own delayed Zoom write is pending.
       const zoomClicked = await tabA.evaluate(`(() => {
         const zoom = Array.from(document.querySelectorAll("button")).find((node) => node.textContent === "Zoom in");
@@ -1570,13 +1570,13 @@ async function main() {
         zoom.click();
         return true;
       })()`);
-      assert(zoomClicked, "EP5-R1 precondition: Zoom control absent");
+      assert(zoomClicked, "preference-intent-ownership precondition: Zoom control absent");
       await publishRecord({ theme: "dracula" });
       const interleavingStored = await waitPreference((value) => value.counters.preferencesPut >= 1
         && value.preferences.font_size === 15 && value.preferences.theme === "dracula", 4_000);
       await delay(150);
       const interleavingLive = await tabA.state();
-      ep5.interleavings.zoomThenTheme = {
+      preferences.interleavings.zoomThenTheme = {
         intendedFont: 15,
         storedFont: interleavingStored.preferences.font_size,
         liveBaseline: interleavingLive.fontBaseline,
@@ -1585,10 +1585,10 @@ async function main() {
         preferencePuts: interleavingStored.counters.preferencesPut,
       };
       if (interleavingStored.preferences.font_size !== 15 || interleavingLive.fontBaseline !== 15) {
-        fail("EP5-R1", "Zoom intent lost across theme commit", ep5.interleavings.zoomThenTheme);
+        fail("preference-intent-ownership", "Zoom intent lost across theme commit", preferences.interleavings.zoomThenTheme);
       }
       if (interleavingStored.preferences.theme !== "dracula" || interleavingLive.theme !== "dracula") {
-        fail("EP5-R1", "theme intent lost across delayed Zoom commit", ep5.interleavings.zoomThenTheme);
+        fail("preference-intent-ownership", "theme intent lost across delayed Zoom commit", preferences.interleavings.zoomThenTheme);
       }
 
       const clickZoomIn = async (times = 1) => {
@@ -1598,10 +1598,10 @@ async function main() {
           for (let index = 0; index < times; index += 1) button.click();
           return true;
         })(${times})`);
-        assert(clicked, "EP5-R1 matrix precondition: Zoom in control absent");
+        assert(clicked, "preference-intent-ownership matrix precondition: Zoom in control absent");
       };
       // A theme "dispatched" during the matrix is a record stored elsewhere and
-      // signalled to this page (UX15 §15.6); the page's only preference write
+      // signalled to this page (terminal appearance §15.6); the page's only preference write
       // is Zoom. `refresh()` is serialised behind writes, so a signal that
       // lands while a PUT is held is read only after that PUT settles.
       const dispatchTheme = async (id) => publishRecord({ theme: id });
@@ -1611,34 +1611,34 @@ async function main() {
         const trace = [{ font: Number(shell.dataset.fontBaseline), theme: shell.dataset.theme }];
         const observer = new MutationObserver(() => trace.push({ font: Number(shell.dataset.fontBaseline), theme: shell.dataset.theme }));
         observer.observe(shell, { attributes: true, attributeFilter: ["data-font-baseline", "data-theme"] });
-        window.__ep5PreferenceTrace = { trace, observer };
+        window.__preferencesPreferenceTrace = { trace, observer };
         return true;
       })()`);
       const finishPreferenceTrace = () => tabA.evaluate(`(() => {
-        const value = window.__ep5PreferenceTrace;
+        const value = window.__preferencesPreferenceTrace;
         if (!value) return [];
         value.observer.disconnect();
-        delete window.__ep5PreferenceTrace;
+        delete window.__preferencesPreferenceTrace;
         return value.trace.filter((entry, index, all) => index === 0 || entry.font !== all[index - 1].font || entry.theme !== all[index - 1].theme);
       })()`);
       const runPreferenceInterleaving = async (name, exercise, expected) => {
         await tabA.navigate("about:blank");
-        // An EXPLICIT 14 in the seeded record. Under J-UX-9 an empty record is
+        // An EXPLICIT 14 in the seeded record. Under terminal topbar an empty record is
         // auto and this desktop fits to ~21, so an unseeded matrix would move
         // its own starting number every time the viewport changed. The matrix
         // measures intent identity and publication order across interleaved
-        // writes, not the tri-state; UX8-F1 below measures the tri-state.
+        // writes, not the tri-state; font-auto-preference below measures the tri-state.
         await control({ reset: true, preferences: { font_size: 14 } });
         await tabA.navigate(unifiedURL(await freshControlHandle()));
-        assert((await tabA.waitUntil(isLive, 10_000)).state, `EP5-R1/${name} precondition: page did not commit`);
-        assert(await startPreferenceTrace(), `EP5-R1/${name} precondition: trace did not install`);
+        assert((await tabA.waitUntil(isLive, 10_000)).state, `preference-intent-ownership/${name} precondition: page did not commit`);
+        assert(await startPreferenceTrace(), `preference-intent-ownership/${name} precondition: trace did not install`);
         const beforeState = await tabA.state();
         const beforeFixture = await snapshot();
         const beforeAttachment = await lastAttachment();
         await exercise();
         await delay(1_300);
         const afterFixture = await snapshot();
-        // UX11: the preference status lives in the View and appearance popover,
+        // the preference status lives in the View and appearance popover,
         // so the outcome is read where the operator meets it. The popover is
         // presentation-only and is closed again before the next scenario.
         const beforeView = await tabA.state();
@@ -1660,7 +1660,7 @@ async function main() {
           live: { font: afterState.fontBaseline, theme: afterState.theme },
           operations,
           trace,
-          // UX15-R2: the page's write outcome is spoken by the bounded toast.
+          // the page's write outcome is spoken by the bounded toast.
           status: [afterState.toast].filter(Boolean),
           transport: {
             attachments: afterFixture.attachments.length - beforeFixture.attachments.length,
@@ -1670,21 +1670,21 @@ async function main() {
             styleNodes: afterState.styleNodes - beforeState.styleNodes,
           },
         };
-        ep5.interleavings[name] = receipt;
+        preferences.interleavings[name] = receipt;
         const exact = (left, right) => JSON.stringify(left) === JSON.stringify(right);
         if (!exact(receipt.stored, expected.stored) || !exact(receipt.live, expected.live)) {
-          fail("EP5-R1", `${name} did not settle to the exact stored/live preferences`, receipt);
+          fail("preference-intent-ownership", `${name} did not settle to the exact stored/live preferences`, receipt);
         }
-        if (!exact(operations, expected.operations)) fail("EP5-R1", `${name} changed preference operation order`, receipt);
-        if (!exact(trace, expected.trace)) fail("EP5-R1", `${name} transiently rolled back a live preference`, receipt);
-        if (expected.status === "clear" && receipt.status.length !== 0) fail("EP5-R1", `${name} left a stale preference status`, receipt);
+        if (!exact(operations, expected.operations)) fail("preference-intent-ownership", `${name} changed preference operation order`, receipt);
+        if (!exact(trace, expected.trace)) fail("preference-intent-ownership", `${name} transiently rolled back a live preference`, receipt);
+        if (expected.status === "clear" && receipt.status.length !== 0) fail("preference-intent-ownership", `${name} left a stale preference status`, receipt);
         if (expected.status !== "clear" && (receipt.status.length === 0
             || !receipt.status.every((message) => new RegExp(expected.status, "i").test(message)))) {
-          fail("EP5-R1", `${name} did not render its ${expected.status} outcome`, receipt);
+          fail("preference-intent-ownership", `${name} did not render its ${expected.status} outcome`, receipt);
         }
         if (receipt.transport.attachments !== 0 || !receipt.transport.sameAttachment || receipt.transport.inputs !== 0
             || receipt.transport.resizes !== 0 || receipt.transport.styleNodes !== 0) {
-          fail("EP5-R1", `${name} touched transport, input, geometry, reconnect, or style nodes`, receipt);
+          fail("preference-intent-ownership", `${name} touched transport, input, geometry, reconnect, or style nodes`, receipt);
         }
       };
 
@@ -1714,7 +1714,7 @@ async function main() {
         await control({ holdPreferencePuts: 1 });
         await clickZoomIn();
         const held = await waitPreference((value) => value.pendingPreferencePuts === 1, 2_000);
-        assert(held.pendingPreferencePuts === 1, "EP5-R1/two-zooms-theme precondition: first font PUT was not held");
+        assert(held.pendingPreferencePuts === 1, "preference-intent-ownership/two-zooms-theme precondition: first font PUT was not held");
         await clickZoomIn();
         await dispatchTheme("dracula");
         await control({ releasePreferencePut: true });
@@ -1741,7 +1741,7 @@ async function main() {
         await control({ holdPreferencePuts: 1 });
         await clickZoomIn();
         const held = await waitPreference((value) => value.pendingPreferencePuts === 1, 2_000);
-        assert(held.pendingPreferencePuts === 1, "EP5-R1/zoom-conflict precondition: the font PUT was not held");
+        assert(held.pendingPreferencePuts === 1, "preference-intent-ownership/zoom-conflict precondition: the font PUT was not held");
         await dispatchTheme("one-dark");
         await control({ releasePreferencePut: true });
       }, {
@@ -1767,12 +1767,12 @@ async function main() {
       await tabA.emulate(DESKTOP, false);
       await control({ reset: true });
       await tabA.navigate(unifiedURL(await freshControlHandle()));
-      assert((await tabA.waitUntil(isLive, 10_000)).state, "EP5-F1 precondition: the preference page did not commit");
+      assert((await tabA.waitUntil(isLive, 10_000)).state, "theme-persistence precondition: the preference page did not commit");
       await delay(200);
       const before = await tabA.state();
       const beforeFixture = await snapshot();
       const beforeAttachment = await lastAttachment();
-      // UX15 §15.6: the catalogue is read from the product's theme module (the
+      // the catalogue is read from the product's theme module (the
       // dashboard card offers exactly this list); no terminal control lists it.
       const themeIDs = (() => {
         const source = fs.readFileSync(path.join(__dirname, "../src/unified_themes.ts"), "utf8");
@@ -1780,24 +1780,24 @@ async function main() {
         return match ? match[1].split(",").map((entry) => entry.trim().replace(/^"|"$/g, "")).filter(Boolean) : [];
       })();
       if (themeIDs.join(",") !== "default,rose-pine,rose-pine-dawn,solarized-dark,gruvbox-dark,one-dark,dracula,catppuccin-mocha") {
-        fail("EP5-F1", "the theme module does not expose the closed eight-theme catalog", themeIDs);
+        fail("theme-persistence", "the theme module does not expose the closed eight-theme catalog", themeIDs);
       }
       for (const id of themeIDs) {
         if (id !== "default") await chooseTheme(id);
         await delay(80);
         const state = await tabA.state();
-        ep5.themes.push({ id, applied: state.theme, body: state.bodyTheme, paint: state.paint, contrast: state.preferenceContrast, styleNodes: state.styleNodes, screen: state.screen });
+        preferences.themes.push({ id, applied: state.theme, body: state.bodyTheme, paint: state.paint, contrast: state.preferenceContrast, styleNodes: state.styleNodes, screen: state.screen });
         if (state.theme !== id || state.bodyTheme !== id || state.themeValues.some((value) => value !== id)) {
-          fail("EP5-F1", "the stored theme did not publish to every view", ep5.themes.at(-1));
+          fail("theme-persistence", "the stored theme did not publish to every view", preferences.themes.at(-1));
         }
-        if (state.screen !== before.screen) fail("EP5-F1", "a theme change reconstructed or changed the terminal transcript", { id, before: before.screen, after: state.screen });
+        if (state.screen !== before.screen) fail("theme-persistence", "a theme change reconstructed or changed the terminal transcript", { id, before: before.screen, after: state.screen });
         const illegible = state.preferenceContrast.filter((control) => !(control.ratio >= 4.5));
-        if (illegible.length) fail("EP5-F9", "a theme rendered an illegible preference control", { id, controls: illegible });
+        if (illegible.length) fail("preference-contrast", "a theme rendered an illegible preference control", { id, controls: illegible });
       }
       const afterThemes = await snapshot();
       const afterThemeAttachment = await lastAttachment();
-      const backgrounds = new Set(ep5.themes.map((entry) => entry.paint.hostBackground));
-      ep5.themeTransport = {
+      const backgrounds = new Set(preferences.themes.map((entry) => entry.paint.hostBackground));
+      preferences.themeTransport = {
         attachmentsBefore: beforeFixture.attachments.length,
         attachmentsAfter: afterThemes.attachments.length,
         resizesBefore: beforeAttachment.resizes || 0,
@@ -1808,13 +1808,13 @@ async function main() {
         styleNodesAfter: (await tabA.state()).styleNodes,
         distinctBackgrounds: backgrounds.size,
       };
-      if (ep5.themeTransport.attachmentsAfter !== ep5.themeTransport.attachmentsBefore
-          || ep5.themeTransport.resizesAfter !== ep5.themeTransport.resizesBefore
-          || ep5.themeTransport.inputsAfter !== ep5.themeTransport.inputsBefore
-          || ep5.themeTransport.styleNodesAfter !== ep5.themeTransport.styleNodesBefore) {
-        fail("EP5-F1", "a live theme change touched transport, geometry, input, or CSP style nodes", ep5.themeTransport);
+      if (preferences.themeTransport.attachmentsAfter !== preferences.themeTransport.attachmentsBefore
+          || preferences.themeTransport.resizesAfter !== preferences.themeTransport.resizesBefore
+          || preferences.themeTransport.inputsAfter !== preferences.themeTransport.inputsBefore
+          || preferences.themeTransport.styleNodesAfter !== preferences.themeTransport.styleNodesBefore) {
+        fail("theme-persistence", "a live theme change touched transport, geometry, input, or CSP style nodes", preferences.themeTransport);
       }
-      if (backgrounds.size < 7) fail("EP5-F1", "the curated themes do not produce distinct measured terminal paints", ep5.themeTransport);
+      if (backgrounds.size < 7) fail("theme-persistence", "the curated themes do not produce distinct measured terminal paints", preferences.themeTransport);
 
       // Zoom is a durable baseline only after the 500 ms debounce. Fit font is
       // presentation-only and must not consume another preference revision.
@@ -1825,7 +1825,7 @@ async function main() {
         button.click();
         return true;
       })()`);
-      assert(zoomed, "EP5-F2 precondition: desktop Zoom in control absent");
+      assert(zoomed, "font-persistence precondition: desktop Zoom in control absent");
       const afterZoom = await waitPreference((value) => value.preferences.revision > fontBefore.preferences.revision);
       await delay(650);
       const zoomState = await tabA.state();
@@ -1836,10 +1836,10 @@ async function main() {
         button.click();
         return true;
       })()`);
-      assert(fitFont, "EP5-F2 precondition: desktop Fit font control absent");
+      assert(fitFont, "font-persistence precondition: desktop Fit font control absent");
       await delay(900);
       const afterFitFont = await snapshot();
-      ep5.font = {
+      preferences.font = {
         before: fontBefore.preferences,
         saved: afterZoom.preferences,
         visibleAfterZoom: zoomState.fontSize,
@@ -1848,44 +1848,44 @@ async function main() {
         putsAfterFit: afterFitFont.counters.preferencesPut,
         resizes: (await lastAttachment()).resizes || 0,
       };
-      if (afterZoom.preferences.font_size < 9 || afterZoom.preferences.font_size > 24) fail("EP5-F2", "the saved font baseline left the 9–24 range", ep5.font);
-      // J-UX-9 restates this pin rather than removing it. Fit font used to
+      if (afterZoom.preferences.font_size < 9 || afterZoom.preferences.font_size > 24) fail("font-persistence", "the saved font baseline left the 9–24 range", preferences.font);
+      // terminal topbar restates this pin rather than removing it. Fit font used to
       // write nothing, which is why a zoom could never be undone; it now writes
       // exactly one PUT, and that PUT is the auto state — never the fitted
       // number, which would pin a viewport-derived size onto every device.
-      if (afterFitFont.counters.preferencesPut !== putsAfterZoom + 1) fail("EP5-F2", "Fit font did not write exactly one preference PUT", ep5.font);
-      if (afterFitFont.preferences.font_size !== null) fail("EP5-F2", "Fit font stored a number instead of auto", ep5.font);
-      if (((await lastAttachment()).resizes || 0) !== ep5.themeTransport.resizesBefore) fail("EP5-F2", "font presentation controls emitted a tmux resize", ep5.font);
+      if (afterFitFont.counters.preferencesPut !== putsAfterZoom + 1) fail("font-persistence", "Fit font did not write exactly one preference PUT", preferences.font);
+      if (afterFitFont.preferences.font_size !== null) fail("font-persistence", "Fit font stored a number instead of auto", preferences.font);
+      if (((await lastAttachment()).resizes || 0) !== preferences.themeTransport.resizesBefore) fail("font-persistence", "font presentation controls emitted a tmux resize", preferences.font);
 
       // A fresh document reconciles from the server record before constructing
       // xterm. The local hint is presentation-only and cannot mint authority.
       const persistedTheme = afterFitFont.preferences.theme;
       const persistedFont = afterFitFont.preferences.font_size;
       await tabA.navigate(unifiedURL(await freshControlHandle()));
-      assert((await tabA.waitUntil(isLive, 10_000)).state, "EP5-F2 precondition: persisted preference reload did not commit");
+      assert((await tabA.waitUntil(isLive, 10_000)).state, "font-persistence precondition: persisted preference reload did not commit");
       const reloaded = await tabA.state();
-      ep5.reload = { theme: reloaded.theme, font: reloaded.fontSize, expectedTheme: persistedTheme, expectedFont: persistedFont };
-      if (reloaded.theme !== persistedTheme) fail("EP5-F2", "reload did not reconcile the durable theme", ep5.reload);
-      if (persistedFont !== null || reloaded.fontPreference !== "auto") fail("EP5-F2", "reload did not reconcile the durable auto font", ep5.reload);
+      preferences.reload = { theme: reloaded.theme, font: reloaded.fontSize, expectedTheme: persistedTheme, expectedFont: persistedFont };
+      if (reloaded.theme !== persistedTheme) fail("font-persistence", "reload did not reconcile the durable theme", preferences.reload);
+      if (persistedFont !== null || reloaded.fontPreference !== "auto") fail("font-persistence", "reload did not reconcile the durable auto font", preferences.reload);
 
-      ep5.fontProfiles = [];
+      preferences.fontProfiles = [];
       for (const baseline of [9, 14, 24]) {
         await control({ preferences: { font_size: baseline } });
         await tabA.navigate(unifiedURL(await freshControlHandle()));
-        assert((await tabA.waitUntil(isLive, 10_000)).state, `EP5-F2 precondition: font ${baseline} page did not commit`);
+        assert((await tabA.waitUntil(isLive, 10_000)).state, `font-persistence precondition: font ${baseline} page did not commit`);
         await delay(250);
         const state = await tabA.state();
         const attachment = await lastAttachment();
-        ep5.fontProfiles.push({ baseline, appliedBaseline: state.fontBaseline, effective: state.fontSize, cellHeight: state.cellHeight, rows: state.terminalRows, resizes: attachment.resizes || 0 });
-        if (state.fontBaseline !== baseline) fail("EP5-F2", "the server baseline was not present when the page constructed", ep5.fontProfiles.at(-1));
-        // J-UX-9: an explicit preference is what the terminal RENDERS, not a
+        preferences.fontProfiles.push({ baseline, appliedBaseline: state.fontBaseline, effective: state.fontSize, cellHeight: state.cellHeight, rows: state.terminalRows, resizes: attachment.resizes || 0 });
+        if (state.fontBaseline !== baseline) fail("font-persistence", "the server baseline was not present when the page constructed", preferences.fontProfiles.at(-1));
+        // an explicit preference is what the terminal RENDERS, not a
         // starting point the auto-fit may overrule. This desktop viewport fits
         // to a size of its own, so a page that ran the fit would not land here.
-        if (state.fontSize !== baseline) fail("EP5-F2", "an explicit font preference did not override the auto-fit on load", ep5.fontProfiles.at(-1));
-        if ((attachment.resizes || 0) !== 0) fail("EP5-F2", "a server font baseline emitted a tmux resize", ep5.fontProfiles.at(-1));
+        if (state.fontSize !== baseline) fail("font-persistence", "an explicit font preference did not override the auto-fit on load", preferences.fontProfiles.at(-1));
+        if ((attachment.resizes || 0) !== 0) fail("font-persistence", "a server font baseline emitted a tmux resize", preferences.fontProfiles.at(-1));
       }
 
-      // --- UX8-F1: the font tri-state (ruling J-UX-9) ------------------------
+      // --- font-auto-preference: the font tri-state  ------------------------
       //
       // Three legs of one behaviour, on a desktop viewport whose auto-fit lands
       // strictly inside the 9-24 clamp, so no step and no fit is absorbed by an
@@ -1901,46 +1901,46 @@ async function main() {
             button.click();
             return true;
           })()`);
-          assert(clicked, "UX8-F1 precondition: the Fit font control is absent");
+          assert(clicked, "font-auto-preference precondition: the Fit font control is absent");
         };
         const f1 = {};
-        ep5.fontTriState = f1;
+        preferences.fontTriState = f1;
         await tabA.emulate(DESKTOP, false);
         await tabA.navigate("about:blank");
         await control({ reset: true });
         await tabA.navigate(unifiedURL(await freshControlHandle()));
-        assert((await tabA.waitUntil(isLive, 10_000)).state, "UX8-F1 precondition: the auto page did not commit");
+        assert((await tabA.waitUntil(isLive, 10_000)).state, "font-auto-preference precondition: the auto page did not commit");
         await delay(300);
         const auto = await tabA.state();
         Object.assign(f1, { autoRendered: auto.fontSize, autoPreference: auto.fontPreference, autoStored: (await snapshot()).preferences.font_size });
-        if (auto.fontPreference !== "auto") fail("UX8-F1", "an empty record did not render as auto-fit", f1);
-        if (f1.autoStored !== null) fail("UX8-F1", "an empty record did not read as auto", f1);
-        if (!(auto.fontSize > 9 && auto.fontSize < 24)) fail("UX8-F1", "this viewport does not fit strictly inside the 9-24 clamp", f1);
+        if (auto.fontPreference !== "auto") fail("font-auto-preference", "an empty record did not render as auto-fit", f1);
+        if (f1.autoStored !== null) fail("font-auto-preference", "an empty record did not read as auto", f1);
+        if (!(auto.fontSize > 9 && auto.fontSize < 24)) fail("font-auto-preference", "this viewport does not fit strictly inside the 9-24 clamp", f1);
 
         const stepped = Math.round(auto.fontSize) + 1;
         f1.expectedAfterZoom = stepped;
         const beforeZoom = await snapshot();
         await clickZoomIn(1);
         const savedZoom = await waitPreference((value) => value.counters.preferencesPut === beforeZoom.counters.preferencesPut + 1, 5_000);
-        assert(savedZoom, "UX8-F1: the zoom did not reach the record");
+        assert(savedZoom, "font-auto-preference: the zoom did not reach the record");
         const zoomed = await tabA.state();
         Object.assign(f1, { zoomRendered: zoomed.fontSize, zoomPreference: zoomed.fontPreference, zoomStored: savedZoom.preferences.font_size });
-        if (zoomed.fontSize !== stepped) fail("UX8-F1", "Zoom in did not step one pixel from the rendered auto-fit", f1);
-        if (zoomed.fontPreference !== String(stepped)) fail("UX8-F1", "Zoom in did not become the explicit preference", f1);
-        if (savedZoom.preferences.font_size !== stepped) fail("UX8-F1", "the zoom was not stored as an explicit size", f1);
+        if (zoomed.fontSize !== stepped) fail("font-auto-preference", "Zoom in did not step one pixel from the rendered auto-fit", f1);
+        if (zoomed.fontPreference !== String(stepped)) fail("font-auto-preference", "Zoom in did not become the explicit preference", f1);
+        if (savedZoom.preferences.font_size !== stepped) fail("font-auto-preference", "the zoom was not stored as an explicit size", f1);
 
         await tabA.navigate(unifiedURL(await freshControlHandle()));
-        assert((await tabA.waitUntil(isLive, 10_000)).state, "UX8-F1 precondition: the explicit reload did not commit");
+        assert((await tabA.waitUntil(isLive, 10_000)).state, "font-auto-preference precondition: the explicit reload did not commit");
         await delay(300);
         const reloadedExplicit = await tabA.state();
         Object.assign(f1, { reloadRendered: reloadedExplicit.fontSize, reloadPreference: reloadedExplicit.fontPreference });
-        if (reloadedExplicit.fontSize !== stepped) fail("UX8-F1", "an explicit size did not survive the reload", f1);
-        if (reloadedExplicit.fontPreference !== String(stepped)) fail("UX8-F1", "the reloaded record was not explicit", f1);
+        if (reloadedExplicit.fontSize !== stepped) fail("font-auto-preference", "an explicit size did not survive the reload", f1);
+        if (reloadedExplicit.fontPreference !== String(stepped)) fail("font-auto-preference", "the reloaded record was not explicit", f1);
 
         const beforeFit = await snapshot();
         await clickFitFont();
         const savedFit = await waitPreference((value) => value.counters.preferencesPut === beforeFit.counters.preferencesPut + 1, 5_000);
-        assert(savedFit, "UX8-F1: Fit font did not reach the record");
+        assert(savedFit, "font-auto-preference: Fit font did not reach the record");
         await delay(400);
         const refit = await tabA.state();
         const afterFit = await snapshot();
@@ -1948,23 +1948,23 @@ async function main() {
           fitStored: savedFit.preferences.font_size, fitRendered: refit.fontSize, fitPreference: refit.fontPreference,
           fitPuts: afterFit.counters.preferencesPut - beforeFit.counters.preferencesPut,
         });
-        if (savedFit.preferences.font_size !== null) fail("UX8-F1", "Fit font stored a number instead of auto", f1);
-        if (f1.fitPuts !== 1) fail("UX8-F1", "Fit font did not write exactly one preference PUT", f1);
-        if (refit.fontPreference !== "auto") fail("UX8-F1", "Fit font did not restore auto-fit", f1);
-        if (Math.abs(refit.fontSize - auto.fontSize) > 0.05) fail("UX8-F1", "Fit font did not return to the fitted size", f1);
+        if (savedFit.preferences.font_size !== null) fail("font-auto-preference", "Fit font stored a number instead of auto", f1);
+        if (f1.fitPuts !== 1) fail("font-auto-preference", "Fit font did not write exactly one preference PUT", f1);
+        if (refit.fontPreference !== "auto") fail("font-auto-preference", "Fit font did not restore auto-fit", f1);
+        if (Math.abs(refit.fontSize - auto.fontSize) > 0.05) fail("font-auto-preference", "Fit font did not return to the fitted size", f1);
 
         await tabA.navigate(unifiedURL(await freshControlHandle()));
-        assert((await tabA.waitUntil(isLive, 10_000)).state, "UX8-F1 precondition: the auto reload did not commit");
+        assert((await tabA.waitUntil(isLive, 10_000)).state, "font-auto-preference precondition: the auto reload did not commit");
         await delay(300);
         const reloadedAuto = await tabA.state();
         Object.assign(f1, {
           autoReloadRendered: reloadedAuto.fontSize, autoReloadPreference: reloadedAuto.fontPreference,
           theme: reloadedAuto.theme, resizes: (await lastAttachment()).resizes || 0,
         });
-        if (reloadedAuto.fontPreference !== "auto") fail("UX8-F1", "auto did not survive the reload", f1);
-        if (Math.abs(reloadedAuto.fontSize - auto.fontSize) > 0.05) fail("UX8-F1", "the reloaded auto page did not fit to the same size", f1);
-        if (reloadedAuto.theme !== auto.theme) fail("UX8-F1", "the font tri-state disturbed the theme", f1);
-        if (f1.resizes !== 0) fail("UX8-F1", "the font tri-state emitted a tmux resize", f1);
+        if (reloadedAuto.fontPreference !== "auto") fail("font-auto-preference", "auto did not survive the reload", f1);
+        if (Math.abs(reloadedAuto.fontSize - auto.fontSize) > 0.05) fail("font-auto-preference", "the reloaded auto page did not fit to the same size", f1);
+        if (reloadedAuto.theme !== auto.theme) fail("font-auto-preference", "the font tri-state disturbed the theme", f1);
+        if (f1.resizes !== 0) fail("font-auto-preference", "the font tri-state emitted a tmux resize", f1);
       }
 
       // A valid default_session is consumed nowhere on a terminal document.
@@ -1972,7 +1972,7 @@ async function main() {
       const neutralHandle = await freshControlHandle();
       const neutralBefore = await snapshot();
       await tabA.navigate(unifiedURL(neutralHandle));
-      assert((await tabA.waitUntil(isLive, 10_000)).state, "EP5-F7 precondition: neutral reload did not commit");
+      assert((await tabA.waitUntil(isLive, 10_000)).state, "preference-reload precondition: neutral reload did not commit");
       const neutralAfter = await snapshot();
       const neutralDelta = {
         handles: neutralAfter.counters.handleRequests - neutralBefore.counters.handleRequests,
@@ -1982,57 +1982,57 @@ async function main() {
       const containmentBefore = await snapshot();
       await control({ preferences: { default_session: { realm: "elsewhere", server: "decoy", name: "not-this-pane" } } });
       await tabA.navigate(unifiedURL(containmentHandle));
-      assert((await tabA.waitUntil(isLive, 10_000)).state, "EP5-F7 precondition: containment reload did not commit");
+      assert((await tabA.waitUntil(isLive, 10_000)).state, "preference-reload precondition: containment reload did not commit");
       const containmentAfter = await snapshot();
-      ep5.containment = {
+      preferences.containment = {
         href: (await tabA.state()).href,
         handlesDelta: containmentAfter.counters.handleRequests - containmentBefore.counters.handleRequests,
         inventoryDelta: containmentAfter.counters.inventory - containmentBefore.counters.inventory,
         neutralDelta,
         session: containmentAfter.preferences.default_session,
       };
-      if (ep5.containment.handlesDelta !== neutralDelta.handles
-          || ep5.containment.inventoryDelta !== neutralDelta.inventory
-          || /elsewhere|decoy|not-this-pane/.test(ep5.containment.href)) {
-        fail("EP5-F7", "default_session escaped into terminal navigation or authority", ep5.containment);
+      if (preferences.containment.handlesDelta !== neutralDelta.handles
+          || preferences.containment.inventoryDelta !== neutralDelta.inventory
+          || /elsewhere|decoy|not-this-pane/.test(preferences.containment.href)) {
+        fail("preference-reload", "default_session escaped into terminal navigation or authority", preferences.containment);
       }
 
       // Store failure is bounded, keeps the terminal live on safe defaults,
       // and exposes a calm page-only status without leaking a path.
       await control({ preferencesAvailable: false });
       await tabA.navigate(unifiedURL(await freshControlHandle()));
-      assert((await tabA.waitUntil(isLive, 10_000)).state, "EP5-F6 precondition: degraded preferences blocked terminal use");
-      // UX11: Appearance and its status line live in the geometry disclosure,
+      assert((await tabA.waitUntil(isLive, 10_000)).state, "preference-failure-isolation precondition: degraded preferences blocked terminal use");
+      // Appearance and its status line live in the geometry disclosure,
       // so the degraded state is read where an operator actually meets it.
       const degradedClosed = await tabA.state();
-      assert(degradedClosed.fitRect, "EP5-F6 precondition: the View and appearance disclosure is absent");
+      assert(degradedClosed.fitRect, "preference-failure-isolation precondition: the View and appearance disclosure is absent");
       await tabA.activate(degradedClosed, degradedClosed.fitRect);
       await delay(200);
       const degraded = await tabA.state();
-      assert(degraded.viewVisible, "EP5-F6 precondition: the View and appearance popover did not open");
-      ep5.degraded = { theme: degraded.theme, statuses: degraded.preferenceStatus, href: degraded.href };
-      // UX15 §15.6: the terminal carries no preference status line; a degraded
+      assert(degraded.viewVisible, "preference-failure-isolation precondition: the View and appearance popover did not open");
+      preferences.degraded = { theme: degraded.theme, statuses: degraded.preferenceStatus, href: degraded.href };
+      // the terminal carries no preference status line; a degraded
       // record is reported on the dashboard's Appearance card (landing gate and
-      // preference-intent falsifier). Here the terminal stays live on the
+      // preference-intent regression test). Here the terminal stays live on the
       // default theme, renders no status text, and leaks no path anywhere.
-      if (degraded.preferenceStatus.length !== 0) fail("EP5-F6", "the terminal still renders a preference status line", ep5.degraded);
-      if (degraded.theme !== "default") fail("EP5-F6", "degraded preferences did not keep the default theme", ep5.degraded);
-      if (/\/(?:run|etc|opt|data4)\//.test(degraded.href)) fail("EP5-F6", "the degraded page leaked a host path", ep5.degraded);
+      if (degraded.preferenceStatus.length !== 0) fail("preference-failure-isolation", "the terminal still renders a preference status line", preferences.degraded);
+      if (degraded.theme !== "default") fail("preference-failure-isolation", "degraded preferences did not keep the default theme", preferences.degraded);
+      if (/\/(?:run|etc|opt|data4)\//.test(degraded.href)) fail("preference-failure-isolation", "the degraded page leaked a host path", preferences.degraded);
 
       await tabA.emulate(PHONE, true);
       await tabA.navigate(unifiedURL(await freshControlHandle()));
-      assert((await tabA.waitUntil(isLive, 10_000)).state, "EP5-F8 precondition: coarse preference page did not commit");
+      assert((await tabA.waitUntil(isLive, 10_000)).state, "touch-preferences precondition: coarse preference page did not commit");
       await delay(250);
       const coarseClosed = await tabA.state();
-      assert(coarseClosed.fitRect, "EP5-F8 precondition: the coarse View and appearance disclosure is absent");
+      assert(coarseClosed.fitRect, "touch-preferences precondition: the coarse View and appearance disclosure is absent");
       await tabA.tap({ x: coarseClosed.fitRect.cx, y: coarseClosed.fitRect.cy });
       await delay(150);
       const coarse = await tabA.state();
-      ep5.coarse = { targetRects: coarse.preferenceTargets, activeBefore: coarseClosed.activeKind, activeAfter: coarse.activeKind, keyBarHidden: coarse.keyBarHidden, visualBefore: coarseClosed.visualViewportHeight, visualAfter: coarse.visualViewportHeight };
-      // UX15 §15.6: no theme control anywhere in the terminal chrome.
-      if (coarse.preferenceTargets.length !== 0) fail("EP5-F8", "the coarse View popover still exposes a theme control", ep5.coarse);
-      if (coarse.activeKind !== coarseClosed.activeKind || coarse.visualViewportHeight !== coarseClosed.visualViewportHeight) fail("EP5-F8", "opening Appearance changed focus or the visual viewport", ep5.coarse);
-      // J-EP5-1 is measured on real computed styles, on the terminal chrome AND
+      preferences.coarse = { targetRects: coarse.preferenceTargets, activeBefore: coarseClosed.activeKind, activeAfter: coarse.activeKind, keyBarHidden: coarse.keyBarHidden, visualBefore: coarseClosed.visualViewportHeight, visualAfter: coarse.visualViewportHeight };
+      // no theme control anywhere in the terminal chrome.
+      if (coarse.preferenceTargets.length !== 0) fail("touch-preferences", "the coarse View popover still exposes a theme control", preferences.coarse);
+      if (coarse.activeKind !== coarseClosed.activeKind || coarse.visualViewportHeight !== coarseClosed.visualViewportHeight) fail("touch-preferences", "opening Appearance changed focus or the visual viewport", preferences.coarse);
+      // theme-contrast is measured on real computed styles, on the terminal chrome AND
       // on the View and appearance popover, for every theme in the catalogue.
       // and the composer toggle is put into its expanded state first, so one
       // pass covers both surfaces plus the one control whose state is carried
@@ -2048,61 +2048,61 @@ async function main() {
         contrastState = await tabA.state();
       }
       assert(contrastState.composerOpen && contrastState.viewVisible,
-        "EP5-F9 precondition: the open composer toggle and View popover are not both live");
-      ep5.themeContrast = [];
+        "preference-contrast precondition: the open composer toggle and View popover are not both live");
+      preferences.themeContrast = [];
       for (const id of themeIDs) {
-        // UX15 §15.6: the theme is stored elsewhere and reaches this page as a
+        // the theme is stored elsewhere and reaches this page as a
         // record; the popover stays open across the publication.
         await publishRecord({ theme: id });
         const themed = await tabA.waitUntil((state) => state.theme === id, 4_000);
         const state = themed.state ?? themed.last;
         const measured = state.preferenceContrast;
         const toggle = measured.find((control) => control.borderOnSurface !== undefined);
-        ep5.themeContrast.push({
+        preferences.themeContrast.push({
           id, applied: state.theme, viewVisible: state.viewVisible, composerOpen: state.composerOpen,
           controls: measured.length,
           minimum: measured.reduce((worst, control) => (control.ratio < worst.ratio ? control : worst), measured[0]),
           toggle,
         });
-        if (!themed.state) fail("EP5-F9", "the stored theme did not apply to the open chrome", ep5.themeContrast.at(-1));
-        if (measured.length < 12) fail("EP5-F9", "the contrast sweep measured fewer controls than the sheet renders", ep5.themeContrast.at(-1));
+        if (!themed.state) fail("preference-contrast", "the stored theme did not apply to the open chrome", preferences.themeContrast.at(-1));
+        if (measured.length < 12) fail("preference-contrast", "the contrast sweep measured fewer controls than the sheet renders", preferences.themeContrast.at(-1));
         const illegible = measured.filter((control) => !(control.ratio >= 4.5));
-        if (illegible.length) fail("EP5-F9", "a theme rendered illegible text on the chrome or the sheet", { id, controls: illegible });
+        if (illegible.length) fail("preference-contrast", "a theme rendered illegible text on the chrome or the sheet", { id, controls: illegible });
         const dot = state.dotContrast;
-        ep5.themeContrast.at(-1).dot = dot;
-        if (!dot) fail("EP5-F9", "the session tag's status dot was not measured", ep5.themeContrast.at(-1));
+        preferences.themeContrast.at(-1).dot = dot;
+        if (!dot) fail("preference-contrast", "the session tag's status dot was not measured", preferences.themeContrast.at(-1));
         else {
           if (dot.states.length !== 3) {
-            fail("EP5-F9", "the status-dot sweep did not measure all three states", { id, dot });
+            fail("preference-contrast", "the status-dot sweep did not measure all three states", { id, dot });
           }
           const dim = dot.states.filter((entry) => !(entry.ratio >= 3));
           if (dim.length) {
-            fail("EP5-F9", "a status-dot state's fill is below 3:1 on this chrome", { id, dim, background: dot.background });
+            fail("preference-contrast", "a status-dot state's fill is below 3:1 on this chrome", { id, dim, background: dot.background });
           }
           // Three states that painted the same fill would pass the ratio law
           // and still tell an operator nothing.
           if (new Set(dot.states.map((entry) => entry.fill)).size !== 3) {
-            fail("EP5-F9", "the three status-dot states do not paint three different fills", { id, dot });
+            fail("preference-contrast", "the three status-dot states do not paint three different fills", { id, dot });
           }
         }
-        if (!toggle) fail("EP5-F9", "the open composer toggle's state border was not measured", ep5.themeContrast.at(-1));
+        if (!toggle) fail("preference-contrast", "the open composer toggle's state border was not measured", preferences.themeContrast.at(-1));
         else if (!(toggle.borderOnFill >= 3) || !(toggle.borderOnSurface >= 3)) {
-          fail("EP5-F9", "the open composer toggle's state border is below 3:1", { id, toggle });
+          fail("preference-contrast", "the open composer toggle's state border is below 3:1", { id, toggle });
         }
         // The closed-theme rule repaints every toolbar button from the chrome
         // pair. Both open semantic disclosures must retain an accent distinct
         // from an ordinary Copy button.
         const affordances = state.stateAffordances;
-        ep5.themeContrast.at(-1).stateAffordances = affordances;
+        preferences.themeContrast.at(-1).stateAffordances = affordances;
         if (affordances.viewExpanded !== "true"
             || (affordances.view.background === affordances.plainButton.background
               && affordances.view.border === affordances.plainButton.border)) {
-          fail("EP5-F9", "the theme rule flattened the open View disclosure into an ordinary button", { id, affordances });
+          fail("preference-contrast", "the theme rule flattened the open View disclosure into an ordinary button", { id, affordances });
         }
-        if (affordances.toggleExpanded !== "true") fail("EP5-F9", "the composer toggle was not in its expanded state", { id, affordances });
+        if (affordances.toggleExpanded !== "true") fail("preference-contrast", "the composer toggle was not in its expanded state", { id, affordances });
         if (affordances.toggle.background === affordances.plainButton.background
             || affordances.toggle.border === affordances.plainButton.border) {
-          fail("EP5-F9", "the theme rule flattened the open composer toggle into an ordinary button", { id, affordances });
+          fail("preference-contrast", "the theme rule flattened the open composer toggle into an ordinary button", { id, affordances });
         }
       }
       await shot(tabA, "phone-19-theme-preferences");
@@ -2161,14 +2161,14 @@ async function main() {
       // QF6's forced reopens: the expired source binding answers 410 by
       // design, which is what sends the transport to the identity re-mint.
       || (/410/.test(entry.text) && /\/api\/attachment-handles/.test(entry.url ?? ""))
-      // E-P3 drives the store's refusal paths on purpose (403/400/409/413/507/503):
+      // clipboard drives the store's refusal paths on purpose (403/400/409/413/507/503):
       // Chromium reports every non-2xx resource load, which is the probe working.
       || (/\/api\/snippets/.test(entry.url ?? "") && /\b(400|403|404|405|409|412|413|503|507)\b/.test(entry.text))
-      // EP3-R5 also drives a TRANSPORT loss: the fixture drops the socket with
+      // clipboard-store-recovery also drives a TRANSPORT loss: the fixture drops the socket with
       // no response, which is what "the store went away mid-write" looks like.
       // Narrow on purpose — only this error, only on the snippets route.
       || (/\/api\/snippets$/.test(entry.url ?? "") && /ERR_EMPTY_RESPONSE/.test(entry.text))
-      // E-P5 drives the bounded degraded-store state deliberately.
+      // preferences drives the bounded degraded-store state deliberately.
       || (/\/api\/preferences$/.test(entry.url ?? "") && /\b(412|503)\b/.test(entry.text));
     const consoleFindings = tabs.flatMap((tab) => tab.console).filter((entry) => !tolerated(entry));
     if (consoleFindings.length !== 0) fail("console", "unexpected console entries", consoleFindings);

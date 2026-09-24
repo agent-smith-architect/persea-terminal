@@ -412,10 +412,10 @@ async function main() {
       "/app.js": path.join(UI, "dist/app.js"),
       "/app.css": path.join(UI, "dist/app.css"),
       "/xterm.css": path.join(UI, "dist/xterm.css"),
-      // E-P6 installable shell. index.html links these, so a fixture that does not
+      // session memory installable shell. index.html links these, so a fixture that does not
       // serve them makes the page 404 assets the front door always has
       // (`requiredBundleFiles` refuses to start a release without them). Same paths,
-      // same media types (ruling J-EP6-1).
+      // same media types.
       "/manifest.webmanifest": path.join(UI, "dist/manifest.webmanifest"),
       "/icon-192.png": path.join(UI, "dist/icon-192.png"),
       "/icon-512.png": path.join(UI, "dist/icon-512.png"),

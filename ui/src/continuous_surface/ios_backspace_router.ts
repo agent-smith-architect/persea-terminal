@@ -20,12 +20,12 @@ export type IOSBackspaceInstrumentation = Readonly<{
   pendingInsertKind: PendingInsertKind | null;
   replacementRewrites: number;
   retainedRevisionRewrites: number;
-  /** UX-16 §16.7: tail-span dictation previews rewritten in place. */
+  /** tail-span dictation previews rewritten in place. */
   tailRevisionRewrites: number;
-  /** UX-16 §16.7: field-diff reconciliations of inputs xterm never forwards. */
+  /** field-diff reconciliations of inputs xterm never forwards. */
   fieldDiffRewrites: number;
   /**
-   * UX16-R1: rewrites refused because the field text carried a line
+   * rewrites refused because the field text carried a line
    * delimiter (a Return the operator never pressed); field and run restored.
    */
   lineDelimiterRefusals: number;
@@ -96,7 +96,7 @@ type CustomKeyDisposition = "logical-dispatch" | "intercept-backspace" | "interc
 const DELETE_INPUT_TYPES = new Set(["deleteContentBackward", "deleteWordBackward"]);
 const DELETE_RECORD_LIMIT = 256;
 /**
- * UX-16 §16.7: applied inputs xterm's `_inputEvent` never forwards (it
+ * applied inputs xterm's `_inputEvent` never forwards (it
  * requires `data` and `inputType === "insertText"`). WebKit dictation
  * commits arrive as an empty inputType with null data and replace the field
  * wholesale; iOS autocorrect acceptance arrives as insertReplacementText.
@@ -105,7 +105,7 @@ const DELETE_RECORD_LIMIT = 256;
  */
 const FIELD_DIFF_INPUT_TYPES = new Set(["", "insertReplacementText"]);
 /**
- * UX16-R1: no rewrite path may synthesize a line delimiter. Only a
+ * no rewrite path may synthesize a line delimiter. Only a
  * trusted Enter through xterm's key path sends Return; a field mutation
  * that carries CR/LF (a dictated "new line", a replacement with a break) is
  * refused whole — the raw path is stopped, the field is put back exactly as
@@ -229,7 +229,7 @@ export class IOSBackspaceRouter {
   private lineDelimiterRefusals = 0;
   private dictationPreludePending = false;
   /**
-   * UX-16 §16.7: the run length expected after a modeled Backspace (an
+   * the run length expected after a modeled Backspace (an
    * intercepted deleteContentBackward with the caret at the end of a field
    * the tracked run fully describes). Set at the delete's beforeinput and
    * consumed by its applied input; any other event in between drops it.
@@ -755,7 +755,7 @@ export class IOSBackspaceRouter {
   }
 
   /**
-   * UX16-R1: the browser put a line delimiter into the field. Nothing is
+   * the browser put a line delimiter into the field. Nothing is
    * sent (the raw path is stopped too), the field is restored to exactly its
    * previous text with the caret at its end (the sole sentinel when that
    * text is empty), and the tracked run — which still describes that text —
@@ -771,7 +771,7 @@ export class IOSBackspaceRouter {
   }
 
   /**
-   * UX-16 §16.7 field-diff: a beforeinput whose applied input xterm will not
+   * field-diff: a beforeinput whose applied input xterm will not
    * forward. Modeled only while the field is empty/sentinel or the tracked run
    * equals the field's code-point length, so the previous/current diff is
    * exactly the PTY's change; otherwise the run ends, fail-closed.
@@ -809,7 +809,7 @@ export class IOSBackspaceRouter {
   }
 
   /**
-   * UX-16 §16.7: the run length after a Backspace this router intercepted,
+   * the run length after a Backspace this router intercepted,
    * when the delete is the one-code-point shape at the end of a fully tracked
    * field; `undefined` for every other delete.
    */
@@ -929,7 +929,7 @@ export class IOSBackspaceRouter {
       && this.emittedCount !== null
       && this.emittedCount === codePointLength(value)
       && !this.compositionSeenThisFocusSession) {
-      // UX-16 §16.7 tail-replace: WebKit dictation previews each interim
+      // tail-replace: WebKit dictation previews each interim
       // result as insertText over the span it previously inserted, anchored
       // at the field's end. With the run equal to the field, the span's
       // code points are exactly the PTY's tail.

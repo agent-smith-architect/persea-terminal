@@ -1,5 +1,5 @@
 // The one workspace route constructor and its parser (packet §5, freeze edit
-// [F1], falsifier FW-R).
+// [F1], regression test FW-R).
 //
 // Every workspace URL the product emits is built here and nowhere else:
 //   /workspace?engine=unified-dev#name=<bounded>

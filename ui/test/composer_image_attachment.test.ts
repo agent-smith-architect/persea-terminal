@@ -48,7 +48,7 @@ assert.equal(
   "review this /a.png /b.png",
   "text+artifacts spacing drifted",
 );
-// The trailing-newline hazard (falsifier 3): normalization PRECEDES
+// The trailing-newline hazard: normalization PRECEDES
 // concatenation, so a dictation draft ending in newlines can never bury one
 // mid-payload where xterm's \n-to-\r rewrite would submit the prompt.
 const hazardous = serializeComposerSegments([text("look at this\n\n"), artifact("/path/a.png")]);

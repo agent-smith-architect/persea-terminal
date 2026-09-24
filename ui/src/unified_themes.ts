@@ -51,7 +51,7 @@ function define(input: ThemeInput): UnifiedTheme {
 }
 
 // The colour values are the projects' published base palettes, reduced to the
-// fixed xterm/page token set E-P5 owns. They are data rather than CSS generated
+// fixed xterm/page token set preferences owns. They are data rather than CSS generated
 // at runtime: adding a palette necessarily passes the data-driven contrast and
 // complete-ANSI tests, and CSP never needs an inline style exception.
 const THEMES: Readonly<Record<UnifiedThemeID, UnifiedTheme>> = Object.freeze({

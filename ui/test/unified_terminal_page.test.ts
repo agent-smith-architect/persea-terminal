@@ -286,7 +286,7 @@ async function main(): Promise<void> {
   const shellShot = await page.screenshot({ path: path.join(artifactRoot, "01-shell-roundtrip.png") });
   if (!refitOnly) assert(sha256(beforeShell) !== sha256(shellShot), "shell output was not visibly rendered");
 
-  // UX13 width-refit closure: the handle was minted from the refreshed
+  // terminal touch width-refit closure: the handle was minted from the refreshed
   // dashboard inventory after creation and the attachment has committed its
   // broker PREPARE source. Exercise the real front HTTP endpoint twice so a
   // successful generation boundary must re-mint before the second request.
@@ -308,7 +308,7 @@ async function main(): Promise<void> {
       await until("pre-refit browser row commit", async () => (await disclosure.textContent()) === `120×${rows}`);
     }
     const formBeforeApply = { columns: await field.inputValue(), rows: await page.getByRole("textbox", { name: "Rows", exact: true }).inputValue(), committed: await disclosure.textContent() };
-    // UX14 §14.1: one Apply reads both fields; a column change is a width
+    // one Apply reads both fields; a column change is a width
     // refit (rows unchanged here, so the request carries none).
     const responsePromise = page.waitForResponse((response: any) => response.request().method() === "POST" && new URL(response.url()).pathname === "/api/session-refits");
     await page.getByRole("button", { name: "Apply", exact: true }).click();

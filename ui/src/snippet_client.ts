@@ -1,4 +1,4 @@
-// The document-global snippets / clips service (design packet §3, phase E-P3).
+// The document-global snippets / clips service.
 //
 // ONE service per document. It owns everything that is not pane-local: the
 // `/api/snippets` transport, the single-flight poll loop, the authoritative
@@ -7,7 +7,7 @@
 // record. It owns NO terminal: it never selects a pane, never inserts, never
 // focuses, and never touches geometry. Pane-local effects belong to the
 // UnifiedTerminalPage that the operator actually tapped, reached through the
-// UnifiedPaneController that owns it (E-P3 integration law).
+// UnifiedPaneController that owns it (clipboard integration law).
 //
 // Construction is inert: no request is made until a consumer retains the live
 // state (retainLive) or performs a mutation, so building a service — or a
@@ -89,7 +89,7 @@ export type SnippetSnapshot = Readonly<{
    * system clipboard (iOS refuses writeText without a gesture). The clip row
    * is then the delivery and its Copy button is the tap.
    *
-   * EP3-R6: this names the EXACT value still owed to the clipboard, not a
+   * this names the EXACT value still owed to the clipboard, not a
    * bare flag. A bare flag let any successful copy retire it — a manual clip,
    * or a stale OSC row from before a newer failure — so the operator could be
    * told the automatic value had arrived when a different string had.
@@ -168,7 +168,7 @@ export type OSC52Verdict =
 
 /**
  * The longest padded base64 that can decode to SNIPPET_BODY_MAX_BYTES:
- * 4 * ceil(16384 / 3) = 21848 characters. EP3-R3: the pinned xterm parser
+ * 4 * ceil(16384 / 3) = 21848 characters. clipboard-decoded-byte-cap: the pinned xterm parser
  * accepts up to 10,000,000 payload characters, every one of them chosen by
  * whatever is running in the pane, so the bound has to be applied to the
  * ENCODED length before atob decodes and allocates. Checking only the decoded
@@ -196,12 +196,12 @@ type Base64Decoded = Uint8Array | "oversize" | "malformed";
 function decodeBase64Bytes(value: string): Base64Decoded {
   if (value.length > OSC_BASE64_MAX_CHARS) return "oversize";
   if (value.length === 0 || value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) return "malformed";
-  // EP3-R3: 16,384 and 16,385 bytes encode to the SAME 21,848 characters, so
+  // 16,384 and 16,385 bytes encode to the SAME 21,848 characters, so
   // the coarse character cap above cannot separate them — only the padding
   // can. Decide the exact decoded size here, so a body one byte over the cap
   // is refused without atob ever allocating for it. This is the single
   // authority on the byte cap: there is deliberately no second check after
-  // atob, because a check that can never fire cannot falsify anything.
+  // atob, because a check that can never fire cannot detect a regression anything.
   if (decodedBase64Length(value) > SNIPPET_BODY_MAX_BYTES) return "oversize";
   let binary: string;
   try {
@@ -229,7 +229,7 @@ export function parseOSC52(data: string): OSC52Verdict {
   const payload = data.slice(separator + 1);
   if (payload === "?") return Object.freeze({ kind: "ignore" as const, reason: "read" as const });
   if (selection !== "c" && selection !== "p") return Object.freeze({ kind: "ignore" as const, reason: "selection" as const });
-  // EP3-R3: the coarse character cap is applied FIRST, so a multi-megabyte
+  // the coarse character cap is applied FIRST, so a multi-megabyte
   // payload is refused before even the grammar regex runs over it. The exact
   // byte cap then falls out of the padding, still before atob.
   if (payload.length > OSC_BASE64_MAX_CHARS) return Object.freeze({ kind: "ignore" as const, reason: "oversize" as const });
@@ -329,7 +329,7 @@ export type SnippetServicePort = Readonly<{
   /** Device-local OSC 52 publication: latest value wins, coalesced. */
   publishOSC(body: string): void;
   /**
-   * EP3-R6: a trusted Copy that reached the system clipboard clears the
+   * a trusted Copy that reached the system clipboard clears the
    * shared "tap Copy for this device" state — but only if it copied the exact
    * body still outstanding. Only an actual successful writeText may retire
    * it, never a render, and never a copy of some other value.
@@ -345,7 +345,7 @@ export type SnippetStats = Readonly<{
   oscPuts: number;
   oscCoalesced: number;
   concurrentPolls: number;
-  /** EP3-R1: reads that started after a mutation response, to reconcile it. */
+  /** reads that started after a mutation response, to reconcile it. */
   reconcilingReads: number;
 }>;
 
@@ -373,7 +373,7 @@ export class SnippetService implements SnippetServicePort {
   private oscTimer: Timer | undefined;
   private disposed = false;
   private readonly counters = { polls: 0, requests: 0, oscPuts: 0, oscCoalesced: 0, concurrentPolls: 0, reconcilingReads: 0 };
-  /** EP3-R2: the single owner of OSC publication. At most one PUT is ever live. */
+  /** the single owner of OSC publication. At most one PUT is ever live. */
   private oscInFlight = false;
   private pollsInFlight = 0;
   private readonly fetcher: (input: string, init: RequestInit) => Promise<Response>;
@@ -461,7 +461,7 @@ export class SnippetService implements SnippetServicePort {
   }
 
   /**
-   * EP3-R1: a read that is guaranteed to have STARTED after this call, used to
+   * a read that is guaranteed to have STARTED after this call, used to
    * reconcile a settled mutation.
    *
    * `refresh()` joins whatever GET is already running, which is right for a
@@ -582,7 +582,7 @@ export class SnippetService implements SnippetServicePort {
   }
 
   /**
-   * EP3-R2: publication has ONE owner. The window is armed only when no PUT is
+   * publication has ONE owner. The window is armed only when no PUT is
    * live; while one is unresolved every later value collapses into
    * `pendingOSC`, and the newest survivor is published after that PUT settles.
    * Two PUTs are therefore never live together, so an older one can never
@@ -626,7 +626,7 @@ export class SnippetService implements SnippetServicePort {
     // The clip record is the delivery. The system clipboard is a bonus that
     // iOS refuses without a gesture: a refusal is a clips-only success, never
     // a terminal failure.
-    // EP3-R6: whichever way this ends, the outstanding delivery is named by
+    // whichever way this ends, the outstanding delivery is named by
     // the body that was actually published — so a LATER publication replaces
     // the hand-off rather than adding a second one, and an earlier value can
     // never be mistaken for it.
@@ -644,7 +644,7 @@ export class SnippetService implements SnippetServicePort {
   }
 
   /**
-   * EP3-R6: retire the "tap Copy for this device" state, and ONLY for the
+   * retire the "tap Copy for this device" state, and ONLY for the
    * value it is about. Called after a real `writeText` resolved from a
    * trusted gesture, with the body that write actually put on the clipboard.
    * A manual clip, or an older OSC row copied after a newer failure, carries
@@ -666,15 +666,15 @@ export class SnippetService implements SnippetServicePort {
       if (outcome === "ok" && accepted) accepted(await response.json().catch(() => undefined));
     } catch {
       // A transport failure is an outage like any other: it must fall through
-      // to the publication below, not return past it (EP3-R5).
+      // to the publication below, not return past it (clipboard-store-recovery).
       outcome = "unreachable";
     }
-    // EP3-R1: the reconciling read is AWAITED, and it starts after this
+    // the reconciling read is AWAITED, and it starts after this
     // response. The caller therefore learns the outcome only once the list it
     // will render is post-mutation authority (or the snapshot has gone
     // `unavailable`, which the sheet reports honestly).
     if (outcome === "ok" || outcome === "conflict" || outcome === "full") await this.reconcileAfterMutation();
-    // EP3-R5: a mutation is also a probe of the store. A 503 or a transport
+    // a mutation is also a probe of the store. A 503 or a transport
     // failure means the store is down NOW, and nothing else would say so
     // until the next poll — so later copies would keep firing mutations at a
     // store already known dead, and the first partial success would be

@@ -1,6 +1,6 @@
 "use strict";
 
-// M11LF-F3 WebKit falsifier. The real WorkspacePage and six real pane
+// workspace rotation WebKit regression test. The real WorkspacePage and six real pane
 // controllers run over TLS because WebKit rejects the product's Secure CSRF
 // cookie on a plaintext origin.
 
@@ -167,7 +167,7 @@ async function main() {
     `same-name successor decorated stale controller: ${JSON.stringify(replacement)}`);
     assert(countersEqual(beforeReplacement.counters, after.counters), "same-name successor detail spent authority");
     assert(browserMessages.length === 0, `browser console was not clean: ${JSON.stringify(browserMessages)}`);
-    console.log(JSON.stringify({ status: "PASS", engine: "webkit", falsifier: "M11LF-F3", counters: after.counters }));
+    console.log(JSON.stringify({ status: "PASS", engine: "webkit", check: "workspace rotation", counters: after.counters }));
   } finally {
     if (context) await context.close().catch(() => undefined);
     if (browser) await browser.close().catch(() => undefined);

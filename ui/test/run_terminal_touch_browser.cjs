@@ -7,12 +7,12 @@ const { startFixture } = require("./unified_reopen_fixture.cjs");
 const { requestJSON: requestHTTPJSON } = require("./unified_browser_lib.cjs");
 
 const UI = path.resolve(__dirname, "..");
-const ENGINE = process.env.PERSEA_UX13_ENGINE || "chromium";
+const ENGINE = process.env.PERSEA_TERMINAL_TOUCH_ENGINE || "chromium";
 const MODULE = process.env.PERSEA_PLAYWRIGHT_MODULE || require.resolve("playwright");
-const EVIDENCE = path.resolve(process.env.PERSEA_UX13_EVIDENCE_DIR || path.join("/tmp", `persea-ux13-${ENGINE}`));
-const SHAPE = process.env.PERSEA_UX13_SHAPE || "";
-const CASE = process.env.PERSEA_UX13_CASE || "all";
-const MUTANT = process.env.PERSEA_UX13_MUTANT || "none";
+const EVIDENCE = path.resolve(process.env.PERSEA_TERMINAL_TOUCH_EVIDENCE_DIR || path.join("/tmp", `persea-terminal_touch-${ENGINE}`));
+const SHAPE = process.env.PERSEA_TERMINAL_TOUCH_SHAPE || "";
+const CASE = process.env.PERSEA_TERMINAL_TOUCH_CASE || "all";
+const MUTANT = process.env.PERSEA_TERMINAL_TOUCH_MUTANT || "none";
 const CASES = new Set(["all", "dictation", "alternate", "selection", "longpress", "geometry", "switcher", "typography", "focus"]);
 const MUTANTS = new Set(["none", "edge-selection", "focus-session", "backspace-repeat", "geometry-action", "switcher-hierarchy", "late-console"]);
 const enabled = (name) => CASE === "all" || CASE === name;
@@ -25,9 +25,9 @@ const SHAPES = [
   { name: "desktop-1440", viewport: { width: 1440, height: 900 }, touch: false },
 ].filter((shape) => SHAPE === "" || shape.name === SHAPE);
 
-if (!CASES.has(CASE)) throw new Error(`unknown UX13 case: ${CASE}`);
-if (!MUTANTS.has(MUTANT)) throw new Error(`unknown UX13 mutant: ${MUTANT}`);
-if (SHAPES.length === 0) throw new Error(`unknown UX13 shape: ${SHAPE}`);
+if (!CASES.has(CASE)) throw new Error(`unknown terminal touch case: ${CASE}`);
+if (!MUTANTS.has(MUTANT)) throw new Error(`unknown terminal touch mutant: ${MUTANT}`);
+if (SHAPES.length === 0) throw new Error(`unknown terminal touch shape: ${SHAPE}`);
 
 function assert(value, message) { if (!value) throw new Error(message); }
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -123,7 +123,7 @@ async function copyFrozenSentinel(page, sentinel, expectedColumns, finalRow = fa
     return { row: rowIndex, column, rows: rows.length, textColumns: Array.from(text).length };
   }, { sentinel, expectedColumns, finalRow });
   assert(location.textColumns === expectedColumns, `frozen sentinel row width=${location.textColumns}, want=${expectedColumns}`);
-  // UX14 §14.2: the Paste slot is the Copy control while a range exists.
+  // the Paste slot is the Copy control while a range exists.
   await page.waitForFunction(() => document.querySelector(".persea-unified-toolbar-paste")?.getAttribute("data-paste-state") === "copy");
   await page.locator(".persea-unified-toolbar-paste").click();
   await page.waitForFunction(() => document.querySelector(".persea-unified-toolbar-paste")?.getAttribute("data-paste-state") === "copied");
@@ -147,7 +147,7 @@ async function main() {
   const evidence = { engine: ENGINE, mutant: MUTANT, cases: [], screenshots: [], caseCounts: Object.fromEntries([...CASES].filter((name) => name !== "all").map((name) => [name, 0])) };
   try {
     for (const shape of SHAPES) {
-      await control({ reset: true, switchSessions: true, sessionBState: "open", ux13SwitcherMetadata: MUTANT !== "switcher-hierarchy" });
+      await control({ reset: true, switchSessions: true, sessionBState: "open", terminal_touchSwitcherMetadata: MUTANT !== "switcher-hierarchy" });
       const inventory = await requestJSON(`${fixture.origin}/api/inventory`);
       const session = inventory.realms[0].servers[0].sessions[0];
       const context = await browser.newContext({ viewport: shape.viewport, isMobile: shape.touch, hasTouch: shape.touch, deviceScaleFactor: shape.touch ? 2 : 1, ignoreHTTPSErrors: true });
@@ -312,7 +312,7 @@ async function main() {
 
         await page.locator(".persea-unified-view-disclosure").click();
         await page.locator('.persea-unified-view-popover input[aria-label="Columns"]').fill("240");
-        // UX14 §14.1: the single Apply refits when the typed columns differ.
+        // the single Apply refits when the typed columns differ.
         await page.locator(".persea-unified-view-popover .persea-unified-size__form").getByRole("button", { name: "Apply", exact: true }).click();
         await page.waitForFunction(() => (document.querySelector(".persea-unified-view-disclosure")?.textContent || "").startsWith("240×"), undefined, { timeout: 5_000 });
         for (let attempt = 0; attempt < 50; attempt += 1) {
@@ -479,7 +479,7 @@ async function main() {
             const box = node.getBoundingClientRect();
             return { tag: node.tagName, text: (node.textContent || node.getAttribute("aria-label") || "").trim(), left: box.left, right: box.right, top: box.top, bottom: box.bottom, width: box.width, height: box.height };
           });
-          // UX14 §14.1: one geometry block — the two refit actions above one
+          // one geometry block — the two refit actions above one
           // form row of Columns, Rows and a single Apply.
           const sizeBlock = document.querySelector(".persea-unified-size[data-surface=view]");
           const actionsRow = sizeBlock?.querySelector(".persea-unified-size__actions");
@@ -534,7 +534,7 @@ async function main() {
         assert(geometry.measures.actions.map((action) => action.text).join(",") === "↕ Fit rows,↔ Fit width"
           && geometry.measures.actions.every((action) => action.box.bottom <= formBoxes[0].top + 1),
         `${shape.name}: refit actions are not ordered above the size form: ${JSON.stringify(geometry.measures)}`);
-        // UX16 §16.5: a three-digit box (3.4rem at the 16px floor ≈ 54px),
+        // a three-digit box (3.4rem at the 16px floor ≈ 54px),
         // never below the 44px touch law, never back to the wide band.
         assert(geometry.measures.inputs.every((input) => input.box.width >= 48 && input.box.width <= 60 && input.box.height >= (shape.touch ? 44 : 32))
           && geometry.measures.apply.box.height >= (shape.touch ? 44 : 32)
@@ -569,7 +569,7 @@ async function main() {
             fits: textWidth + arrowReserve <= contentWidth + 0.5,
           };
         });
-        // UX15 §15.6: the theme is a dashboard setting; the terminal follows the
+        // the theme is a dashboard setting; the terminal follows the
         // record. Each theme is set on the fixture record and reaches the page
         // through its foreground re-read (14.3b), exactly as another tab's save
         // would.
@@ -623,7 +623,7 @@ async function main() {
         await page.getByRole("button", { name: "Zoom out", exact: true }).click();
         await page.getByRole("button", { name: "Fit font", exact: true }).click();
         await page.getByRole("button", { name: "Zoom in", exact: true }).click();
-        // UX15 §15.6: no Appearance rows in the View popover any more.
+        // no Appearance rows in the View popover any more.
         assert(await page.locator(".persea-unified-view-popover .persea-unified-preference").count() === 0, `${shape.name}: a preference picker leaked into the View popover`);
         const appearanceScreenshot = path.join(EVIDENCE, `${ENGINE}-${shape.name}-appearance-values.png`);
         await page.screenshot({ path: appearanceScreenshot, animations: "disabled", caret: "hide" });
@@ -661,7 +661,7 @@ async function main() {
         const targetColumns = geometry.columns === 300 ? 299 : geometry.columns + 1;
         const refitsBefore = afterFit.refitOperations.length;
         await page.locator('.persea-unified-view-popover input[aria-label="Columns"]').fill(String(targetColumns));
-        // UX14 §14.1: the single Apply refits when the typed columns differ.
+        // the single Apply refits when the typed columns differ.
         await page.locator(".persea-unified-view-popover .persea-unified-size__form").getByRole("button", { name: "Apply", exact: true }).click();
         for (let attempt = 0; attempt < 50; attempt += 1) {
           const state = await snapshot();
@@ -757,7 +757,7 @@ async function main() {
       // correctly trips this page's CSP and would turn the test tool itself
       // into the only policy violation being measured.
       await page.screenshot({ path: screenshot, animations: "allow", caret: "initial" });
-      if (MUTANT === "late-console") await page.evaluate(() => console.error("UX13_MUTANT_LATE_POLICY refused to apply policy"));
+      if (MUTANT === "late-console") await page.evaluate(() => console.error("TERMINAL_TOUCH_MUTANT_LATE_POLICY refused to apply policy"));
       await delay(250);
       await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       const finalState = await snapshot();
@@ -777,14 +777,14 @@ async function main() {
     await fixture.close();
   }
   assert(evidence.cases.length === SHAPES.length && evidence.cases.length > 0,
-    `UX13 case census mismatch: expected=${SHAPES.length} executed=${evidence.cases.length}`);
+    `terminal touch case census mismatch: expected=${SHAPES.length} executed=${evidence.cases.length}`);
   const touchAvailable = SHAPES.some((shape) => shape.touch);
   const requiredCases = CASE === "all"
     ? [...CASES].filter((name) => name !== "all" && (touchAvailable || !["dictation", "longpress", "focus"].includes(name)))
     : [CASE];
-  for (const name of requiredCases) assert(evidence.caseCounts[name] > 0, `UX13 required case executed zero times: ${name}`);
-  fs.writeFileSync(path.join(EVIDENCE, `${ENGINE}-ux13.json`), JSON.stringify(evidence, null, 2) + "\n");
-  console.log(`UX13_BROWSER_PASS engine=${ENGINE} cases=${evidence.cases.length}`);
+  for (const name of requiredCases) assert(evidence.caseCounts[name] > 0, `terminal touch required case executed zero times: ${name}`);
+  fs.writeFileSync(path.join(EVIDENCE, `${ENGINE}-terminal_touch.json`), JSON.stringify(evidence, null, 2) + "\n");
+  console.log(`TERMINAL_TOUCH_BROWSER_PASS engine=${ENGINE} cases=${evidence.cases.length}`);
 }
 
 main().catch((error) => { console.error(error); process.exitCode = 1; });

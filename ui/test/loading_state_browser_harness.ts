@@ -1,6 +1,6 @@
 import { UnifiedTerminalPage } from "../src/unified_terminal_page";
 
-const SOURCE_PREFIX = "ux7-source";
+const SOURCE_PREFIX = "loading_state-source";
 const EPOCH = 41n;
 const NONCE = "AAAAAAAAAAAAAAAAAAAAAA";
 const encoder = new TextEncoder();
@@ -113,7 +113,7 @@ async function prepareAll(): Promise<Record<string, unknown>> {
       rows: 24,
       history: [],
       truncated: false,
-      replay: encoder.encode(`UX7-REPLAY-${pane.name}\r\n`),
+      replay: encoder.encode(`LOADING_STATE-REPLAY-${pane.name}\r\n`),
     }));
   }
   const deadline = performance.now() + 5_000;
@@ -147,7 +147,7 @@ function exhaustAll(reason = "retry_budget_exhausted"): Record<string, unknown> 
 
 declare global {
   interface Window {
-    __ux7: {
+    __loading_state: {
       reset(count: number): Record<string, unknown>;
       prepareAll(): Promise<Record<string, unknown>>;
       commitAll(): Record<string, unknown>;
@@ -158,5 +158,5 @@ declare global {
   }
 }
 
-window.__ux7 = { reset, prepareAll, commitAll, failAll, exhaustAll, snapshot };
-document.body.dataset.ux7Ready = "true";
+window.__loading_state = { reset, prepareAll, commitAll, failAll, exhaustAll, snapshot };
+document.body.dataset.loading_stateReady = "true";

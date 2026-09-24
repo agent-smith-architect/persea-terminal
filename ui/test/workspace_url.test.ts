@@ -1,4 +1,4 @@
-// M9 W1a — FW-R route constructor falsifier (packet §5 [F1], §8b).
+// M9 W1a — FW-R route constructor regression test.
 // (a) dashboard open and (b) saved-workspace reload both produce exactly
 // /workspace?engine=unified-dev#name=<bounded>; (c) a missing, different,
 // extra, or duplicated query field is a typed refusal with no navigation;

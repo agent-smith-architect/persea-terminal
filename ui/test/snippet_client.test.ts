@@ -1,10 +1,10 @@
-// Unit gate for the document-global snippets/clips service (E-P3).
+// Unit gate for the document-global snippets/clips service (clipboard).
 //
-// The OSC 52 parser is pinned here corpus by corpus (EP3-F7's decision table),
+// The OSC 52 parser is pinned here corpus by corpus (clipboard-osc-parser's decision table),
 // together with the single-flight poll, the device-local coalescer's
-// last-value-wins economics (EP3-F8), the CAS/capacity outcome mapping
-// (EP3-F5), and the one secured requester every mutation goes through
-// (EP3-F6). Nothing here touches a document: the service is a data owner and
+// last-value-wins economics (clipboard-osc-budget), the CAS/capacity outcome mapping
+// (clipboard-full-store-refusal), and the one secured requester every mutation goes through
+// (clipboard-malformed-request). Nothing here touches a document: the service is a data owner and
 // takes its fetch, its clock and its timers by injection.
 
 // Same shape as the other unit files: no node typings in the test bundle.
@@ -59,11 +59,11 @@ const written = (data: string, body: string, message: string): void => {
 // A READ never writes and never replies: it is the whole reason the upstream
 // clipboard addon is rejected (it answers a read with 8 bytes into the pane).
 
-// EP3-R3 comes FIRST on purpose: the corpus below also refuses a 16 KiB + 1
+// clipboard-decoded-byte-cap comes FIRST on purpose: the corpus below also refuses a 16 KiB + 1
 // body, and if that ran first it would abort the file before the cheaper,
 // more fundamental property — that such a body never reaches atob at all —
 // was ever checked.
-// --- EP3-R3: the 16 KiB bound is applied BEFORE atob decodes/allocates -------
+// --- clipboard-decoded-byte-cap: the 16 KiB bound is applied BEFORE atob decodes/allocates -------
 // The pinned xterm parser accepts up to 10,000,000 payload characters, all of
 // them chosen by whatever runs in the pane. Checking only the DECODED length
 // still lets a pane force multi-megabyte decode/allocation work on a phone, so
@@ -305,7 +305,7 @@ const wire = (patch: Readonly<Record<string, unknown>> & Readonly<{ id: string; 
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
 // A response the test resolves by hand, so a request can be held "in flight"
-// across other work. EP3-R1 and EP3-R2 are both about what may happen while a
+// across other work. clipboard-read-after-write and clipboard-publication-owner are both about what may happen while a
 // request is unresolved, which no amount of fast fake responses can express.
 type Deferred = Readonly<{ promise: Promise<Response>; resolve: (response: Response) => void }>;
 const deferred = (): Deferred => {
@@ -515,7 +515,7 @@ assert.equal(deviceOrigin({} as unknown as Window), "desktop", "a window without
 
 declare const process: { exitCode: number };
 
-// --- EP3-R1: a mutation reconciles against a read that STARTED after it ------
+// --- clipboard-read-after-write: a mutation reconciles against a read that STARTED after it ------
 // refresh() joins an in-flight GET, which is right for a poll and wrong here:
 // a GET that began before the mutation carries pre-mutation authority.
 
@@ -525,15 +525,15 @@ blocks.push(async () => {
   harness.reply(() => stale.promise);
   const polling = harness.service.refresh();      // GET #1, held open
   await settle();
-  assert.equal(harness.calls.length, 1, "EP3-R1: the stale GET is in flight");
+  assert.equal(harness.calls.length, 1, "clipboard-read-after-write: the stale GET is in flight");
 
   const mutation = harness.service.createClip("body");   // POST, resolves at once
   await settle();
-  assert.equal(harness.calls.length, 2, "EP3-R1: the POST went out while the stale GET was open");
+  assert.equal(harness.calls.length, 2, "clipboard-read-after-write: the POST went out while the stale GET was open");
   let settled = false;
   void mutation.then(() => { settled = true; });
   await settle();
-  assert.ok(!settled, "EP3-R1: the mutation must not report an outcome while only the stale GET has answered");
+  assert.ok(!settled, "clipboard-read-after-write: the mutation must not report an outcome while only the stale GET has answered");
 
   stale.resolve(json(200, { items: [] }));
   await polling;
@@ -541,8 +541,8 @@ blocks.push(async () => {
   await settle();
   const gets = harness.calls.filter((call) => call.method === "GET").length;
   assert.equal(gets, 2, "a mutation joined the pre-mutation GET instead of forcing a post-response read");
-  assert.equal(harness.calls[2].method, "GET", "EP3-R1: the reconciling read is the request AFTER the mutation");
-  assert.equal(harness.service.stats().reconcilingReads, 1, "EP3-R1: exactly one reconciling read was taken");
+  assert.equal(harness.calls[2].method, "GET", "clipboard-read-after-write: the reconciling read is the request AFTER the mutation");
+  assert.equal(harness.service.stats().reconcilingReads, 1, "clipboard-read-after-write: exactly one reconciling read was taken");
 });
 
 blocks.push(async () => {
@@ -556,10 +556,10 @@ blocks.push(async () => {
   const mutation = harness.service.setPinned(record({ id: "a", kind: "snippet" }), true);
   await settle();
   stale.resolve(json(200, { items: [] }));
-  assert.equal(await mutation, "conflict", "EP3-R1: a 409 still classifies as a conflict");
+  assert.equal(await mutation, "conflict", "clipboard-read-after-write: a 409 still classifies as a conflict");
   await polling;
   await settle();
-  assert.equal(harness.calls.filter((call) => call.method === "GET").length, 2, "EP3-R1: a conflict also forces a post-response read");
+  assert.equal(harness.calls.filter((call) => call.method === "GET").length, 2, "clipboard-read-after-write: a conflict also forces a post-response read");
 });
 
 blocks.push(async () => {
@@ -569,11 +569,11 @@ blocks.push(async () => {
   await harness.service.createClip("two");
   await settle();
   const methods = harness.calls.map((call) => call.method).join(",");
-  assert.equal(methods, "POST,GET,POST,GET", "EP3-R1: every mutation is followed by its own read");
-  assert.equal(harness.service.stats().reconcilingReads, 2, "EP3-R1: two mutations, two reconciling reads");
+  assert.equal(methods, "POST,GET,POST,GET", "clipboard-read-after-write: every mutation is followed by its own read");
+  assert.equal(harness.service.stats().reconcilingReads, 2, "clipboard-read-after-write: two mutations, two reconciling reads");
 });
 
-// --- EP3-R2: OSC publication has ONE serialized owner ------------------------
+// --- clipboard-publication-owner: OSC publication has ONE serialized owner ------------------------
 
 blocks.push(async () => {
   const harness = new Harness();
@@ -582,14 +582,14 @@ blocks.push(async () => {
   harness.service.publishOSC("old");
   harness.fire(750);
   await settle();
-  assert.equal(harness.calls.length, 1, "EP3-R2: the first PUT is in flight");
+  assert.equal(harness.calls.length, 1, "clipboard-publication-owner: the first PUT is in flight");
 
   // Every later value while that PUT is unresolved collapses to the newest.
   for (let index = 0; index < 30; index += 1) harness.service.publishOSC(`flood-${index}`);
   harness.service.publishOSC("new");
   await settle();
   assert.equal(harness.calls.length, 1, "an older in-flight OSC PUT was allowed a concurrent newer PUT");
-  assert.equal(harness.timers.filter((timer) => timer.ms === 750).length, 0, "EP3-R2: no window is armed while a PUT is unresolved");
+  assert.equal(harness.timers.filter((timer) => timer.ms === 750).length, 0, "clipboard-publication-owner: no window is armed while a PUT is unresolved");
 
   first.resolve(json(200, {}));
   await settle();
@@ -598,9 +598,9 @@ blocks.push(async () => {
   await settle();
   await settle();
   const puts = harness.calls.filter((call) => call.method === "PUT");
-  assert.equal(puts.length, 2, "EP3-R2: the survivor publishes once, after settlement");
+  assert.equal(puts.length, 2, "clipboard-publication-owner: the survivor publishes once, after settlement");
   assert.equal(JSON.parse(String(puts[1].body)).body, "new", "an older in-flight OSC PUT completed after and overwrote the latest value");
-  assert.equal(harness.clipboardWrites.join(","), "old,new", "EP3-R2: the device clipboard is written in publication order");
+  assert.equal(harness.clipboardWrites.join(","), "old,new", "clipboard-publication-owner: the device clipboard is written in publication order");
 });
 
 blocks.push(async () => {
@@ -618,9 +618,9 @@ blocks.push(async () => {
   harness.fire(750);
   await settle();
   const puts = harness.calls.filter((call) => call.method === "PUT");
-  assert.equal(puts.length, 2, "EP3-R2: a refusal does not strand the newest pending value");
-  assert.equal(JSON.parse(String(puts[1].body)).body, "newer", "EP3-R2: the value published after a refusal is the newest one");
-  assert.equal(harness.clipboardWrites.join(","), "newer", "EP3-R2: a refused PUT writes no clipboard");
+  assert.equal(puts.length, 2, "clipboard-publication-owner: a refusal does not strand the newest pending value");
+  assert.equal(JSON.parse(String(puts[1].body)).body, "newer", "clipboard-publication-owner: the value published after a refusal is the newest one");
+  assert.equal(harness.clipboardWrites.join(","), "newer", "clipboard-publication-owner: a refused PUT writes no clipboard");
 });
 
 blocks.push(async () => {
@@ -636,11 +636,11 @@ blocks.push(async () => {
   first.resolve(json(200, {}));
   await settle();
   await settle();
-  assert.equal(harness.timers.filter((timer) => timer.ms === 750).length, 0, "EP3-R2: dispose arms no further window");
-  assert.equal(harness.calls.filter((call) => call.method === "PUT").length, 1, "EP3-R2: nothing is published after dispose");
+  assert.equal(harness.timers.filter((timer) => timer.ms === 750).length, 0, "clipboard-publication-owner: dispose arms no further window");
+  assert.equal(harness.calls.filter((call) => call.method === "PUT").length, 1, "clipboard-publication-owner: nothing is published after dispose");
 });
 
-// --- EP3-R6: the acknowledgement is bound to the value it is about -----------
+// --- clipboard-device-handoff: the acknowledgement is bound to the value it is about -----------
 // The outstanding delivery is a VALUE. A bare flag let ANY successful copy
 // retire it, so copying an unrelated manual clip told the operator the
 // automatic value had reached the clipboard when a different string had.
@@ -659,10 +659,10 @@ blocks.push(async () => {
   // The hand-off names the body, not a boolean.
   {
     const harness = await raise("value");
-    assert.equal(harness.service.snapshot().clipboardHandoff?.body, "value", "EP3-R6: a refused gestureless write names the owed body");
+    assert.equal(harness.service.snapshot().clipboardHandoff?.body, "value", "clipboard-device-handoff: a refused gestureless write names the owed body");
     harness.clipboardRefuses = false;
     harness.service.acknowledgeClipboard("value");
-    assert.equal(harness.service.snapshot().clipboardHandoff, undefined, "EP3-R6: copying the owed body retires the hand-off");
+    assert.equal(harness.service.snapshot().clipboardHandoff, undefined, "clipboard-device-handoff: copying the owed body retires the hand-off");
   }
 
   // A MANUAL clip copied successfully cannot retire it.
@@ -672,7 +672,7 @@ blocks.push(async () => {
     assert.equal(
       harness.service.snapshot().clipboardHandoff?.body,
       "automatic value",
-      "EP3-R6: copying an unrelated clip must not clear the automatic hand-off",
+      "clipboard-device-handoff: copying an unrelated clip must not clear the automatic hand-off",
     );
   }
 
@@ -683,11 +683,11 @@ blocks.push(async () => {
     harness.fire(750);
     await settle();
     await settle();
-    assert.equal(harness.service.snapshot().clipboardHandoff?.body, "newer", "EP3-R6: a newer failure replaces the hand-off");
+    assert.equal(harness.service.snapshot().clipboardHandoff?.body, "newer", "clipboard-device-handoff: a newer failure replaces the hand-off");
     harness.service.acknowledgeClipboard("older");
-    assert.equal(harness.service.snapshot().clipboardHandoff?.body, "newer", "EP3-R6: copying the stale row must not clear the newer hand-off");
+    assert.equal(harness.service.snapshot().clipboardHandoff?.body, "newer", "clipboard-device-handoff: copying the stale row must not clear the newer hand-off");
     harness.service.acknowledgeClipboard("newer");
-    assert.equal(harness.service.snapshot().clipboardHandoff, undefined, "EP3-R6: copying the newest owed body retires it");
+    assert.equal(harness.service.snapshot().clipboardHandoff, undefined, "clipboard-device-handoff: copying the newest owed body retires it");
   }
 
   // A newer SUCCESS retires the hand-off on its own: the clipboard now holds
@@ -699,7 +699,7 @@ blocks.push(async () => {
     harness.fire(750);
     await settle();
     await settle();
-    assert.equal(harness.service.snapshot().clipboardHandoff, undefined, "EP3-R6: a later successful write clears the hand-off");
+    assert.equal(harness.service.snapshot().clipboardHandoff, undefined, "clipboard-device-handoff: a later successful write clears the hand-off");
   }
 
   // A disposed service acknowledges nothing.
@@ -707,11 +707,11 @@ blocks.push(async () => {
     const harness = await raise("value");
     harness.service.dispose();
     harness.service.acknowledgeClipboard("value");
-    assert.equal(harness.service.snapshot().clipboardHandoff?.body, "value", "EP3-R6: a disposed service must not publish");
+    assert.equal(harness.service.snapshot().clipboardHandoff?.body, "value", "clipboard-device-handoff: a disposed service must not publish");
   }
 });
 
-// --- EP3-R5: an operational store failure publishes unavailable --------------
+// --- clipboard-store-recovery: an operational store failure publishes unavailable --------------
 // A mutation is also a probe. Without this, a copy after the store died kept
 // firing mutations at a store already known dead, and the sheet only learned
 // about the outage at the next poll.
@@ -724,7 +724,7 @@ blocks.push(async () => {
     assert.equal(harness.service.snapshot().status, "ready", "the store starts reachable");
     harness.reply(() => Promise.resolve(json(503, {})));
     assert.equal(await harness.service.createClip("x"), "unavailable", "a 503 is an unavailable outcome");
-    assert.equal(harness.service.snapshot().status, "unavailable", "EP3-R5: a 503 mutation must publish unavailable");
+    assert.equal(harness.service.snapshot().status, "unavailable", "clipboard-store-recovery: a 503 mutation must publish unavailable");
   }
 
   // ...and so does a transport failure.
@@ -733,7 +733,7 @@ blocks.push(async () => {
     await harness.service.refresh();
     harness.reply(() => Promise.reject(new Error("offline")));
     assert.equal(await harness.service.createClip("x"), "unreachable", "a transport failure is unreachable");
-    assert.equal(harness.service.snapshot().status, "unavailable", "EP3-R5: an unreachable mutation must publish unavailable");
+    assert.equal(harness.service.snapshot().status, "unavailable", "clipboard-store-recovery: an unreachable mutation must publish unavailable");
   }
 
   // The lists are NOT wiped: their rows carry the local copy actions that
@@ -748,7 +748,7 @@ blocks.push(async () => {
     harness.reply(() => Promise.resolve(json(503, {})));
     await harness.service.createClip("x");
     assert.equal(harness.service.snapshot().status, "unavailable", "the outage is published");
-    assert.equal(harness.service.snapshot().clips.length, before, "EP3-R5: a failed mutation must not wipe the last known list");
+    assert.equal(harness.service.snapshot().clips.length, before, "clipboard-store-recovery: a failed mutation must not wipe the last known list");
     harness.reply(() => Promise.resolve(json(503, {})));
     await harness.service.refresh();
     assert.equal(harness.service.snapshot().clips.length, 0, "a failed READ still clears the list");
@@ -765,7 +765,7 @@ blocks.push(async () => {
     harness.reply(() => Promise.resolve(json(503, {})));
     await harness.service.createClip("a");
     await harness.service.createClip("b");
-    assert.equal(publications, 1, "EP3-R5: a second failure against a known-dead store must not republish");
+    assert.equal(publications, 1, "clipboard-store-recovery: a second failure against a known-dead store must not republish");
   }
 });
 

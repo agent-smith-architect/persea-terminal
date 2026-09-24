@@ -185,9 +185,9 @@ async function run(): Promise<Record<string, unknown>> {
 
 declare global {
   interface Window {
-    __ux12RefitAccounting: { run(): Promise<Record<string, unknown>> };
+    __refitRefitAccounting: { run(): Promise<Record<string, unknown>> };
   }
 }
 
-window.__ux12RefitAccounting = { run };
+window.__refitRefitAccounting = { run };
 document.body.dataset.ready = "true";

@@ -516,7 +516,7 @@ html, body, #app { margin: 0; width: 100%; min-width: 0; height: 100%; min-heigh
   flex-wrap: nowrap;
   padding-right: 2rem;
 }
-/* UX-16 §16.2: the status is a conditional line (hidden while empty). */
+/* the status is a conditional line (hidden while empty). */
 .attachment-page__composer .attachment-page__composer-status[hidden] { display: none; }
 .attachment-page__composer-status {
   font: 600 .72rem/1.35 ui-monospace, monospace;
@@ -880,7 +880,7 @@ html, body, #app { margin: 0; width: 100%; min-width: 0; height: 100%; min-heigh
 
 /* Initial replay honesty. This is an inert overlay in the stage, not a grid
    row, so it cannot move the toolbar, change the Fit measurement, focus the
-   terminal or intercept input. E-P5 supplies these custom properties; their
+   terminal or intercept input. preferences supplies these custom properties; their
    fallbacks are the existing terminal/chrome colours on this base. */
 .persea-unified-loading {
   position: absolute;
@@ -1264,7 +1264,7 @@ button[data-copy-state="failed"] {
   border-color: var(--persea-chrome-fg, #e6edf3);
   background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 26%, var(--persea-chrome-bg, #1b1e25));
 }
-/* UX14: the Paste slot carries the copy outcome. Its box is fixed like the
+/* the Paste slot carries the copy outcome. Its box is fixed like the
    Select box, so Paste → Copy → Copied ✓ → Paste never moves a neighbour. */
 .persea-unified-toolbar button.persea-unified-toolbar-paste {
   inline-size: 4.75rem;
@@ -1301,7 +1301,7 @@ button[data-copy-state="failed"] {
 @media (pointer: fine), (pointer: none) {
   .ws-cell .ws-cell__header { padding-right: min(22rem, 90%); }
   .ws-cell .ws-cell__mount .persea-unified-toolbar { width: min(22rem, 90%); }
-  /* UX14: the Paste slot is a fixed box now (it has to hold "Copied ✓"), so
+  /* the Paste slot is a fixed box now (it has to hold "Copied ✓"), so
      a cell's bar trims both fixed boxes to what their widest word needs at
      the cell's fine-pointer padding — Select/Selecting at 5rem, Paste/Copy/
      Copied ✓/Copy ✗ at 4.5rem — and the row is back inside the budget the
@@ -1376,7 +1376,7 @@ button[data-copy-state="failed"] {
      name — so an ellipsis there costs a word the operator has already read,
      while the alternative costs the session's identity on the device that
      needs it most. The geometry readout keeps its slot: it is the subject of
-     an E-P4 assertion that reads rendered text, and the arithmetic does not
+     an session switch assertion that reads rendered text, and the arithmetic does not
      need it. */
   .persea-unified-toolbar { gap: 0.4rem; }
   .persea-unified-toolbar button.persea-unified-tag { max-width: 10rem; }
@@ -1448,11 +1448,11 @@ button[data-copy-state="failed"] {
       padding-inline: 0.75rem;
     }
     .persea-unified-toolbar__controls { gap: 4px; }
-    /* UX15 §15.1 row budget at phone-360: 24 padding + 88 tag + 4 gap +
+    /* row budget at phone-360: 24 padding + 88 tag + 4 gap +
        (48 + 48 + 44 + 44 + 44 + 4×4 gaps) = 360. The tag gives 8px so the two
        word-bearing controls can hold "Select", "Copied" and "Failed" as words
        (the operator asked for words, not glyphs). The padding is one token for
-       every control in the row (UX-13 law); the widths are per control. */
+       every control in the row (terminal touch law); the widths are per control. */
     .persea-unified-toolbar button.persea-unified-tag {
       min-width: 76px;
       max-width: none;
@@ -1508,7 +1508,7 @@ button[data-copy-state="failed"] {
 .persea-unified-toolbar button.persea-unified-fit-hint[hidden] { display: none; }
 
 /* The geometry readout stays quiet. Explicit row changes are also available
-   in the shared Terminal size controller; width remains E-P2 refit authority. */
+   in the shared Terminal size controller; width remains scrollback refit authority. */
 .persea-unified-geometry {
   flex: none;
   color: var(--persea-chrome-muted-fg, #c5d5ec);
@@ -1774,7 +1774,7 @@ button[data-copy-state="failed"] {
     calc(var(--persea-composer-inset-budget, 100dvh) - 4rem)
   );
 }
-/* UX15 §15.5 / UX15-R1: no coarse floor. The composer face is the operator's
+/* / unrestricted-zoom: no coarse floor. The composer face is the operator's
    chosen size on every pointer. The iOS focus zoom is prevented at the
    composer (composer.ts: a 16px face for the instant of focus on a coarse
    pointer), never by a viewport zoom cap — `maximum-scale` / `user-scalable=no`
@@ -1996,7 +1996,7 @@ button[data-copy-state="failed"] {
   .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]) .attachment-page__composer-actions {
     grid-row: 6;
   }
-  /* UX-16 §16.2: with no status to show, the chrome row moves up so the
+  /* with no status to show, the chrome row moves up so the
      empty status track costs no gap. */
   .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]):has(.attachment-page__composer-status[hidden]) {
     grid-template-rows: auto auto auto auto;
@@ -2020,7 +2020,7 @@ button[data-copy-state="failed"] {
 .persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-fix,
 .persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-restore {
   flex: 0 0 auto;
-  /* UX-16: the touch-target law applies to the word buttons too — "Fix"
+  /* the touch-target law applies to the word buttons too — "Fix"
      measured 35px wide before (the ergonomics census never saw it). They
      may still ellipsize below the 360 floor, never below 44px. */
   min-width: 44px;
@@ -2179,7 +2179,7 @@ button[data-copy-state="failed"] {
   font-size: 0.8rem;
 }
 .persea-unified-sheet__status:empty { display: none; }
-/* UX-16 §16.6: every section after the first reads as its own block — a
+/* every section after the first reads as its own block — a
    hairline and clear space above the heading. The general sibling
    combinator survives the hidden session-list div between Sessions and
    Image, which defeated the old adjacent-sibling rule. */
@@ -2274,7 +2274,7 @@ button[data-copy-state="failed"] {
   border-color: var(--persea-chrome-fg, #e6edf3);
   background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 26%, var(--persea-chrome-bg, #1b1e25));
 }
-/* The sheet is the whole control surface on a phone, and ruling J-EP5-1 names
+/* The sheet is the whole control surface on a phone, and ruling theme-contrast names
    it explicitly: it takes the same chrome pair as the toolbar, so the
    preference status inside it is measured against a themed background rather
    than a fixed dark one. The tiles keep their own opaque pair. */
@@ -2349,7 +2349,7 @@ button[data-copy-state="failed"] {
 }
 .persea-unified-sheet__reason:empty { display: none; }
 
-/* E-P3: the Snippets / Clips list, inline under the section's three tiles.
+/* the Snippets / Clips list, inline under the section's three tiles.
    It lives inside the sheet, which is an absolute overlay column, so opening
    a list never changes the terminal's box — no modal, no layout shift. */
 .persea-unified-snips {
@@ -2603,7 +2603,7 @@ button[data-copy-state="failed"] {
 }
 .persea-unified-toast[hidden] { display: none; }
 
-/* UX-11: the top bar is one compact disclosure row at every width. View,
+/* the top bar is one compact disclosure row at every width. View,
    geometry and appearance keep their existing controllers, but render once
    in the positioned panel owned by the committed-size button. */
 .persea-unified-toolbar {
@@ -2693,13 +2693,13 @@ button[data-copy-state="failed"] {
   min-width: 0;
   gap: 0.3rem;
   padding-block: 0.35rem 0;
-  /* UX-16 §16.5: the size block closes the card since UX-15 moved theme and
+  /* the size block closes the card because theme and
      composer text size to the dashboard — a top divider only. */
   border-block-start: 1px solid color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 34%, transparent);
 }
-/* UX14 §14.1: two rows, read top-down. First the fit-to-view actions, then
+/* two rows, read top-down. First the fit-to-view actions, then
    the explicit form with both numbers side by side and one Apply. Every
-   action stays under the 132px coarse / 120px fine ceiling from UX13. */
+   action stays under the 132px coarse / 120px fine ceiling. */
 .persea-unified-view-popover .persea-unified-size label { min-width: 0; }
 .persea-unified-view-popover .persea-unified-size__actions {
   display: grid;
@@ -2723,7 +2723,7 @@ button[data-copy-state="failed"] {
   flex: 0 0 auto;
   min-width: 0;
 }
-/* UX-16 §16.5: three digits wide, 16px text (the iOS focus-zoom floor),
+/* three digits wide, 16px text (the iOS focus-zoom floor),
    40px tall on a fine pointer and the 44px touch law on a coarse one. */
 .persea-unified-view-popover .persea-unified-size__form input { flex: 0 0 3.4rem; }
 .persea-unified-view-popover .persea-unified-size__caption {
@@ -2871,7 +2871,7 @@ button[data-copy-state="failed"] {
   z-index: 0;
 }
 
-/* UX15 §15.2: tap feedback. A press dims-then-flashes so the operator sees
+/* tap feedback. A press dims-then-flashes so the operator sees
    that the tap registered even when the action's own result is elsewhere
    (a size change, a copy, a fit). Disabled controls are visibly dimmed and
    never flash. Reduced motion keeps a static highlight. */

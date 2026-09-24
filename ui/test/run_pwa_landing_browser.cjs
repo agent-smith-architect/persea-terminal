@@ -1,7 +1,7 @@
 "use strict";
 
-// E-P6 gate — Resume/default landing, PWA manifest, and the memory that feeds
-// them (falsifiers EP6-F1 … EP6-F11; EP6-F12 is hardware and is reported NOT
+// session memory gate — Resume/default landing, PWA manifest, and the memory that feeds
+// them (regression tests remember-committed-identity … landing-privacy; installed-pwa-hardware is hardware and is reported NOT
 // RUN with its manifest RED control executed here).
 //
 // The stack is an in-process front-door double: it serves the REAL built
@@ -22,8 +22,8 @@
 //                      Requires PERSEA_PLAYWRIGHT_MODULE (absolute) and, in
 //                      this environment, PLAYWRIGHT_BROWSERS_PATH.
 //
-// Optional: PERSEA_EP6_EVIDENCE_DIR — screenshots and the JSON ledger.
-// Mutant driving: PERSEA_EP6_ONLY=<item> narrows the run to one falsifier.
+// Optional: PERSEA_SESSION_MEMORY_EVIDENCE_DIR — screenshots and the JSON ledger.
+// Mutant driving: PERSEA_SESSION_MEMORY_ONLY=<item> narrows the run to one regression test.
 
 const crypto = require("crypto");
 const fs = require("fs");
@@ -38,11 +38,11 @@ const { assert, delay, freePort, requestJSON, CDP, launchChrome, stopChrome } = 
 
 const UI = path.resolve(__dirname, "..");
 const ENGINE = process.env.PERSEA_PWA_ENGINE || "chromium";
-const EVIDENCE = process.env.PERSEA_EP6_EVIDENCE_DIR ? path.resolve(process.env.PERSEA_EP6_EVIDENCE_DIR) : null;
-const ONLY = process.env.PERSEA_EP6_ONLY || "";
+const EVIDENCE = process.env.PERSEA_SESSION_MEMORY_EVIDENCE_DIR ? path.resolve(process.env.PERSEA_SESSION_MEMORY_EVIDENCE_DIR) : null;
+const ONLY = process.env.PERSEA_SESSION_MEMORY_ONLY || "";
 const PHONE = Object.freeze({ width: 390, height: 844 });
 const DESKTOP = Object.freeze({ width: 1280, height: 900 });
-// The exact M5 sentence (UX-8 F2), asserted against its single source so a
+// The exact M5 sentence (workspace access F2), asserted against its single source so a
 // reworded product notice can never pass this gate by accident.
 const PHONE_STATE_NOTICE = "workspace view is not available on this device yet";
 assert(fs.readFileSync(path.join(UI, "src/workspace_posture.ts"), "utf8")
@@ -52,14 +52,14 @@ const CSP = "default-src 'self'; script-src 'self'; style-src 'self' 'nonce-" + 
   + "'; connect-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'";
 const SOURCE = "PPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPPP";
 const MEMORY_KEY = "persea-terminal.last-session.v1";
-// One key per operation, not one key per origin (adjudication EP6-R2): the
+// One key per operation, not one key per origin: the
 // candidate a trusted action stages is addressed by the operation id that
 // action minted, and only the navigation carrying that id may claim it.
 const PENDING_PREFIX = "persea-terminal.pending-session.v1/";
 const OP_A = "0123456789abcdef0123456789abcdef";
 const OP_B = "fedcba9876543210fedcba9876543210";
 // What a trusted dashboard action stages from the authoritative inventory
-// immediately before it navigates (adjudication EP6-R1). Identity only: no
+// immediately before it navigates. Identity only: no
 // handle, no URL, no token.
 function stagedCandidate(session, alias) {
   return JSON.stringify({
@@ -73,12 +73,12 @@ function stagedEntry(operationId, session, alias) {
 
 // Two incarnations of the SAME NAME on the same server. Only the session id and
 // the creation time differ — which is exactly what an exact-incarnation resume
-// must refuse to confuse (EP6-F2).
+// must refuse to confuse (remember-exact-target).
 function authority(sessionID, created) {
-  return { realm: "local", server: "private", uid: 1000, selector_kind: "socket_path", selector_value: "/tmp/private.sock", boot_id: "boot-ep6", server_pid: 42, server_start: 100, session_id: sessionID, session_created: created };
+  return { realm: "local", server: "private", uid: 1000, selector_kind: "socket_path", selector_value: "/tmp/private.sock", boot_id: "boot-session_memory", server_pid: 42, server_start: 100, session_id: sessionID, session_created: created };
 }
 function scopeOf(sessionID, created) {
-  return JSON.stringify(["local", "private", "socket_path", "/tmp/private.sock", "boot-ep6", sessionID, 1000, 42, 100, created]);
+  return JSON.stringify(["local", "private", "socket_path", "/tmp/private.sock", "boot-session_memory", sessionID, 1000, 42, 100, created]);
 }
 const REMEMBERED = Object.freeze({ sessionID: "$7", created: 200, name: "ops", scope: scopeOf("$7", 200) });
 const SUCCESSOR = Object.freeze({ sessionID: "$21", created: 900, name: "ops", scope: scopeOf("$21", 900) });
@@ -91,7 +91,7 @@ function memoryRecord(scope, name, at) {
 // --- The stack ---------------------------------------------------------------
 
 function hermeticTLS() {
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "persea-ep6-tls-"));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "persea-session_memory-tls-"));
   const key = path.join(dir, "key.pem");
   const cert = path.join(dir, "cert.pem");
   const result = childProcess.spawnSync("openssl", [
@@ -124,11 +124,11 @@ async function startStack({ tls }) {
     defaultSession: "absent",    // absent | open | adoptable | blocked
     preferenceDefault: null,     // the default_session preference body, or null
     preferencesStatus: 200,
-    // Attachment behaviour for the EP6-F1 scenarios.
+    // Attachment behaviour for the remember-committed-identity scenarios.
     attachmentFailure: "",       // "" | before_prepare | after_prepare | lease_held
     adoptionDelayMs: 0,          // hold the adoption response, so a refresh can arrive mid-flight
     adopted: false,
-    // Saved workspace records the dashboard's Workspaces panel lists (UX-8 F2).
+    // Saved workspace records the dashboard's Workspaces panel lists (workspace access F2).
     workspaces: [],
     handles: new Map(),
     attachments: [],
@@ -255,7 +255,7 @@ async function startStack({ tls }) {
     server = http.createServer((request, response) => { void handler(request, response); });
   }
 
-  // The attachment. Only the EP6-F1 scenarios reach it; every other scenario
+  // The attachment. Only the remember-committed-identity scenarios reach it; every other scenario
   // asserts that it is never reached at all.
   server.on("upgrade", (request, raw) => {
     charge("WS", "/ws");
@@ -285,7 +285,7 @@ async function startStack({ tls }) {
     const epoch = "17";
     const cut = "1";
     const frame = (value) => JSON.stringify({ version: 1, source: SOURCE, epoch, ...value });
-    socket.sendText(frame({ type: "PREPARE", cut, kind: "INITIAL", columns: 80, rows: 24, history: [], truncated: false, replay: Buffer.from("ep6-replay\r\n", "binary").toString("base64") }));
+    socket.sendText(frame({ type: "PREPARE", cut, kind: "INITIAL", columns: 80, rows: 24, history: [], truncated: false, replay: Buffer.from("session_memory-replay\r\n", "binary").toString("base64") }));
     if (state.attachmentFailure === "after_prepare") setTimeout(() => { if (!socket.closed) closeWith(1011, "stale_target"); }, 500);
     function onText(text) {
       if (text.startsWith(LIVENESS_PREFIX)) {
@@ -344,7 +344,7 @@ async function startStack({ tls }) {
 const INIT_SCRIPT = `
 (() => {
   const record = { opens: 0, sockets: 0, serviceWorkerRegistrations: 0, cspViolations: [], assigns: [] };
-  Object.defineProperty(window, "__perseaEP6", { value: record, configurable: false, writable: false });
+  Object.defineProperty(window, "__perseaSessionMemory", { value: record, configurable: false, writable: false });
   const nativeOpen = window.open;
   window.open = function (...args) { record.opens += 1; return nativeOpen.apply(window, args); };
   const NativeWebSocket = window.WebSocket;
@@ -365,7 +365,7 @@ const INIT_SCRIPT = `
 // What every scenario reads back off the page. Geometry is measured on the
 // real rendered card, never on a class name.
 const STATE_EXPRESSION = `(() => {
-  const record = window.__perseaEP6 || { opens: 0, sockets: 0, serviceWorkerRegistrations: 0, cspViolations: [] };
+  const record = window.__perseaSessionMemory || { opens: 0, sockets: 0, serviceWorkerRegistrations: 0, cspViolations: [] };
   const landing = document.querySelector(".dashboard-landing");
   const action = landing ? landing.querySelector(".landing-action") : null;
   const box = action ? action.getBoundingClientRect() : null;
@@ -412,7 +412,7 @@ const STATE_EXPRESSION = `(() => {
 // --- Drivers -----------------------------------------------------------------
 
 async function chromiumDriver(origin) {
-  const handle = await launchChrome("persea-ep6-landing-");
+  const handle = await launchChrome("persea-session_memory-landing-");
   const pages = [];
   const open = async ({ viewport, coarse, screen }) => {
     const target = await requestJSON(`http://127.0.0.1:${handle.debugPort}/json/new?about:blank`, "PUT");
@@ -579,17 +579,17 @@ async function settle(page, url) {
 const results = [];
 let failures = 0;
 // The last thing a scenario said it was doing. A stalled item names its step
-// instead of leaving a bare timeout, and PERSEA_EP6_TRACE=1 streams every step.
+// instead of leaving a bare timeout, and PERSEA_SESSION_MEMORY_TRACE=1 streams every step.
 let currentStep = "";
 function step(name) {
   currentStep = name;
-  if (process.env.PERSEA_EP6_TRACE === "1") process.stderr.write(`  [step] ${name}\n`);
+  if (process.env.PERSEA_SESSION_MEMORY_TRACE === "1") process.stderr.write(`  [step] ${name}\n`);
 }
 
 // One item may not stall the whole gate. A scenario that never returns — a
 // navigation that never lands, a page a mutant wedged — is recorded as that
 // item's failure with a named cause instead of becoming silence.
-const ITEM_TIMEOUT_MS = Number(process.env.PERSEA_EP6_ITEM_TIMEOUT_MS || 180_000);
+const ITEM_TIMEOUT_MS = Number(process.env.PERSEA_SESSION_MEMORY_ITEM_TIMEOUT_MS || 180_000);
 
 async function item(name, description, run) {
   if (ONLY && ONLY !== name) return;
@@ -639,7 +639,7 @@ function consoleErrors(page) {
   return page.consoleMessages.filter((message) => message.kind === "error" || message.kind === "exception");
 }
 
-// --- The manifest contract (EP6-F8 schema half and the EP6-F12 RED control) ---
+// --- The manifest contract (manifest-schema schema half and the installed-pwa-hardware RED control) ---
 
 function manifestVerdict(text) {
   let value;
@@ -665,11 +665,11 @@ function manifestVerdict(text) {
 // A gate that hangs reports nothing, and nothing reads like success. The
 // watchdog turns any hang — a stuck navigation, a browser that will not exit, a
 // socket teardown that never settles — into a loud non-zero exit.
-const WATCHDOG_MS = Number(process.env.PERSEA_EP6_WATCHDOG_MS || 900_000);
+const WATCHDOG_MS = Number(process.env.PERSEA_SESSION_MEMORY_WATCHDOG_MS || 900_000);
 
 function armWatchdog() {
   const timer = setTimeout(() => {
-    process.stderr.write(`\nE-P6 landing gate exceeded ${WATCHDOG_MS} ms; the run is incomplete and is reported as failed.\n`);
+    process.stderr.write(`\nsession memory landing gate exceeded ${WATCHDOG_MS} ms; the run is incomplete and is reported as failed.\n`);
     process.stderr.write(`items completed: ${JSON.stringify(results.map((entry) => `${entry.item}:${entry.verdict}`))}\n`);
     process.exit(3);
   }, WATCHDOG_MS);
@@ -688,8 +688,8 @@ async function main() {
   const at = (box) => ({ x: box.x + box.width / 2, y: box.y + Math.min(box.height / 2, 30) });
 
   try {
-    // ---------------------------------------------------------------- EP6-F1
-    await item("EP6-F1", "memory records the trusted action's identity, only after that operation's COMMIT", async () => {
+    // ---------------------------------------------------------------- remember-committed-identity
+    await item("remember-committed-identity", "memory records the trusted action's identity, only after that operation's COMMIT", async () => {
       const page = await driver.open({ viewport: DESKTOP, coarse: false });
       const target = (scopeSource, extra = "", openId = OP_A, withScope = true) => {
         const handle = token();
@@ -751,7 +751,7 @@ async function main() {
         // The staged candidate is consumed by the navigation it was staged for.
         assert(await pendingAt(OP_A) === null, "the staged candidate survived its navigation and could be replayed");
 
-        // ---- adjudication EP6-R1, the substituted-draft-scope receipt ----
+        // ---- contract committed-identity, the substituted-draft-scope receipt ----
         // Every operand is the trusted one EXCEPT the URL's draft scope, which
         // names a second live incarnation of the same name. A COMMIT proves a
         // handle attached; it never proves the URL names that attachment, so
@@ -786,7 +786,7 @@ async function main() {
         const replayed = await settledMemory(25);
         assert(replayed === null, `a consumed candidate was replayed: ${replayed}`);
 
-        // ---- adjudication EP6-R2, shape 1: two operations, one dashboard ----
+        // ---- contract operation-owned-candidate, shape 1: two operations, one dashboard ----
         // Two trusted actions stage two candidates. Whichever target the
         // operator reaches first claims ITS OWN candidate and leaves the
         // sibling's untouched, so both land on the identity their own tap
@@ -823,7 +823,7 @@ async function main() {
         assert(crossed === null, `a crossed operation/scope pair recorded device memory: ${crossed}`);
         assert(await pendingAt(OP_B) === null, "a crossed pair left its candidate claimable");
 
-        // ---- adjudication EP6-R2, shape 2: a scope-less page cannot claim ----
+        // ---- contract operation-owned-candidate, shape 2: a scope-less page cannot claim ----
         // A hand-edited URL with no incarnation of its own must DROP a staged
         // candidate, never consume it into a record it cannot corroborate.
         stack.reset();
@@ -840,7 +840,7 @@ async function main() {
       } finally { await page.close(); }
     });
 
-    await item("EP6-F2", "resume is exact-incarnation: a same-name successor is never resumed", async () => {
+    await item("remember-exact-target", "resume is exact-incarnation: a same-name successor is never resumed", async () => {
       const page = await driver.open({ viewport: PHONE, coarse: true });
       try {
         stack.reset();
@@ -862,8 +862,8 @@ async function main() {
         assert(state.kicker.length === 0 || !state.kicker.some(text => text.startsWith("Resume")), "a same-name successor was offered as a resume");
         assert(state.notes.some((note) => note.includes("has ended")), `expected an honest ended notice, saw ${JSON.stringify(state.notes)}`);
         assert(state.sessionRows === 1, "the successor must still be listed like any other session");
-        assertNoAuthority(stack.ledgerSince(mark), "EP6-F2 ended");
-        assertQuiet(state, "EP6-F2 ended");
+        assertNoAuthority(stack.ledgerSince(mark), "remember-exact-target ended");
+        assertQuiet(state, "remember-exact-target ended");
         if (shot("phone_has_ended")) await page.screenshot(shot("phone_has_ended"));
 
         // Two live sessions carrying the SAME pinned scope: ambiguous, never a guess.
@@ -878,8 +878,8 @@ async function main() {
       } finally { await page.close(); }
     });
 
-    // ---------------------------------------------------------------- EP6-F3
-    await item("EP6-F3", "a landing spends no authority before a trusted tap", async () => {
+    // ---------------------------------------------------------------- resume-available-session
+    await item("resume-available-session", "a landing spends no authority before a trusted tap", async () => {
       const page = await driver.open({ viewport: PHONE, coarse: true });
       try {
         stack.reset();
@@ -892,8 +892,8 @@ async function main() {
           const mark = stack.mark();
           await page.goto(entry);
           const state = await page.state();
-          assertNoAuthority(stack.ledgerSince(mark), `EP6-F3 ${entry}`);
-          assertQuiet(state, `EP6-F3 ${entry}`);
+          assertNoAuthority(stack.ledgerSince(mark), `resume-available-session ${entry}`);
+          assertQuiet(state, `resume-available-session ${entry}`);
         }
         // Reload, a restore-shaped visibility change, and an orientation change.
         let mark = stack.mark();
@@ -905,16 +905,16 @@ async function main() {
         await page.setViewport(PHONE);
         await delay(200);
         const state = await page.state();
-        assertNoAuthority(stack.ledgerSince(mark), "EP6-F3 restore/orientation");
-        assertQuiet(state, "EP6-F3 restore/orientation");
+        assertNoAuthority(stack.ledgerSince(mark), "resume-available-session restore/orientation");
+        assertQuiet(state, "resume-available-session restore/orientation");
         assert(consoleErrors(page).length === 0, `console errors: ${JSON.stringify(page.consoleMessages)}`);
         // The other device is still the controller: nothing here displaced it.
         assert(stack.count("POST /api/control-takeovers") === 0, "a landing attempted a takeover");
       } finally { await page.close(); }
     });
 
-    // ---------------------------------------------------------------- EP6-F4
-    await item("EP6-F4", "one trusted tap, one adoption at most, same tab, no popup", async () => {
+    // ---------------------------------------------------------------- resume-ended-session
+    await item("resume-ended-session", "one trusted tap, one adoption at most, same tab, no popup", async () => {
       const page = await driver.open({ viewport: PHONE, coarse: true });
       try {
         // `open`: the card is the row's own anchor. One same-tab navigation with
@@ -998,12 +998,12 @@ async function main() {
         await delay(400);
         state = await page.state();
         assert(!state.href.includes("/terminal"), "an untrusted click attached to a session");
-        assertNoAuthority(stack.ledgerSince(mark), "EP6-F4 untrusted click");
+        assertNoAuthority(stack.ledgerSince(mark), "resume-ended-session untrusted click");
       } finally { await page.close(); }
     });
 
-    // ---------------------------------------------------------------- EP6-F5
-    await item("EP6-F5", "the default is offered only without a resumable memory, and always says default", async () => {
+    // ---------------------------------------------------------------- refuse-name-reuse
+    await item("refuse-name-reuse", "the default is offered only without a resumable memory, and always says default", async () => {
       const page = await driver.open({ viewport: PHONE, coarse: true });
       try {
         // No memory at all + a resolvable default.
@@ -1018,8 +1018,8 @@ async function main() {
         assert(state.kicker.includes("Default session"), `expected a default card, saw ${JSON.stringify(state.kicker)}`);
         assert(String(state.actionAria).toLowerCase().includes("default"), `the default action must name itself: ${JSON.stringify(state.actionAria)}`);
         assert(!String(state.actionAria).startsWith("Resume"), "the default impersonated a resume");
-        assertNoAuthority(stack.ledgerSince(mark), "EP6-F5 default");
-        assertQuiet(state, "EP6-F5 default");
+        assertNoAuthority(stack.ledgerSince(mark), "refuse-name-reuse default");
+        assertQuiet(state, "refuse-name-reuse default");
         if (shot("phone_default_card")) await page.screenshot(shot("phone_default_card"));
 
         // A resumable memory takes precedence and suppresses the default card.
@@ -1054,8 +1054,8 @@ async function main() {
         assert(!state.kicker.some(text => text.startsWith("Resume")), "a blocked session was offered as a resume");
         assert(state.notes.some((note) => note.includes("full-screen app is active")), `expected the reviewed blocked reason, saw ${JSON.stringify(state.notes)}`);
         assert(state.kicker.includes("Default session"), `the default was not offered beside a blocked resume: ${JSON.stringify(state.kicker)}`);
-        assertNoAuthority(stack.ledgerSince(mark), "EP6-F5 blocked");
-        assertQuiet(state, "EP6-F5 blocked");
+        assertNoAuthority(stack.ledgerSince(mark), "refuse-name-reuse blocked");
+        assertQuiet(state, "refuse-name-reuse blocked");
 
         // A default the inventory cannot resolve is a named reason, never a create.
         stack.reset();
@@ -1067,12 +1067,12 @@ async function main() {
         state = await page.state();
         assert(state.notes.some((note) => note.includes("not running")), `expected a missing-default reason, saw ${JSON.stringify(state.notes)}`);
         assert(stack.count("POST /api/sessions") === 0, "a missing default was created");
-        assertNoAuthority(stack.ledgerSince(mark), "EP6-F5 missing default");
+        assertNoAuthority(stack.ledgerSince(mark), "refuse-name-reuse missing default");
       } finally { await page.close(); }
     });
 
-    // ---------------------------------------------------------------- EP6-F6
-    await item("EP6-F6", "hostile device memory fails closed with no amplification", async () => {
+    // ---------------------------------------------------------------- validate-stored-record
+    await item("validate-stored-record", "hostile device memory fails closed with no amplification", async () => {
       const page = await driver.open({ viewport: PHONE, coarse: true });
       try {
         const hostile = [
@@ -1094,8 +1094,8 @@ async function main() {
           assert(!state.kicker.some(text => text.startsWith("Resume")), `hostile memory (${label}) produced a resume card`);
           assert(state.sessionRows === 1, `hostile memory (${label}) broke the ordinary list`);
           assert(!state.landingText.includes("cccccccccccccccccccccccccccccccccccccccccc0"), `hostile memory (${label}) reflected a token into the page`);
-          assertNoAuthority(stack.ledgerSince(mark), `EP6-F6 ${label}`);
-          assertQuiet(state, `EP6-F6 ${label}`);
+          assertNoAuthority(stack.ledgerSince(mark), `validate-stored-record ${label}`);
+          assertQuiet(state, `validate-stored-record ${label}`);
           const requests = stack.ledgerSince(mark).length;
           if (baselineRequests === null) baselineRequests = requests;
           assert(Math.abs(requests - baselineRequests) <= 1, `hostile memory (${label}) amplified requests: ${requests} vs ${baselineRequests}`);
@@ -1104,8 +1104,8 @@ async function main() {
       } finally { await page.close(); }
     });
 
-    // ---------------------------------------------------------------- EP6-F7
-    await item("EP6-F7", "the cards share one inventory snapshot and spend one preferences read", async () => {
+    // ---------------------------------------------------------------- shared-landing-inventory
+    await item("shared-landing-inventory", "the cards share one inventory snapshot and spend one preferences read", async () => {
       const page = await driver.open({ viewport: PHONE, coarse: true });
       try {
         // A load with NOTHING for the landing to draw, and an otherwise
@@ -1159,9 +1159,9 @@ async function main() {
       } finally { await page.close(); }
     });
 
-    // --------------------------------------------------------------- UX14-F4
-    await item("UX15-F4", "the dashboard composer picker offers 9–24 on every pointer, no phone floor, no write", async () => {
-      // UX14 F4: a phone renders the composer at max(16px, value), so the
+    // --------------------------------------------------------------- input-trace-privacy
+    await item("composer-font-range", "the dashboard composer picker offers 9–24 on every pointer, no phone floor, no write", async () => {
+      // a phone renders the composer at max(16px, value), so the
       // dashboard card offers 16 ("phone minimum") through 24 there and shows a
       // stored 13 as 16 without a PUT; a fine pointer keeps the full 9–24 list.
       const COMPOSER = `(() => {
@@ -1182,13 +1182,13 @@ async function main() {
         const mark = stack.mark();
         await phone.goto(`${stack.origin}/`);
         const phonePicker = await picker(phone);
-        // UX15 §15.5: the viewport meta suppresses the iOS focus zoom, so the
+        // the viewport meta suppresses the iOS focus zoom, so the
         // phone gets the whole range and the stored value as-is.
         assert(phonePicker && phonePicker.options.length === 16 && phonePicker.options[0].value === "9" && phonePicker.options[0].text === "9 px" && phonePicker.options.at(-1).value === "24", `the phone composer picker offers the wrong range: ${JSON.stringify(phonePicker)}`);
         assert(phonePicker.value === "13" && phonePicker.floor === null, `a stored 13 px was not shown as 13 px on the phone: ${JSON.stringify(phonePicker)}`);
         await delay(300);
         assert(stack.ledgerSince(mark).filter((entry) => entry.startsWith("PUT /api/preferences")).length === 0, "rendering the picker wrote the record");
-        // UX15 §15.2 (G2): the dashboard's buttons paint the tap flash too.
+        // (G2): the dashboard's buttons paint the tap flash too.
         const tap = await phone.evaluate(`(() => {
           const button = document.querySelector(".dashboard-search-clear");
           if (!button) return null;
@@ -1208,8 +1208,8 @@ async function main() {
       } finally { await desktop.close(); }
     });
 
-    // ---------------------------------------------------------------- EP6-F8
-    await item("EP6-F8", "the manifest and icons are ordinary served bundle files with the right types", async () => {
+    // ---------------------------------------------------------------- manifest-schema
+    await item("manifest-schema", "the manifest and icons are ordinary served bundle files with the right types", async () => {
       const page = await driver.open({ viewport: DESKTOP, coarse: false });
       try {
         stack.reset();
@@ -1253,8 +1253,8 @@ async function main() {
       } finally { await page.close(); }
     });
 
-    // ---------------------------------------------------------------- EP6-F9
-    await item("EP6-F9", "there is no service worker anywhere: source, bundle, manifest, or browser", async () => {
+    // ---------------------------------------------------------------- landing-navigation
+    await item("landing-navigation", "there is no service worker anywhere: source, bundle, manifest, or browser", async () => {
       const sources = [];
       const walk = (dir) => {
         for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -1282,7 +1282,7 @@ async function main() {
         const browser = await page.evaluate(`(async () => {
           const registrations = navigator.serviceWorker && navigator.serviceWorker.getRegistrations ? (await navigator.serviceWorker.getRegistrations()).length : 0;
           const cacheKeys = typeof caches === "undefined" ? [] : await caches.keys();
-          return { registrations, cacheKeys, counted: window.__perseaEP6.serviceWorkerRegistrations };
+          return { registrations, cacheKeys, counted: window.__perseaSessionMemory.serviceWorkerRegistrations };
         })()`);
         assert(browser.registrations === 0, `${browser.registrations} service worker registration(s)`);
         assert(browser.cacheKeys.length === 0, `cache storage is not empty: ${JSON.stringify(browser.cacheKeys)}`);
@@ -1290,8 +1290,8 @@ async function main() {
       } finally { await page.close(); }
     });
 
-    // --------------------------------------------------------------- EP6-F10
-    await item("EP6-F10", "Resume has a dedicated visible Open action, 44px+, and raises no keyboard", async () => {
+    // --------------------------------------------------------------- landing-failure
+    await item("landing-failure", "Resume has a dedicated visible Open action, 44px+, and raises no keyboard", async () => {
       const page = await driver.open({ viewport: PHONE, coarse: true });
       try {
         stack.reset();
@@ -1333,7 +1333,7 @@ async function main() {
         await delay(400);
         state = await page.state();
         assert(!state.href.includes("/terminal"), "a touch scroll activated the resume card");
-        assertNoAuthority(stack.ledgerSince(mark), "EP6-F10 touch scroll");
+        assertNoAuthority(stack.ledgerSince(mark), "landing-failure touch scroll");
 
         // Keyboard activation follows ordinary button semantics.
         stack.reset();
@@ -1349,8 +1349,8 @@ async function main() {
       } finally { await page.close(); }
     });
 
-    // --------------------------------------------------------------- EP6-F11
-    await item("EP6-F11", "the landing is presentation only; the terminal appears only after the tap", async () => {
+    // --------------------------------------------------------------- landing-privacy
+    await item("landing-privacy", "the landing is presentation only; the terminal appears only after the tap", async () => {
       const page = await driver.open({ viewport: DESKTOP, coarse: false });
       try {
         stack.reset();
@@ -1366,7 +1366,7 @@ async function main() {
         assert(previewReads() === previews, "the landing automatically refreshed its captured preview");
         state = await page.state();
         assert(state.sockets === 0 && state.xtermScreens === 0, "the landing constructed a renderer or a socket");
-        assertNoAuthority(stack.ledgerSince(mark), "EP6-F11 landing");
+        assertNoAuthority(stack.ledgerSince(mark), "landing-privacy landing");
         assert(consoleErrors(page).length === 0, `preview console errors: ${JSON.stringify(page.consoleMessages)}`);
         const before = state.interactiveCount;
         await page.clickAt(at(state.actionBox));
@@ -1380,8 +1380,8 @@ async function main() {
       } finally { await page.close(); }
     });
 
-    // --------------------------------------------------------------- EP6-F12
-    await item("EP6-F12-control", "the manifest contract rejects a wrong fixture before any hardware run", async () => {
+    // --------------------------------------------------------------- installed-pwa-hardware
+    await item("installed-pwa-hardware-control", "the manifest contract rejects a wrong fixture before any hardware run", async () => {
       const real = fs.readFileSync(path.join(UI, "dist/manifest.webmanifest"), "utf8");
       assert(manifestVerdict(real) === "ok", `the shipped manifest is not acceptable: ${manifestVerdict(real)}`);
       const base = JSON.parse(real);
@@ -1396,10 +1396,10 @@ async function main() {
         const verdict = manifestVerdict(JSON.stringify(value));
         assert(verdict !== "ok", `a manifest with a wrong ${label} was accepted`);
       }
-      process.stdout.write("    EP6-F12 (real iPhone home-screen launch) — NOT RUN: no hardware available to this lane.\n");
+      process.stdout.write("    installed-pwa-hardware (real iPhone home-screen launch) — NOT RUN: no hardware available to this lane.\n");
     });
 
-    // ---------------------------------------------------------------- UX8-F2
+    // ---------------------------------------------------------------- phone-workspace-refusal
     //
     // A phone-class device opens no workspace view (M5), so the dashboard must
     // not offer a create affordance the same device then refuses to open. The
@@ -1410,7 +1410,7 @@ async function main() {
     // terminal. Posture is read from the emulated device screen — the same
     // stable witness the /workspace document uses — so a merely narrow desktop
     // window is not a phone.
-    await item("UX8-F2", "a phone is never offered a workspace it cannot open, and the desktop path is unchanged", async () => {
+    await item("phone-workspace-refusal", "a phone is never offered a workspace it cannot open, and the desktop path is unchanged", async () => {
       const record = {
         workspace_id: "0123456789abcdef0123456789abcdef",
         name: "saved-one",
@@ -1476,9 +1476,9 @@ async function main() {
   }
 
   clearTimeout(watchdog);
-  const summary = { engine: driver.name, origin: stack.origin, items: results, failures, hardware: { "EP6-F12": "NOT RUN — no iPhone available to this lane" } };
-  if (EVIDENCE) fs.writeFileSync(path.join(EVIDENCE, `ep6_landing_gate_${driver.name}.json`), `${JSON.stringify(summary, null, 2)}\n`);
-  process.stdout.write(`\nE-P6 landing gate (${driver.name}): ${results.filter((entry) => entry.verdict === "PASS").length} passed, ${failures} failed\n`);
+  const summary = { engine: driver.name, origin: stack.origin, items: results, failures, hardware: { "installed-pwa-hardware": "NOT RUN — no iPhone available to this lane" } };
+  if (EVIDENCE) fs.writeFileSync(path.join(EVIDENCE, `session_memory_landing_gate_${driver.name}.json`), `${JSON.stringify(summary, null, 2)}\n`);
+  process.stdout.write(`\nsession memory landing gate (${driver.name}): ${results.filter((entry) => entry.verdict === "PASS").length} passed, ${failures} failed\n`);
   // Explicit: a lingering handle must not turn a finished run into a hang.
   process.exit(failures > 0 ? 1 : 0);
 }

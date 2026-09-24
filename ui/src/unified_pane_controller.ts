@@ -113,7 +113,7 @@ export async function fetchInventory(signal: AbortSignal): Promise<DashboardInve
   return parseInventory(await response.json());
 }
 
-// --- Pinned identity (packet §3c, B2).
+// --- Pinned identity.
 
 export type SessionSelector = Readonly<{ realm: string; server: string; name: string }>;
 
@@ -130,7 +130,7 @@ export type ResolvedPaneIdentity = Readonly<{
 // A snapshot of the inventory tagged with a monotone generation, so a
 // controller that already consumed a handle from generation g can ask for one
 // strictly newer than g and a workspace can answer six such requests with ONE
-// fetch (packet §4a step 4, falsifier W1B-F7).
+// fetch.
 export type InventorySnapshot = Readonly<{ generation: number; inventory: DashboardInventory }>;
 export type InventoryResolver = (signal: AbortSignal, newerThan: number) => Promise<InventorySnapshot>;
 
@@ -159,7 +159,7 @@ export type UnifiedPaneObserver = Readonly<{
     identity: string | null;
     currentIdentity: string | null;
   }>): void;
-  // Mechanism-level switch probe. A falsifier may queue a microtask from any
+  // Mechanism-level switch probe. A regression test may queue a microtask from any
   // phase and call `sample`; because the commit primitive is non-async, every
   // queued sample must observe the completely settled B state.
   sessionSwitchPhase?(phase: SessionSwitchCommitPhase, sample: () => SessionSwitchBoundState): void;
@@ -224,7 +224,7 @@ export type UnifiedPaneControllerOptions = Readonly<{
   onIdentityReplaced?(identity: ResolvedPaneIdentity, session: DashboardSession): void;
   onSessionCommitted?(session: DashboardSession): void;
   claimFocusOnCommit?: CommitFocusPolicy;
-  // The ONE document-global snippets/clips service (E-P3). The controller
+  // The ONE document-global snippets/clips service (clipboard). The controller
   // owns the pane, so it is the only thing that hands the service to a page:
   // a snippet action taken in this pane's sheet reaches THIS pane's terminal
   // and no sibling's, and six controllers still share one poll loop. Passing

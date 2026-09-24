@@ -45,8 +45,8 @@ for (const name of scriptNames(stripComments(workflow))) visitScript(name);
 // as the local aggregate command, along with the baseline contracts.
 // These causal suites remain mandatory even when their containing groups move.
 const requiredBrowserLanes = [
-  "test:loading-state-browser", "test:ux10-browser", "test:ux11-browser",
-  "test:ux12-refit-accounting-browser",
+  "test:loading-state-browser", "test:terminal-interaction-browser", "test:view-disclosure-browser",
+  "test:refit-accounting-browser",
 ];
 for (const name of ["test", ...scriptNames(scripts["test:browser"] || ""), ...requiredBrowserLanes]) {
   if (!visited.has(`script:${name}`)) failures.push(`test group is unreachable from CI: ${name}`);

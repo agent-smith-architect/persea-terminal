@@ -23,10 +23,10 @@ function contrast(a: string, b: string): number {
 // Its actual preview, copy success/refusal and live feedback are covered by
 // the Clipboard browser suite. The contextual toolbar keeps its own outcome
 // state machine and these independent source/style/contrast fences.
-// UX14 §14.2: the contextual Copy outcome lives on the Paste slot.
+// the contextual Copy outcome lives on the Paste slot.
 assert(source.includes('button.dataset.pasteState = "copied"') && source.includes('this.pasteWord.textContent = "Copied"'), "contextual Copy lacks a local-success outcome");
 assert(source.includes('button.dataset.pasteState = "failed"') && source.includes('this.pasteWord.textContent = "Failed"'), "contextual Copy lacks a local-failure outcome");
-// The Paste slot's outcome colours are fixed pairs too (J-EP5-1 on every theme).
+// The Paste slot's outcome colours are fixed pairs too (theme-contrast on every theme).
 assert(css.includes('button.persea-unified-toolbar-paste[data-paste-state="copied"]') && css.includes('button.persea-unified-toolbar-paste[data-paste-state="failed"]'), "Paste slot outcome states are unstyled");
 for (const theme of UNIFIED_THEME_IDS) {
   assert(contrast("#d8ffe4", "#143822") >= 4.5, `${theme}: Paste slot copied contrast fell below 4.5:1`);

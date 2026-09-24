@@ -66,10 +66,10 @@ function startWorkspaceFixture(ui, options = {}) {
     "/app.js": { file: path.join(ui, "dist/app.js"), type: "text/javascript" },
     "/app.css": { file: path.join(ui, "dist/app.css"), type: "text/css" },
     "/xterm.css": { file: path.join(ui, "dist/xterm.css"), type: "text/css" },
-    // E-P6 installable shell. index.html links these, so a fixture that does not
+    // session memory installable shell. index.html links these, so a fixture that does not
     // serve them makes the page 404 assets the front door always has
     // (`requiredBundleFiles` refuses to start a release without them). Same paths,
-    // same media types (ruling J-EP6-1).
+    // same media types.
     "/manifest.webmanifest": { file: path.join(ui, "dist/manifest.webmanifest"), type: "application/manifest+json" },
     "/icon-192.png": { file: path.join(ui, "dist/icon-192.png"), type: "image/png" },
     "/icon-512.png": { file: path.join(ui, "dist/icon-512.png"), type: "image/png" },
@@ -145,7 +145,7 @@ function startWorkspaceFixture(ui, options = {}) {
     state.holdInventoryMs = 0;
     for (const name of names) makeSession(name);
   }
-  // The /api/snippets store double (E-P3): ONE store for the whole document,
+  // The /api/snippets store double (clipboard): ONE store for the whole document,
   // exactly as the front door holds one global store for the operator.
   const snippets = createSnippetStore(CSRF_TOKEN);
   reset(options.sessions || ["ws01", "ws02", "ws03", "ws04", "ws05", "ws06"]);
@@ -325,7 +325,7 @@ function startWorkspaceFixture(ui, options = {}) {
       }));
       return;
     }
-    // E-P6 (ruling J-EP6-2). The dashboard document reads the operator's
+    // session memory. The dashboard document reads the operator's
     // default-session preference exactly once per page, so a fixture that does
     // not answer this makes the page log a 404 the product never produces.
     // Mirrors `getPreferences` / `writePreferences` in
@@ -333,7 +333,7 @@ function startWorkspaceFixture(ui, options = {}) {
     // stored: the `defaultPreferences()` record (version 1, theme "default",
     // font size 14, no default session), revision 0, `stored: false`, plus the
     // `available` flag of the preferencesResponse wrapper, under the same
-    // Cache-Control/Content-Type/ETag headers. E-P5 adds the exact strong-CAS
+    // Cache-Control/Content-Type/ETag headers. preferences adds the exact strong-CAS
     // mutation path used by all pane controllers through one shared service.
     if (request.method === "GET" && url.pathname === "/api/preferences") {
       state.counters.preferencesGet += 1;

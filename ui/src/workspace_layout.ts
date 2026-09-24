@@ -9,7 +9,7 @@
 // Layout is presentation-only; no geometry path exists in this code. Dividers
 // change CSS weight classes and nothing else. A cell resize reaches the
 // mounted page's own ResizeObserver, which refits the font (packet §2b,
-// falsifier FW3). This module imports no transport, no attachment page, and
+// regression test FW3). This module imports no transport, no attachment page, and
 // no protocol frame type. Styles are class-based (workspace.css): no element
 // ever carries a style attribute, so the shell renders under the base nonce'd
 // CSP.
@@ -21,7 +21,7 @@ import {
   type NodePath, type OnMissing, type WorkspaceLeaf, type WorkspaceNode, type WorkspaceRefusal, type WorkspaceSplit,
 } from "./workspace_model";
 
-// --- Per-pane state (packet §7). Resolution states are workspace-owned;
+// --- Per-pane state. Resolution states are workspace-owned;
 // projection states are the shared UnifiedSessionProjection states (imported,
 // never re-declared); attachment states are classified through the shared
 // close policy. Rendering is exhaustive by construction (`never` checks), so a
@@ -177,7 +177,7 @@ export function paneStateCopy(state: PaneState): PaneStateCopy {
   }
 }
 
-// --- Posture (packet §6, M5). The rule itself lives in workspace_posture.ts
+// --- Posture. The rule itself lives in workspace_posture.ts
 // so the dashboard can ask the same question without an import cycle; this
 // module keeps its name in the surface its callers already import.
 export { PHONE_CLASS_SHORT_EDGE_PX, readPostureEnvironment, workspacePosture } from "./workspace_posture";
@@ -298,7 +298,7 @@ class CellView implements WorkspaceCell {
     // no reader. An inventory detail is the only thing a live pane still has
     // to say, so it says it in a notice that is positioned OUT OF FLOW. The
     // mount's box never changes, so the terminal never refits and no RESIZE
-    // is spent on presentation (M11 F3).
+    // is spent on presentation (workspace rotation).
     const inlineDetail = state.kind === "live" ? state.detail : undefined;
     if (inlineDetail === undefined) delete this.element.dataset.wsDetail;
     else this.element.dataset.wsDetail = inlineDetail;
@@ -527,7 +527,7 @@ export class WorkspaceLayoutView {
   }
 }
 
-// --- Honest phone-class state (packet §6, M5): the workspace name, the
+// --- Honest phone-class state: the workspace name, the
 // notice, and one link per leaf to open that leaf as a single terminal — the
 // href is the same unified terminal URL the dashboard row renders, minted by
 // the caller from its inventory snapshot. Zero cells, zero transports.
@@ -563,7 +563,7 @@ export function renderWorkspacePhoneState(host: HTMLElement, name: string, leave
   host.replaceChildren(panel);
 }
 
-// --- Workspace-level failure (packet §7): full surface, a sentence, the code,
+// --- Workspace-level failure: full surface, a sentence, the code,
 // and a way back to the dashboard.
 export type WorkspaceUnavailableNotice = Readonly<{ headline: string; detail: string; code?: string }>;
 

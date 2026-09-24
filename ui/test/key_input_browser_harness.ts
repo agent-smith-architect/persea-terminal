@@ -788,7 +788,7 @@ async function assertPointerMediaRestoredAndDestroy(): Promise<Readonly<Record<s
 }
 
 /**
- * UX-16 §16.7: the two WebKit dictation shapes of the 2026-09-02 iPhone
+ * the two WebKit dictation shapes of the 2026-09-02 iPhone
  * trace, driven through the shared router and xterm. A commit arrives as
  * an input with an empty inputType and null data (xterm forwards nothing);
  * an interim preview arrives as insertText over the tail span it inserted
@@ -848,7 +848,7 @@ async function dictationTailAndCommitShapes(): Promise<void> {
     assert(textarea.value === IOS_BACKSPACE_SENTINEL, "shape fixture was not seeded");
     const runStart = emittedText(subject).length;
 
-    // UX16-R1: a browser-applied newline in an empty-inputType field
+    // a browser-applied newline in an empty-inputType field
     // commit is refused before xterm can see it. The empty run regains its
     // sentinel and remains eligible for the real first commit.
     assert(commit("\n") === "", "empty-run field-diff synthesized a line delimiter");

@@ -1,6 +1,6 @@
 "use strict";
 
-// E-P4 hermetic browser gate. The real bundled controller, transport, page,
+// session switch hermetic browser gate. The real bundled controller, transport, page,
 // xterm and shared session-list renderer run against the reopen fixture's
 // one-time capabilities, leases, adoption endpoint and broker automaton.
 
@@ -11,15 +11,15 @@ const { startFixture } = require("./unified_reopen_fixture.cjs");
 const { requestJSON: requestHTTPJSON } = require("./unified_browser_lib.cjs");
 
 const UI = path.resolve(__dirname, "..");
-const ENGINE = process.env.PERSEA_EP4_ENGINE || "chromium";
-const POINTER = process.env.PERSEA_EP4_POINTER || "coarse";
-const R2_ONLY = process.env.PERSEA_EP4_R2_ONLY === "1";
+const ENGINE = process.env.PERSEA_SESSION_SWITCH_ENGINE || "chromium";
+const POINTER = process.env.PERSEA_SESSION_SWITCH_POINTER || "coarse";
+const R2_ONLY = process.env.PERSEA_SESSION_SWITCH_R2_ONLY === "1";
 const MODULE = process.env.PERSEA_PLAYWRIGHT_MODULE || require.resolve("playwright");
-const EVIDENCE = process.env.PERSEA_EP4_EVIDENCE_DIR ? path.resolve(process.env.PERSEA_EP4_EVIDENCE_DIR) : null;
+const EVIDENCE = process.env.PERSEA_SESSION_SWITCH_EVIDENCE_DIR ? path.resolve(process.env.PERSEA_SESSION_SWITCH_EVIDENCE_DIR) : null;
 
 function assert(value, message) { if (!value) throw new Error(message); }
 const delay = (ms) => new Promise((done) => setTimeout(done, ms));
-const phase = (name) => process.stdout.write(`EP4_PHASE ${name}\n`);
+const phase = (name) => process.stdout.write(`SESSION_SWITCH_PHASE ${name}\n`);
 const requestJSON = (url, method = "GET", body) => {
   if (!url.startsWith("https:")) return requestHTTPJSON(url, method, body);
   return new Promise((resolve, reject) => {
@@ -64,43 +64,43 @@ async function main() {
   const installPageInstrumentation = () => {
     const original = window.fetch.bind(window);
     const originalFocus = HTMLTextAreaElement.prototype.focus;
-    window.__ep4InventoryFetches = [];
-    window.__ep4TextareaFocuses = [];
-    window.__ep4CommitSamples = [];
-    window.__ep4IgnoredAborts = [];
-    window.__ep4HandleResolutions = 0;
-    window.__ep4InventoryResolutions = 0;
-    window.__ep4AuthorityResults = [];
-    window.__perseaEP4AuthorityProbe = (event) => { window.__ep4AuthorityResults.push(event); };
-    window.__perseaEP4SwitchProbe = (phase, sample) => {
-      window.__ep4SwitchSample = sample;
+    window.__session_switchInventoryFetches = [];
+    window.__session_switchTextareaFocuses = [];
+    window.__session_switchCommitSamples = [];
+    window.__session_switchIgnoredAborts = [];
+    window.__session_switchHandleResolutions = 0;
+    window.__session_switchInventoryResolutions = 0;
+    window.__session_switchAuthorityResults = [];
+    window.__perseaSessionSwitchAuthorityProbe = (event) => { window.__session_switchAuthorityResults.push(event); };
+    window.__perseaSessionSwitchSwitchProbe = (phase, sample) => {
+      window.__session_switchSwitchSample = sample;
       const immediate = sample();
-      queueMicrotask(() => window.__ep4CommitSamples.push({ phase, immediate, scheduled: sample() }));
+      queueMicrotask(() => window.__session_switchCommitSamples.push({ phase, immediate, scheduled: sample() }));
     };
     window.fetch = (...args) => {
       const value = typeof args[0] === "string" ? args[0] : args[0]?.url;
       let trackedResolution = "";
-      if (value === "/api/inventory") window.__ep4InventoryFetches.push(new Error("inventory fetch").stack);
-      if (value === "/api/attachment-handles" && window.__ep4IgnoreHandleAbort && args[1]) {
-        window.__ep4IgnoredAborts.push(value);
+      if (value === "/api/inventory") window.__session_switchInventoryFetches.push(new Error("inventory fetch").stack);
+      if (value === "/api/attachment-handles" && window.__session_switchIgnoreHandleAbort && args[1]) {
+        window.__session_switchIgnoredAborts.push(value);
         args[1] = { ...args[1], signal: undefined };
         trackedResolution = "handle";
       }
-      if (value === "/api/inventory" && window.__ep4IgnoreInventoryAbort && args[1]) {
-        window.__ep4IgnoredAborts.push(value);
+      if (value === "/api/inventory" && window.__session_switchIgnoreInventoryAbort && args[1]) {
+        window.__session_switchIgnoredAborts.push(value);
         args[1] = { ...args[1], signal: undefined };
         trackedResolution = "inventory";
       }
-      if (value === "/api/control-takeovers" && window.__ep4IgnoreTakeoverAbort && args[1]) {
+      if (value === "/api/control-takeovers" && window.__session_switchIgnoreTakeoverAbort && args[1]) {
         args[1] = { ...args[1], signal: undefined };
       }
       const pending = original(...args);
-      if (trackedResolution === "handle") return pending.then((response) => { window.__ep4HandleResolutions += 1; return response; });
-      if (trackedResolution === "inventory") return pending.then((response) => { window.__ep4InventoryResolutions += 1; return response; });
+      if (trackedResolution === "handle") return pending.then((response) => { window.__session_switchHandleResolutions += 1; return response; });
+      if (trackedResolution === "inventory") return pending.then((response) => { window.__session_switchInventoryResolutions += 1; return response; });
       return pending;
     };
     HTMLTextAreaElement.prototype.focus = function (...args) {
-      window.__ep4TextareaFocuses.push(this.className);
+      window.__session_switchTextareaFocuses.push(this.className);
       return originalFocus.apply(this, args);
     };
   };
@@ -111,10 +111,10 @@ async function main() {
   const evidence = { engine: ENGINE, pointer: POINTER, timelines: [], measurements: {} };
 
   const terminalText = () => page.locator(".xterm-rows").innerText();
-  // UX-10 gives the tag and sheet two presentation entry points over the same
+  // terminal interaction gives the tag and sheet two presentation entry points over the same
   // inventory loader. Count the authority request itself, not either caller's
   // stack name, so the one-request law is shared by both surfaces.
-  const listFetches = () => page.evaluate(() => window.__ep4InventoryFetches.length);
+  const listFetches = () => page.evaluate(() => window.__session_switchInventoryFetches.length);
   const openSheet = async () => {
     const sheet = page.locator(".persea-unified-sheet");
     if (!await sheet.isVisible()) await page.getByRole("button", { name: "Quick actions", exact: true }).click();
@@ -147,7 +147,7 @@ async function main() {
     })}`;
     await page.goto(url, { waitUntil: "load" });
     await waitSession("fixture-live");
-    // ------------------------------------------------------------- UX-8 F4
+    // ------------------------------------------------------------- workspace access F4
     // Clipboard and Keys are task routes in the quick-actions sheet. Since U5
     // exactly ONE control opens it, on every pointer: the top-bar opener. The
     // floating puck it replaced is deleted, not hidden, so this also asserts
@@ -293,13 +293,13 @@ async function main() {
     await page.locator(".xterm-helper-textarea").pressSequentially("a-before");
     await delay(80);
     assert((await terminalText()).includes("A_DURING_ADOPTION"), "A stopped receiving output before the switch commit");
-    const focusCallsBeforeCommit = await page.evaluate(() => window.__ep4TextareaFocuses.length);
+    const focusCallsBeforeCommit = await page.evaluate(() => window.__session_switchTextareaFocuses.length);
     phase("precommit-a-live");
     evidence.timelines.push({ phase: "adoption-pending", href: page.url(), text: await terminalText() });
 
     await waitSession("beta-replay");
     await page.waitForFunction((scope) => location.hash.includes(encodeURIComponent(scope)), fixture.draftScopeB);
-    const commitSamples = await page.evaluate(() => window.__ep4CommitSamples);
+    const commitSamples = await page.evaluate(() => window.__session_switchCommitSamples);
     const commitFinal = commitSamples.find((entry) => entry.phase === "endpoint_replaced")?.immediate;
     assert(commitFinal, `switch commit never reached endpoint replacement: ${JSON.stringify(commitSamples)}`);
     const scheduledStates = commitSamples.map((entry) => entry.scheduled);
@@ -319,7 +319,7 @@ async function main() {
     assert(await page.locator(".attachment-page__composer-textarea").inputValue() === "", "A draft crossed into B scope");
     assert((await page.locator(".persea-unified-geometry:not(.persea-unified-geometry--phone)").innerText()) === "100×30", "B committed geometry did not replace A geometry");
     assert(new URLSearchParams(page.url().split("#")[1]).get("image_realm") === "remote", "B image staging authority was not rebound");
-    const switchFocusCalls = (await page.evaluate(() => window.__ep4TextareaFocuses.length)) - focusCallsBeforeCommit;
+    const switchFocusCalls = (await page.evaluate(() => window.__session_switchTextareaFocuses.length)) - focusCallsBeforeCommit;
     assert(switchFocusCalls === (POINTER === "fine" ? 1 : 0), `${POINTER} switch made ${switchFocusCalls} textarea focus calls`);
     await page.locator(".attachment-page__composer-textarea").fill("beta draft");
     await page.locator(".xterm-helper-textarea").pressSequentially("b-after");
@@ -473,8 +473,8 @@ async function main() {
     const reloadAuthority = await openScenario({ sessionBState: "adoptable", holdAdoptionMs: 180 });
     await reloadAuthority.openList();
     await reloadAuthority.scenarioPage.evaluate(() => {
-      window.__ep4IgnoreHandleAbort = true;
-      window.__ep4IgnoreInventoryAbort = true;
+      window.__session_switchIgnoreHandleAbort = true;
+      window.__session_switchIgnoreInventoryAbort = true;
     });
     const reloadBefore = await snapshot();
     await control({ holdHandleMs: 5_000, reprepareSession: "A" });
@@ -516,8 +516,8 @@ async function main() {
       const scenario = await openScenario({ sessionBState: "adoptable", holdAdoptionMs: race.holdAdoptionMs });
       await scenario.openList();
       await scenario.scenarioPage.evaluate((kind) => {
-        window.__ep4IgnoreHandleAbort = kind === "source-remint-authority";
-        window.__ep4IgnoreInventoryAbort = kind === "identity-remint-authority";
+        window.__session_switchIgnoreHandleAbort = kind === "source-remint-authority";
+        window.__session_switchIgnoreInventoryAbort = kind === "identity-remint-authority";
       }, race.name);
       const authorityBefore = await snapshot();
       await control({
@@ -533,18 +533,18 @@ async function main() {
       await control({ closeSession: { session: "A", reason: "generation_rotated" } });
       const authorityKind = race.name === "source-remint-authority" ? "source_remint" : "identity_remint";
       try {
-        await scenario.scenarioPage.waitForFunction((kind) => window.__ep4AuthorityResults.some((event) => event.kind === kind
+        await scenario.scenarioPage.waitForFunction((kind) => window.__session_switchAuthorityResults.some((event) => event.kind === kind
           && (event.stage === "discarded" || event.stage === "recorded")), authorityKind, { timeout: 15_000 });
       } catch (error) {
-        throw new Error(`${race.name}: authority callback edge missing: ${JSON.stringify({ ignored: await scenario.scenarioPage.evaluate(() => window.__ep4IgnoredAborts), authority: await scenario.scenarioPage.evaluate(() => window.__ep4AuthorityResults), server: await snapshot() })}`, { cause: error });
+        throw new Error(`${race.name}: authority callback edge missing: ${JSON.stringify({ ignored: await scenario.scenarioPage.evaluate(() => window.__session_switchIgnoredAborts), authority: await scenario.scenarioPage.evaluate(() => window.__session_switchAuthorityResults), server: await snapshot() })}`, { cause: error });
       }
-      const authorityResults = await scenario.scenarioPage.evaluate(() => window.__ep4AuthorityResults);
+      const authorityResults = await scenario.scenarioPage.evaluate(() => window.__session_switchAuthorityResults);
       const staleAuthorityResults = authorityResults.filter((event) => event.kind === authorityKind);
       assert(staleAuthorityResults.some((event) => event.stage === "resolved" && event.operation !== event.currentOperation && event.identity === fixture.draftScope && event.currentIdentity === fixture.draftScopeB)
         && staleAuthorityResults.some((event) => event.stage === "discarded")
         && !staleAuthorityResults.some((event) => event.stage === "recorded"),
       `${race.name}: stale callback was not discarded at its own guard: ${JSON.stringify(staleAuthorityResults)}`);
-      const authorityAtStaleSettlement = await scenario.scenarioPage.evaluate(() => window.__ep4SwitchSample());
+      const authorityAtStaleSettlement = await scenario.scenarioPage.evaluate(() => window.__session_switchSwitchSample());
       assert(authorityAtStaleSettlement.identity === fixture.draftScopeB && authorityAtStaleSettlement.controlOfferIdentity === fixture.draftScopeB,
         `${race.name}: stale callback replaced B offer authority: ${JSON.stringify(authorityAtStaleSettlement)}`);
       let raced = await waitSnapshot((value) => value.attachments.some((entry) => entry.session === "B" && entry.takeover && entry.live), 15_000);
@@ -553,7 +553,7 @@ async function main() {
       raced = await waitSnapshot((value) => race.holdHandleMs > 0
         ? value.handleLedger.slice(authorityBefore.handleLedger.length).some((entry) => entry.session === "A")
         : value.inventoryLedger.slice(authorityBefore.inventoryLedger.length).some((entry) => entry.session === "A"), 8_000);
-      assert(raced, `${race.name}: stale callback never reached its held completion edge; ignored=${JSON.stringify(await scenario.scenarioPage.evaluate(() => window.__ep4IgnoredAborts))}`);
+      assert(raced, `${race.name}: stale callback never reached its held completion edge; ignored=${JSON.stringify(await scenario.scenarioPage.evaluate(() => window.__session_switchIgnoredAborts))}`);
       const refusedB = raced.attachments.find((entry) => entry.session === "B" && entry.handlePurpose === "control" && entry.closeReason === "lease_held");
       const claimed = raced.takeoverClaims.at(-1);
       assert(refusedB?.offeredHandle, `${race.name}: B losing handle was not recorded`);
@@ -582,7 +582,7 @@ async function main() {
     // takeover handle must remain unconsumed.
     const staleTakeover = await openScenario({ sessionBState: "open" });
     await staleTakeover.openList();
-    await staleTakeover.scenarioPage.evaluate(() => { window.__ep4IgnoreTakeoverAbort = true; });
+    await staleTakeover.scenarioPage.evaluate(() => { window.__session_switchIgnoreTakeoverAbort = true; });
     await control({ holdLeaseB: true, holdTakeoverMs: 650 });
     await staleTakeover.scenarioPage.getByRole("button", { name: "Switch to beta" }).click();
     const takeoverIssued = await waitSnapshot((value) => value.counters.takeovers === 1 && value.handles.some((entry) => entry.purpose === "control-takeover" && entry.session === "B"), 8_000);
@@ -591,14 +591,14 @@ async function main() {
     await control({ holdPrepareMs: 1_200 });
     await staleTakeover.scenarioPage.getByRole("button", { name: "Switch to alpha" }).click();
     await staleTakeover.scenarioPage.waitForFunction((scope) => location.hash.includes(encodeURIComponent(scope)), fixture.draftScope, { timeout: 5_000 });
-    await staleTakeover.scenarioPage.waitForFunction(() => window.__ep4AuthorityResults.some((event) => event.kind === "takeover"
+    await staleTakeover.scenarioPage.waitForFunction(() => window.__session_switchAuthorityResults.some((event) => event.kind === "takeover"
       && (event.stage === "discarded" || event.stage === "recorded") && event.operation !== event.currentOperation), null, { timeout: 5_000 });
-    const takeoverAuthorityResults = await staleTakeover.scenarioPage.evaluate(() => window.__ep4AuthorityResults.filter((event) => event.kind === "takeover" && event.operation !== event.currentOperation));
+    const takeoverAuthorityResults = await staleTakeover.scenarioPage.evaluate(() => window.__session_switchAuthorityResults.filter((event) => event.kind === "takeover" && event.operation !== event.currentOperation));
     assert(takeoverAuthorityResults.some((event) => event.stage === "resolved")
       && takeoverAuthorityResults.some((event) => event.stage === "discarded")
       && !takeoverAuthorityResults.some((event) => event.stage === "recorded"),
     `stale takeover callback was not discarded at its own guard: ${JSON.stringify(takeoverAuthorityResults)}`);
-    const currentAuthority = await staleTakeover.scenarioPage.evaluate(() => window.__ep4SwitchSample());
+    const currentAuthority = await staleTakeover.scenarioPage.evaluate(() => window.__session_switchSwitchSample());
     assert(currentAuthority.identity === fixture.draftScope && currentAuthority.controlOfferIdentity === fixture.draftScope,
       `stale B takeover mutated A authority: ${JSON.stringify(currentAuthority)}`);
     const takeoverSettled = await snapshot();
@@ -664,8 +664,8 @@ async function main() {
     evidence.timelines.push({ phase: "lease-a-b-a", server: leaseRace });
     await leased.scenarioContext.close();
 
-    // ------------------------------------------------------------- UX-8 F1
-    // Ruling J-UX-9 on this engine's real bundle at this pointer medium. The
+    // ------------------------------------------------------------- workspace access F1
+    // Ruling terminal topbar on this engine's real bundle at this pointer medium. The
     // WebKit/coarse run is the one the live smoke failed: nothing stored, the
     // fit floors at 9px on a 390pt phone, and the old Zoom stepped the stored
     // 14 to 15 — six pixels away from what the operator could see, and gone
@@ -712,7 +712,7 @@ async function main() {
       // at 1280x800 this fixture's session fits at 24px, the ceiling, on this
       // machine's font stack, and a fixed "Zoom in" then had nothing to step
       // to. That is not new: 436f99e fails this same precondition here, and
-      // the receipt is in the UX-9 evidence root under base-controls/.
+      // the receipt is in the terminal topbar evidence root under base-controls/.
       const direction = fitted >= 24 ? "Zoom out" : "Zoom in";
       const stepped = clamp(fitted + (direction === "Zoom out" ? -1 : 1));
       assert(autoState.preference === "auto", `an empty record did not render as auto-fit: ${JSON.stringify(autoState)}`);
@@ -756,8 +756,8 @@ async function main() {
       const f1Server = await snapshot();
       assert(f1Server.counters.preferencesPut === putsBeforeFit + 1, `the font tri-state wrote unexpected extra PUTs: ${f1Server.counters.preferencesPut}`);
       assert(f1.scenarioErrors.length === 0, `font tri-state browser errors ${JSON.stringify(f1.scenarioErrors)}`);
-      evidence.timelines.push({ phase: "ux8-f1-font-tristate", autoState, zoomState, reloadedState, fitState, reloadedAuto, stepped, direction, server: f1Server });
-      phase("ux8-f1-font-tristate");
+      evidence.timelines.push({ phase: "workspace_access-f1-font-tristate", autoState, zoomState, reloadedState, fitState, reloadedAuto, stepped, direction, server: f1Server });
+      phase("workspace_access-f1-font-tristate");
       await f1.scenarioContext.close();
     }
 

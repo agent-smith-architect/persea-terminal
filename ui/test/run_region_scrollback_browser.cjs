@@ -1,6 +1,6 @@
 "use strict";
 
-// Falsifier runner for scroll-region history preservation. It bundles the real
+// regression test runner for scroll-region history preservation. It bundles the real
 // product modules (including the patched @xterm/xterm build the app ships) and
 // replays codex-style DECSTBM scroll sequences through UnifiedTerminalPage in
 // a real browser. Expectations are pinned by tmux control probes; see
@@ -187,8 +187,8 @@ async function main() {
   if (artifact) fs.writeFileSync(artifact, `${JSON.stringify(outcome, null, 2)}\n`);
   process.stdout.write(`${JSON.stringify(outcome, null, 2)}\n`);
   assert(outcome && outcome.failures.length === 0,
-    `region scrollback falsifier failed:\n  ${(outcome?.failures ?? ["no outcome"]).join("\n  ")}`);
-  process.stdout.write("region scrollback falsifier PASS\n");
+    `region scrollback regression test failed:\n  ${(outcome?.failures ?? ["no outcome"]).join("\n  ")}`);
+  process.stdout.write("region scrollback regression test PASS\n");
 }
 
 main().catch((error) => {

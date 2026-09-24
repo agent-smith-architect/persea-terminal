@@ -545,14 +545,14 @@ try {
   // --- F2: unmodeled xterm keys end replacement authority ----------------------
 
   {
-    // The advisor's falsifier: establish "hello", deliver ArrowLeft through
+    // The advisor's regression test: establish "hello", deliver ArrowLeft through
     // both public router hooks, then the full-field revision. Five Backspaces
     // at the moved PTY cursor would over-erase; the revision must fall back
     // to the raw path with the erase count invalidated, never guessed.
     const subject = fixture();
     seeded(subject);
     deliverInsert(subject, "hello", "caret-end");
-    assert.equal(subject.router.instrumentation().trackedEmissionCount, 5, "falsifier run not established");
+    assert.equal(subject.router.instrumentation().trackedEmissionCount, 5, "regression test run not established");
     subject.router.handleCustomKey(keydown(subject.textarea, "ArrowLeft"));
     subject.router.onXtermKeyHandled(keydown(subject.textarea, "ArrowLeft"));
     assert.equal(subject.router.instrumentation().trackedEmissionCount, null, "an xterm-handled ArrowLeft kept replacement authority");
@@ -954,7 +954,7 @@ try {
     assert.ok(diagnostic.includes('"seeded":true'), "instrumentation lost the seeded flag");
   }
 
-  // --- UX12-B2 privacy-preserving event-shape ledger -------------------------
+  // --- input-event-privacy privacy-preserving event-shape ledger -------------------------
 
   {
     type Shape = Readonly<{
@@ -1022,15 +1022,15 @@ try {
     subject.router.onFocusIn(focusEvent(subject.textarea));
     dictationSession([4, 7, 15]);
 
-    assert.equal(ledger.filter((shape) => shape.phase === "delete").length, 12, "UX12 ledger lost held-delete shapes");
-    assert.equal(ledger.filter((shape) => shape.phase === "dictation").length, 6, "UX12 ledger lost one dictation session");
+    assert.equal(ledger.filter((shape) => shape.phase === "delete").length, 12, "refit ledger lost held-delete shapes");
+    assert.equal(ledger.filter((shape) => shape.phase === "dictation").length, 6, "refit ledger lost one dictation session");
     const encoded = JSON.stringify(ledger);
-    assert.ok(!encoded.includes("xxx"), "UX12 event-shape ledger retained transcript content");
-    assert.ok(encoded.includes('"trackedNumericCount"') && encoded.includes('"selectionStart"'), "UX12 ledger lost authority metadata");
-    console.log(`UX12_B2_EVENT_SHAPES=${encoded}`);
+    assert.ok(!encoded.includes("xxx"), "refit event-shape ledger retained transcript content");
+    assert.ok(encoded.includes('"trackedNumericCount"') && encoded.includes('"selectionStart"'), "refit ledger lost authority metadata");
+    console.log(`INPUT_EVENT_PRIVACY_EVENT_SHAPES=${encoded}`);
   }
 
-  // --- UX13-S4: WebKit/xterm #6078 retained-prefix dictation ------------
+  // --- TERMINAL_TOUCH-S4: WebKit/xterm #6078 retained-prefix dictation ------------
 
   {
     // Real iPhone dictation can keep the prior helper value and report the
@@ -1156,7 +1156,7 @@ try {
       "ineligible/screen-reader insertion was rewritten");
   }
   // ---------------------------------------------------------------------
-  // UX-16 §16.7 — the Firefox-iOS (WebKit) dictation trace of 2026-09-02.
+  // — the Firefox-iOS (WebKit) dictation trace of 2026-09-02.
   // A dictation commit is a beforeinput/input pair with an empty inputType
   // and null data; xterm forwards neither, so nothing reaches the wire on
   // the raw path. A modeled Backspace is the intercepted keydown and its
@@ -1347,7 +1347,7 @@ try {
   }
 
   {
-    // UX16-R1: a field mutation must never synthesize Return. Exercise
+    // a field mutation must never synthesize Return. Exercise
     // both field-diff input types and both line delimiters over a tracked run;
     // the field, caret and tracking remain exactly where they were.
     for (const inputType of ["", "insertReplacementText"] as const) {

@@ -62,7 +62,7 @@ function integer(value: unknown, label: string, minimum = 0): number { if (typeo
 function boolean(value: unknown, label: string): boolean { if (value === undefined || value === null) return false; if (typeof value !== "boolean") throw new Error(`${label} must be a boolean`); return value; }
 function optionalString(value: unknown, label: string): string | undefined {return value === undefined ? undefined : string(value, label); }
 
-// Broker-internal attachment wrapper sessions (UX-8 F3).
+// Broker-internal attachment wrapper sessions (workspace access F3).
 //
 // While an attachment is live the broker owns one extra tmux session named
 // `persea-attach-<32 hex nonce>` (`internal/broker/attachment.go`
@@ -183,7 +183,7 @@ export function parseInventory(value: unknown): DashboardInventory {
 // labels are display-only: they name the session on the page and carry no
 // authority, which is fixed by the handle.
 export function terminalURL(base: string, handle: string, mode: AttachmentMode, history: HistoryChoice = DEFAULT_HISTORY_CHOICE, labels: { name?: string; alias?: string } = {}, draftScope?: string): string { const url = new URL("/terminal", base); url.search = ""; url.hash = new URLSearchParams({ handle, mode, history: String(history), ...(labels.name ? { name: labels.name } : {}), ...(labels.alias ? { alias: labels.alias } : {}), ...(draftScope !== undefined ? { draft_scope: draftScope } : {}) }).toString(); return url.toString(); }
-// `openId` names the ONE staged candidate this navigation may claim (EP6-R2).
+// `openId` names the ONE staged candidate this navigation may claim (operation-owned-candidate).
 // It is not an authority and is not derived from one: it grants nothing, it
 // names a local storage entry, and the target still needs a valid handle, a
 // matching draft scope and a real COMMIT before anything is recorded. Omitted
@@ -202,7 +202,7 @@ export function unifiedTerminalURL(base: string, handle: string, session: Dashbo
   url.hash = fragment.toString();
   return url.toString();
 }
-// The workspace route constructor (packet §5 [F1]) is authored once in
+// The workspace route constructor is authored once in
 // workspace_url.ts beside its parser; the dashboard re-exports it so every
 // dashboard entry point composes workspace URLs through the same function.
 export { workspaceURL };
@@ -362,7 +362,7 @@ export function resolveDraftScope(inventory: DashboardInventory, draftScope: str
   return Object.freeze({ kind: "found", session: matches[0] });
 }
 
-// --- E-P6 landing copy. Reviewed operator-facing wording lives here as pure
+// --- session memory landing copy. Reviewed operator-facing wording lives here as pure
 // functions so the states can be asserted without a DOM. Every message names
 // what is true; none of them promises a session the inventory did not confirm.
 export function resumeCardLabel(session: Pick<DashboardSession, "name" | "server">): string { return `Resume ${session.name} · ${session.server}`; }
@@ -469,7 +469,7 @@ export class Dashboard {
     window.location.reload();
   };
   // One preferences service per page: the default-session read and the
-  // Appearance card share its single load (EP6-F7).
+  // Appearance card share its single load (shared-landing-inventory).
   private readonly preferences: OperatorPreferencesService;
   constructor(
     private readonly root: HTMLElement,
@@ -573,7 +573,7 @@ export class Dashboard {
     void this.loadDefaultPreference();
     window.addEventListener("pageshow", this.onPageShow); window.addEventListener("hashchange", this.handleFragmentTransition); document.addEventListener("visibilitychange", this.onVisibility); this.periodic = window.setInterval(() => { if (document.visibilityState === "visible") void this.refresh("background"); }, 60_000); void this.refresh("initial");
   }
-  // UX14 §14.3: the appearance preferences (theme, terminal font, composer
+  // the appearance preferences (theme, terminal font, composer
   // text) are operator-wide, so they get a dashboard card. It is collapsed by
   // default — the dashboard's job is choosing a session — and it renders from
   // the page's one preferences read. Saves are ordinary preference updates:
@@ -591,7 +591,7 @@ export class Dashboard {
     body.append(note, open); card.append(heading, body); return card;
   }
   private appearanceCard(): HTMLElement {
-    // UX15 §15.6: the one settings surface for every terminal — theme, terminal
+    // the one settings surface for every terminal — theme, terminal
     // font and composer text moved here from the terminal's View popover.
     const card = element("details", "dashboard-settings-panel dashboard-appearance");
     card.open = true;
@@ -612,7 +612,7 @@ export class Dashboard {
     };
     const theme = element("select"); for (const id of UNIFIED_THEME_IDS) option(theme, id, unifiedTheme(id).label);
     const font = element("select"); option(font, "auto", "Auto (fit to view)"); for (const size of APPEARANCE_FONT_SIZES) option(font, String(size), `${size} px`);
-    // UX15 §15.5: no phone floor — the viewport meta suppresses the iOS focus
+    // no phone floor — the viewport meta suppresses the iOS focus
     // zoom, so every size 9–24 is the composer's real size on every device.
     const composer = element("select"); for (const size of APPEARANCE_FONT_SIZES) option(composer, String(size), `${size} px`);
     grid.append(field("Theme", theme, "Terminal theme"), field("Terminal font", font, "Terminal font size"), field("Composer text", composer, "Composer text size"));
@@ -680,7 +680,7 @@ export class Dashboard {
     font.addEventListener("change", () => void save({ fontSize: font.value === "auto" ? null : Number(font.value) }));
     composer.addEventListener("change", () => void save({ composerFontSize: Number(composer.value) }));
     // The dashboard never re-reads preferences on focus or visibility
-    // (EP6-F7); another tab's save reaches the card through the `storage`
+    // (shared-landing-inventory); another tab's save reaches the card through the `storage`
     // signal, which triggers one authoritative server read (14.3b) — a
     // storage event never fires in the document that wrote it.
     void service.load().then(() => { if (!this.destroyed) this.cleanup.push(service.watchExternalChanges({ refetchOnForeground: false })); });
@@ -689,7 +689,7 @@ export class Dashboard {
   // Exactly one preferences read per page, at mount. The default session is an
   // operator preference, not live state: it is never re-fetched on refresh,
   // focus, visibility, or orientation, and a failure simply means no default
-  // card. (Acceptance B1.4, falsifier EP6-F7.)
+  // card.
   private async loadDefaultPreference(): Promise<void> {
     await this.preferences.load();
     if (this.destroyed) return;
@@ -797,7 +797,7 @@ export class Dashboard {
     }
   }
 
-  // UX-8 F2: a phone-class device opens no workspace view (M5), so the
+  // a phone-class device opens no workspace view (M5), so the
   // dashboard must not offer a create affordance the same device then refuses.
   // The M5 notice takes the form's place — the operator reads the refusal
   // before producing a record for it, rather than after. Existing records stay
@@ -953,12 +953,12 @@ export class Dashboard {
     this.view = view; this.inventory = inventory; this.renderLanding(); this.applyPresentation();
   }
 
-  // --- E-P6 landing -----------------------------------------------------------
+  // --- session memory landing -----------------------------------------------------------
   //
   // Renders from ONE inventory snapshot — the one the dashboard just parsed —
   // plus the memory read at mount and the single preferences read. It issues no
   // request of its own, so however many cards it draws the request ledger is
-  // unchanged (falsifier EP6-F7).
+  // unchanged.
   private renderLanding(): void {
     const inventory = this.inventory;
     if (inventory === undefined) return;
@@ -984,7 +984,7 @@ export class Dashboard {
     }
     // The default is offered only when there is no resumable remembered
     // identity, and it always says "default" — a missing memory never silently
-    // becomes a same-name resume (falsifier EP6-F5).
+    // becomes a same-name resume.
     if (defaultSessionIsOffered(memory)) {
       const fallback = defaultSessionState(inventory, this.defaultPreference);
       if (fallback.kind === "open") {
@@ -1023,7 +1023,7 @@ export class Dashboard {
 
   // Resume and ordinary rows share the same trusted Open action. The card's
   // accessible name also explains whether the choice is Resume or a default.
-  // EP6-R1. Every trusted action that navigates into the unified terminal
+  // committed-identity. Every trusted action that navigates into the unified terminal
   // stages the identity of the session IT resolved from the authoritative
   // inventory, immediately before the navigation. The terminal page records
   // only what this staged candidate says; it never reads identity out of the

@@ -43,7 +43,7 @@ export const DEFAULT_PREFERENCES: PreferencesV1 = Object.freeze({
   version: 1,
   composer: Object.freeze({
     density: "standard",
-    // UX-16 §16.4: code (autocorrect off) is the default in a terminal —
+    // code (autocorrect off) is the default in a terminal —
     // a silently autocorrected command is the worse failure. Prose is one
     // tap away in the composer for dictated natural-language instructions.
     mode: "code",

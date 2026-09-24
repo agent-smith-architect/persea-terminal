@@ -7,10 +7,10 @@ const { startClipboardFixture: startFixture } = require("./clipboard_fixture.cjs
 const { requestJSON: requestHTTPJSON } = require("./unified_browser_lib.cjs");
 
 const UI = path.resolve(__dirname, "..");
-const ENGINE = process.env.PERSEA_UX10_ENGINE || "chromium";
+const ENGINE = process.env.PERSEA_TERMINAL_INTERACTION_ENGINE || "chromium";
 const MODULE = process.env.PERSEA_PLAYWRIGHT_MODULE || require.resolve("playwright");
-const EVIDENCE = path.resolve(process.env.PERSEA_UX10_EVIDENCE_DIR || path.join("/tmp", `persea-ux10-${ENGINE}`));
-const SHAPE = process.env.PERSEA_UX10_SHAPE || "";
+const EVIDENCE = path.resolve(process.env.PERSEA_TERMINAL_INTERACTION_EVIDENCE_DIR || path.join("/tmp", `persea-terminal_interaction-${ENGINE}`));
+const SHAPE = process.env.PERSEA_TERMINAL_INTERACTION_SHAPE || "";
 const SHAPES = [
   { name: "desktop", viewport: { width: 1180, height: 820 }, touch: false },
   { name: "tablet", viewport: { width: 820, height: 900 }, touch: true },
@@ -18,8 +18,8 @@ const SHAPES = [
   { name: "phone-360", viewport: { width: 360, height: 780 }, touch: true },
   { name: "phone-landscape", viewport: { width: 844, height: 390 }, touch: true },
 ].filter((shape) => SHAPE === "" || shape.name === SHAPE);
-const UX12_CORRECTION_CASE = process.env.PERSEA_UX12_CORRECTION_CASE || "all";
-const ux12CorrectionEnabled = (name) => UX12_CORRECTION_CASE === "all" || UX12_CORRECTION_CASE === name;
+const REFIT_LIFECYCLE_CASE = process.env.PERSEA_REFIT_LIFECYCLE_CASE || "all";
+const refitLifecycleEnabled = (name) => REFIT_LIFECYCLE_CASE === "all" || REFIT_LIFECYCLE_CASE === name;
 
 function assert(value, message) { if (!value) throw new Error(message); }
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -53,12 +53,12 @@ async function main() {
   const evidence = { engine: ENGINE, cases: [], screenshots: [] };
   try {
     for (const shape of SHAPES) {
-      console.log(`UX10_PHASE ${ENGINE} ${shape.name} start`);
+      console.log(`TERMINAL_INTERACTION_PHASE ${ENGINE} ${shape.name} start`);
       await control({ reset: true, switchSessions: true, sessionBState: "open" });
       const inventory = await requestJSON(`${fixture.origin}/api/inventory`);
       const session = inventory.realms[0].servers[0].sessions[0];
       const context = await browser.newContext({ viewport: shape.viewport, isMobile: shape.touch, hasTouch: shape.touch, deviceScaleFactor: shape.touch ? 2 : 1, ignoreHTTPSErrors: true });
-      // UX14 round 2: the software keyboard is not drivable from Playwright,
+      // the software keyboard is not drivable from Playwright,
       // but the page reads window.visualViewport once at construction, so a
       // transparent proxy (real readings, real events forwarded) with an
       // override lets a probe shrink the visual height and dispatch `resize`
@@ -82,13 +82,13 @@ async function main() {
         };
         for (const type of ["resize", "scroll"]) real.addEventListener(type, () => target.dispatchEvent(new Event(type)));
         Object.defineProperty(window, "visualViewport", { configurable: true, get: () => fake });
-        Object.defineProperty(window, "__ux14Viewport", { configurable: true, value: {
+        Object.defineProperty(window, "__terminal_layoutViewport", { configurable: true, value: {
           set(next) { Object.assign(override, next); target.dispatchEvent(new Event("resize")); },
         } });
       });
       await context.addInitScript(() => {
         const state = { writes: [], fail: false, readFail: false };
-        Object.defineProperty(window, "__ux10Clipboard", { configurable: true, value: state });
+        Object.defineProperty(window, "__terminal_interactionClipboard", { configurable: true, value: state });
         Object.defineProperty(Navigator.prototype, "clipboard", { configurable: true, get() { return {
           writeText(text) { state.writes.push(String(text)); return state.fail ? Promise.reject(new Error("fixture clipboard refusal")) : Promise.resolve(); },
           readText() { return state.readFail ? Promise.reject(new Error("fixture clipboard read refusal")) : Promise.resolve(state.writes.at(-1) || ""); },
@@ -185,7 +185,7 @@ async function main() {
       };
       const selectAction = () => page.locator(".persea-unified-select-context");
       const pasteAction = () => page.locator(".persea-unified-toolbar-paste");
-      // UX14 F3: every state of the two text-bearing controls fits its own
+      // every state of the two text-bearing controls fits its own
       // content box. Phones (coarse, <720px container) present the state as a
       // glyph with the words kept for the accessible name; everywhere else the
       // text range must fit the content box. Targets stay ≥44px on touch and
@@ -207,7 +207,7 @@ async function main() {
           };
         });
         const box = await locator.boundingBox();
-        // UX15 §15.1: words on every shape — the word must fit the content box
+        // words on every shape — the word must fit the content box
         // and nothing may overflow the button.
         const iconOnly = false;
         const fits = measure.wordShown && !measure.glyphShown && measure.textWidth <= measure.content + 0.5 && measure.scrollWidth <= measure.clientWidth;
@@ -217,8 +217,8 @@ async function main() {
       };
       // C5: Paste opens the shared picker. Device import is a separate trusted
       // request; refusal offers local text entry and never sends terminal input.
-      if (shape.name === "desktop" && ux12CorrectionEnabled("c5")) {
-        await page.evaluate(() => { window.__ux10Clipboard.readFail = true; });
+      if (shape.name === "desktop" && refitLifecycleEnabled("c5")) {
+        await page.evaluate(() => { window.__terminal_interactionClipboard.readFail = true; });
         const beforeDeniedImport = (await snapshot()).attachments.at(-1).inputs.length;
         await pasteAction().click();
         const clipboard = page.locator(".persea-clipboard");
@@ -231,7 +231,7 @@ async function main() {
         assert(/cancelled|blocked/i.test(message), `${shape.name}: denied device import omitted its status: ${JSON.stringify(message)}`);
         assert((await snapshot()).attachments.at(-1).inputs.length === beforeDeniedImport, `${shape.name}: denied import emitted terminal input`);
         await clipboard.getByRole("button", { name: "Close clipboard", exact: true }).click();
-        await page.evaluate(() => { window.__ux10Clipboard.readFail = false; });
+        await page.evaluate(() => { window.__terminal_interactionClipboard.readFail = false; });
       }
       const openFrozenSnapshot = async (label) => {
         await selectAction().click();
@@ -242,7 +242,7 @@ async function main() {
         return metrics;
       };
 
-      // UX12-B1: a programmatic Terminal.paste clears xterm's helper
+      // a programmatic Terminal.paste clears xterm's helper
       // textarea. The unified delivery sink must reconcile the iOS router in
       // the same tick so native repeat still has deletable sentinel content.
       // Synthetic input events model only the browser-side mechanism: real
@@ -263,14 +263,14 @@ async function main() {
         await overlay.waitFor({ state: "visible" });
         await page.evaluate(() => {
           const row = [...document.querySelectorAll(".persea-unified-select__row")].find((entry) => (entry.textContent || "").trim() !== "");
-          if (!row) throw new Error("no frozen UX12 row to select");
+          if (!row) throw new Error("no frozen refit row to select");
           const range = document.createRange();
           range.selectNodeContents(row);
           const selection = window.getSelection();
           selection.removeAllRanges();
           selection.addRange(range);
         });
-        // UX14 §14.2: Copy lives on the Paste slot while the range exists.
+        // Copy lives on the Paste slot while the range exists.
         await page.waitForFunction(() => document.querySelector(".persea-unified-toolbar-paste")?.dataset.pasteState === "copy");
         await pasteAction().click();
         await page.waitForFunction(() => document.querySelector(".persea-unified-toolbar-paste")?.dataset.pasteState === "copied");
@@ -287,7 +287,7 @@ async function main() {
         const clipboard = page.locator(".persea-clipboard");
         await clipboard.getByRole("button", { name: "Paste from device", exact: true }).click();
         await page.waitForFunction(() => document.querySelector(".persea-clipboard")?.getAttribute("aria-busy") === "false");
-        const importedText = await page.evaluate(() => window.__ux10Clipboard.writes.at(-1).replace(/\r\n?/g, "\n"));
+        const importedText = await page.evaluate(() => window.__terminal_interactionClipboard.writes.at(-1).replace(/\r\n?/g, "\n"));
         const importedRow = clipboard.locator("[data-clipboard-item]").filter({ has: page.locator(".persea-clipboard__preview", { hasText: importedText }) }).first();
         assert((await snapshot()).attachments.at(-1).inputs.length === beforePaste.attachments.at(-1).inputs.length, `${shape.name}: import sent input before explicit Paste`);
         await importedRow.getByRole("button", { name: "Paste text to terminal", exact: true }).click();
@@ -335,8 +335,8 @@ async function main() {
           `${shape.name}: programmatic Paste did not preserve the iOS repeat sentinel: ${JSON.stringify(cycle)}`);
         assert(deleteInputs.length === 12 && deleteInputs.every((input) => input === "\u007f"),
           `${shape.name}: held Backspace was not 12 ordered PTY delete intents: ${JSON.stringify(deleteInputs)}`);
-        evidence.cases.push({ shape: `${shape.name}-ux12-programmatic-paste-backspace`, cycle, deleteInputs: deleteInputs.length });
-        console.log(`UX12_B1 ${ENGINE} ${shape.name} pass cycles=${cycle.nativeCycles} deletes=${deleteInputs.length}`);
+        evidence.cases.push({ shape: `${shape.name}-refit-programmatic-paste-backspace`, cycle, deleteInputs: deleteInputs.length });
+        console.log(`PASTE_INPUT ${ENGINE} ${shape.name} pass cycles=${cycle.nativeCycles} deletes=${deleteInputs.length}`);
       }
 
       const beforeTag = await toolbarBox(); const beforeTagShell = await shellBoxes();
@@ -373,13 +373,13 @@ async function main() {
       const beforeSelectResizes = await resizes();
       const selectTile = selectAction();
       await selectTile.evaluate((node) => {
-        window.__ux10LongPressEvents = [];
+        window.__terminal_interactionLongPressEvents = [];
         for (const type of ["pointerdown", "pointermove", "pointerleave", "pointerup", "lostpointercapture", "click"]) {
-          node.addEventListener(type, (event) => window.__ux10LongPressEvents.push({ type, trusted: event.isTrusted, x: event.clientX, y: event.clientY }));
+          node.addEventListener(type, (event) => window.__terminal_interactionLongPressEvents.push({ type, trusted: event.isTrusted, x: event.clientX, y: event.clientY }));
         }
       });
       await longPress(selectTile); await page.waitForTimeout(100);
-      const selectLongPress = await page.evaluate(() => ({ visible: !document.querySelector(".persea-unified-explainer")?.hidden, events: window.__ux10LongPressEvents }));
+      const selectLongPress = await page.evaluate(() => ({ visible: !document.querySelector(".persea-unified-explainer")?.hidden, events: window.__terminal_interactionLongPressEvents }));
       assert(selectLongPress.visible, `${shape.name}: Select long-press did not explain: ${JSON.stringify(selectLongPress.events)}`);
       assert(!await page.locator(".persea-unified-select").isVisible() && await resizes() === beforeSelectResizes, `${shape.name}: Select long-press ran the primary action`);
       await page.keyboard.press("Escape"); await page.waitForTimeout(50);
@@ -410,22 +410,22 @@ async function main() {
         const range = document.createRange(); range.selectNodeContents(row);
         const selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(range);
       });
-      // UX14 §14.2: the Paste slot becomes Copy while a range exists; Select
+      // the Paste slot becomes Copy while a range exists; Select
       // stays a toggle and never turns into Copy itself.
       const selectCopy = pasteAction();
       await page.waitForFunction(() => document.querySelector(".persea-unified-toolbar-paste")?.dataset.pasteState === "copy");
       assert(await selectAction().getAttribute("data-select-state") === "selecting", `${shape.name}: Select changed state when a range appeared`);
-      const writesBefore = await page.evaluate(() => window.__ux10Clipboard.writes.length);
+      const writesBefore = await page.evaluate(() => window.__terminal_interactionClipboard.writes.length);
       await fitsBox(selectAction(), "selecting"); await fitsBox(pasteAction(), "copy");
       const selectCopyReadyBox = await selectCopy.boundingBox();
-      if (shape.name === "desktop" && ux12CorrectionEnabled("c4")) await control({ snippetMutationDelayMs: 1_500 });
+      if (shape.name === "desktop" && refitLifecycleEnabled("c4")) await control({ snippetMutationDelayMs: 1_500 });
       await selectCopy.click();
-      if (shape.name === "desktop" && ux12CorrectionEnabled("c4")) {
-        await page.waitForFunction((before) => window.__ux10Clipboard.writes.length === before + 1, writesBefore);
+      if (shape.name === "desktop" && refitLifecycleEnabled("c4")) {
+        await page.waitForFunction((before) => window.__terminal_interactionClipboard.writes.length === before + 1, writesBefore);
         assert(!await overlay.isVisible(), `${shape.name}: local clipboard success waited for the secondary Clips mutation before exiting selection`);
       }
       await page.waitForFunction(() => document.querySelector(".persea-unified-toolbar-paste")?.dataset.pasteState === "copied");
-      assert(await page.evaluate(() => window.__ux10Clipboard.writes.length) === writesBefore + 1, `${shape.name}: Select Copy local write count`);
+      assert(await page.evaluate(() => window.__terminal_interactionClipboard.writes.length) === writesBefore + 1, `${shape.name}: Select Copy local write count`);
       await fitsBox(pasteAction(), "copied");
       assert(sameBox(selectCopyReadyBox, await selectCopy.boundingBox()), `${shape.name}: Copy slot box changed on success`);
       assert(!await overlay.isVisible(), `${shape.name}: successful Copy did not exit selection immediately`);
@@ -434,7 +434,7 @@ async function main() {
       await page.waitForTimeout(1_300);
       assert(await pasteAction().getAttribute("data-paste-state") === "paste" && await pasteAction().getAttribute("aria-label") === "Open clipboard", `${shape.name}: Copied dwell did not return to Clipboard`);
       await fitsBox(selectAction(), "select"); await fitsBox(pasteAction(), "paste");
-      // UX15 §15.2 (G2): a click on an enabled control paints the tap flash
+      // (G2): a click on an enabled control paints the tap flash
       // (class + the stylesheet's keyframe) and clears it after the dwell; a
       // disabled or aria-disabled control never flashes. The probe stops the
       // click at the target so the product's own handler does not run.
@@ -467,7 +467,7 @@ async function main() {
       assert(!tapFeedback.disabled.tapped, `${shape.name}: a disabled control painted tap feedback: ${JSON.stringify(tapFeedback.disabled)}`);
       assert(!tapFeedback.ariaDisabled.tapped, `${shape.name}: an aria-disabled control painted tap feedback: ${JSON.stringify(tapFeedback.ariaDisabled)}`);
       await page.waitForFunction(() => !document.querySelector(".persea-tapped"), undefined, { timeout: 2_000 });
-      // UX15-R3 (): a repeat tap inside the dwell restarts its own flash;
+      // tap-feedback-timer (): a repeat tap inside the dwell restarts its own flash;
       // the first tap's timer must not cut the second tap's feedback short.
       const repeatTap = await page.evaluate(async () => {
         const select = document.querySelector(".persea-unified-select-context");
@@ -485,7 +485,7 @@ async function main() {
       assert(repeatTap.clearedAfterDwell, `${shape.name}: the repeat tap's feedback never cleared`);
       evidence.cases.push({ shape: `${shape.name}-tap-feedback`, ...tapFeedback, repeatTap });
       if (!shape.touch) {
-        // UX14 F1: a Copy of a LIVE xterm range (real mouse drag, no frozen
+        // a Copy of a LIVE xterm range (real mouse drag, no frozen
         // Select) is one local write; the copied range is cleared so the slot
         // returns to Paste after the dwell, with no terminal input or resize.
         const liveRow = page.locator(".xterm-rows > div").filter({ hasText: /\S/ }).first();
@@ -493,7 +493,7 @@ async function main() {
         assert(liveBox, `${shape.name}: no live row to drag over`);
         const liveInputsBefore = (await snapshot()).attachments.reduce((sum, attachment) => sum + attachment.inputs.length, 0);
         const liveResizesBefore = await resizes();
-        const liveWritesBefore = await page.evaluate(() => window.__ux10Clipboard.writes.length);
+        const liveWritesBefore = await page.evaluate(() => window.__terminal_interactionClipboard.writes.length);
         await page.mouse.move(liveBox.x + 2, liveBox.y + liveBox.height / 2);
         await page.mouse.down();
         await page.mouse.move(liveBox.x + 120, liveBox.y + liveBox.height / 2, { steps: 6 });
@@ -504,7 +504,7 @@ async function main() {
         const liveCopyBox = await pasteAction().boundingBox();
         await pasteAction().click();
         await page.waitForFunction(() => document.querySelector(".persea-unified-toolbar-paste")?.dataset.pasteState === "copied");
-        assert(await page.evaluate(() => window.__ux10Clipboard.writes.length) === liveWritesBefore + 1, `${shape.name}: live-range Copy local write count`);
+        assert(await page.evaluate(() => window.__terminal_interactionClipboard.writes.length) === liveWritesBefore + 1, `${shape.name}: live-range Copy local write count`);
         assert(sameBox(liveCopyBox, await pasteAction().boundingBox()), `${shape.name}: Paste slot box changed on live-range Copy`);
         await shot("live-copy-done");
         await page.waitForTimeout(1_300);
@@ -517,7 +517,7 @@ async function main() {
       await page.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent?.includes("AUTO_ALT_METRIC"));
       const autoAlternateMetrics = await openFrozenSnapshot("auto-alternate");
       const alternateView = await openView(); await alternateView.getByRole("button", { name: "Zoom out", exact: true }).click();
-      // UX14 F2: on the alternate screen Fit width is disabled up front,
+      // on the alternate screen Fit width is disabled up front,
       // Apply stays for rows, and a typed column change is refused without a
       // request — the broker would refuse the rebuild anyway.
       const alternateBlock = alternateView.locator(".persea-unified-size[data-surface=view]");
@@ -575,15 +575,15 @@ async function main() {
         const selection = getSelection(); selection.removeAllRanges(); selection.addRange(range);
       });
       await page.waitForFunction(() => document.querySelector(".persea-unified-toolbar-paste")?.dataset.pasteState === "copy");
-      await page.evaluate(() => { window.__ux10Clipboard.fail = true; });
+      await page.evaluate(() => { window.__terminal_interactionClipboard.fail = true; });
       const screenCopy = pasteAction(); const screenCopyReadyBox = await screenCopy.boundingBox(); await screenCopy.click();
       await page.waitForFunction(() => document.querySelector(".persea-unified-select__status")?.textContent?.includes("Copy failed"));
       assert(await overlay.isVisible() && await screenCopy.getAttribute("data-paste-state") === "failed" && await selectAction().getAttribute("data-select-state") === "selecting", `${shape.name}: failed Copy exited or lost its range`);
       assert(sameBox(screenCopyReadyBox, await screenCopy.boundingBox()), `${shape.name}: Copy slot box changed on failure`);
       await fitsBox(pasteAction(), "failed");
       await shot("select-failed");
-      await page.evaluate(() => { window.__ux10Clipboard.fail = false; });
-      // UX14 §14.2: Select is a toggle — a second tap leaves selection with the
+      await page.evaluate(() => { window.__terminal_interactionClipboard.fail = false; });
+      // Select is a toggle — a second tap leaves selection with the
       // range still in place, and the Paste slot returns to Paste.
       await selectAction().click(); await overlay.waitFor({ state: "hidden" });
       assert(await selectAction().getAttribute("data-select-state") === "select", `${shape.name}: Select toggle did not leave selection`);
@@ -651,7 +651,7 @@ async function main() {
 	  view = await openView();
 	  const refitForm = view.locator(".persea-unified-size[data-surface=view]");
 	  const columns = refitForm.getByRole("textbox", { name: "Columns", exact: true });
-	  // UX14 §14.1: the single Apply performs the width refit when the typed
+	  // the single Apply performs the width refit when the typed
 	  // columns differ from the committed ones (rows untouched → no rows sent).
 	  const refit = refitForm.getByRole("button", { name: "Apply", exact: true });
 	  const beforeRefit = await snapshot();
@@ -662,9 +662,9 @@ async function main() {
 	  await page.waitForFunction(() => document.activeElement?.classList.contains("xterm-helper-textarea"));
 	  await control({ holdRefitMs: 350 });
 	  await refit.evaluate((button) => {
-	    window.__ux12RefitEvents = [];
+	    window.__refitRefitEvents = [];
 	    for (const type of ["pointerdown", "mousedown", "pointerup", "click"])
-	      button.addEventListener(type, (event) => window.__ux12RefitEvents.push({ type, trusted: event.isTrusted, detail: "detail" in event ? event.detail : null, disabled: button.disabled }));
+	      button.addEventListener(type, (event) => window.__refitRefitEvents.push({ type, trusted: event.isTrusted, detail: "detail" in event ? event.detail : null, disabled: button.disabled }));
 	  });
 	  await columns.fill(String(refitColumns));
 	  await columns.press("Enter");
@@ -683,7 +683,7 @@ async function main() {
 	      refusal: document.querySelector(".persea-unified-refusal")?.textContent,
 	      toast: document.querySelector(".persea-unified-toast:not([hidden])")?.textContent,
 	      geometry: document.querySelector(".persea-unified-view-disclosure")?.textContent,
-	      events: window.__ux12RefitEvents,
+	      events: window.__refitRefitEvents,
 	    }));
 	    throw new Error(`${shape.name}: Apply did not enter the Refitting state: ${JSON.stringify({ diagnostic, fixture: (await snapshot()).counters })}; ${error}`);
 	  }
@@ -692,7 +692,7 @@ async function main() {
 	  // C3 natural RED: replaying the predecessor tuple while the HTTP refit is
 	  // pending must not open the exact-operation seal. Only the captured
 	  // successor COMMIT owns that transition.
-	  if (shape.name === "desktop" && ux12CorrectionEnabled("c3")) {
+	  if (shape.name === "desktop" && refitLifecycleEnabled("c3")) {
 	    await control({ recommitSession: "A" });
 	    await page.waitForTimeout(50);
 	    await helper.evaluate((node) => node.focus({ preventScroll: true }));
@@ -712,7 +712,7 @@ async function main() {
 	      geometry: document.querySelector(".persea-unified-view-disclosure")?.textContent,
 	      status: document.querySelector(".persea-unified-connection-status")?.textContent,
 	      refusal: document.querySelector(".persea-unified-refusal")?.textContent,
-	      events: window.__ux12RefitEvents,
+	      events: window.__refitRefitEvents,
 	    }));
 	    const fixtureState = await snapshot();
 	    throw new Error(`${shape.name}: width refit did not publish successor geometry: ${JSON.stringify({ diagnostic, fixtureState })}; ${error}`);
@@ -729,7 +729,7 @@ async function main() {
 	  assert(await resizes() === beforeRefitResizes, `${shape.name}: width refit emitted an attachment RESIZE_REQUEST`);
 	  const refitInputs = await inputTranscript();
 	  assert(refitInputs.includes("REFIT_PRE;") && refitInputs.includes("REFIT_POST;") && !refitInputs.includes("REFIT_DURING;") && !refitInputs.includes("REFIT_WRONG_COMMIT;"), `${shape.name}: refit input seal violated ordering/drop contract: ${JSON.stringify(refitInputs)}`);
-	  const droppedRefitBytes = shape.name === "desktop" && ux12CorrectionEnabled("c3") ? 50 : 13;
+	  const droppedRefitBytes = shape.name === "desktop" && refitLifecycleEnabled("c3") ? 50 : 13;
 	  const refitDropToast = page.locator(".persea-unified-toast:not([hidden])");
 	  const actualRefitDropToast = await refitDropToast.textContent();
 	  assert(actualRefitDropToast === `${droppedRefitBytes} input bytes were not sent during width refit`, `${shape.name}: successful refit did not settle its dropped input exactly once: ${JSON.stringify(actualRefitDropToast)}`);
@@ -761,7 +761,7 @@ async function main() {
         await disclosure.click(); const viewPopover = page.locator(".persea-unified-view-popover"); await viewPopover.waitFor({ state: "visible" });
         assert(sameBox(beforeView, await toolbarBox()), "View disclosure changed toolbar box");
         assert(await viewPopover.getByRole("button", { name: "Zoom out" }).isVisible() && await viewPopover.locator(".persea-unified-size[data-surface=view]").isVisible(), "View popover lacks zoom/size");
-        // UX15 §15.6: theme and composer text live on the dashboard; the View
+        // theme and composer text live on the dashboard; the View
         // popover carries no preference picker.
         assert(await viewPopover.locator(".persea-unified-preference").count() === 0, `${shape.name}: a preference picker leaked into the View popover`);
         await shot("view-popover");
@@ -792,20 +792,20 @@ async function main() {
       const helpTerms = await help.locator("dt").allTextContents();
       assert(JSON.stringify(helpTerms) === JSON.stringify(["Copy", "Select", "Paste / Copy", "Fit rows / Fit width", "View and size", "Terminal size", "Sessions"]), `${shape.name}: Help incomplete: ${JSON.stringify(helpTerms)}`);
       assert(await help.getByRole("button", { name: "Copy the recent input trace for a bug report" }).isVisible(), `${shape.name}: Help lacks the input trace copy`);
-      // UX14 §14.4: the trace is one local clipboard write of valid JSON with
+      // the trace is one local clipboard write of valid JSON with
       // the recorded event sequence — never a network request.
-      const traceWritesBefore = await page.evaluate(() => window.__ux10Clipboard.writes.length);
+      const traceWritesBefore = await page.evaluate(() => window.__terminal_interactionClipboard.writes.length);
       const traceRequestsBefore = httpErrors.length + (await snapshot()).attachments.length;
       await help.getByRole("button", { name: "Copy the recent input trace for a bug report" }).click();
-      await page.waitForFunction((before) => window.__ux10Clipboard.writes.length === before + 1, traceWritesBefore);
-      const trace = JSON.parse(await page.evaluate(() => window.__ux10Clipboard.writes.at(-1)));
+      await page.waitForFunction((before) => window.__terminal_interactionClipboard.writes.length === before + 1, traceWritesBefore);
+      const trace = JSON.parse(await page.evaluate(() => window.__terminal_interactionClipboard.writes.at(-1)));
       assert(trace.version === 1 && typeof trace.userAgent === "string" && Array.isArray(trace.entries) && trace.entries.length > 0 && trace.entries.length <= 300
         && trace.entries.every((entry) => typeof entry.t === "number" && typeof entry.kind === "string" && entry.router && typeof entry.router.active === "boolean")
         && trace.entries.some((entry) => entry.kind === "send"),
         `${shape.name}: input trace malformed: ${JSON.stringify(trace).slice(0, 400)}`);
       assert(httpErrors.length + (await snapshot()).attachments.length === traceRequestsBefore, `${shape.name}: copying the trace touched the network`);
       await shot("help"); await page.keyboard.press("Escape");
-      // UX14 round 2: a software-keyboard / visual-viewport transition
+      // a software-keyboard / visual-viewport transition
       // while the View popover is open refreshes the Fit width affordance
       // (activation was already fail-closed; the control must say so), and
       // the target returns unchanged once the keyboard goes.
@@ -816,7 +816,7 @@ async function main() {
       assert(!guardBefore.disabled && guardBefore.aria === "false" && /^Rebuild this session at \d+ columns/.test(guardBefore.title || ""), `${shape.name}: Fit width not offered before the keyboard probe: ${JSON.stringify(guardBefore)}`);
       const guardRefits = (await snapshot()).counters.refits;
       const guardResizes = await resizes();
-      await page.evaluate(() => window.__ux14Viewport.set({ height: Math.max(120, Math.round(window.innerHeight * 0.55)) }));
+      await page.evaluate(() => window.__terminal_layoutViewport.set({ height: Math.max(120, Math.round(window.innerHeight * 0.55)) }));
       const fitWidthState = () => [...document.querySelectorAll(".persea-unified-size[data-surface=view] button")]
         .filter((button) => (button.textContent || "").includes("Fit width"))
         .map((button) => ({ disabled: button.disabled, aria: button.getAttribute("aria-disabled"), title: button.title }))[0];
@@ -828,7 +828,7 @@ async function main() {
         .catch(async (error) => { throw new Error(`${shape.name}: Fit width stayed offered through a keyboard rise: ${JSON.stringify(await page.evaluate(fitWidthState))}; ${error}`); });
       const guardAfter = { disabled: await guardFit.evaluate((button) => button.disabled), aria: await guardFit.getAttribute("aria-disabled"), title: await guardFit.getAttribute("title") };
       assert(guardAfter.title === "Close the software keyboard before fitting to the visible area.", `${shape.name}: keyboard-guarded Fit width title: ${JSON.stringify(guardAfter)}`);
-      // UX15 §15.3: Apply carries a typed size — it stays available while the
+      // Apply carries a typed size — it stays available while the
       // keyboard is up, and a typed rows change during the rise is exactly one
       // live RESIZE_REQUEST; the measured fits stay withdrawn.
       const guardApply = guardBlock.getByRole("button", { name: "Apply", exact: true });
@@ -846,14 +846,14 @@ async function main() {
       await delay(150);
       assert(await resizes() === guardResizes + 1 && (await snapshot()).counters.refits === guardRefits, `${shape.name}: a typed rows Apply during the keyboard rise did not issue exactly one RESIZE_REQUEST`);
       const guardResizesAfterApply = await resizes();
-      await page.evaluate(() => window.__ux14Viewport.set({ height: null }));
+      await page.evaluate(() => window.__terminal_layoutViewport.set({ height: null }));
       await page.waitForFunction((source) => { const state = new Function(`return (${source})()`)(); return state && !state.disabled && state.aria === "false"; }, fitWidthState.toString(), { timeout: 5_000 })
         .catch(async (error) => { throw new Error(`${shape.name}: Fit width not restored after the keyboard went: ${JSON.stringify(await page.evaluate((source) => new Function(`return (${source})()`)(), fitWidthState.toString()))}; ${error}`); });
       assert(await guardFit.getAttribute("title") === guardBefore.title, `${shape.name}: Fit width target changed across the keyboard probe: ${await guardFit.getAttribute("title")} vs ${guardBefore.title}`);
       assert((await snapshot()).counters.refits === guardRefits && await resizes() === guardResizesAfterApply, `${shape.name}: the keyboard release produced refit or resize traffic`);
       evidence.cases.push({ shape: `${shape.name}-keyboard-guard`, before: guardBefore, guarded: guardAfter });
       await page.keyboard.press("Escape"); await page.waitForTimeout(100);
-      // UX14 F2: Fit width is the measured-columns rebuild; once the width
+      // Fit width is the measured-columns rebuild; once the width
       // fits, the control withdraws itself ("Width already fits") instead of
       // offering a no-op refit. The measured width is read from the control's
       // own title, so the pin holds on every shape.
@@ -897,10 +897,10 @@ async function main() {
         && httpErrors.every((entry) => entry.status === 403 && new URL(entry.url).pathname === "/api/snippets");
       assert(httpErrors.length === 0 || expectedWebKitClipRefusal, `${shape.name}: HTTP errors: ${JSON.stringify(httpErrors)}`);
       evidence.cases.push({ shape: shape.name, row: rowEvidence, selectState, r4Geometry, errors, httpErrors }); await context.close();
-      console.log(`UX10_PHASE ${ENGINE} ${shape.name} pass`);
+      console.log(`TERMINAL_INTERACTION_PHASE ${ENGINE} ${shape.name} pass`);
     }
-    fs.writeFileSync(path.join(EVIDENCE, `ux10-${ENGINE}.json`), JSON.stringify(evidence, null, 2));
-    console.log(`UX10 ${ENGINE}: PASS (${evidence.cases.length} postures)`);
+    fs.writeFileSync(path.join(EVIDENCE, `terminal_interaction-${ENGINE}.json`), JSON.stringify(evidence, null, 2));
+    console.log(`terminal interaction ${ENGINE}: PASS (${evidence.cases.length} postures)`);
   } finally {
     await browser.close();
     await Promise.race([fixture.close(), delay(3_000)]);

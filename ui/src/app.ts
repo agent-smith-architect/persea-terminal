@@ -81,7 +81,7 @@ async function boot(): Promise<void> {
   // The workspace document (M9 W1b) is decided BEFORE the terminal fragment
   // self-heal below: its fragment contract is {name} only, `engine` in a
   // workspace fragment is a typed refusal, and a workspace is never redirected
-  // to /terminal (packet §5 [F1], FW-R).
+  // to /terminal.
   if (window.location.pathname === "/workspace") {
     await bootWorkspace({ root, styleNonce });
     return;
@@ -101,7 +101,7 @@ async function boot(): Promise<void> {
   if (searchKeys.length > 1
     || (searchKeys.length === 1
       && !((searchKeys[0] === "engine" && search.get("engine") === "unified-dev")
-        // E-P6: the landing flag of the dashboard and the PWA `start_url`. It
+        // the landing flag of the dashboard and the PWA `start_url`. It
         // carries no authority whatsoever — the dashboard reads it only to
         // decide which card to focus — but it must be an exact known value so
         // the "authority lives in the fragment" refusal keeps its meaning.
@@ -110,7 +110,7 @@ async function boot(): Promise<void> {
   }
   const query = fragment;
   const seen = new Set<string>();
-  // `open_id` (E-P6, EP6-R2) names the one staged last-session candidate this
+  // `open_id` (session memory, operation-owned-candidate) names the one staged last-session candidate this
   // navigation may claim. It carries no authority: it selects a local storage
   // entry, and the page still needs a valid handle, an agreeing draft scope and
   // a real COMMIT before anything is recorded.
@@ -157,7 +157,7 @@ async function boot(): Promise<void> {
   // one-shot reload handle in sessionStorage — stays here as callbacks;
   // the controller owns the
   // per-pane claim state, re-mint paths, transport, and page.
-  // E-P6 (corrected per adjudication EP6-R1): the device remembers this
+  // The device remembers this
   // session only after a real first COMMIT, AND only the identity that the
   // trusted dashboard action staged from the authoritative inventory.
   //
@@ -189,7 +189,7 @@ async function boot(): Promise<void> {
     pageDraftScope: draftScopeFragment,
   });
   window.addEventListener("pagehide", () => committedSession.abandon());
-  // ONE snippets/clips service per document (E-P3). Constructing it makes
+  // ONE snippets/clips service per document (clipboard). Constructing it makes
   // no request: it reads the store only once a pane's sheet puts a list on
   // screen, and every pane in this document shares that one poll loop.
   const snippets = new SnippetService({
@@ -203,13 +203,13 @@ async function boot(): Promise<void> {
     sessionId: decodedScope.sessionId,
   }) : undefined;
   const switchProbe = (window as unknown as Readonly<{
-    __perseaEP4SwitchProbe?: (phase: SessionSwitchCommitPhase, sample: () => SessionSwitchBoundState) => void;
-    __perseaEP4AuthorityProbe?: NonNullable<UnifiedPaneObserver["authorityResult"]>;
-  }>).__perseaEP4SwitchProbe;
+    __perseaSessionSwitchSwitchProbe?: (phase: SessionSwitchCommitPhase, sample: () => SessionSwitchBoundState) => void;
+    __perseaSessionSwitchAuthorityProbe?: NonNullable<UnifiedPaneObserver["authorityResult"]>;
+  }>).__perseaSessionSwitchSwitchProbe;
   const authorityProbe = (window as unknown as Readonly<{
-    __perseaEP4AuthorityProbe?: NonNullable<UnifiedPaneObserver["authorityResult"]>;
-  }>).__perseaEP4AuthorityProbe;
-  // E-P5: one server preference read per document, completed before xterm
+    __perseaSessionSwitchAuthorityProbe?: NonNullable<UnifiedPaneObserver["authorityResult"]>;
+  }>).__perseaSessionSwitchAuthorityProbe;
+  // one server preference read per document, completed before xterm
   // construction so the authoritative font baseline precedes the first fit.
   // Failure resolves to bounded defaults; it never blocks attachment use.
   const preferences = new OperatorPreferencesService();

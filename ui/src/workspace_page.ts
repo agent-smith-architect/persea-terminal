@@ -1,8 +1,8 @@
 // The /workspace document (M9 W1b): the strict route branch, the landing card
 // that never auto-attaches (ergonomics B3), the honest phone-class state
-// (packet §6 / M5), and the desktop runtime — one per-pane controller per
+//, and the desktop runtime — one per-pane controller per
 // leaf, one single-flight inventory per workspace, pinned identities (B2), a
-// designated-pane focus veto composed over E-P1's hook (F3 / N3), and the
+// designated-pane focus veto composed over terminal's hook (F3 / N3), and the
 // W1a presentation shell.
 //
 // W1 is the ephemeral phase (no store): the arrangement lives in this tab
@@ -37,7 +37,7 @@ import {
 import { WorkspaceAPI, WorkspaceAPIError, workspaceAPIMessage, type WorkspaceRecord } from "./workspace_api";
 import { parseWorkspaceLocation, workspaceRouteNotice, workspaceURL } from "./workspace_url";
 
-// --- Posture (packet §6, advisory A1). Authored in workspace_posture.ts, which
+// --- Posture. Authored in workspace_posture.ts, which
 // the dashboard reads too so that its create affordance and this document's
 // decision are the same function of the same inputs.
 import { stablePostureEnvironment } from "./workspace_posture";
@@ -74,7 +74,7 @@ export function autoArrange(selectors: readonly SessionSelector[]): WorkspaceNod
   return split("column", [split("row", leaves.slice(0, top)), split("row", leaves.slice(top))]);
 }
 
-// --- Single-flight inventory (packet §4a step 1 / step 4; falsifier F7).
+// --- Single-flight inventory.
 //
 // At most one inventory request is in flight per workspace document. A
 // caller that already consumed a handle from snapshot generation g asks for
@@ -120,7 +120,7 @@ export class WorkspaceInventory {
   }
 }
 
-// --- Resolution of a leaf against one snapshot (packet §3c load-time outcomes).
+// --- Resolution of a leaf against one snapshot.
 export type LeafResolution =
   | Readonly<{ kind: "resolved"; identity: ResolvedPaneIdentity; session: DashboardSession; snapshotGeneration: number }>
   | Readonly<{ kind: "missing" }>
@@ -214,7 +214,7 @@ export async function bootWorkspace(options: WorkspaceBootOptions): Promise<void
   page.landing(arrangement, snapshot);
 }
 
-// The honest phone-class state (packet §6, M5): the workspace name, the
+// The honest phone-class state: the workspace name, the
 // notice, one single-terminal link per resolved leaf with its resolution
 // state beside it. Zero transports, zero xterms.
 function renderPhone(root: HTMLElement, name: string, arrangement: WorkspaceNode | undefined, snapshot: InventorySnapshot, win: Window): void {
@@ -280,7 +280,7 @@ export class WorkspacePage {
   private designated?: string;
   private opened = false;
   private torndown = false;
-  // ONE snippets/clips service for the whole workspace document (E-P3): six
+  // ONE snippets/clips service for the whole workspace document (clipboard): six
   // panes subscribe to it and share its single poll loop, and each pane's own
   // controller is what routes a snippet action to that pane's terminal.
   // Construction is inert — nothing is read until a pane opens a list.
@@ -507,7 +507,7 @@ export class WorkspacePage {
       // pane and its rotation-deferred detail never arrives. The exactness
       // test itself is unchanged: a resolution that no longer names this
       // controller's incarnation projects no detail, and the controller
-      // refuses any key but its own (M11LF-F3C).
+      // refuses any key but its own (workspace rotationC).
       const resolution = resolveLeaf(current, identity.selector);
       const exact = resolution.kind === "resolved" && resolution.identity.incarnationKey === identity.incarnationKey;
       const projection = exact ? resolution.session.unified : undefined;
@@ -537,7 +537,7 @@ export class WorkspacePage {
   }
 
   // Adoption is the one pre-attach mutation a leaf may perform, and it is per
-  // pane: a 429 or a refusal delays or fails THIS pane only (packet §4a step 5).
+  // pane: a 429 or a refusal delays or fails THIS pane only.
   private async adopt(pane: PaneRuntime, identity: ResolvedPaneIdentity): Promise<boolean> {
     while (!this.torndown) {
       pane.adoptAttempts += 1;
@@ -596,9 +596,9 @@ export class WorkspacePage {
         if (remembered) writeLastSession(this.win.localStorage, Object.freeze({ ...remembered, at: Date.now() }));
       },
       onIdentityReplaced: (next) => { pane.identity = next; },
-      // E-P1's hook is a VETO: the page's pointer rule decides whether a
+      // terminal's hook is a VETO: the page's pointer rule decides whether a
       // COMMIT may claim focus at all; this policy only withholds it from
-      // every pane but the designated one (adjudication N3).
+      // every pane but the designated one.
       claimFocusOnCommit: (context: CommitFocusContext) => context.pointerRuleClaims && key === this.designated,
       observer: {
         openTransport: (generation) => {
@@ -659,7 +659,7 @@ export class WorkspacePage {
         return;
       }
       case "retry": {
-        // Explicit operator intent (packet §3c step 3): a pane that never
+        // Explicit operator intent: a pane that never
         // pinned an identity resolves again; a pane that did re-attaches on
         // its pinned identity and never crosses to a same-name replacement.
         if (pane.controller) {

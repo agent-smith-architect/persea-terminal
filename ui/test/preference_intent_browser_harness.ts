@@ -1,5 +1,4 @@
-// D1 (advisor seam pre-check, made binding by Amendment 2 of the E-P5
-// correction contract): the page's two preference call sites must settle the
+// The page's two preference call sites must settle the
 // MATCHING intent when the operation rejects, not only when it fulfils.
 //
 // OperatorPreferencesService.update() is deliberately rejection-capable: the
@@ -16,7 +15,7 @@
 // for the rest of the document's life; if the rejection were unhandled, the
 // void call would leak it to the window.
 //
-// UX15 §15.6: the theme picker lives on the dashboard's Appearance card, not
+// the theme picker lives on the dashboard's Appearance card, not
 // on the terminal page. The theme cases therefore mount the REAL Dashboard on
 // the SAME service as the terminal page (one service, many subscribers — the
 // document the product actually runs) and drive the card's real theme select:
@@ -249,7 +248,7 @@ async function fontRejection(): Promise<CaseResult> {
     committedRevision: committed.revision,
     laterOutcome: outcome,
     laterLiveFont: mounted.shell.dataset.fontBaseline,
-    // UX15-R2: a discarded Zoom intent says so on the page.
+    // a discarded Zoom intent says so on the page.
     toast: mounted.root.querySelector(".persea-unified-toast")?.textContent ?? "",
   };
   dismount(mounted);
@@ -281,7 +280,7 @@ async function newerIntentSurvives(): Promise<CaseResult> {
   return { name: "newer_theme_intent_survives_older_rejection", detail };
 }
 
-// UX18-R2/R3/R4 lifecycle pin. The controller owns these transitions; using
+// control-lifecycle/R3/R4 lifecycle pin. The controller owns these transitions; using
 // its internal seam here avoids a fake reimplementation while still mounting
 // and destroying the real xterm page in a browser. destroy() must synchronously
 // restore the original row and close the page-owned typography disclosure
@@ -320,7 +319,7 @@ async function destroyRestoresPresentation(): Promise<CaseResult> {
     owner: internals.popoverOwner,
   };
   mounted.root.remove();
-  return { name: "destroy_restores_ux18_presentation", detail };
+  return { name: "destroy_restores_terminal_controls_presentation", detail };
 }
 
 function judge(results: readonly CaseResult[]): string[] {
@@ -329,7 +328,7 @@ function judge(results: readonly CaseResult[]): string[] {
   const theme = byName.get("theme_rejection_settles_matching_intent")!;
   const font = byName.get("font_rejection_settles_matching_intent")!;
   const newer = byName.get("newer_theme_intent_survives_older_rejection")!;
-  const lifecycle = byName.get("destroy_restores_ux18_presentation")!;
+  const lifecycle = byName.get("destroy_restores_terminal_controls_presentation")!;
 
   for (const [name, detail] of [["theme", theme], ["font", font], ["newer", newer]] as const) {
     if (detail.siblingThrew !== true) failures.push(`${name}: the sibling subscriber never threw; the case proves nothing`);
