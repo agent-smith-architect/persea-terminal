@@ -18,6 +18,26 @@ require a major release.
    release notes. Use pre-release status for preview versions such as
    `0.2.0-rc.1`; ordinary 0.x releases can be marked as the latest release.
 
+## Release checks
+
+Before you tag a release, also check these points:
+
+- Include `LICENSE` and `THIRD_PARTY_NOTICES.md` with any binary release
+  archive, and keep the UI build's `THIRD_PARTY_NOTICES.txt` with its bundled
+  assets.
+- Test the actual network boundaries of the terminal: temporary loss,
+  blackholed connections, delayed output, reconnect exhaustion, and explicit
+  recovery. Assert retained readable output, no replayed input, no unrequested
+  resize, and correct Control ownership.
+- Use a sustained-output run to measure resident memory and input
+  responsiveness on a constrained browser. Add buffering or concurrency
+  machinery only if these measurements show a problem.
+- Desktop browser emulation does not prove iOS keyboard behavior or low-end
+  hardware performance. State those gaps in the release notes, or test on
+  representative devices.
+- Scan release archives, generated bundles, and screenshots for credentials,
+  personal information, internal paths, and real terminal content.
+
 Keep dependency maintenance separate from product versions. Before release,
 refresh dependencies, test the recorded lockfile, and retain any required xterm
 patch. See [dependency maintenance](ui/DEPENDENCIES.md).

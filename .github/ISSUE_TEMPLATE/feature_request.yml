@@ -1,0 +1,26 @@
+name: Feature request
+description: Suggest a change or a new capability.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what prevents you now?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Describe the change you want. Include alternatives you considered.
+    validations:
+      required: true
+  - type: textarea
+    id: security
+    attributes:
+      label: Security considerations
+      description: >-
+        Persea Terminal gives a single operator access to configured Unix accounts.
+        Tell us if the change affects who can reach a terminal, what they can do there,
+        or which data is stored.

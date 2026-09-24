@@ -4,6 +4,8 @@ Keep changes bounded to one owner boundary and preserve fail-closed behavior.
 Use synthetic realm names, accounts, hosts, identities, and terminal content in
 source, tests, examples, and reports.
 
+Take part according to the [code of conduct](CODE_OF_CONDUCT.md).
+
 ## LLM use
 
 Mention the LLM model(s) and reasoning effort used in your PR.
