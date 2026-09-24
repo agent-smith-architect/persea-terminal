@@ -732,7 +732,7 @@ persea_require_public_release() {
 # Serialize release readers that can change pointers with pruning. The lock is
 # outside releases so a fresh install need not create an install root early.
 persea_lock_deployment() {
-  local runtime lock owner group
+  local runtime lock owner group caller_umask
   runtime=$(persea_path /run)
   persea_require_safe_directory "$runtime"
   lock="$runtime/persea-terminal-deploy.lock"
@@ -744,11 +744,12 @@ persea_lock_deployment() {
       persea_die 'deployment lock is unsafe'
   fi
   [[ ${PERSEA_DEPLOY_LOCK_PID:-} == "$$" ]] && return 0
+  caller_umask=$(umask)
   # flock owns the descriptor in the supervisor, not in build/service children.
   # Re-exec before loading host data so a waiter reads the committed snapshot.
   exec /bin/bash -c 'umask 0077; exec flock --exclusive --close -- "$@"' persea-lock \
-    "$lock" /bin/bash -c 'export PERSEA_DEPLOY_LOCK_PID=$$; exec "$@"' persea-deploy \
-    "$0" "${PERSEA_DEPLOY_ARGUMENTS[@]}"
+    "$lock" /bin/bash -c 'umask "$1"; shift; export PERSEA_DEPLOY_LOCK_PID=$$; exec "$@"' persea-deploy \
+    "$caller_umask" "$0" "${PERSEA_DEPLOY_ARGUMENTS[@]}"
 }
 
 persea_validate_keep_releases() {

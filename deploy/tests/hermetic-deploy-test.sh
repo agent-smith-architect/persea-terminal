@@ -53,6 +53,7 @@ cleanup() {
 trap cleanup EXIT
 
 mkdir -m 0700 "$MOCK_BIN" "$FAKE_STATE"
+umask >"$MOCK_BIN/build-umask"
 cat >"$MOCK_BIN/npm" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -61,6 +62,10 @@ effective=$(id -u)
 lang=${LANG-<unset>}
 lc_all=${LC_ALL-<unset>}
 tmpdir=${TMPDIR-<unset>}
+[[ $(umask) == $(cat "$(dirname -- "$0")/build-umask") ]] || {
+  printf 'fake npm build umask differs from the invoking shell\n' >&2
+  exit 98
+}
 printf 'npm real=%s effective=%s LANG=%s LC_ALL=%s TMPDIR=%s args=%s\n' "$real" "$effective" "$lang" "$lc_all" "$tmpdir" "$*" >>"$FAKE_STATE/build-uid.log"
 [[ $real == "$PERSEA_EXPECT_BUILD_UID" && $effective == "$PERSEA_EXPECT_BUILD_UID" ]] || {
   printf 'fake npm UID witness: real=%s effective=%s expected=%s\n' "$real" "$effective" "$PERSEA_EXPECT_BUILD_UID" >&2
