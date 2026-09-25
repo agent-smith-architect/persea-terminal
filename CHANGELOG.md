@@ -4,6 +4,10 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+### Changed
+
+- The help for Fit rows, Fit width and Terminal size now says that these actions fix the tmux window at the new size for every attached terminal, and how to give sizing back.
+
 ## 0.1.2 — 2026-09-25
 
 ### Fixed
