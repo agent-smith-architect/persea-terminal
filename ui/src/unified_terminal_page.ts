@@ -1,5 +1,10 @@
+import type { UnifiedViewportInsetSource, InsertTextResult, UnifiedTerminalPageOptions } from "./unified_terminal_options";
+export type { UnifiedViewportInsetSource, InsertTextResult, UnifiedTerminalPageOptions } from "./unified_terminal_options";
+import type { WidthRefitResult, WidthRefitAttempt, PendingWidthRefit, UnifiedGeometryAction, UnifiedGeometryAvailabilityCode, UnifiedGeometryAvailability, UnifiedGeometryAvailabilityInput, GeometryFormView } from "./unified_terminal_geometry_types";
+export type { WidthRefitResult, WidthRefitAttempt, UnifiedGeometryAction, UnifiedGeometryAvailabilityCode, UnifiedGeometryAvailability, UnifiedGeometryAvailabilityInput } from "./unified_terminal_geometry_types";
+import type { CopyToClipsResult, UnifiedPopoverOwner, UnifiedExplainerTopic, ScrollAnchor, FontIntent, ComposerFontIntent, InputTraceEntry } from "./unified_terminal_state_types";
 import { Terminal } from "@xterm/xterm";
-import type { AttachmentPagePort, PortSendResult } from "./attachment_port";
+import type { PortSendResult } from "./attachment_port";
 import type { AttachmentTransportSink, ReconnectStatus } from "./websocket_attachment_transport";
 import { MAX_FIT_CELLS, MAX_FIT_ROWS, MIN_FIT_ROWS, validVerticalFit, validateServerFrame, type BrowserFrame, type Prepare, type ServerFrame } from "./attachment_protocol";
 import { Composer, normalizeComposedText, type ComposerAvailability, type ComposerInjectionResult, type ComposerTypographyState } from "./composer";
@@ -7,13 +12,13 @@ import type { ComposerStagedImage } from "./composer_attachments";
 import { IOSBackspaceRouter, syntheticInsertTextEvent } from "./continuous_surface/ios_backspace_router";
 import type { LogicalKey } from "./continuous_surface/types";
 import { bindExplainedTapActivation, bindGenerationFencedClickActivation, bindTapActivation } from "./tap_activation";
-import { isStorableSnippetBody, parseOSC52, type SnippetOutcome, type SnippetServicePort } from "./snippet_client";
+import { isStorableSnippetBody, parseOSC52, type SnippetOutcome } from "./snippet_client";
 import { ClipboardPanel } from "./clipboard_panel";
 import { clipboardIcon } from "./clipboard_icons";
 import "./terminal_menu.css";
 import "./scrollback_control.css";
 import { createScrollbackControl, readScrollbackRows, readTerminalScrollbackRows, saveTerminalScrollbackRows, terminalScrollbackOverride, type ScrollbackRows } from "./scrollback_preferences";
-import { COMPOSER_FONT_SIZE_MAX, COMPOSER_FONT_SIZE_MIN, DEFAULT_COMPOSER_FONT_SIZE, type OperatorPreferenceOutcome, type OperatorPreferencePort, type OperatorPreferencePreviewToken, type OperatorPreferenceSnapshot, type OperatorPreferenceSubscription } from "./operator_preferences";
+import { COMPOSER_FONT_SIZE_MAX, COMPOSER_FONT_SIZE_MIN, DEFAULT_COMPOSER_FONT_SIZE, type OperatorPreferenceOutcome, type OperatorPreferenceSnapshot, type OperatorPreferenceSubscription } from "./operator_preferences";
 import { commitFocusClaim, pointerRuleClaims, type CommitFocusContext } from "./unified_focus_claim";
 import { createPreferencesStore } from "./preferences";
 import { TerminalKeysPanel } from "./terminal_keys_panel";
@@ -45,70 +50,6 @@ const ANSI_THEME_KEYS = Object.freeze([
   "black", "red", "green", "yellow", "blue", "magenta", "cyan", "white",
   "brightBlack", "brightRed", "brightGreen", "brightYellow", "brightBlue", "brightMagenta", "brightCyan", "brightWhite",
 ] as const);
-type CopyToClipsResult = Readonly<{
-  local: boolean;
-  store: "not-attempted" | "too-large" | "pending" | SnippetOutcome;
-}>;
-export type WidthRefitResult = Readonly<{
-  ok: boolean;
-  message: string;
-  disposition: "success" | "refused" | "terminal" | "uncertain";
-	successorSource: string;
-}>;
-export type WidthRefitAttempt = Readonly<{
-  operation: string;
-  predecessorSource: string;
-  predecessorIncarnation: string;
-  result: Promise<WidthRefitResult>;
-}>;
-type PendingWidthRefit = {
-  operation: string;
-  predecessorSource: string;
-  predecessorIncarnation: string;
-  predecessorGeneration: number;
-  predecessorEndpointOperation: number;
-	successorSource: string;
-  awaitingSuccessor: boolean;
-  expected?: Readonly<{ generation: number; source: string; epoch: bigint; cut: bigint }>;
-  droppedBytes: number;
-};
-type UnifiedPopoverOwner = "none" | "view" | "tag" | "sheet" | "explainer" | "typography";
-type UnifiedExplainerTopic = "copy" | "select" | "paste" | "fit" | "view" | "size" | "sessions";
-export type UnifiedGeometryAction = "fit_rows" | "fit_width" | "apply";
-export type UnifiedGeometryAvailabilityCode =
-  | "available"
-  | "closed"
-  | "connecting"
-  | "observe_mode"
-  | "no_control"
-  | "replaying"
-  | "pending_size"
-  | "unknown_geometry"
-  | "keyboard"
-  | "alternate_buffer"
-  | "missing_measurement"
-  | "already_fit";
-export type UnifiedGeometryAvailability = Readonly<{
-  enabled: boolean;
-  code: UnifiedGeometryAvailabilityCode;
-  message: string;
-}>;
-export type UnifiedGeometryAvailabilityInput = Readonly<{
-  action: UnifiedGeometryAction;
-  closed: boolean;
-  prepared: boolean;
-  committed: boolean;
-  controlGranted: boolean;
-  replaying: boolean;
-  capabilityMode: "observe" | "control";
-  fitPending: boolean;
-  refitPending: boolean;
-  committedColumns: number;
-  committedRows: number;
-  keyboardGuard: boolean;
-  bufferType: "normal" | "alternate";
-  measurement?: number;
-}>;
 
 const geometryUnavailable = (code: Exclude<UnifiedGeometryAvailabilityCode, "available">, message: string): UnifiedGeometryAvailability =>
   Object.freeze({ enabled: false, code, message });
@@ -140,27 +81,7 @@ export function unifiedGeometryAvailability(input: UnifiedGeometryAvailabilityIn
   return Object.freeze({ enabled: true, code: "available", message: "" });
 }
 
-type GeometryFormView = Readonly<{
-  root: HTMLElement;
-  columns: HTMLInputElement;
-  rows: HTMLInputElement;
-  apply: HTMLButtonElement;
-  fitRows: HTMLButtonElement;
-  fitWidth: HTMLButtonElement;
-  reason: HTMLOutputElement;
-}>;
 
-// The slice of VisualViewport the page consumes. Injected so a harness can
-// drive keyboard open/close; production passes nothing and the page reads
-// window.visualViewport.
-export type UnifiedViewportInsetSource = Readonly<{
-  readonly height: number;
-  readonly scale: number;
-  readonly offsetLeft: number;
-  readonly offsetTop: number;
-  addEventListener(type: "resize" | "scroll", listener: () => void): void;
-  removeEventListener(type: "resize" | "scroll", listener: () => void): void;
-}>;
 
 // The COMMIT focus-claim context and its monotone resolution live in
 // unified_focus_claim.ts (unit-pinned); the type is re-exported for workspaces.
@@ -178,9 +99,6 @@ const UNIFIED_EXPLAINERS: ReadonlyArray<Readonly<{ topic: UnifiedExplainerTopic;
   Object.freeze({ topic: "sessions", title: "Sessions", detail: "Choose a named session for this terminal view, or return to the Dashboard." }),
 ]);
 
-// How an insert ended, in the operator's terms. The sheet renders one fixed
-// sentence for each: nothing is ever dropped silently.
-export type InsertTextResult = "SENT" | "COMPOSER" | "REFUSED_NO_CONTROL" | "REFUSED_EMPTY" | "REFUSED_DESTROYED";
 
 // The fixed refusal table for every snippet/clip mutation. Bounded, never an
 // echo of a body, a label or a server message.
@@ -213,85 +131,7 @@ const UNIFIED_PHASE_WORDS: Readonly<Record<"live" | "pending" | "down", string>>
   down: "disconnected",
 });
 
-export type UnifiedTerminalPageOptions = Readonly<{
-  root: HTMLElement;
-  port: AttachmentPagePort;
-  capabilityMode: "observe" | "control";
-  styleNonce: string;
-  historyRows?: ScrollbackRows;
-  scrollbackScope?: string;
-  onScrollbackChanged?(rows: ScrollbackRows): void;
-  reloadRecordedHistory?(): boolean;
-  // Display-only session name from the URL fragment, shown in the reconnecting
-  // strip ("Reconnecting to <name>…") so a reopen names what it is restoring.
-  // No authority: the attached session is fixed by the handle.
-  sessionName?: string;
-  // Display-only alias from the URL fragment / the pane controller's resolved
-  // identity, shown beside the name in the top bar's session tag. Like
-  // sessionName it carries no authority: the attached session is fixed by the
-  // handle. Absent when the session has no alias.
-  aliasLabel?: string;
-  viewportInset?: UnifiedViewportInsetSource;
-  // Draft-persistence scope for the composer, carried by the terminal URL's
-  // display-only draft_scope fragment field (same plumbing as the legacy
-  // page). Absent, the composer runs storage-degraded: drafts live only in
-  // this tab.
-  composerStorageScope?: string;
-  // Image staging for the composer, present exactly when the dashboard's
-  // inventory advertised the capability for this session's realm (the
-  // display/UX-only image_realm fragment field). The server re-authorizes
-  // every upload regardless; absence means the composer has no image
-  // affordance at all.
-  stageImage?(file: File, signal: AbortSignal): Promise<ComposerStagedImage>;
-  rememberSource(source: string): void;
-  // `rows` rides the same generation refit when the operator typed both; an
-  // absent rows keeps the predecessor's height (the engine's default).
-  refitWidth?(columns: number, rows?: number): WidthRefitAttempt;
-  // Control-takeover claim: resolves a fresh takeover endpoint for this
-  // session (given the last prepared source when one exists) which the page
-  // hands to its port. Present only in control mode.
-  takeControl?(source: string | undefined, signal: AbortSignal): Promise<Readonly<{ url: string; protocols: readonly string[] }>>;
-  // First COMMIT of this page's lifetime; the app clears its one-shot
-  // takeover offer here, mirroring the legacy page.
-  onFirstCommit?(): void;
-  // Every successful admission commit. Unlike onFirstCommit, this runs again
-  // after an explicit session switch so session memory memory can record the new exact
-  // identity only after the new session is genuinely live.
-  onCommit?(generation: number): void;
-  sessionSwitch?: Readonly<{
-    currentDraftScope(): string | null;
-    inventory(refresh: boolean, signal: AbortSignal): Promise<SessionSwitcherInventory>;
-    blockedMessage(session: DashboardSession): string;
-    select(session: DashboardSession): Promise<Readonly<{ ok: boolean; message: string }>>;
-  }>;
-  // Focus-claim policy consulted on every COMMIT, AFTER the MODE_REQUEST has
-  // been sent (that order is load-bearing, abd2dce) and only for the one
-  // terminal.focus() the admission path makes. Absent, the page applies its
-  // pointer rule (context.pointerRuleClaims). Returning true focuses xterm's
-  // helper textarea — on a phone, that raises the keyboard.
-  claimFocusOnCommit?(context: CommitFocusContext): boolean;
-  // The ONE document-global snippets/clips service, supplied by the consumer
-  // that owns the document (app.ts for a single terminal, WorkspacePage for a
-  // workspace). The page is a subscriber and a caller; it never constructs
-  // one, so six panes still poll once. Without a service the Clipboard control
-  // is unavailable and no shared-text request is made.
-  snippets?: SnippetServicePort;
-  // The ONE document-global operator preference service. It is loaded by the
-  // document owner before page construction, so its current theme and font
-  // baseline are available before xterm opens and performs its first fit.
-  preferences?: OperatorPreferencePort;
-  // Workspace owns document navigation; a pane-local sheet must not offer a
-  // Dashboard action that would tear down its siblings.
-  workspaceCell?: boolean;
-}>;
 
-type ScrollAnchor = Readonly<{
-  bufferType: "normal" | "alternate";
-  row: number;
-  fraction: number;
-  scalarRemainder: number;
-  following: boolean;
-}>;
 
 // The size xterm is constructed with before anything measures the viewport. It
 // is a seed, not a default preference: in auto mode the first fit replaces it
@@ -304,22 +144,9 @@ function fontBaselineAttribute(preference: number | null): string {
   return preference === null ? "auto" : String(preference);
 }
 
-// value is the font-size tri-state the page intends to store: an explicit size, or
-// `null` for auto. `null` is a real intent, never "no intent", so every read of
-// it tests `fontIntent !== undefined` rather than using `??`.
-type FontIntent = Readonly<{
-  id: number;
-  value: number | null;
-}>;
-
-type ComposerFontIntent = Readonly<{
-  id: number;
-  value: number;
-  preview?: OperatorPreferencePreviewToken;
-}>;
 
 
-type InputTraceEntry = Readonly<Record<string, unknown> & { t: number; kind: string }>;
+
 const INPUT_TRACE_LIMIT = 300;
 const INPUT_TRACE_TEXT_LIMIT = 160;
 const INPUT_TRACE_DECODER = new TextDecoder();
