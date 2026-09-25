@@ -161,7 +161,7 @@ func TestNoDestructiveOrImplicitResizeProductCallsites(t *testing.T) {
 			captureCalls += bytes.Count(b, []byte("capture"+"-pane"))
 			attachHere := bytes.Count(b, []byte("attach"+"-session"))
 			attachCalls += attachHere
-			if base == "unified_dev.go" {
+			if base == "unified_dev_lifecycle.go" {
 				// The unified provider spawns per-session observer units. A
 				// birth unit issues no attach verb at all — its startup
 				// command IS the session creation built by the audited
@@ -259,7 +259,7 @@ func TestNoDestructiveOrImplicitResizeProductCallsites(t *testing.T) {
 	// transaction (attachment.go), two error strings naming the verb
 	// (terminal/history.go), the adoption composite's three sub-commands —
 	// history+screen, saved normal screen, and pending-prefix -P
-	// (unified_dev.go) — and the dashboard preview's single read-only
+	// (unified_dev_adoption.go) — and the dashboard preview's single read-only
 	// plain-text capture (session_preview.go), pinned by shape above.
 	if captureCalls != 8 || attachCalls != 4 {
 		t.Fatalf("guarded tmux callsites: capture=%d attach=%d", captureCalls, attachCalls)
