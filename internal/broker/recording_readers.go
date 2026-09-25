@@ -10,10 +10,24 @@ import (
 const (
 	recordingReaderBytes = 128 << 20
 	recordingReaderLimit = 64
-	recordingTailSlots   = 64
+	// recordingTailSlots is the capacity of one reader's tail channel; the
+	// reader may own one event more, the one its writer is sending. It is
+	// sized for admission, the window between PREPARE and COMMIT in which the
+	// writer deliberately does not drain the tail: a full-screen program
+	// repaints up to a frame rate's worth of records of a few dozen bytes per
+	// second, and a browser can take seconds to load the replay, so a count
+	// sized for bulk output evicts such a reader on every attempt. 1024 slots
+	// cover several seconds of admission at 120 frames per second while the
+	// fixed charge below still admits every public attachment the reader
+	// budget admitted before. Bulk output reaches recordingTailBytes first.
+	recordingTailSlots = 1024
+	// recordingTailSlotBytes is the channel memory one slot preallocates:
+	// unsafe.Sizeof(unifiedjournal.Event{}), pinned by a test.
+	recordingTailSlotBytes = 72
 	// The writer uses at most one 64 KiB LIVE encoding at a time. This covers
-	// its base64, JSON work buffer and result, plus maps and fixed reader state.
-	recordingWriterBytes = (512 + 16) << 10
+	// its base64, JSON work buffer and result, plus maps and fixed reader
+	// state, including the tail channel's preallocated slots.
+	recordingWriterBytes = (512+16)<<10 + recordingTailSlots*recordingTailSlotBytes
 	recordingReaderFloor = 64 << 10
 	// PREPARE additionally owns replay assembly and a 256 KiB encoding. Keep
 	// this reserve through backlog settlement, including a blocked PREPARE.
@@ -22,7 +36,25 @@ const (
 	// input/transitional queues, its PTY reader and small control egress. Bulk
 	// capture and legacy LIVE JSON are absent on this explicit writer pairing.
 	recordingAttachmentBytes = 4 << 20
-	recordingTailBytes       = (recordingTailSlots + 1) * (64 << 10)
+	// recordingTailBytes bounds the payload one reader's tail may own: 4 MiB
+	// of pending output plus one maximal 64 KiB record. Output that outruns a
+	// reader by more than this is cheaper to rebuild from the snapshot.
+	recordingTailBytes = 4<<20 + 64<<10
+)
+
+// recordingTailLimit names the bound that refused a tail event. The browser
+// always sees one typed reason, subscriber_lagged; the name is for the
+// operator log, so a reconnect can be traced to the bound that caused it.
+type recordingTailLimit string
+
+const (
+	tailLimitSequenceGap  recordingTailLimit = "sequence_gap"
+	tailLimitQueueEvents  recordingTailLimit = "queue_events"
+	tailLimitQueueBytes   recordingTailLimit = "queue_bytes"
+	tailLimitReaderEvents recordingTailLimit = "reader_events"
+	tailLimitReaderBytes  recordingTailLimit = "reader_bytes"
+	tailLimitDetached     recordingTailLimit = "detached"
+	tailLimitInvalid      recordingTailLimit = "invalid_event"
 )
 
 var errRecordingReaders = errors.New("recording reader capacity exhausted")
@@ -86,23 +118,39 @@ func (budget *recordingReaderBudget) acquire(snapshotBytes int64) (*recordingRea
 }
 
 func (lease *recordingReaderLease) reserveEvent(bytes int64) bool {
+	return lease.reserveTailEvent(bytes) == ""
+}
+
+// reserveTailEvent charges one tail event to this lease, or names the bound
+// that refuses it. The empty name means the event is owned until releaseEvent.
+func (lease *recordingReaderLease) reserveTailEvent(bytes int64) recordingTailLimit {
 	if lease == nil {
-		return true // hand-built subscribers are used only by protocol fixtures
+		return "" // hand-built subscribers are used only by protocol fixtures
 	}
 	budget := lease.budget
 	budget.mutex().Lock()
 	defer budget.mutex().Unlock()
 	before := max(lease.eventBytes, int64(recordingReaderFloor))
 	after := max(lease.eventBytes+bytes, int64(recordingReaderFloor))
-	if lease.detached || lease.events >= recordingTailSlots+1 || budget.events >= recordingReaderLimit*(recordingTailSlots+1) ||
-		bytes < 0 || lease.eventBytes+bytes > recordingTailBytes || after-before > budget.capacity()-budget.bytes || !budget.copies.available(after-before) {
-		return false
+	switch {
+	case lease.detached:
+		return tailLimitDetached
+	case bytes < 0:
+		return tailLimitInvalid
+	case lease.events >= recordingTailSlots+1:
+		return tailLimitQueueEvents
+	case lease.eventBytes+bytes > recordingTailBytes:
+		return tailLimitQueueBytes
+	case budget.events >= recordingReaderLimit*(recordingTailSlots+1):
+		return tailLimitReaderEvents
+	case after-before > budget.capacity()-budget.bytes || !budget.copies.available(after-before):
+		return tailLimitReaderBytes
 	}
 	budget.charge(after - before)
 	budget.events++
 	lease.eventBytes += bytes
 	lease.events++
-	return true
+	return ""
 }
 
 func (lease *recordingReaderLease) releaseEvent(bytes int64) {

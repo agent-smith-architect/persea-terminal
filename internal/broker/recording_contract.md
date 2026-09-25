@@ -261,15 +261,20 @@ reserves the copied event index, payload slab and serializer allowances before
 calling `ReadCommittedEvents`, under the existing journal/snapshot seam. Array
 charges include allocator rounding. A failed admission allocates no snapshot.
 
-Each admitted reader reserves 528 KiB for its writer and fixed state, a 64 KiB
-first-event allowance, and an additional 2 MiB through PREPARE/backlog settlement.
+Each admitted reader reserves 600 KiB for its writer and fixed state, including
+the preallocated slots of its tail channel, a 64 KiB first-event allowance, and
+an additional 2 MiB through PREPARE/backlog settlement.
 PREPARE assembles at most 256 KiB; LIVE writes use at most 64 KiB per encoding.
 The initial event index and payload slab remain charged while any backlog suffix
 can retain them. `releaseSnapshot` means the final consumer has finished; cancelling
 the tail alone does not provide that proof.
 
-The 64-slot subscriber channel and one event in a writer share a 65-event limit
-and a 65 × 64 KiB allocation limit per reader, within the aggregate budget.
+The 1024-slot subscriber channel and one event in a writer share a 1025-event
+limit and a 65 × 64 KiB (4 MiB + 64 KiB) allocation limit per reader, within the
+aggregate budget. The count is sized for admission: between PREPARE and COMMIT
+the writer does not drain the tail, while a full-screen program can publish many
+small records per second, so the byte limit, not the count, bounds bulk output.
+An eviction's `subscriber_closed` log line names the limit that refused the event.
 Zero-payload geometry still consumes event count. Publication reserves before
 copying; receipt transfers ownership to the writer without refund. The writer
 releases the event only after its actual write returns. Eviction and cancellation

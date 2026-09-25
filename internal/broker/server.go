@@ -339,7 +339,7 @@ func (writer *unifiedAttachmentFrameWriter) streamTail() {
 		// returns, however many events the provider buffered before evicting.
 		select {
 		case <-tail.verdictSignal():
-			writer.terminate(tail.closeReason())
+			writer.terminate(tail.closeReason(), tail.closeLimit())
 			return
 		default:
 		}
@@ -356,7 +356,7 @@ func (writer *unifiedAttachmentFrameWriter) streamTail() {
 		if err != nil {
 			select {
 			case <-tail.verdictSignal():
-				writer.terminate(tail.closeReason())
+				writer.terminate(tail.closeReason(), tail.closeLimit())
 			default:
 			}
 			return
@@ -369,7 +369,7 @@ func (writer *unifiedAttachmentFrameWriter) streamTail() {
 	// so it must end now with that reason rather than stay open on a healthy
 	// socket that will never carry another byte.
 	if reason := tail.closeReason(); reason != "" {
-		writer.terminate(reason)
+		writer.terminate(reason, tail.closeLimit())
 	}
 }
 
@@ -430,14 +430,18 @@ func (writer *unifiedAttachmentFrameWriter) finish() {
 // already closing: its attachment ended first and owns its own reason. The
 // control write here is itself bounded by watchVerdict: a peer that does not
 // drain it within the grace is cut from outside this lock.
-func (writer *unifiedAttachmentFrameWriter) terminate(reason proto.SubscriberCloseReason) {
+func (writer *unifiedAttachmentFrameWriter) terminate(reason proto.SubscriberCloseReason, limit recordingTailLimit) {
 	writer.mu.Lock()
 	if writer.closing {
 		writer.mu.Unlock()
 		return
 	}
 	writer.closing = true
-	brokerLogf("component=broker event=subscriber_closed reason=%q session=%q epoch=%d", string(reason), writer.session, writer.epochID)
+	detail := ""
+	if limit != "" {
+		detail = fmt.Sprintf(" limit=%q", string(limit))
+	}
+	brokerLogf("component=broker event=subscriber_closed reason=%q%s session=%q epoch=%d", string(reason), detail, writer.session, writer.epochID)
 	_ = writer.downstream.wire.control(proto.Control{Type: "error", Code: string(reason), Msg: "unified subscriber closed"})
 	writer.mu.Unlock()
 	writer.finish()

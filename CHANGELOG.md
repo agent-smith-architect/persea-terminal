@@ -8,6 +8,11 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 - The help for Fit rows, Fit width and Terminal size now says that these actions fix the tmux window at the new size for every attached terminal, and how to give sizing back.
 
+### Fixed
+
+- A terminal view no longer reconnects over and over while a full-screen program repaints its screen many times per second. A view can now hold up to 1,024 small updates while the browser loads the history, instead of 64; the 4 MiB limit on waiting output is unchanged.
+- When the broker drops a view that has fallen behind, its log now names the limit that was reached.
+
 ## 0.1.2 — 2026-09-25
 
 ### Fixed
