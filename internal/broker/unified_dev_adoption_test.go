@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -537,7 +538,8 @@ func TestUnifiedAdoptionRefusalsAreTypedAndArtifactFree(t *testing.T) {
 // unthrottled pane flood, repeated adoption composites classify ZERO %output
 // events inside any submission span — the measured tmux 3.4 atomicity as a
 // regression gate — and the PRE!=POST retry path is exercisable through the
-// test seam without real version drift.
+// test seam without real version drift. Admission may succeed or refuse the
+// unbounded source at its quota; either outcome must preserve atomicity.
 func TestUnifiedAdoptionCompositeAtomicityUnderFlood(t *testing.T) {
 	if testing.Short() {
 		t.Skip("real tmux adoption flood")
@@ -545,33 +547,106 @@ func TestUnifiedAdoptionCompositeAtomicityUnderFlood(t *testing.T) {
 	const floodCommand = `while :; do echo FLOOD_LINE_OF_CONTINUOUS_OUTPUT; done`
 
 	t.Run("flood", func(t *testing.T) {
-		fixture := newAdoptionFixture(t, 64)
 		const composites = 25
 		for index := 0; index < composites; index++ {
 			name := fmt.Sprintf("flood%02d", index)
-			sessionID := fixture.startPaneCommand(t, name, floodCommand)
-			adoption, err := fixture.effects.AdoptSession(context.Background(), sessionID)
-			if err != nil {
-				t.Fatalf("adoption %d under flood: %v", index, err)
-			}
-			if adoption.Existing {
-				t.Fatalf("adoption %d reported an existing generation", index)
-			}
-			// The flood is killed right after its capture so the journal realm
-			// never accumulates 25 live floods; the span counter has already
-			// judged the composite by then.
-			fixture.disposable.run("kill-session", "-t", sessionID)
-		}
-		if outputs := fixture.effects.adoptionSpanOutputs.Load(); outputs != 0 {
-			t.Fatalf("%d %%output events were classified inside adoption submission spans, want 0", outputs)
-		}
-		if retries := fixture.effects.adoptionRetries.Load(); retries != 0 {
-			t.Fatalf("%d PRE!=POST retries under flood, want 0", retries)
+			t.Run(name, func(t *testing.T) {
+				fixture := newAdoptionFixture(t, 2)
+				var captures atomic.Int64
+				fixture.effects.adoptionPostTamper = func(_ int, post string) string {
+					captures.Add(1)
+					return post
+				}
+				sessionID := fixture.startPaneCommand(t, name, floodCommand)
+				adoption, err := fixture.effects.AdoptSession(context.Background(), sessionID)
+				if errors.Is(err, unifiedjournal.ErrSourceQuota) {
+					assertFloodAdoptionRefused(t, fixture, sessionID, adoption)
+				} else if err != nil {
+					t.Fatalf("adoption %d under flood: %v", index, err)
+				} else if adoption.Existing || adoption.Key == (unifiedjournal.PaneKey{}) || adoption.SessionID != sessionID {
+					t.Fatalf("adoption %d returned an invalid new generation: %+v", index, adoption)
+				}
+				if captures.Load() != 1 {
+					t.Fatalf("capture attempts=%d, want 1", captures.Load())
+				}
+				// Stop the producer only after the complete adoption outcome, so
+				// the submission span is stressed even when recording is slow.
+				fixture.disposable.run("kill-session", "-t", sessionID)
+				if outputs := fixture.effects.adoptionSpanOutputs.Load(); outputs != 0 {
+					t.Fatalf("%d %%output events were classified inside adoption submission spans, want 0", outputs)
+				}
+				if retries := fixture.effects.adoptionRetries.Load(); retries != 0 {
+					t.Fatalf("%d PRE!=POST retries under flood, want 0", retries)
+				}
+			})
 		}
 	})
 
+	t.Run("quota", func(t *testing.T) {
+		fixture := newAdoptionFixture(t, 2)
+		// Reach the same envelope admission check without racing the separate
+		// stalled-recorder watchdog or depending on the machine's throughput.
+		fixture.registry.retention.mu.Lock()
+		fixture.registry.retention.options.sourceLimits.envelopes = 256
+		fixture.registry.retention.mu.Unlock()
+		held, release := make(chan unifiedjournal.PaneKey, 1), make(chan struct{})
+		var holdOnce, releaseOnce sync.Once
+		unblock := func() { releaseOnce.Do(func() { close(release) }) }
+		defer unblock()
+		fixture.registry.retention.setHook(func(point string, key unifiedjournal.PaneKey) {
+			if point == "before_commit" {
+				holdOnce.Do(func() { held <- key; <-release })
+			}
+		})
+		sessionID := fixture.startPaneCommand(t, "quota", `stty -echo; printf 'QUOTA_BOOTSTRAP\n'; read start; `+floodCommand)
+		done := make(chan struct{})
+		var adoption UnifiedAdoption
+		var adoptErr error
+		go func() {
+			adoption, adoptErr = fixture.effects.AdoptSession(context.Background(), sessionID)
+			close(done)
+		}()
+		var key unifiedjournal.PaneKey
+		select {
+		case key = <-held:
+		case <-time.After(5 * time.Second):
+			t.Fatal("bootstrap did not reach commit")
+		}
+		// Begin overload only once the initial commit owns the manager. This
+		// prevents cancellation from winning before the hold is established.
+		fixture.disposable.run("send-keys", "-t", sessionID+":", "Enter")
+		pollUntil(t, 5*time.Second, "source quota refusal with commit held", func() bool {
+			runtime := fixture.registry.retention
+			runtime.mu.Lock()
+			defer runtime.mu.Unlock()
+			generation := runtime.generations[key]
+			if generation == nil || generation.initial == nil || !generation.initial.cancelled {
+				return false
+			}
+			t.Logf("source quota usage=%+v limit=%+v", generation.source.usage, runtime.sourceLimit())
+			return true
+		})
+		unblock()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("quota refusal did not settle")
+		}
+		if !errors.Is(adoptErr, unifiedjournal.ErrSourceQuota) {
+			t.Fatalf("adoption error=%v, want source quota", adoptErr)
+		}
+		assertFloodAdoptionRefused(t, fixture, sessionID, adoption)
+		if outputs := fixture.effects.adoptionSpanOutputs.Load(); outputs != 0 {
+			t.Fatalf("%d %%output events inside the refused adoption span, want 0", outputs)
+		}
+		if retries := fixture.effects.adoptionRetries.Load(); retries != 0 {
+			t.Fatalf("quota refusal retried %d captures, want 0", retries)
+		}
+		fixture.disposable.run("kill-session", "-t", sessionID)
+	})
+
 	t.Run("tamper-retry", func(t *testing.T) {
-		fixture := newAdoptionFixture(t, 0)
+		fixture := newAdoptionFixture(t, 2)
 		fixture.effects.adoptionPostTamper = func(attempt int, post string) string {
 			if attempt == 1 {
 				return post + " tampered"
@@ -580,7 +655,7 @@ func TestUnifiedAdoptionCompositeAtomicityUnderFlood(t *testing.T) {
 		}
 		sessionID := fixture.startPaneCommand(t, "tampered", floodCommand)
 		adoption, err := fixture.effects.AdoptSession(context.Background(), sessionID)
-		if err != nil {
+		if err != nil && !errors.Is(err, unifiedjournal.ErrSourceQuota) {
 			t.Fatalf("adoption through the tampered first attempt: %v", err)
 		}
 		if retries := fixture.effects.adoptionRetries.Load(); retries != 1 {
@@ -589,10 +664,68 @@ func TestUnifiedAdoptionCompositeAtomicityUnderFlood(t *testing.T) {
 		if outputs := fixture.effects.adoptionSpanOutputs.Load(); outputs != 0 {
 			t.Fatalf("%d %%output events inside spans across the retry, want 0", outputs)
 		}
+		if errors.Is(err, unifiedjournal.ErrSourceQuota) {
+			assertFloodAdoptionRefused(t, fixture, sessionID, adoption)
+			return
+		}
 		pollUntil(t, 5*time.Second, "the retried bootstrap commit", func() bool {
 			return len(fixture.journalBytes(t, adoption.Key)) != 0
 		})
 	})
+}
+
+// A bounded recorder can refuse an unbounded producer. The failed transaction
+// must release every recording authority and credit without deleting the pane.
+func assertFloodAdoptionRefused(t *testing.T, fixture *adoptionFixture, sessionID string, adoption UnifiedAdoption) {
+	t.Helper()
+	if adoption != (UnifiedAdoption{}) {
+		t.Fatalf("refused adoption returned a result: %+v", adoption)
+	}
+	pollUntil(t, 5*time.Second, "failed observer reaped", func() bool {
+		fixture.effects.mu.Lock()
+		defer fixture.effects.mu.Unlock()
+		_, adopting := fixture.effects.adopting[sessionID]
+		return fixture.effects.units[sessionID] == nil && !adopting && len(fixture.effects.panes) == 0
+	})
+	fixture.effects.mu.Lock()
+	active, adopting, panes := len(fixture.effects.active), len(fixture.effects.adopting), len(fixture.effects.panes)
+	fixture.effects.mu.Unlock()
+	if active != 0 || adopting != 0 || panes != 0 {
+		t.Fatalf("refused adoption retained active=%d adopting=%d panes=%d", active, adopting, panes)
+	}
+	runtime := fixture.registry.retention
+	pollUntil(t, 5*time.Second, "refused source credits released", func() bool {
+		runtime.mu.Lock()
+		defer runtime.mu.Unlock()
+		return len(runtime.sources) == 0 && runtime.pUsed == 0 && runtime.qUsed == 0 && runtime.eUsed == 0 && runtime.bUsed == 0 && runtime.oUsed == 0
+	})
+	fixture.registry.mu.Lock()
+	var failedWitness controlmode.PaneWitness
+	for _, state := range fixture.registry.admitted {
+		if state.failedIncarnation != state.witness.Incarnation {
+			fixture.registry.mu.Unlock()
+			t.Fatal("refused adoption retained an eligible route")
+		}
+		failedWitness = state.witness
+	}
+	fixture.registry.mu.Unlock()
+	// A sticky failure marker may remain to prevent the same incarnation
+	// from reopening. It must reject both admission and further output.
+	if failedWitness != (controlmode.PaneWitness{}) {
+		if err := fixture.registry.AdmitPane(failedWitness); !errors.Is(err, unifiedjournal.ErrInvalidated) {
+			t.Fatalf("failed incarnation readmission=%v", err)
+		}
+		if err := fixture.registry.ObservePane(controlmode.Observation{Kind: controlmode.ObservationOutput, Witness: failedWitness, Data: []byte("refused")}); !errors.Is(err, unifiedjournal.ErrSourceQuota) {
+			t.Fatalf("failed incarnation output=%v", err)
+		}
+	}
+	fixture.effects.journalMu.Lock()
+	available := fixture.effects.realm.AvailableCompletePaneSlots()
+	fixture.effects.journalMu.Unlock()
+	if available != 1 || fixture.journalFileCount(t) != 0 {
+		t.Fatalf("refused adoption retained journal state: available=%d", available)
+	}
+	fixture.disposable.run("has-session", "-t", sessionID)
 }
 
 // TestUnifiedAdoptionRestartFailsClosedAndReadoptable is restart coverage in the broker
