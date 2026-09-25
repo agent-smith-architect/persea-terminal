@@ -11,13 +11,15 @@ Before the first unified attachment, the adoption request carries an optional
 integer `history_rows`. Both HTTP and broker protocol boundaries reject values
 outside 0..10,000; omission defaults to 10,000. The broker independently checks
 the bound before performing any effects. Zero captures no history. When a
-full-screen program is active, both its alternate display and the saved normal
-display are retained, so leaving the program restores the normal screen.
+full-screen program is active, its visible alternate display is retained and the
+hidden normal display is fitted to the current geometry. After a resize, the
+normal screen shown on exit can differ in cells tmux hides from capture.
 
 The chosen depth reaches the existing atomic capture composite. Its witness
 checks, output boundary, capture byte cap, cursor and terminal-mode restoration,
 and reconstructed journal provenance are unchanged. An oversized bootstrap still
-trims the oldest history rows first; neither visible screen is trimmed. The
+trims the oldest history rows first, then blanks hidden normal rows if needed;
+the visible alternate display is never trimmed. The
 import can only read history tmux still has. See
 [terminal reconstruction](../docs/terminal-reconstruction.md) for the two-screen
 capture contract and its limits.

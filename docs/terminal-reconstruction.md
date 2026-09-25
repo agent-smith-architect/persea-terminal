@@ -29,10 +29,14 @@ normal display and retained history. Normal-screen captures use the original
 single-screen reconstruction.
 
 The bootstrap byte cap includes both displays and their switching sequences.
-Oldest history is trimmed first; neither visible display is trimmed. An
-oversized visible state or malformed capture fails closed. History depth stays
-bounded by the requested history limit. Opening and rotation neither resize nor
-send input; width refit still requires the existing explicit guarded request.
+Oldest history is trimmed first. If necessary while alternate mode is active,
+hidden normal rows are replaced with blanks, from top to bottom, preserving
+their positions and the saved cursor. The visible alternate display is never
+trimmed. An oversized visible state or malformed active capture still fails
+closed, as for normal-screen reconstruction. History depth stays bounded by
+the requested history limit plus saved rows moved into history during fitting.
+Opening and rotation neither resize nor send input; width refit still requires
+the existing explicit guarded request.
 
 This is capture equivalence, not recovery of every emulator detail. tmux 3.4
 does not expose wrap metadata, G0/G1 designation, arbitrary saved DECSC state,
@@ -40,7 +44,7 @@ cursor style or the live SGR state at the capture boundary. Those pre-existing
 limitations remain. The saved normal cursor exposed for the alternate screen
 is reconstructed, but hidden saved attributes cannot be recovered.
 
-Width changes while the alternate screen is active have an additional tmux
+Resizing while the alternate screen is active has an additional tmux
 limit: the saved grid keeps its old dimensions until alternate-screen exit.
 tmux then reflows it, but its public capture formats expose neither those
 dimensions nor wrap metadata. The saved capture also clips each row at the
@@ -49,11 +53,25 @@ constructs two saved grids with identical captures after a shrink and different
 normal displays after exit, proving that those captures cannot reconstruct both
 outcomes. See the [tmux 3.4 capture implementation](https://github.com/tmux/tmux/blob/3.4/cmd-capture-pane.c)
 and [screen restoration](https://github.com/tmux/tmux/blob/3.4/screen.c).
-A saved cursor beyond the new width is accepted
-and positioned within the new grid; its eventual restored position can differ
-when tmux reflows the saved display. The replay tests cover growth and shrinkage
-with hard rows and a saved cursor within their text. They do not prove arbitrary
-saved-grid reflow after a width change.
+Any saved height and cursor are accepted. Fitting follows the measured tmux 3.4
+height rules: shrink removes bottom rows below the saved cursor first, then
+moves remaining top overflow into history; growth pulls available history into
+view and adds blank bottom rows if needed. The saved cursor follows those row
+shifts and is clamped inside the current geometry. tmux does not expose how much
+history remains eligible for growth after clearing, so reconstruction uses the
+captured history. Captured rows are treated as hard rows at the current width;
+missing cells stay blank. The original width, wrap flags and allocation of
+blank cells are hidden, so tmux's width reflow and restored cursor can differ.
+
+After a resize while a full-screen app runs, the normal screen shown after the
+app exits can differ from tmux's in the cells tmux hides. This is a documented
+approximation of the hidden normal screen, never a reason to block opening,
+rotation or refit. The visible alternate display and current cursor remain
+capture-equivalent. Real-server tests cover height shrink and growth (including
+history overflow and blank padding), width shrink and growth, and a saved cursor
+beyond both new bounds. The clipped-cell and cursor cases assert specific
+approximations; cases with exposed hard-row state compare the restored normal
+screen and cursor directly with tmux.
 
 New brokers do not emit `blocked_alt_screen` or
 `rotation_deferred_alt_screen`. Front-door and UI parsers retain both values

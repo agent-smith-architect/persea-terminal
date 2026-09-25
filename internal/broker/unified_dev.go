@@ -52,7 +52,8 @@ const (
 	// requests. Deeper history stays in tmux and is not reconstructed.
 	adoptionHistoryCapRows = proto.AdoptionHistoryMaxRows
 	// adoptionBootstrapCapBytes bounds the synthesized bootstrap; oldest
-	// history rows are trimmed first and the trim is surfaced to the caller.
+	// history rows are trimmed first, then hidden normal rows if needed.
+	// The trim is surfaced to the caller.
 	// The pane generation's whole lifetime is 8 MiB, so a full bootstrap
 	// spends a quarter of it.
 	adoptionBootstrapCapBytes = int(unifiedjournal.AdoptionBootstrapCapBytes)
@@ -2686,9 +2687,40 @@ type adoptionAlternate struct {
 	cursorX, cursorY int
 }
 
+// tmux keeps the saved grid at its original height until alternate exit.
+// Shrink discards bottom rows below the saved cursor first, then scrolls the
+// remaining overflow into history. Growth pulls history into view, then pads.
+// hscrolled (history eligible for growth), old width and wrap/allocation flags
+// are not exposed. Use available history and hard captured rows; cells clipped
+// by capture cannot be recovered. These hidden-screen limits must not prevent
+// opening the exact visible alternate display.
+func fitAdoptionAlternate(history []string, saved adoptionAlternate, modes adoptionModes) ([]string, int, int) {
+	x := min(max(saved.cursorX, 0), modes.columns-1)
+	y := min(max(saved.cursorY, 0), max(0, len(saved.rows)-1))
+	display := saved.rows
+	padding := 0
+	if len(display) > modes.rows {
+		shrink := len(display) - modes.rows
+		drop := min(shrink, len(display)-1-y)
+		display = display[:len(display)-drop]
+		y -= shrink - drop
+	} else {
+		growth := modes.rows - len(display)
+		pull := min(growth, len(history))
+		y += pull
+		padding = growth - pull
+	}
+	rows := make([]string, 0, len(history)+len(display)+padding)
+	rows = append(rows, history...)
+	rows = append(rows, display...)
+	rows = append(rows, make([]string, padding)...)
+	return rows, x, min(max(y, 0), modes.rows-1)
+}
+
 // synthesizeAdoptionBootstrap renders the captured pane state as one byte
 // sequence a fresh terminal of the captured geometry replays into the
-// capture-equivalent screen. The emit order is pinned: attribute reset, rows
+// capture-equivalent visible screen, with a fitted hidden normal screen when
+// alternate mode is active. The emit order is pinned: attribute reset, rows
 // in order (history scrolls through naturally, CRLF between rows and none
 // after the last), saved normal cursor and alternate display when active,
 // then DECSTBM — which homes the cursor — then DECOM per the
@@ -2698,12 +2730,12 @@ type adoptionAlternate struct {
 // after them), and the captured pending parser prefix LAST, immediately
 // before live bytes. G0/G1 designation, arbitrary saved DECSC state, cursor style, and
 // the SGR live at the seam are unreadable on tmux 3.4 and reset to defaults:
-// reconstructed means capture-equivalent, no more.
+// the hidden normal display also has the resize limits described above.
 func synthesizeAdoptionBootstrap(rows []string, pending string, cursorX, cursorY int, modes adoptionModes, alternate ...adoptionAlternate) ([]byte, bool, error) {
 	var switchScreen strings.Builder
 	if len(alternate) > 0 {
 		saved := alternate[0]
-		if len(alternate) != 1 || len(rows) < modes.rows || len(saved.rows) != modes.rows || saved.cursorY >= modes.rows || saved.cursorX < 0 || saved.cursorY < 0 {
+		if len(alternate) != 1 || len(rows) < modes.rows {
 			return nil, false, errors.New("unified adoption saved screen has an invalid shape")
 		}
 		// Ordinary capture is normal history followed by the alternate view.
@@ -2711,8 +2743,9 @@ func synthesizeAdoptionBootstrap(rows []string, pending string, cursorX, cursorY
 		// restores it and its cursor. CUP paints the alternate rows without
 		// scrolling either buffer, including a full-width bottom row.
 		visible := rows[len(rows)-modes.rows:]
-		rows = append(append([]string(nil), rows[:len(rows)-modes.rows]...), saved.rows...)
-		fmt.Fprintf(&switchScreen, "\x1b[%d;%dH\x1b[?1049h\x1b[0m", saved.cursorY+1, saved.cursorX+1)
+		var savedX, savedY int
+		rows, savedX, savedY = fitAdoptionAlternate(rows[:len(rows)-modes.rows], saved, modes)
+		fmt.Fprintf(&switchScreen, "\x1b[%d;%dH\x1b[?1049h\x1b[0m", savedY+1, savedX+1)
 		for index, line := range visible {
 			fmt.Fprintf(&switchScreen, "\x1b[%d;1H%s", index+1, line)
 		}
@@ -2762,13 +2795,20 @@ func synthesizeAdoptionBootstrap(rows []string, pending string, cursorX, cursorY
 		size -= 2
 	}
 	trimmed := false
-	// Oldest history rows are trimmed first and the visible screen — the last
-	// modes.rows rows — never is. The alternate display is never trimmed either,
-	// so reconstruction stays screen-complete even when history-shallow.
+	// Preserve the visible screen. Under alternate mode the normal display is
+	// hidden: after exhausting history, replace its oldest rows with blanks as
+	// needed. Keep row positions and the saved cursor, never trim alternate rows.
 	for size > adoptionBootstrapCapBytes && len(rows) > modes.rows {
 		size -= len(rows[0]) + 2
 		rows = rows[1:]
 		trimmed = true
+	}
+	if len(alternate) != 0 {
+		for index := 0; size > adoptionBootstrapCapBytes && index < len(rows); index++ {
+			size -= len(rows[index])
+			rows[index] = ""
+			trimmed = true
+		}
 	}
 	if size > adoptionBootstrapCapBytes {
 		return nil, false, errors.New("unified adoption screen exceeds the bootstrap cap")

@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -63,11 +64,12 @@ func TestUnifiedAlternateTmuxCaptureViews(t *testing.T) {
 
 // A read-only capture cannot promise arbitrary saved-grid restoration after
 // a shrink: two distinct saved grids have identical public capture inputs.
-// Keep this measured limit separate from the supported replay regressions.
+// Replay must still open both and restore the same explicit approximation.
 func TestUnifiedAlternateTmuxSavedGridCaptureLimit(t *testing.T) {
 	f := newAdoptionFixture(t, 4)
 	leave := filepath.Join(t.TempDir(), "leave")
 	var captures, restored []string
+	var keys []unifiedjournal.PaneKey
 	for index, suffix := range []string{"A", "B"} {
 		name := fmt.Sprintf("saved-grid-%d", index)
 		text := strings.Repeat("x", 65) + suffix + strings.Repeat("y", 14)
@@ -79,6 +81,12 @@ func TestUnifiedAlternateTmuxSavedGridCaptureLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 		captures = append(captures, string(out))
+		adoption, err := f.effects.AdoptSession(context.Background(), f.disposable.run("display-message", "-p", "-t", name+":", "#{session_id}"))
+		if err != nil {
+			t.Fatalf("adopt clipped saved screen: %v", err)
+		}
+		keys = append(keys, adoption.Key)
+		assertAlternateReplay(t, f, name, adoption.Key, true)
 	}
 	if captures[0] != captures[1] || strings.Contains(captures[0], "A") || strings.Contains(captures[1], "B") {
 		t.Fatalf("saved captures no longer hide the clipped cells: %q", captures)
@@ -92,6 +100,24 @@ func TestUnifiedAlternateTmuxSavedGridCaptureLimit(t *testing.T) {
 			return f.disposable.run("display-message", "-p", "-t", name+":", "#{alternate_on}") == "0"
 		})
 		restored = append(restored, f.capture(t, name))
+		wantRestored := make([]string, 24)
+		wantRestored[0] = strings.Repeat("x", 12) + []string{"A", "B"}[index] + strings.Repeat("y", 14)
+		if restored[index] != strings.Join(wantRestored, "\n")+"\n" {
+			t.Fatalf("tmux clipped-cell restoration changed: %q", restored[index])
+		}
+		pollUntil(t, 5*time.Second, "clipped saved exit committed", func() bool { return bytes.Contains(f.journalBytes(t, keys[index]), []byte("\x1b[?1049l")) })
+		replay := replayAlternateJournal(t, f, keys[index])
+		// Both indistinguishable captures must restore the same explicit
+		// approximation: the exposed 53 cells, then 23 blank hard rows.
+		want := make([]string, 24)
+		want[0] = strings.Repeat("x", 53)
+		for i := range replay.Lines {
+			replay.Lines[i] = strings.TrimRight(replay.Lines[i], " ")
+		}
+		if !reflect.DeepEqual(replay.Lines, want) || replay.Type != "normal" || replay.X != 0 || replay.Y != 0 {
+			t.Fatalf("clipped saved display approximation: %+v", replay)
+		}
+		t.Logf("clipped saved display %d restored by tmux: %q", index, restored[index])
 	}
 	if restored[0] == restored[1] || !strings.Contains(restored[0], "A") || !strings.Contains(restored[1], "B") {
 		t.Fatalf("tmux no longer restores clipped saved cells: %q", restored)
@@ -117,7 +143,13 @@ func TestUnifiedAlternateWithoutSavedCursor(t *testing.T) {
 	assertAlternateReplay(t, f, session, adoption.Key, false)
 }
 
-func assertAlternateReplay(t *testing.T, f *adoptionFixture, session string, key unifiedjournal.PaneKey, alternate bool) {
+type alternateReplay struct {
+	Lines []string
+	X, Y  int
+	Type  string
+}
+
+func replayAlternateJournal(t *testing.T, f *adoptionFixture, key unifiedjournal.PaneKey) alternateReplay {
 	t.Helper()
 	f.effects.journalMu.Lock()
 	geometry, err := f.effects.realm.InitialGeometry(key)
@@ -125,11 +157,16 @@ func assertAlternateReplay(t *testing.T, f *adoptionFixture, session string, key
 	if err != nil {
 		t.Fatal(err)
 	}
+	return replayAlternateBytes(t, geometry, f.journalBytes(t, key))
+}
+
+func replayAlternateBytes(t *testing.T, geometry unifiedjournal.Geometry, data []byte) alternateReplay {
+	t.Helper()
 	input, err := json.Marshal(struct {
 		Columns int    `json:"columns"`
 		Rows    int    `json:"rows"`
 		Data    []byte `json:"data"`
-	}{geometry.Columns, geometry.Rows, f.journalBytes(t, key)})
+	}{geometry.Columns, geometry.Rows, data})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,14 +176,16 @@ func assertAlternateReplay(t *testing.T, f *adoptionFixture, session string, key
 	if err != nil {
 		t.Fatalf("headless xterm replay (run npm ci in ui first): %v: %s", err, out)
 	}
-	var replay struct {
-		Lines []string
-		X, Y  int
-		Type  string
-	}
+	var replay alternateReplay
 	if err := json.Unmarshal(out, &replay); err != nil {
 		t.Fatalf("oracle: %v: %s", err, out)
 	}
+	return replay
+}
+
+func assertAlternateReplay(t *testing.T, f *adoptionFixture, session string, key unifiedjournal.PaneKey, alternate bool) {
+	t.Helper()
+	replay := replayAlternateJournal(t, f, key)
 	args := []string{"capture-pane", "-p", "-t", session + ":"}
 	wantType := "alternate"
 	if !alternate {
@@ -251,12 +290,13 @@ func TestSynthesizeAdoptionAlternateState(t *testing.T) {
 	if active[1] != "ALT-TOP" {
 		t.Fatal("synthesis modified capture input")
 	}
-	for _, invalid := range []adoptionAlternate{
-		{rows: []string{"short"}}, {rows: []string{"1", "2", "3"}},
+	for _, resized := range []adoptionAlternate{
+		{}, {rows: []string{"short"}}, {rows: []string{"1", "2", "3"}},
 		{rows: saved.rows, cursorY: 2}, {rows: saved.rows, cursorX: -1},
+		{rows: saved.rows, cursorX: 1<<32 - 1, cursorY: 1<<32 - 1},
 	} {
-		if _, _, err := synthesizeAdoptionBootstrap(active, "", 0, 0, modes, invalid); err == nil {
-			t.Fatalf("accepted malformed saved state: %+v", invalid)
+		if _, _, err := synthesizeAdoptionBootstrap(active, "", 0, 0, modes, resized); err != nil {
+			t.Fatalf("refused resized saved state: %+v: %v", resized, err)
 		}
 	}
 	if _, _, err := synthesizeAdoptionBootstrap(active[:1], "", 0, 0, modes, saved); err == nil {
@@ -280,7 +320,7 @@ func TestSynthesizeAdoptionAlternateCap(t *testing.T) {
 	}
 	for _, marker := range []string{"NORMAL-TOP", "NORMAL-BOTTOM", "ALT-TOP", "ALT-BOTTOM"} {
 		if !bytes.Contains(bootstrap, []byte(marker)) {
-			t.Fatalf("trimmed visible row %s", marker)
+			t.Fatalf("trimmed retained row %s", marker)
 		}
 	}
 	for _, largeSaved := range []bool{false, true} {
@@ -291,8 +331,27 @@ func TestSynthesizeAdoptionAlternateCap(t *testing.T) {
 		} else {
 			active[0] = strings.Repeat("a", adoptionBootstrapCapBytes)
 		}
-		if _, _, err := synthesizeAdoptionBootstrap(active, "", 0, 0, modes, saved); err == nil {
-			t.Fatalf("trimmed visible screen instead of refusing: saved=%t", largeSaved)
+		bootstrap, trimmed, err := synthesizeAdoptionBootstrap(active, "", 0, 0, modes, saved)
+		if largeSaved {
+			if err != nil || !trimmed || len(bootstrap) > adoptionBootstrapCapBytes {
+				t.Fatalf("hidden normal rows blocked reconstruction: trimmed=%t err=%v", trimmed, err)
+			}
+			for _, marker := range []string{"NORMAL-BOTTOM", "ALT-TOP", "ALT-BOTTOM"} {
+				if !bytes.Contains(bootstrap, []byte(marker)) {
+					t.Fatalf("trimmed retained row %s", marker)
+				}
+			}
+			geometry := unifiedjournal.Geometry{Columns: 80, Rows: 2}
+			visible := replayAlternateBytes(t, geometry, bootstrap)
+			if !reflect.DeepEqual(visible.Lines, []string{"ALT-TOP", "ALT-BOTTOM"}) || visible.Type != "alternate" || visible.X != 0 || visible.Y != 0 {
+				t.Fatalf("cap damaged alternate display: %+v", visible)
+			}
+			restored := replayAlternateBytes(t, geometry, append(bootstrap, []byte("\x1b[?1049l")...))
+			if !reflect.DeepEqual(restored.Lines, []string{"", "NORMAL-BOTTOM"}) || restored.Type != "normal" || restored.X != 0 || restored.Y != 0 {
+				t.Fatalf("cap hidden-row approximation: %+v", restored)
+			}
+		} else if err == nil {
+			t.Fatal("trimmed visible alternate screen instead of refusing")
 		}
 	}
 }
@@ -314,11 +373,9 @@ func TestInitialAlternateCaptureDriftAndShape(t *testing.T) {
 			t.Fatalf("field %d drift accepted: %v", field, err)
 		}
 	}
-	for _, index := range []int{3, 4} {
-		bad := append([]string(nil), responses...)
-		bad[index] = "short\n"
-		if _, _, _, err := parseInitialCapture(bad, 42, nil); err == nil {
-			t.Fatalf("accepted incomplete screen %d", index)
-		}
+	bad := append([]string(nil), responses...)
+	bad[3] = "short\n"
+	if _, _, _, err := parseInitialCapture(bad, 42, nil); err == nil {
+		t.Fatal("accepted incomplete active screen")
 	}
 }
