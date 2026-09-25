@@ -839,7 +839,7 @@ async function main() {
       affordances: dashboardScrollAffordances,
     } };
 
-    // A blocked row explains its state and offers neither a dead Open action
+    // An older broker's blocked row explains its state and offers neither a dead Open action
     // nor the removed legacy actions.
     await navigate("/");
     await waitForDashboard();
