@@ -502,6 +502,7 @@ export class Composer {
     this.render();
 
     document.addEventListener("visibilitychange", this.onVisibilityChange);
+    window.addEventListener("blur", this.endTextareaGestures);
     window.addEventListener("pagehide", this.onPageHide);
     this.resizeObserver = typeof ResizeObserver === "function"
       ? new ResizeObserver(() => {
@@ -746,6 +747,7 @@ export class Composer {
     if (this.typographyPositionFrame !== undefined) window.cancelAnimationFrame(this.typographyPositionFrame);
     this.resizeObserver?.disconnect();
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
+    window.removeEventListener("blur", this.endTextareaGestures);
     window.removeEventListener("pagehide", this.onPageHide);
     this.textarea.removeEventListener("input", this.onInput);
     this.textarea.removeEventListener("keydown", this.onTextareaKeydown);
@@ -1707,7 +1709,10 @@ export class Composer {
     this.render();
   };
   private readonly onVisibilityChange = (): void => {
-    if (document.visibilityState === "hidden") this.flushStoredDraft();
+    if (document.visibilityState === "hidden") {
+      this.endTextareaGestures();
+      this.flushStoredDraft();
+    }
   };
   private readonly onPageHide = (): void => { this.flushStoredDraft(); };
   // iOS zooms the page when a text field takes focus with a computed font size
@@ -1759,6 +1764,14 @@ export class Composer {
   private textareaGestureActive(): boolean {
     return this.textareaPointers.size !== 0 || this.textareaTouches.size !== 0;
   }
+  private readonly endTextareaGestures = (): void => {
+    // Leaving the window can prevent either release stream from arriving.
+    // Invalidate pending repairs as well as allowing later font changes.
+    if (!this.textareaGestureActive()) return;
+    this.textareaPointers.clear();
+    this.textareaTouches.clear();
+    this.noteTypographyInteraction();
+  };
   // A native thumb drag can continue without another input event. During a
   // gesture even a layout-generated notification must yield to user intent.
   // Without input intent, font reflow and layout offset writes still need the
