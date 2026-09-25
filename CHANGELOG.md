@@ -7,7 +7,7 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 ### Fixed
 
 - Composer font changes preserve the draft's scroll position after a scroll gesture is interrupted by switching tabs or leaving the window.
-- Existing sessions running full-screen programs can be opened without exiting the program. Journal rotation and explicit width refit now reconstruct both captured terminal screens. [Saved-screen restoration after a width change](docs/terminal-reconstruction.md) remains limited by the state tmux exposes.
+- Existing sessions running full-screen programs can be opened without exiting the program, including after a resize. Journal rotation and explicit width refit reconstruct the visible alternate screen and fit the hidden normal screen to the current geometry. [Saved-screen restoration after a resize](docs/terminal-reconstruction.md) approximates cells tmux hides from capture.
 
 ## 0.1.1 — 2026-09-24
 

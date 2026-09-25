@@ -7,8 +7,11 @@ resizes, or destroys tmux servers, sessions, windows, or panes. It has no
 Funnel, tailnet-policy, DNS, SSH, or global Tailscale reset operation.
 
 Sessions running full-screen programs can be opened, rotated and explicitly
-refitted while the alternate screen is active. Both visible screens and bounded
-normal history are reconstructed from one drift-checked tmux capture transaction.
+refitted while the alternate screen is active. The visible alternate display,
+hidden normal display and bounded history are reconstructed from one
+drift-checked tmux capture transaction. Saved normal displays of any height
+are fitted to the current geometry; cells tmux hides after a resize are
+approximated when the app exits.
 Opening and rotation do not resize the pane or send it input. See
 [terminal reconstruction](../docs/terminal-reconstruction.md) for the capture
 contract and its limits. During a rolling upgrade, an older broker may still
