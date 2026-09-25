@@ -213,7 +213,7 @@ func parseInitialCapture(responses []string, observerPID int, tamper func(string
 	if strings.TrimSpace(responses[1]) != "" {
 		return invalid(errRecordingInitial)
 	}
-	pre, post := strings.TrimSpace(responses[2]), strings.TrimSpace(responses[6])
+	pre, post := strings.TrimSpace(responses[2]), strings.TrimSpace(responses[7])
 	if tamper != nil {
 		post = tamper(post)
 	}
@@ -222,8 +222,6 @@ func parseInitialCapture(responses []string, observerPID int, tamper func(string
 		return invalid(err)
 	}
 	switch {
-	case probe.alternate != 0:
-		return invalid(ErrUnifiedAdoptAlternateScreen)
 	case probe.windows != 1:
 		return invalid(ErrUnifiedAdoptMultiWindow)
 	case probe.panes != 1:
@@ -232,17 +230,39 @@ func parseInitialCapture(responses []string, observerPID int, tamper func(string
 	if pre != post {
 		return invalid(errUnifiedAdoptDrift)
 	}
-	modes, err := parseAdoptionModes(strings.TrimSpace(responses[5]))
+	modes, err := parseAdoptionModes(strings.TrimSpace(responses[6]))
 	if err != nil {
 		return invalid(err)
 	}
 	// Exactly one LF belongs to the command response, not the parser prefix.
-	pending := strings.TrimSuffix(responses[4], "\n")
-	bootstrap, trimmed, err := synthesizeAdoptionBootstrap(parseAdoptionCapture(responses[3]), pending, probe.cursorX, probe.cursorY, modes)
+	pending := strings.TrimSuffix(responses[5], "\n")
+	bootstrap, trimmed, err := synthesizeCapturedAdoption(responses[3], responses[4], pending, probe, modes)
 	if err != nil {
 		return invalid(err)
 	}
 	return bootstrap, unifiedjournal.Geometry{Columns: modes.columns, Rows: modes.rows}, trimmed, nil
+}
+
+// Both initial admission and rotation use the same two-screen interpretation.
+func synthesizeCapturedAdoption(active, saved, pending string, probe adoptionProbe, modes adoptionModes) ([]byte, bool, error) {
+	rows := parseAdoptionCapture(active)
+	switch probe.alternate {
+	case 0:
+		if strings.TrimSuffix(saved, "\n") != "" {
+			return nil, false, errRecordingInitial
+		}
+		return synthesizeAdoptionBootstrap(rows, pending, probe.cursorX, probe.cursorY, modes)
+	case 1:
+		// 1047 enters the alternate screen without saving a cursor. tmux
+		// exposes UINT_MAX for both coordinates; its matching exit keeps the
+		// active cursor, so no normal restore position needs reconstruction.
+		if uint64(probe.savedX) == 1<<32-1 && uint64(probe.savedY) == 1<<32-1 {
+			probe.savedX, probe.savedY = 0, 0
+		}
+		return synthesizeAdoptionBootstrap(rows, pending, probe.cursorX, probe.cursorY, modes, adoptionAlternate{rows: parseAdoptionCapture(saved), cursorX: probe.savedX, cursorY: probe.savedY})
+	default:
+		return nil, false, errRecordingInitial
+	}
 }
 
 // startInitial admits one complete initial state atomically into the ordinary

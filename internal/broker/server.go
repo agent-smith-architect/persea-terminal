@@ -1769,8 +1769,6 @@ func refitRefusalCode(err error) string {
 		return "bad_refit"
 	case errors.Is(err, ErrUnifiedRefitStale):
 		return "stale_target"
-	case errors.Is(err, ErrUnifiedRefitAlternateScreen), errors.Is(err, ErrUnifiedRotateAlternateScreen):
-		return "blocked_alt_screen"
 	case errors.Is(err, ErrUnifiedRotateInProgress):
 		return "refit_in_progress"
 	case errors.Is(err, ErrUnifiedRotateSlotsExhausted):

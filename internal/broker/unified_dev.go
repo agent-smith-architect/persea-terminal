@@ -31,15 +31,14 @@ import (
 // returned, no journal generation, registry admission, or provider registration
 // exists for the attempt.
 var (
-	ErrUnifiedAdoptSessionMissing  = errors.New("unified adoption target session is unavailable")
-	ErrUnifiedAdoptAlternateScreen = errors.New("unified adoption target is on the alternate screen")
-	ErrUnifiedAdoptMultiWindow     = errors.New("unified adoption target has more than one window")
-	ErrUnifiedAdoptMultiPane       = errors.New("unified adoption target has more than one pane")
-	ErrUnifiedAdoptSlotsExhausted  = errors.New("unified adoption slots are exhausted")
-	ErrUnifiedAdoptInProgress      = errors.New("unified adoption is already in progress")
-	ErrUnifiedAdoptUnstable        = errors.New("unified adoption capture did not stabilize")
-	ErrUnifiedAdoptHistory         = errors.New("unified adoption history is outside its bounds")
-	ErrUnifiedObserverFlowControl  = errors.New("unified observer flow control violated byte authority")
+	ErrUnifiedAdoptSessionMissing = errors.New("unified adoption target session is unavailable")
+	ErrUnifiedAdoptMultiWindow    = errors.New("unified adoption target has more than one window")
+	ErrUnifiedAdoptMultiPane      = errors.New("unified adoption target has more than one pane")
+	ErrUnifiedAdoptSlotsExhausted = errors.New("unified adoption slots are exhausted")
+	ErrUnifiedAdoptInProgress     = errors.New("unified adoption is already in progress")
+	ErrUnifiedAdoptUnstable       = errors.New("unified adoption capture did not stabilize")
+	ErrUnifiedAdoptHistory        = errors.New("unified adoption history is outside its bounds")
+	ErrUnifiedObserverFlowControl = errors.New("unified observer flow control violated byte authority")
 )
 
 // errUnifiedAdoptDrift is the internal PRE!=POST signal: the pane mutated (or a
@@ -65,7 +64,7 @@ const (
 	// adoptionCompositeBlocks is the composite's sub-command count. Measured:
 	// each semicolon sub-command produces its own %begin/%end block, so the
 	// block count consumed must equal the sub-command count exactly.
-	adoptionCompositeBlocks = 7
+	adoptionCompositeBlocks = 8
 )
 
 type unifiedDevCommand struct {
@@ -761,28 +760,7 @@ func (effects *UnifiedDevPaneEffects) projectSession(server, sessionID string, f
 	}
 	effects.mu.Lock()
 	key, active := effects.active[sessionID]
-	detail := ""
-	wake := false
-	if active {
-		if state := effects.rotationStates[sessionID]; state != nil && state.key == key && state.deferredAltScreen {
-			if facts.Valid && facts.Alternate == 0 {
-				state.deferredAltScreen = false
-				state.backoff = 0
-				now := time.Now
-				if effects.rotationNow != nil {
-					now = effects.rotationNow
-				}
-				state.nextAttempt = now()
-				wake = true
-			} else {
-				detail = proto.UnifiedSessionDetailRotationDeferredAltScreen
-			}
-		}
-	}
 	effects.mu.Unlock()
-	if wake {
-		effects.wakeRotationScheduler()
-	}
 	if active {
 		if effects.realm == nil {
 			return &proto.UnifiedSessionState{State: proto.UnifiedSessionUnavailable}
@@ -800,7 +778,7 @@ func (effects *UnifiedDevPaneEffects) projectSession(server, sessionID string, f
 			// inventory vocabulary intentionally has only birth and reconstructed.
 			projectedOrigin = proto.UnifiedOriginReconstructed
 		}
-		return &proto.UnifiedSessionState{State: proto.UnifiedSessionOpen, Origin: projectedOrigin, Detail: detail}
+		return &proto.UnifiedSessionState{State: proto.UnifiedSessionOpen, Origin: projectedOrigin}
 	}
 	if !facts.Valid {
 		return &proto.UnifiedSessionState{State: proto.UnifiedSessionUnavailable}
@@ -808,8 +786,6 @@ func (effects *UnifiedDevPaneEffects) projectSession(server, sessionID string, f
 	// Eligibility before slots, matching the adoption sequence: an ineligible
 	// pane shows its real blocker even when the slot budget is also gone.
 	switch {
-	case facts.Alternate != 0:
-		return &proto.UnifiedSessionState{State: proto.UnifiedSessionBlockedAltScreen}
 	case facts.Windows != 1:
 		return &proto.UnifiedSessionState{State: proto.UnifiedSessionBlockedMultiWindow}
 	case facts.Panes != 1:
@@ -2571,7 +2547,7 @@ func (unit *unifiedDevUnit) commitAdoption(responses []string, holder *unifiedDe
 	return reservation, key, trimmed, nil
 }
 
-// adoptionCompositeLine is the atomic capture composite: seven semicolon
+// adoptionCompositeLine is the atomic capture composite: eight semicolon
 // sub-commands submitted as ONE control-mode line, which tmux 3.4 drains in a
 // single command-queue run without processing pane reads (measured by the
 // adoption regression test). The first command rechecks this observer's
@@ -2592,7 +2568,7 @@ func adoptionCompositeLine(pane string, requestedHistory ...int) string {
 	if len(requestedHistory) == 1 {
 		historyRows = requestedHistory[0]
 	}
-	const probe = "#{history_size} #{history_limit} #{cursor_x} #{cursor_y} #{alternate_on} #{window_panes} #{session_windows}"
+	const probe = "#{history_size} #{history_limit} #{cursor_x} #{cursor_y} #{alternate_on} #{window_panes} #{session_windows} #{?alternate_on,#{alternate_saved_x},0} #{?alternate_on,#{alternate_saved_y},0}"
 	// pane_tabs is last because it is the only field that can be empty.
 	const modes = "#{cursor_flag} #{insert_flag} #{keypad_cursor_flag} #{keypad_flag} #{origin_flag} #{wrap_flag} #{mouse_standard_flag} #{mouse_button_flag} #{mouse_all_flag} #{mouse_utf8_flag} #{mouse_sgr_flag} #{scroll_region_upper} #{scroll_region_lower} #{pane_width} #{pane_height} #{pane_tabs}"
 	target := shellQuote(pane)
@@ -2601,6 +2577,9 @@ func adoptionCompositeLine(pane string, requestedHistory ...int) string {
 		"refresh-client -A " + shellQuote(pane+":on"),
 		"display-message -p -t " + target + " " + shellQuote(probe),
 		"capture-pane -e -p -N -S -" + strconv.Itoa(historyRows) + " -E - -t " + target,
+		// -q makes the absent saved screen an empty successful block. Both
+		// captures stay in this command-queue run, inside the drift probes.
+		"capture-pane -a -q -e -p -N -t " + target,
 		"capture-pane -p -P -t " + target,
 		"display-message -p -t " + target + " " + shellQuote(modes),
 		"display-message -p -t " + target + " " + shellQuote(probe),
@@ -2609,12 +2588,13 @@ func adoptionCompositeLine(pane string, requestedHistory ...int) string {
 
 type adoptionProbe struct {
 	historySize, historyLimit, cursorX, cursorY, alternate, panes, windows int
+	savedX, savedY                                                         int
 }
 
 func parseAdoptionProbe(text string) (adoptionProbe, error) {
 	invalid := errors.New("unified adoption probe returned an invalid shape")
 	fields := strings.Fields(text)
-	if len(fields) != 7 {
+	if len(fields) != 9 {
 		return adoptionProbe{}, invalid
 	}
 	values := make([]int, len(fields))
@@ -2629,6 +2609,7 @@ func parseAdoptionProbe(text string) (adoptionProbe, error) {
 		historySize: values[0], historyLimit: values[1],
 		cursorX: values[2], cursorY: values[3],
 		alternate: values[4], panes: values[5], windows: values[6],
+		savedX: values[7], savedY: values[8],
 	}, nil
 }
 
@@ -2700,19 +2681,42 @@ func parseAdoptionCapture(response string) []string {
 	return strings.Split(strings.TrimSuffix(response, "\n"), "\n")
 }
 
+type adoptionAlternate struct {
+	rows             []string
+	cursorX, cursorY int
+}
+
 // synthesizeAdoptionBootstrap renders the captured pane state as one byte
 // sequence a fresh terminal of the captured geometry replays into the
 // capture-equivalent screen. The emit order is pinned: attribute reset, rows
 // in order (history scrolls through naturally, CRLF between rows and none
-// after the last), then DECSTBM — which homes the cursor — then DECOM per the
+// after the last), saved normal cursor and alternate display when active,
+// then DECSTBM — which homes the cursor — then DECOM per the
 // captured origin flag, then CUP with region-relative coordinates iff origin
 // mode is on, then the remaining modes, then tab stops (whose HTS placement
 // moves the cursor by column, so the captured position is restored again
 // after them), and the captured pending parser prefix LAST, immediately
-// before live bytes. G0/G1 designation, saved DECSC state, cursor style, and
+// before live bytes. G0/G1 designation, arbitrary saved DECSC state, cursor style, and
 // the SGR live at the seam are unreadable on tmux 3.4 and reset to defaults:
 // reconstructed means capture-equivalent, no more.
-func synthesizeAdoptionBootstrap(rows []string, pending string, cursorX, cursorY int, modes adoptionModes) ([]byte, bool, error) {
+func synthesizeAdoptionBootstrap(rows []string, pending string, cursorX, cursorY int, modes adoptionModes, alternate ...adoptionAlternate) ([]byte, bool, error) {
+	var switchScreen strings.Builder
+	if len(alternate) > 0 {
+		saved := alternate[0]
+		if len(alternate) != 1 || len(rows) < modes.rows || len(saved.rows) != modes.rows || saved.cursorY >= modes.rows || saved.cursorX < 0 || saved.cursorY < 0 {
+			return nil, false, errors.New("unified adoption saved screen has an invalid shape")
+		}
+		// Ordinary capture is normal history followed by the alternate view.
+		// Seed the saved normal display before entering 1049, so a later exit
+		// restores it and its cursor. CUP paints the alternate rows without
+		// scrolling either buffer, including a full-width bottom row.
+		visible := rows[len(rows)-modes.rows:]
+		rows = append(append([]string(nil), rows[:len(rows)-modes.rows]...), saved.rows...)
+		fmt.Fprintf(&switchScreen, "\x1b[%d;%dH\x1b[?1049h\x1b[0m", saved.cursorY+1, saved.cursorX+1)
+		for index, line := range visible {
+			fmt.Fprintf(&switchScreen, "\x1b[%d;1H%s", index+1, line)
+		}
+	}
 	set := func(builder *strings.Builder, on bool, enable, disable string) {
 		if on {
 			builder.WriteString(enable)
@@ -2750,7 +2754,7 @@ func synthesizeAdoptionBootstrap(rows []string, pending string, cursorX, cursorY
 	tail.WriteString(pending)
 
 	const head = "\x1b[0m"
-	size := len(head) + tail.Len()
+	size := len(head) + switchScreen.Len() + tail.Len()
 	for _, line := range rows {
 		size += len(line) + 2
 	}
@@ -2759,8 +2763,8 @@ func synthesizeAdoptionBootstrap(rows []string, pending string, cursorX, cursorY
 	}
 	trimmed := false
 	// Oldest history rows are trimmed first and the visible screen — the last
-	// modes.rows rows — never is, so the reconstruction stays screen-complete
-	// even when it must be history-shallow.
+	// modes.rows rows — never is. The alternate display is never trimmed either,
+	// so reconstruction stays screen-complete even when history-shallow.
 	for size > adoptionBootstrapCapBytes && len(rows) > modes.rows {
 		size -= len(rows[0]) + 2
 		rows = rows[1:]
@@ -2777,6 +2781,7 @@ func synthesizeAdoptionBootstrap(rows []string, pending string, cursorX, cursorY
 		}
 		bootstrap = append(bootstrap, line...)
 	}
+	bootstrap = append(bootstrap, switchScreen.String()...)
 	bootstrap = append(bootstrap, tail.String()...)
 	return bootstrap, trimmed, nil
 }

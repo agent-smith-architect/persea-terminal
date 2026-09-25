@@ -10,12 +10,17 @@ default and history protocol.
 Before the first unified attachment, the adoption request carries an optional
 integer `history_rows`. Both HTTP and broker protocol boundaries reject values
 outside 0..10,000; omission defaults to 10,000. The broker independently checks
-the bound before performing any effects. Zero captures the visible screen only.
+the bound before performing any effects. Zero captures no history. When a
+full-screen program is active, both its alternate display and the saved normal
+display are retained, so leaving the program restores the normal screen.
 
 The chosen depth reaches the existing atomic capture composite. Its witness
 checks, output boundary, capture byte cap, cursor and terminal-mode restoration,
 and reconstructed journal provenance are unchanged. An oversized bootstrap still
-trims the oldest rows first. The import can only read history tmux still has.
+trims the oldest history rows first; neither visible screen is trimmed. The
+import can only read history tmux still has. See
+[terminal reconstruction](../docs/terminal-reconstruction.md) for the two-screen
+capture contract and its limits.
 It does not set tmux's history limit, resize its window, or send terminal input.
 Dashboard, session-switch and workspace adoption paths always request the full
 bounded 10,000-row import. The device preference only controls browser retention:

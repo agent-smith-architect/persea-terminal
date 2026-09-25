@@ -2,7 +2,6 @@ package broker
 
 import (
 	"context"
-	"errors"
 	"sort"
 	"time"
 
@@ -43,13 +42,12 @@ func ratioBelow(value, cap, numerator, denominator int64) bool {
 }
 
 type unifiedRotationState struct {
-	key               unifiedjournal.PaneKey
-	armed             bool
-	armedAt           time.Time
-	lastSuccess       time.Time
-	nextAttempt       time.Time
-	backoff           time.Duration
-	deferredAltScreen bool
+	key         unifiedjournal.PaneKey
+	armed       bool
+	armedAt     time.Time
+	lastSuccess time.Time
+	nextAttempt time.Time
+	backoff     time.Duration
 }
 
 // requestRotationEvaluation is the complete retention-drain responsibility:
@@ -131,7 +129,6 @@ func (effects *UnifiedDevPaneEffects) recordExplicitRefitSuccess(session string,
 	state.lastSuccess = now
 	state.backoff = 0
 	state.nextAttempt = now.Add(unifiedRotationCadence)
-	state.deferredAltScreen = false
 	effects.mu.Unlock()
 }
 
@@ -173,9 +170,6 @@ func (effects *UnifiedDevPaneEffects) updateRotationPressure(candidate unifiedRo
 		state = &unifiedRotationState{}
 		effects.rotationStates[candidate.session] = state
 	}
-	if state.key != (unifiedjournal.PaneKey{}) && state.key != candidate.key {
-		state.deferredAltScreen = false
-	}
 	state.key = candidate.key
 	if pressure.high() {
 		if !state.armed {
@@ -193,7 +187,6 @@ func (effects *UnifiedDevPaneEffects) updateRotationPressure(candidate unifiedRo
 		state.armed = false
 		state.backoff = 0
 		state.nextAttempt = time.Time{}
-		state.deferredAltScreen = false
 	}
 }
 
@@ -304,14 +297,10 @@ func (effects *UnifiedDevPaneEffects) runRotationScheduler(ctx context.Context) 
 			state.lastSuccess = completedAt
 			state.backoff = 0
 			state.nextAttempt = completedAt.Add(unifiedRotationCadence)
-			state.deferredAltScreen = false
 			if key, active := effects.active[session]; active {
 				state.key = key
 			}
 		} else {
-			if errors.Is(err, ErrUnifiedRotateAlternateScreen) {
-				state.deferredAltScreen = true
-			}
 			if state.backoff == 0 {
 				state.backoff = unifiedRotationRetryInitial
 			} else {

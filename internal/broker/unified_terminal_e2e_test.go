@@ -396,7 +396,7 @@ func TestUnifiedSessionProjectionStates(t *testing.T) {
 	}
 	expect(t, effects.projectSession("other", "$1", eligibleFacts()), proto.UnifiedSessionBlockedForeignServer, "")
 	expect(t, effects.projectSession("main", "$1", eligibleFacts()), proto.UnifiedSessionAdoptable, "")
-	expect(t, effects.projectSession("main", "$1", unifiedSessionFacts{Alternate: 1, Panes: 1, Windows: 1, Valid: true}), proto.UnifiedSessionBlockedAltScreen, "")
+	expect(t, effects.projectSession("main", "$1", unifiedSessionFacts{Alternate: 1, Panes: 1, Windows: 1, Valid: true}), proto.UnifiedSessionAdoptable, "")
 	expect(t, effects.projectSession("main", "$1", unifiedSessionFacts{Alternate: 0, Panes: 1, Windows: 2, Valid: true}), proto.UnifiedSessionBlockedMultiWindow, "")
 	expect(t, effects.projectSession("main", "$1", unifiedSessionFacts{Alternate: 0, Panes: 2, Windows: 1, Valid: true}), proto.UnifiedSessionBlockedMultiPane, "")
 	expect(t, effects.projectSession("main", "$1", unifiedSessionFacts{}), proto.UnifiedSessionUnavailable, "")
@@ -432,62 +432,19 @@ func TestUnifiedSessionProjectionStates(t *testing.T) {
 	expect(t, effects.projectSession("main", "$17", unifiedSessionFacts{Alternate: 1, Panes: 3, Windows: 3, Valid: true}), proto.UnifiedSessionOpen, proto.UnifiedOriginBirth)
 }
 
-func TestUnifiedSessionProjectionReportsAndClearsAlternateScreenDeferral(t *testing.T) {
+func TestUnifiedSessionProjectionKeepsAlternateScreenOpen(t *testing.T) {
 	effects := newProjectionEffects(t, 0)
-	key := unifiedjournal.PaneKey{Server: "main", Session: "$deferred", Window: "@1", Pane: "%1", Incarnation: "inc", ControlGeneration: 1}
+	key := unifiedjournal.PaneKey{Server: "main", Session: "$alternate", Window: "@1", Pane: "%1", Incarnation: "inc", ControlGeneration: 1}
 	reserveRecordingSourceForTest(t, effects, key)
-	effects.journalMu.Lock()
-	err := effects.realm.AdmitPane(key, unifiedjournal.Geometry{Columns: 80, Rows: 24})
-	effects.journalMu.Unlock()
-	if err != nil {
+	if err := effects.realm.AdmitPane(key, unifiedjournal.Geometry{Columns: 80, Rows: 24}); err != nil {
 		t.Fatal(err)
 	}
-	now := time.Unix(30_000, 0)
-	attempts := 0
-	effects.mu.Lock()
 	effects.active[key.Session] = key
-	effects.rotationNow = func() time.Time { return now }
-	effects.rotationPressure = func(unifiedjournal.PaneKey) (unifiedRotationPressure, error) {
-		return unifiedRotationPressure{logical: 80, logicalCap: 100, physicalCap: 100}, nil
-	}
-	effects.rotationAttempt = func(context.Context, string) error {
-		attempts++
-		if attempts == 1 {
-			return ErrUnifiedRotateAlternateScreen
+	for _, alternate := range []int{1, 0, 1} {
+		projected := effects.projectSession("main", key.Session, unifiedSessionFacts{Alternate: alternate, Panes: 1, Windows: 1, Valid: true})
+		if projected == nil || projected.State != proto.UnifiedSessionOpen || projected.Detail != "" {
+			t.Fatalf("alternate=%d projection=%+v", alternate, projected)
 		}
-		return nil
-	}
-	effects.mu.Unlock()
-	effects.requestRotationEvaluation(key)
-	effects.runRotationScheduler(context.Background())
-	if attempts != 1 {
-		t.Fatalf("alternate-screen attempt count=%d", attempts)
-	}
-
-	deferred := effects.projectSession("main", key.Session, unifiedSessionFacts{Alternate: 1, Panes: 1, Windows: 1, Valid: true})
-	if deferred == nil || deferred.State != proto.UnifiedSessionOpen || deferred.Detail != proto.UnifiedSessionDetailRotationDeferredAltScreen {
-		t.Fatalf("deferred projection=%+v", deferred)
-	}
-	select {
-	case <-effects.rotationWake:
-	default:
-	}
-	cleared := effects.projectSession("main", key.Session, eligibleFacts())
-	if cleared == nil || cleared.State != proto.UnifiedSessionOpen || cleared.Detail != "" {
-		t.Fatalf("cleared projection=%+v", cleared)
-	}
-	state := effects.rotationState(key.Session)
-	if state.deferredAltScreen || state.backoff != 0 || !state.nextAttempt.Equal(now) {
-		t.Fatalf("alternate-screen exit did not make rotation promptly eligible: %+v", state)
-	}
-	select {
-	case <-effects.rotationWake:
-	default:
-		t.Fatal("alternate-screen exit did not wake the scheduler")
-	}
-	effects.runRotationScheduler(context.Background())
-	if attempts != 2 || effects.rotationState(key.Session).deferredAltScreen {
-		t.Fatalf("alternate-screen exit did not promptly rotate: attempts=%d state=%+v", attempts, effects.rotationState(key.Session))
 	}
 }
 
