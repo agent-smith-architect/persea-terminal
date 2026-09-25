@@ -5,7 +5,9 @@ const fs = require("node:fs") as { readFileSync(path: string, encoding: "utf8"):
 const path = require("node:path") as { join(...parts: string[]): string };
 const sourcePath = process.env.PERSEA_TERMINAL_INTERACTION_SOURCE
   ?? path.join(process.cwd(), "src", "unified_terminal_page.ts");
-const source = fs.readFileSync(sourcePath, "utf8");
+const source = fs.readFileSync(sourcePath, "utf8")
+  + ["unified_terminal_options", "unified_terminal_geometry_types", "unified_terminal_state_types"]
+    .map((name) => fs.readFileSync(path.join(process.cwd(), "src", `${name}.ts`), "utf8")).join("\n");
 const controller = fs.readFileSync(path.join(process.cwd(), "src", "unified_pane_controller.ts"), "utf8");
 const packageSource = fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8");
 const packageJSON = JSON.parse(packageSource) as { scripts?: Record<string, string> };
