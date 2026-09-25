@@ -1,0 +1,301 @@
+/* Shared attachment shell, status, and scroll surface. */
+:root {
+  color-scheme: dark;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  background: #081018;
+  color: #e6edf3;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app { margin: 0; width: 100%; min-width: 0; height: 100%; min-height: 0; overflow: hidden; overscroll-behavior: none; background: #081018; }
+
+.attachment-page {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  min-width: 0;
+  height: 100vh;
+  height: 100dvh;
+  /* Set by AttachmentPage while the visual viewport is unzoomed, so the on-screen
+     keyboard cannot cover the caret row. Falls back to dvh when absent. */
+  height: var(--persea-visual-viewport-height, 100dvh);
+  min-height: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
+  /* There are no fixed-position descendants; each overlay is anchored by its
+     own positioned page descendant, so this compositor-only origin correction
+     cannot change the terminal's layout or fit inputs. */
+  transform: translateY(var(--persea-visual-viewport-offset, 0px));
+  background: #081018;
+}
+
+/* Mobile first. The resident bar is one line; the action controls live in a panel
+   that is collapsed by default and only ever expanded deliberately, so a phone
+   spends its vertical space on the terminal. The wide breakpoint below restores a
+   single always-visible row and hides the disclosure entirely. */
+/* The header is exactly one line at every width. The terminal is the product, so
+   chrome does not get to grow: the action panel is an overlay, not a row, and
+   costs zero layout height when closed. This also gives desktop and mobile one
+   mental model instead of two. */
+.attachment-page__header {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .5rem;
+  padding: .4rem .6rem;
+  border-bottom: 1px solid #273444;
+  background: #0d1620;
+}
+
+.attachment-page__bar {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: .3rem;
+  min-width: 0;
+  overflow: hidden;
+}
+
+/* Dropdown, anchored under the disclosure. Scrolls internally rather than
+   growing, so a long menu never pushes the terminal off screen. */
+.attachment-page__actions {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + .3rem);
+  right: .6rem;
+  left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: .6rem;
+  min-width: min(22rem, calc(100vw - 1.2rem));
+  max-width: calc(100vw - 1.2rem);
+  max-height: min(70vh, 30rem);
+  overflow-y: auto;
+  padding: .7rem;
+  border: 1px solid #2b4055;
+  border-radius: .6rem;
+  background: #101d29;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 55%);
+}
+
+.attachment-page__header[data-actions-expanded="false"] .attachment-page__actions { display: none; }
+.attachment-page__disclosure { margin-left: auto; flex: 0 0 auto; white-space: nowrap; min-height: 34px; }
+.attachment-page__disclosure::before { content: "\2261\00a0"; }
+
+.attachment-page__title {
+  margin: 0;
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: .95rem;
+}
+/* Capability and connection state are safety information and never shrink. The
+   identity yields first, while its title routes preserve the full labels. */
+.attachment-page__identity { display: flex; flex: 1 1 0; align-items: center; gap: .35rem; min-width: 0; overflow: hidden; }
+.attachment-page__identity[hidden] { display: none; }
+.attachment-page__session, .attachment-page__alias {
+  flex: 0 0 auto;
+  max-width: 20ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-radius: 999px;
+  padding: .2rem .5rem;
+  font: 600 .74rem/1.35 ui-monospace, monospace;
+}
+.attachment-page__session { flex: 1 1 auto; min-width: 2.5rem; background: #16324a; color: #9fd4ff; }
+.attachment-page__alias { background: #2c2416; color: #ffc77d; }
+.attachment-page__status, .attachment-page__mode, .attachment-page__history, .attachment-page__control-navigation-status { font: 600 .72rem/1.35 ui-monospace, monospace; letter-spacing: .04em; }
+.attachment-page__status, .attachment-page__mode {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  color: #b7cbe0;
+}
+@media (max-width: 430px) { .attachment-page__alias { display: none; } }
+.attachment-page__title[hidden] { display: none; }
+/* Menu contents grouped by intent, with the groups visibly separated. */
+.attachment-page__group { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
+.attachment-page__actions .attachment-page__group + .attachment-page__group { padding-top: .6rem; border-top: 1px solid #1c2b3a; }
+.attachment-page__history { display: grid; align-self: flex-start; flex: 1 1 18rem; gap: .25rem; min-width: min(18rem, 100%); color: #b7cbe0; font: 600 .8rem/1.35 ui-monospace, monospace; letter-spacing: .02em; }
+.attachment-page__history-primary { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem; }
+.attachment-page__history-primary label { color: #e6edf3; font-size: 1rem; }
+.attachment-page__history select {
+  max-width: 100%;
+  min-height: 34px;
+  border: 1px solid #41617e;
+  border-radius: .3rem;
+  padding: .28rem .35rem;
+  background: #081018;
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+}
+.attachment-page__history-loaded { color: #9fb4c6; }
+.attachment-page__history output { max-width: 24rem; color: #9fd4ff; }
+.attachment-page__history output[data-state="pending-reader"] { color: #ffd479; }
+.attachment-page__history output[data-state^="failed"] { color: #ffaaa5; }
+.attachment-page__history output[data-state="effective-split"] { color: #d1b5ff; }
+.attachment-page__history-omission { color: #8298aa; font-size: .68rem; font-weight: 500; }
+.attachment-page__history-omission[hidden] { display: none; }
+.attachment-page__button { border: 1px solid #41617e; border-radius: .35rem; padding: .32rem .55rem; background: #142536; color: inherit; text-decoration: none; font: inherit; }
+.attachment-page__button:disabled { cursor: wait; opacity: .65; }
+.attachment-page__button[hidden] { display: none; }
+.attachment-page__control-navigation-status { max-width: 24rem; color: #b7cbe0; }
+.attachment-page__control-navigation-status[hidden] { display: none; }
+.attachment-page__dashboard { white-space: nowrap; }
+.attachment-page__geometry { display: inline-flex; align-self: flex-start; align-items: center; gap: .3rem; white-space: nowrap; }
+.attachment-page__geometry[hidden] { display: none; }
+.attachment-page__geometry input {
+  width: 4.4rem;
+  border: 1px solid #41617e;
+  border-radius: .3rem;
+  padding: .28rem .35rem;
+  background: #081018;
+  color: inherit;
+  font: 600 .72rem/1 ui-monospace, monospace;
+}
+.attachment-page__geometry button {
+  border: 1px solid #41617e;
+  border-radius: .3rem;
+  padding: .28rem .48rem;
+  background: #142536;
+  color: inherit;
+}
+.attachment-page__geometry output { max-width: 18rem; font: 600 .72rem/1 ui-monospace, monospace; color: #b7cbe0; }
+
+.attachment-page__settings {
+  position: absolute;
+  z-index: 30;
+  top: 3.25rem;
+  right: .6rem;
+  width: min(28rem, calc(100% - 1.2rem));
+  max-height: min(75%, 34rem);
+  overflow-y: auto;
+  padding: .8rem;
+  border: 1px solid #2b4055;
+  border-radius: .6rem;
+  background: #101d29;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 55%);
+}
+.attachment-page__settings[hidden] { display: none; }
+.attachment-page__settings h2 { margin: 0 8rem .75rem 0; font-size: 1rem; }
+.attachment-page__settings-close { position: absolute; top: .6rem; right: .6rem; }
+.attachment-page__settings fieldset { margin: 0 0 .75rem; border: 1px solid #2b4055; border-radius: .4rem; padding: .6rem; }
+.attachment-page__settings legend { padding: 0 .25rem; font: 600 .8rem/1.35 ui-monospace, monospace; }
+.attachment-page__settings-choices { display: flex; gap: .5rem; }
+.attachment-page__settings-choices .attachment-page__button[aria-pressed="true"] { border-color: #e6edf3; background: #1d3348; }
+.attachment-page__settings-status,
+.attachment-page__settings-record { display: block; margin-top: .65rem; color: #b7cbe0; font: 600 .72rem/1.4 ui-monospace, monospace; }
+.attachment-page__settings-record { max-height: 12rem; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+@media (min-width: 641px) {
+  /* More breathing room, same single-line rule. The disclosure is NOT hidden on
+     desktop: one behaviour at every width is easier to reason about than two, and
+     it keeps the terminal's height independent of how many controls exist. */
+  .attachment-page__header { padding: .5rem .75rem; }
+  .attachment-page__actions { min-width: 26rem; }
+}
+
+.attachment-page__stage {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  /* The Composer is painted above the dock, but its committed inset is real
+     layout space.  This keeps the scroller's box equal to the visible band. */
+  margin-bottom: var(--persea-composer-inset, 0px);
+  overflow: hidden;
+}
+
+/* Sits where the terminal would be, because that is where the operator is looking
+   when nothing appears. Centred and above the aggregates, so a retained reader is
+   never covered — it is only ever raised when the stage is otherwise empty. */
+.attachment-page__notice {
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: .4rem;
+  padding: 1.5rem;
+  text-align: center;
+  background: #081018;
+}
+.attachment-page__notice[hidden] { display: none; }
+.attachment-page__notice-headline { margin: 0; font-size: 1.05rem; font-weight: 600; color: #e6edf3; }
+.attachment-page__notice-detail { margin: 0; max-width: 34rem; font-size: .9rem; line-height: 1.45; color: #b7cbe0; }
+/* The machine code stays visible. Replacing it with prose would trade this
+   operator's confusion for the next person's undiagnosable bug report. */
+.attachment-page__notice-code { margin: .4rem 0 0; font: 600 .7rem/1 ui-monospace, monospace; letter-spacing: .04em; color: #6f8599; }
+
+.attachment-page__aggregate {
+  display: flex;
+  flex: 1 1 auto;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.attachment-page__aggregate > .continuous-surface { width: 100%; min-width: 0; min-height: 0; }
+
+/* `visibility: hidden` is load-bearing and must NOT be "optimised" to
+   `display: none`. A hidden aggregate still needs to lay out, because the surface
+   converges its font fit while hidden and then presents an already-settled grid —
+   that is what stops the operator seeing the font walk 14px down to 7px on screen.
+   A display:none element has no boxes, so every measurement reads zero and the fit
+   silently converges on nothing. The symptom would appear in the surface, nowhere
+   near this rule. */
+.attachment-page__aggregate--candidate,
+.attachment-page__aggregate--logical-hidden {
+  position: absolute;
+  inset: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.attachment-page__aggregate--frozen { pointer-events: auto; }
+
+.continuous-surface-scroller { overscroll-behavior: contain; touch-action: pan-x pan-y; }
+
+.continuous-surface-live-host { position: relative; }
+.continuous-surface-selection-live-overlay {
+  position: absolute;
+  overflow: hidden;
+  z-index: 10;
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.continuous-surface-selection-live-segment {
+  position: absolute;
+  background: rgba(71, 132, 194, .58);
+  pointer-events: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.continuous-surface-history ::selection,
+.continuous-surface-bridge ::selection {
+  color: inherit;
+  background: rgba(71, 132, 194, .58);
+}
+
+/* The only in-flow trailing content is the baseline scrollbar/thumb gutter. The
+   Composer reserve belongs to the stage box above, so every surface consumer sees
+   the same reduced client height. */
+.continuous-surface-scroller::after {
+  content: "";
+  display: block;
+  height: var(--persea-scroller-gutter, .5rem);
+}

@@ -1,0 +1,627 @@
+/* Unified toolbar, session tag, copy feedback, and scroll viewport. */
+
+/* A control row never scrolls. Overflow is resolved by priority, never by
+   scrolling or wrapping (wrapping changes the row's height, and every
+   box-height change is a font-refit flicker risk): buttons and the readout
+   are flex:none and keep their width; the selection status yields first
+   (capped, then ellipsized), the caption label next (it takes only leftover
+   space); and below the phone breakpoint the secondary controls collapse
+   under one ⋯ toggle into a popover anchored to this row, so the essential
+   controls — the geometry readout with its ↕ action and the ✎ composer
+   toggle — always sit inside the viewport, tappable. The popover is
+   positioned, never in flow: opening it changes no box the ResizeObserver
+   watches, so it cannot refit the font. */
+.persea-unified-toolbar {
+  position: relative;
+  /* The toolbar is its own size container: its breakpoint is judged against
+     the row's inline size, not the viewport, so a page mounted in a workspace
+     cell collapses the same way a page on a narrow viewport does. */
+  container-type: inline-size;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.75rem;
+  background: #1b1e25;
+  border-bottom: 1px solid #343844;
+  min-width: 0;
+}
+
+.persea-unified-toolbar button {
+  flex: none;
+  white-space: nowrap;
+  color: inherit;
+  background: #282d38;
+  border: 1px solid #596171;
+  border-radius: 0.35rem;
+  padding: 0.35rem 0.65rem;
+}
+
+.persea-unified-toolbar button.persea-unified-copy[data-selection="ready"] {
+  border-color: var(--persea-chrome-fg, #e6edf3);
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 26%, var(--persea-chrome-bg, #1b1e25));
+}
+
+/* Copy outcomes are painted on the control, never injected beside it. The
+   fixed glyph slot makes ⎘/✓/✗ an exact box-preserving swap. The success and
+   failure pairs are opaque rather than theme-mixed, so their contrast is
+   stable across all eight chrome themes. */
+.persea-copy-feedback__glyph {
+  display: inline-block;
+  box-sizing: border-box;
+  inline-size: 1.6em;
+  text-align: center;
+}
+.persea-copy-feedback__label { margin-inline-start: 0.25rem; }
+button[data-copy-state="ready"] {
+  border-color: var(--persea-chrome-fg, #e6edf3);
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 26%, var(--persea-chrome-bg, #1b1e25));
+}
+button[data-copy-state="done"] {
+  border-color: #d8fbe2 !important;
+  background: #237a3b !important;
+  color: #ffffff !important;
+}
+button[data-copy-state="failed"] {
+  border-color: #ffe2df !important;
+  background: #b42318 !important;
+  color: #ffffff !important;
+}
+
+.persea-unified-preference {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+  color: inherit;
+  font-size: 0.8rem;
+}
+.persea-unified-preference__label { white-space: nowrap; }
+.persea-unified-preference__theme,
+.persea-unified-preference__composer-font {
+  box-sizing: border-box;
+  min-height: 2.25rem;
+  max-width: 10.5rem;
+  padding: 0.3rem 1.8rem 0.3rem 0.45rem;
+  border: 1px solid color-mix(in srgb, var(--persea-accent, #8fc7ff) 55%, #596171);
+  border-radius: 0.35rem;
+  background: #1b1e25;
+  color: var(--persea-chrome-fg, #f3f4f6);
+  font: inherit;
+}
+.persea-unified-preference-status {
+  flex: 0 1 12rem;
+  overflow: hidden;
+  /* The accent alone is not legible on every chrome (Solarized Dark reached
+     4.12:1) and this status also renders inside the sheet. */
+  color: var(--persea-chrome-notice-fg, #8fc7ff);
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.persea-unified-preference-status[hidden] { display: none; }
+
+/* The session tag. It replaces the build caption in the row's leading
+   slot: a status dot whose colour is the page's connection state and the
+   session name (plus its alias) in a code face. It shrinks to an ellipsis
+   rather than wrapping — the control row never gains a line — and it survives
+   every width, including the phone, which is the device this is mostly used
+   on and the one where the row is the only place the session is named.
+   At 390 pt the essential controls fill the row to its edge, so the width the
+   tag needs is taken from the one-time fit hint (see the phone breakpoint
+   below); the alias is dropped there and the name ellipsises. */
+.persea-unified-identity {
+  display: flex;
+  align-items: center;
+  /* The first thing in the row to give up width, and the only one allowed to
+     go below its content: everything else in the row is a target. */
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.persea-unified-toolbar button.persea-unified-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 20rem;
+  overflow: hidden;
+  padding: 0.3rem 0.5rem;
+  font: 0.78rem/1.3 ui-monospace, monospace;
+}
+
+/* The three states. A single value per state has to clear 3:1 against every
+   chrome in the catalogue, and the catalogue has both a light chrome
+   (rose-pine-dawn #fffaf3, relative luminance .9610) and a fairly light dark
+   chrome (gruvbox-dark #3c3836, .0406). That pins each fill into a narrow
+   luminance band: at least 3 x (.0406 + .05) - .05 = .2217 to clear the
+   darkest end, at most (.9610 + .05)/3 - .05 = .2870 to clear the lightest.
+   The worst-case ratio is maximised at the luminance where the two ends meet,
+   L = sqrt(.0906 x 1.0110) - .05 = .2527, which yields 3.34 -- the best any
+   single value can do here. All three fills are placed on that band:
+
+     live    #2e9e4f  L .2560  worst 3.30 (rose-pine-dawn)
+     pending #ad8408  L .2540  worst 3.33 (rose-pine-dawn)
+     down    #ee554f  L .2524  worst 3.34 (gruvbox-dark)
+
+   The previous red (#d94a3d, L .1999) was below the band and measured 2.76 on
+   gruvbox-dark, 2.81 on dracula, 2.97 on one-dark and 2.99 on catppuccin-mocha
+   -- and the sweep never caught it, because a live committed page is always in
+   the `live` state, so only the green was ever measured. The sweep now forces
+   each state onto the dot before measuring, and asserts the three fills differ.
+   Colour is still never the only carrier: the tag's accessible name says the
+   state in words. */
+.persea-unified-tag__dot {
+  flex: none;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 999px;
+  background: #ad8408;
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 35%, transparent);
+}
+.persea-unified-tag__dot[data-state="live"] { background: #2e9e4f; }
+.persea-unified-tag__dot[data-state="pending"] { background: #ad8408; }
+.persea-unified-tag__dot[data-state="down"] { background: #ee554f; }
+
+.persea-unified-tag__name,
+.persea-unified-tag__alias {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.persea-unified-tag__alias {
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+}
+.persea-unified-tag__alias[hidden] { display: none; }
+.persea-unified-tag__alias::before { content: "\00b7"; margin-right: 0.3rem; }
+
+/* The details the tag does not have room for. Positioned, never in flow: it
+   is not a grid row and changes no box the ResizeObserver watches, exactly
+   like the overflow popover beside it. */
+.persea-unified-identity__details {
+  position: absolute;
+  top: 100%;
+  left: 0.5rem;
+  z-index: 10;
+  box-sizing: border-box;
+  max-width: calc(100% - 1rem);
+  width: min(28rem, calc(100% - 1rem));
+  max-height: min(70vh, 32rem);
+  overflow: auto;
+  overscroll-behavior: contain;
+  margin: 0.25rem 0 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid #343844;
+  border-radius: 0.4rem;
+  background: #1b1e25;
+  box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+  font-size: 0.78rem;
+}
+.persea-unified-identity__details[hidden] { display: none; }
+.persea-unified-identity__facts { margin: 0; }
+.persea-unified-identity__session-status {
+  min-height: 1.2em;
+  margin: 0.45rem 0 0;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+}
+.persea-unified-identity__sessions[hidden] { display: none; }
+.persea-unified-identity__session-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 0.3rem;
+  margin-block: 0.35rem;
+}
+.persea-unified-identity__session-actions button { min-height: 44px; }
+.persea-unified-identity__row {
+  display: flex;
+  gap: 0.6rem;
+  align-items: baseline;
+}
+.persea-unified-identity__row + .persea-unified-identity__row { margin-top: 0.2rem; }
+.persea-unified-identity__row dt {
+  flex: none;
+  min-width: 5.5rem;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+}
+.persea-unified-identity__row dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, monospace;
+}
+
+.persea-unified-toolbar__controls {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+/* Inline on a wide viewport: the secondary controls are the row's own flex
+   items, so the status among them takes part in the row's shrink order. */
+.persea-unified-toolbar__secondary { display: contents; }
+
+.persea-unified-toolbar button.persea-unified-toolbar__more { display: none; }
+.persea-unified-toolbar button.persea-unified-phone-view,
+.persea-unified-geometry--phone { display: none; }
+
+/* readiness is the button's own state, so the row carries no text that
+   can appear and disappear. The glyph is fixed width, so the box never moves
+   when a selection is made or cleared. */
+.persea-unified-toolbar button.persea-unified-copy {
+  inline-size: 5.5rem;
+  min-width: 5.5rem;
+  font: 600 0.75rem/1 ui-monospace, monospace;
+}
+.persea-unified-toolbar button.persea-unified-copy[data-select-state="selecting"] {
+  border-color: var(--persea-chrome-fg, #e6edf3);
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 26%, var(--persea-chrome-bg, #1b1e25));
+}
+/* the Paste slot carries the copy outcome. Its box is fixed like the
+   Select box, so Paste → Copy → Copied ✓ → Paste never moves a neighbour. */
+.persea-unified-toolbar button.persea-unified-toolbar-paste {
+  inline-size: 4.75rem;
+  min-width: 4.75rem;
+  font: 600 0.75rem/1 ui-monospace, monospace;
+}
+.persea-unified-toolbar button.persea-unified-toolbar-paste[data-paste-state="copy"] {
+  border-color: var(--persea-chrome-fg, #e6edf3);
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 26%, var(--persea-chrome-bg, #1b1e25));
+}
+.persea-unified-toolbar button.persea-unified-toolbar-paste[data-paste-state="copied"] {
+  border-color: #2f6f45;
+  background: #143822;
+  color: #d8ffe4;
+}
+.persea-unified-toolbar button.persea-unified-toolbar-paste[data-paste-state="failed"] {
+  border-color: #8a3b3b;
+  background: #3a1616;
+  color: #ffd9d9;
+}
+.persea-unified-toolbar button.persea-unified-copy .persea-copy-feedback__glyph {
+  inline-size: auto;
+  min-inline-size: 4ch;
+}
+
+/* A six-pane workspace keeps the full contextual Select/Copy box. Give the
+   real toolbar enough of its cell header to carry that fixed box plus Paste,
+   View, quick actions and Composer without squeezing the session tag into the
+   control row. The tag's details stay positioned by the toolbar rather than
+   its deliberately shrinking identity flex item, so the session list remains
+   a usable pane-local popover. These selectors are more specific than the
+   workspace compaction defaults because the attachment toolbar owns the new
+   controls and their constant geometry. */
+@media (pointer: fine), (pointer: none) {
+  /* Reserve the same share of the header that the toolbar actually uses.
+     A fixed cap starves the name even when the pane has ample free space. */
+  .ws-cell .ws-cell__header { padding-right: 90%; }
+  .ws-cell .ws-cell__mount .persea-unified-toolbar { width: 90%; }
+  .ws-cell .ws-cell__mount .persea-unified-toolbar button.persea-unified-tag { min-width: 0; max-width: none; }
+  /* the Paste slot is a fixed box now (it has to hold "Copied ✓"), so
+     a cell's bar trims both fixed boxes to what their widest word needs at
+     the cell's fine-pointer padding — Select/Selecting at 5rem, Paste/Copy/
+     Copied ✓/Copy ✗ at 4.5rem — and the row is back inside the budget the
+     comment in workspace.css measures. Boxes stay constant across states. */
+  .ws-cell .ws-cell__mount .persea-unified-toolbar button.persea-unified-copy { inline-size: 5rem; min-width: 5rem; padding-inline: 0.3rem; }
+  .ws-cell .ws-cell__mount .persea-unified-toolbar button.persea-unified-toolbar-paste { inline-size: 4.5rem; min-width: 4.5rem; padding-inline: 0.3rem; }
+  .ws-cell__mount .persea-unified-terminal .persea-unified-identity {
+    position: static;
+    z-index: 1;
+  }
+}
+.persea-unified-toolbar button.persea-unified-explainer-info {
+  min-width: 40px;
+  min-height: 40px;
+  padding-inline: 0.35rem;
+}
+.persea-unified-explainer {
+  position: absolute;
+  z-index: 15;
+  top: calc(100% + 0.35rem);
+  right: 0;
+  width: min(25rem, calc(100% - 0.5rem));
+  max-height: min(28rem, 70vh);
+  box-sizing: border-box;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0.75rem;
+  border: 1px solid color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 45%, var(--persea-chrome-bg, #1b1e25));
+  border-radius: 0.55rem;
+  background: var(--persea-chrome-bg, #1b1e25);
+  color: var(--persea-chrome-fg, #f3f4f6);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+}
+.persea-unified-explainer[hidden] { display: none; }
+.persea-unified-explainer__heading { margin: 0 0 0.45rem; font-size: 0.9rem; }
+.persea-unified-explainer__body p { margin: 0; font-size: 0.78rem; line-height: 1.45; }
+.persea-unified-explainer__tools { display: grid; gap: 0.35rem; margin: 0.7rem 0 0; padding-top: 0.55rem; border-top: 1px solid color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 30%, var(--persea-chrome-bg, #1b1e25)); }
+.persea-unified-toolbar button.persea-unified-explainer__tool { min-height: 2.75rem; height: 2.75rem; width: auto; max-width: none; justify-self: start; padding: 0.2rem 0.85rem; white-space: nowrap; }
+.persea-unified-explainer__tool-note { color: var(--persea-chrome-muted-fg, #c5d5ec); font-size: 0.74rem; line-height: 1.4; }
+.persea-unified-explainer__list { margin: 0; }
+.persea-unified-explainer__list dt { margin-top: 0.55rem; font-weight: 700; }
+.persea-unified-explainer__list dt:first-child { margin-top: 0; }
+.persea-unified-explainer__list dd { margin: 0.1rem 0 0; color: var(--persea-chrome-muted-fg, #c5d5ec); font-size: 0.76rem; line-height: 1.4; }
+.persea-explainer-enabled { -webkit-touch-callout: none; }
+
+/* The copy OUTCOME, announced and never painted. Out of the row's layout
+   entirely: an absolutely positioned 1px box generates no flex item, so the
+   control row's height is identical whether it is empty or not. */
+.persea-unified-copy-status {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  clip: rect(0px, 0px, 0px, 0px);
+  clip-path: inset(50%);
+}
+
+/* The inline row's fixed controls need ~640px; below 720 they collapse. */
+@container (max-width: 719px) {
+  /* The session tag survives the phone. It is the only thing in this row that says
+     WHICH session is on screen, so it stays: the dot at full size, the name
+     truncated with an ellipsis, the alias dropped. It cannot add a line —
+     every button here is `flex: none; white-space: nowrap`, and the only two
+     items allowed to shrink are the tag and the one-time fit hint.
+     The width comes from that hint and from nothing else. The hint is
+     transient, the action it names is the ↕ standing next to it, its whole
+     box is the dismiss target, and its full sentence stays in its accessible
+     name — so an ellipsis there costs a word the operator has already read,
+     while the alternative costs the session's identity on the device that
+     needs it most. The geometry readout keeps its slot: it is the subject of
+     an session switch assertion that reads rendered text, and the arithmetic does not
+     need it. */
+  .persea-unified-toolbar { gap: 0.4rem; }
+  .persea-unified-toolbar button.persea-unified-tag { max-width: 10rem; }
+  .persea-unified-tag__alias { display: none; }
+  .persea-unified-toolbar button.persea-unified-fit-hint {
+    flex: 0 1 auto;
+    min-width: 3.25rem;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .persea-unified-toolbar button.persea-unified-explainer-info { display: none; }
+  .persea-unified-toolbar__controls { flex: 1 1 auto; }
+  /* The readout and its ↕ pair up at the left; ✎ and ⋯ at the right. */
+  .persea-unified-toolbar button.persea-unified-fit-height { margin-right: auto; }
+  .persea-unified-toolbar button.persea-unified-toolbar__more { display: inline-block; }
+  .persea-unified-toolbar__secondary {
+    display: none;
+    position: absolute;
+    top: 100%;
+    right: 0.5rem;
+    z-index: 10;
+    box-sizing: border-box;
+    max-width: calc(100% - 1rem);
+    margin-top: 0.25rem;
+    padding: 0.5rem;
+    align-items: center;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    border: 1px solid #343844;
+    border-radius: 0.4rem;
+    background: #1b1e25;
+    box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+  }
+  .persea-unified-toolbar__secondary[data-open="true"] { display: flex; }
+  .persea-unified-toolbar__secondary button { min-height: 40px; }
+}
+
+/* The floor under the phone rule above. Below about 320 CSS px — narrower than
+   any phone this ships to, and the width the scroll-geometry suite uses to
+   prove the key row scrolls inside itself — the row's fixed 44 px targets and
+   the geometry readout already consume the viewport, and adding a 44 px chip
+   makes the PAGE scroll sideways. That is the harder failure: horizontal
+   overflow breaks the terminal's whole geometry contract, while a missing chip
+   costs a name that the reconnect strip, the failure notice and the sheet still
+   carry. So the tag stands down here, and only here. */
+@container (max-width: 319px) {
+  .persea-unified-identity { display: none; }
+}
+
+/* On a coarse pointer the sheet is the one control surface: the ⋯ toggle and
+   its popover go, and every toolbar button is a 44px target. A fine pointer
+   keeps the toolbar and its ⋯ exactly as they were. */
+@media (pointer: coarse) {
+  .persea-unified-toolbar button.persea-unified-toolbar__more { display: none; }
+  .persea-unified-toolbar__secondary[data-open] { display: none; }
+  .persea-unified-toolbar button { min-width: 44px; min-height: 44px; }
+  .persea-unified-toolbar button.persea-unified-explainer-info { min-width: 44px; min-height: 44px; }
+  /* Restated at the tag's own specificity: the tag opts out of the row's
+     min-width so it can ellipsise, and a touch target may not. */
+  .persea-unified-toolbar button.persea-unified-tag { min-width: 44px; }
+  .persea-unified-preference__theme,
+  .persea-unified-preference__composer-font { min-height: 44px; }
+}
+@media (pointer: coarse) {
+  @container (max-width: 719px) {
+    .persea-unified-toolbar {
+      gap: 4px;
+      padding-inline: 0.75rem;
+    }
+    .persea-unified-toolbar__controls { gap: 4px; }
+    /* row budget at phone-360: 24 padding + 88 tag + 4 gap +
+       (48 + 48 + 44 + 44 + 44 + 4×4 gaps) = 360. The tag gives 8px so the two
+       word-bearing controls can hold "Select", "Copied" and "Failed" as words
+       without truncation. The padding is one token for
+       every control in the row (terminal touch law); the widths are per control. */
+    .persea-unified-toolbar button.persea-unified-tag {
+      min-width: 76px;
+      max-width: none;
+      flex: 1 1 auto;
+    }
+    /* Specificity (0,3,1): the shared control token further down the sheet
+       (`.persea-unified-toolbar button.persea-unified-copy`, (0,2,1)) sets
+       padding 0.35rem and would otherwise win by source order. */
+    .persea-unified-toolbar .persea-unified-toolbar__controls > button:not(.persea-unified-fit-hint) {
+      box-sizing: border-box;
+      width: 44px;
+      min-width: 44px;
+      max-width: 44px;
+      padding-inline: 0.1rem;
+    }
+    /* 54px: the Linux phone faces set "Copied" at ~46.5px (iOS's is narrower);
+       the row budget on a 360px phone is 24 + 76 (tag) + 4 + (54 + 54 + 44 +
+       44 + 44 + 16 gaps). */
+    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-copy,
+    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-toolbar-paste {
+      width: 54px;
+      min-width: 54px;
+      max-width: 54px;
+    }
+    .persea-unified-toolbar button.persea-unified-fit-height { margin-right: 0; }
+    .persea-unified-toolbar button.persea-unified-fit-hint { display: none; }
+    .persea-unified-toolbar > .persea-unified-toolbar__controls > .persea-unified-geometry:not(.persea-unified-geometry--phone) {
+      display: none;
+    }
+    .persea-unified-toolbar button.persea-unified-phone-view { display: inline-block; }
+    .persea-unified-toolbar__secondary[data-open="true"] { display: flex; }
+    .persea-unified-toolbar__secondary .persea-unified-geometry--phone { display: inline-block; }
+  }
+}
+@media (pointer: coarse) {
+  @container (min-width: 720px) {
+    /* A wide coarse pointer (tablet) keeps the secondary controls inline. */
+    .persea-unified-toolbar__secondary[data-open] { display: contents; }
+  }
+}
+
+/* The one-time fit hint beside ↕: dismiss-only (its tap retires it; it never
+   emits a resize). Quiet colours, one line, never wraps the toolbar. */
+.persea-unified-toolbar button.persea-unified-fit-hint {
+  min-height: 2.75rem;
+  padding: 0.35rem 0.6rem;
+  border-color: #5c4a1e;
+  background: #3a2d12;
+  color: #ffd9a0;
+  font-size: 0.8125rem;
+}
+.persea-unified-toolbar button.persea-unified-fit-hint::after { content: " \00d7"; color: #c9a96a; }
+.persea-unified-toolbar button.persea-unified-fit-hint[hidden] { display: none; }
+
+/* The geometry readout stays quiet. Explicit row changes are also available
+   in the shared Terminal size controller; width remains scrollback refit authority. */
+.persea-unified-geometry {
+  flex: none;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font-size: 0.8125rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.persea-unified-size {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(4.5rem, 1fr));
+  gap: 0.4rem;
+  width: 100%;
+  min-width: min(18rem, 100%);
+}
+.persea-unified-size__readout {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font: 0.78rem/1.3 ui-monospace, monospace;
+}
+.persea-unified-size__width {
+  grid-column: 1 / -1;
+  margin: 0;
+  align-self: end;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font: 0.72rem/1.25 ui-monospace, monospace;
+  white-space: nowrap;
+}
+.persea-unified-size label {
+  display: grid;
+  gap: 0.2rem;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font-size: 0.75rem;
+}
+.persea-unified-size input {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 40px;
+  border: 1px solid #596171;
+  border-radius: 0.35rem;
+  padding: 0.35rem 0.45rem;
+  background: #12151b;
+  color: var(--persea-chrome-fg, #f3f4f6);
+  font: 16px/1.2 ui-monospace, monospace;
+}
+.persea-unified-size input:disabled { opacity: 0.65; }
+.persea-unified-size button { min-height: 40px; }
+@media (pointer: coarse) {
+  .persea-unified-size input,
+  .persea-unified-size button { min-height: 44px; }
+}
+
+.persea-unified-toolbar button.persea-unified-fit-height,
+.persea-unified-toolbar button.persea-unified-composer-toggle,
+.persea-unified-toolbar button.persea-unified-toolbar__more {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  padding: 0.25rem 0.5rem;
+  line-height: 1;
+  font-size: 1rem;
+}
+
+.persea-unified-toolbar button.persea-unified-fit-height[aria-disabled="true"] {
+  opacity: 0.55;
+}
+
+.persea-unified-toolbar button.persea-unified-composer-toggle[aria-expanded="true"] {
+  border-color: #e6edf3;
+  background: #38404f;
+}
+
+.persea-unified-scroll {
+  position: relative;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+}
+
+/* The range spacer owns the scrollable area on both axes; the host is
+   projected inside it and never stretched to the scroller's own box. */
+.persea-unified-scroll-range {
+  position: relative;
+  min-height: 100%;
+  min-width: 100%;
+}
+
+.persea-unified-xterm {
+  position: absolute;
+  top: 0;
+  left: 0;
+  box-sizing: border-box;
+  overflow: hidden;
+  padding: 0.5rem;
+  background: var(--persea-terminal-bg, #111318);
+}
+
+/* xterm remains the renderer, but its pinned 6.0.0 custom scrollbar is not an
+   input or presentation surface. The product-owned outer overflow is both. */
+.persea-unified-xterm .xterm-scrollable-element > .scrollbar {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+/* iOS Safari auto-zooms when a focused input's font is under 16px, then pans
+   toward the element — and xterm's hidden helper textarea is parked at the
+   caret cell with the UA's DEFAULT textarea font (~13px monospace; xterm's
+   own font rule covers only .xterm-rows). Focus therefore zoomed and panned
+   toward the cursor column, and Safari can fail to restore on keyboard
+   close, leaving the page stuck zoomed and shifted. Same 16px class as the
+   history select fix. The textarea is invisible (opacity 0, overflow
+   hidden) and nothing measures its font: cell metrics size it outside
+   composition, and the composition view's rect sizes it during. */
+@media (pointer: coarse) {
+  .persea-unified-xterm .xterm-helper-textarea { font-size: 16px; }
+}

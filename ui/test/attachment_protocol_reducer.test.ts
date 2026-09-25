@@ -1565,7 +1565,8 @@ test("composer_scope_is_display_inert_exact_and_preserved_across_navigation_clea
 test("composer_mobile_repair_structure_is_shared_bounded_and_operator_vocabulary_only", () => {
   const composer = readWorkspaceText("src/composer.ts");
   const helper = readWorkspaceText("src/keyboard_preserving_button.ts");
-  const css = readWorkspaceText("src/attachment_page.css");
+  const css = ["attachment_shell", "attachment_composer", "attachment_surface", "unified_terminal_surface", "unified_terminal_toolbar", "unified_terminal_composer", "unified_terminal_overlays", "unified_terminal_disclosures"]
+    .map((name) => readWorkspaceText(`src/${name}.css`)).join("\n");
   equal((helper.match(/addEventListener\(/g) ?? []).length, 4, "shared activation helper must own exactly four listeners");
   for (const type of ["mousedown", "touchstart", "pointerdown", "click"]) {
     assert(helper.includes(`addEventListener("${type}"`), `shared activation helper lost ${type}`);

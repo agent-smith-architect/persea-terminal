@@ -1,0 +1,172 @@
+/* Unified terminal grid, selection surface, and notices. */
+/* The trailing rows are the composer dock and the mobile key bar; hidden or
+   empty they contribute nothing, so a fine-pointer layout with the composer
+   closed is byte-for-byte the old two-row grid. */
+.persea-unified-terminal {
+  display: grid;
+  /* toolbar, connection strip, failure notice, viewport, composer dock, key bar */
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto auto auto;
+  /* The explicit column caps the track at the container. Left implicit, the
+     auto track sizes to the toolbar's min-content width, and on a phone every
+     row — the key bar included — stretches past the viewport and is clipped. */
+  grid-template-columns: minmax(0, 1fr);
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: #111318;
+  color: #f3f4f6;
+}
+
+/* Placement is explicit because auto-placement is positional over the
+   children that GENERATE BOXES: a display:none row (the empty connection
+   strip, the hidden notice) does not occupy a track, so relying on child
+   order would slide the later rows forward — dropping the viewport into an
+   auto track and crushing whichever row inherits the 1fr track to nothing. */
+.persea-unified-toolbar { grid-row: 1; }
+.persea-unified-connection { grid-row: 2; }
+.persea-unified-notice { grid-row: 3; }
+.persea-unified-stage { grid-row: 4; }
+.persea-unified-composer-dock { grid-row: 5; }
+.persea-terminal-keys { grid-row: 6; }
+.persea-unified-keybar { grid-row: 7; }
+
+/* The stage is the viewport's track: one grid cell the scroller fills, with
+   the quick-actions sheet positioned inside it. Its bottom edge is
+   the top of whichever bottom rows are showing (composer dock, key bar), so
+   "docked above the bar" is a fact of composition — nothing is measured and
+   no offset is published. The sheet is out of flow: opening it
+   changes no box the ResizeObserver watches. */
+.persea-unified-stage {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+}
+
+/* Initial replay honesty. This is an inert overlay in the stage, not a grid
+   row, so it cannot move the toolbar, change the Fit measurement, focus the
+   terminal or intercept input. preferences supplies these custom properties; their
+   fallbacks are the existing terminal/chrome colours on this base. */
+.persea-unified-loading {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.35rem;
+  box-sizing: border-box;
+  padding: 1rem;
+  overflow: hidden;
+  pointer-events: none;
+  user-select: none;
+  background: var(--persea-terminal-bg, #111318);
+  color: var(--persea-chrome-fg, #f3f4f6);
+  text-align: center;
+}
+.persea-unified-loading[hidden] { display: none; }
+.persea-unified-loading__identity { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 0.82rem/1.3 ui-monospace, monospace; }
+.persea-unified-loading__detail { opacity: 0.72; font-size: 0.78rem; line-height: 1.3; }
+
+/* Touch selection is a frozen, selectable sibling above xterm. It owns the
+   only scroll surface while active; the live viewport stays the same size
+   underneath and is inert/aria-hidden, so entering Select cannot resize or
+   feed input to the terminal. */
+.persea-unified-select {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--persea-terminal-bg, #111318);
+  color: var(--persea-terminal-fg, #f3f4f6);
+}
+.persea-unified-select[hidden] { display: none; }
+.persea-unified-select__status {
+  position: absolute;
+  z-index: 1;
+  inset: 0.35rem 0.5rem auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding: 0.25rem 0.4rem;
+  border-radius: 0.3rem;
+  background: var(--persea-chrome-bg, #1b1e25);
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font-size: 0.76rem;
+}
+.persea-unified-select__status:empty { display: none; }
+.persea-unified-select__body {
+  min-width: 0;
+  min-height: 0;
+  box-sizing: border-box;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0.25rem 0.4rem max(1rem, env(safe-area-inset-bottom));
+  white-space: pre;
+  font-family: var(--persea-terminal-font-family, ui-monospace, monospace);
+  font-size: var(--persea-terminal-font-size, 14px);
+  line-height: var(--persea-terminal-row-height, 1.2em);
+  touch-action: pan-x pan-y;
+  -webkit-overflow-scrolling: touch;
+  -webkit-user-select: text;
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+.persea-unified-select__row {
+  display: block;
+  min-height: var(--persea-terminal-row-height, 1.2em);
+  line-height: var(--persea-terminal-row-height, 1.2em);
+  white-space: pre;
+}
+.persea-unified-select__cell { white-space: pre; }
+.persea-unified-select__cell--blink {
+  animation: persea-frozen-cell-blink 1s steps(1, end) infinite;
+}
+@keyframes persea-frozen-cell-blink { 50% { opacity: 0; } }
+
+.persea-unified-connection {
+  padding: 0.4rem 0.75rem;
+  background: #3a2d12;
+  border-bottom: 1px solid #5c4a1e;
+  color: #ffd9a0;
+  font-size: 0.85rem;
+}
+
+.persea-unified-connection:empty { display: none; }
+
+.persea-unified-notice {
+  margin: 1.2rem auto 0;
+  max-width: 34rem;
+  width: calc(100% - 2rem);
+  box-sizing: border-box;
+  padding: 1rem 1.25rem;
+  border: 1px solid #4a3d57;
+  border-radius: 0.5rem;
+  background: #1d1a24;
+}
+
+.persea-unified-notice[hidden] { display: none; }
+.persea-unified-notice__headline { margin: 0 0 0.4rem; font-size: 1.05rem; }
+.persea-unified-notice__detail { margin: 0 0 0.5rem; color: #c9cedd; }
+.persea-unified-notice__code { margin: 0 0 0.8rem; color: #8b93a7; font: 0.78rem/1.4 ui-monospace, monospace; }
+.persea-unified-notice__actions { display: flex; align-items: center; gap: 0.6rem; }
+
+.persea-unified-notice__take-control,
+.persea-unified-notice__reconnect {
+  color: inherit;
+  background: #14503d;
+  border: 1px solid #28755b;
+  border-radius: 0.35rem;
+  padding: 0.45rem 0.75rem;
+}
+
+.persea-unified-notice__take-control[hidden],
+.persea-unified-notice__reconnect[hidden] { display: none; }
+.persea-unified-notice__dashboard { color: #9fd1ff; }

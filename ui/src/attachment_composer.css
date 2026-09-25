@@ -1,0 +1,478 @@
+/* Shared composer, key bar, and attachment chips. */
+
+/* The dock's only in-flow child is the accessory key row. The page is pinned to
+   the visual viewport, so being the last child puts it on the keyboard's top edge
+   no positioning arithmetic. It costs the terminal height only while the terminal
+   has focus — the reader never pays for it. */
+.attachment-page__dock {
+  position: relative;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.attachment-page__keybar {
+  position: relative;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: .3rem;
+  padding: .35rem .4rem calc(.35rem + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid #273444;
+  background: #0d1620;
+}
+.attachment-page__keybar[hidden] { display: none; }
+
+/* Out of flow in BOTH states, so it never costs the terminal a row. The first
+   version was a full-width row of its own, which spent height to save height and
+   still spent it once collapsed. Anchored above the bar rather than inside it: it
+   overlaps a few pixels of terminal at the right edge, where a tab belongs, and it
+   can never cover a key. */
+.attachment-page__keybar-handle {
+  position: absolute;
+  bottom: 100%;
+  right: .5rem;
+  min-height: 20px;
+  padding: 0 .7rem;
+  border: 1px solid #273444;
+  border-bottom: 0;
+  border-radius: .35rem .35rem 0 0;
+  background: #0d1620;
+  color: #8ba6bd;
+  font: 600 .72rem/1 ui-monospace, monospace;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.attachment-page__keybar-handle:active { background: #1d3348; }
+.attachment-page__keybar[data-collapsed="true"] .attachment-page__keybar-row { display: none; }
+/* Collapsed height is the safe-area inset and nothing else — the rows are gone and
+   the handle is out of flow, so the terminal gets every pixel back. */
+.attachment-page__keybar[data-collapsed="true"] {
+  gap: 0;
+  border-top: 0;
+  padding: 0 0 env(safe-area-inset-bottom, 0px);
+}
+
+.attachment-page__keybar-row { display: flex; gap: .3rem; }
+.attachment-page__keybar-row--overflow { justify-content: flex-start; overflow-x: auto; }
+.attachment-page__keybar-row--overflow[hidden] { display: none; }
+
+/* Equal flex so the arrow cluster lands in predictable places under the thumb:
+   a key whose position shifts with its label length is a key you have to look at.
+   44px is the minimum comfortable touch target. */
+.attachment-page__keybar-key {
+  flex: 1 1 0;
+  min-width: 2.2rem;
+  min-height: 40px;
+  border: 1px solid #41617e;
+  border-radius: .4rem;
+  padding: .2rem .1rem;
+  background: #142536;
+  color: #e6edf3;
+  font: 600 .88rem/1 ui-monospace, monospace;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.attachment-page__keybar-key:active { background: #1d3348; }
+/* The latch must be unmistakable: an armed modifier that looks unarmed sends the
+   operator's next keystroke somewhere they did not intend. */
+.attachment-page__keybar-key--latch[data-latched="true"] {
+  border-color: #ffc77d;
+  background: #4a3a18;
+  color: #ffc77d;
+}
+
+.attachment-page__compose-tab,
+.attachment-page__composer {
+  position: absolute;
+  z-index: 15;
+  bottom: 100%;
+}
+
+.attachment-page__compose-tab {
+  display: block;
+  left: .5rem;
+  min-height: 20px;
+  padding: 0 .7rem;
+  border: 1px solid #273444;
+  border-bottom: 0;
+  border-radius: .35rem .35rem 0 0;
+  background: #0d1620;
+  color: #8ba6bd;
+  font: 600 .72rem/1 ui-monospace, monospace;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.attachment-page__compose-tab:active { background: #1d3348; }
+.attachment-page__compose-tab[hidden] { display: none; }
+
+.attachment-page__composer {
+  left: .4rem;
+  right: .4rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(24px, 1fr) auto auto;
+  min-width: 0;
+  gap: .4rem;
+  max-height: min(
+    calc(var(--persea-visual-viewport-height, 100dvh) - 6rem),
+    var(--persea-composer-inset-budget, 100dvh)
+  );
+  overflow: hidden;
+  padding: .5rem;
+  border: 1px solid #2b4055;
+  border-radius: .6rem .6rem 0 0;
+  background: #101d29;
+  box-shadow: 0 18px 48px rgb(0 0 0 / 55%);
+}
+.attachment-page__composer[hidden] { display: none; }
+.attachment-page__composer-header,
+.attachment-page__composer-footer,
+.attachment-page__composer-header-actions,
+.attachment-page__composer-mode,
+.attachment-page__composer-guard-actions {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+}
+.attachment-page__composer-header { min-height: 28px; }
+.attachment-page__composer-label {
+  flex: 0 0 auto;
+  font: 600 .72rem/1 ui-monospace, monospace;
+  letter-spacing: .04em;
+}
+.attachment-page__composer-mode { margin-right: auto; }
+.attachment-page__composer-mode .attachment-page__button,
+.attachment-page__composer-header-actions .attachment-page__button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: .2rem .35rem;
+}
+.attachment-page__composer-mode .attachment-page__button[aria-pressed="true"] {
+  border-color: #e6edf3;
+  background: #1d3348;
+}
+.attachment-page__composer-grip {
+  position: relative;
+  z-index: 1;
+  width: 3rem;
+  height: 24px;
+  overflow: hidden;
+  margin: -.5rem auto -.35rem;
+  outline-offset: -3px;
+  cursor: ns-resize;
+  touch-action: none;
+}
+.attachment-page__composer-grip::after {
+  content: "";
+  display: block;
+  width: 3rem;
+  height: 4px;
+  margin-top: 8px;
+  border-radius: 999px;
+  background: #41617e;
+  pointer-events: none;
+}
+.attachment-page__composer-textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: max(1lh, 24px);
+  max-height: min(7.5rem, 100%);
+  resize: none;
+  overscroll-behavior: contain;
+  border: 1px solid #2b4055;
+  border-radius: .4rem;
+  padding: .45rem .5rem;
+  background: #081018;
+  color: #e6edf3;
+  caret-color: #9fd4ff;
+  font: 16px/1.4 ui-monospace, monospace;
+}
+.attachment-page__composer[data-size="expanded"] .attachment-page__composer-textarea {
+  max-height: min(100%, calc(var(--persea-visual-viewport-height, 100dvh) * .55));
+}
+
+.attachment-page[data-composer-density="compact"] .attachment-page__composer {
+  gap: .3rem;
+  padding: .35rem;
+}
+.attachment-page[data-composer-density="compact"] .attachment-page__composer-grip {
+  margin: -.35rem auto -.25rem;
+}
+.attachment-page[data-composer-density="compact"] .attachment-page__composer-textarea {
+  max-height: min(6rem, 100%);
+  padding: .25rem .4rem;
+  font: 16px/1.2 ui-monospace, monospace;
+}
+.attachment-page[data-composer-density="compact"] .attachment-page__composer[data-size="expanded"] .attachment-page__composer-textarea {
+  max-height: min(100%, calc(var(--persea-visual-viewport-height, 100dvh) * .4));
+}
+.attachment-page[data-composer-density="compact"] .attachment-page__composer button { min-height: 40px; }
+.attachment-page__composer-footer {
+  min-height: 44px;
+  min-width: 0;
+  max-width: 100%;
+  flex-wrap: nowrap;
+  padding-right: 2rem;
+}
+/* the status is a conditional line (hidden while empty). */
+.attachment-page__composer .attachment-page__composer-status[hidden] { display: none; }
+.attachment-page__composer-status {
+  font: 600 .72rem/1.35 ui-monospace, monospace;
+  letter-spacing: .04em;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #b7cbe0;
+}
+.attachment-page__composer[data-content="guard"] .attachment-page__composer-status,
+.attachment-page__composer[data-content="blocked"] .attachment-page__composer-status { color: #ffb4ab; }
+.attachment-page__composer[data-content="sent"] {
+  display: flex;
+  align-items: center;
+  gap: .35rem;
+  padding-block: .35rem;
+}
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-grip,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-label,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-mode,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-size,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-textarea,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-guard-actions,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-fix,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-clear,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-send {
+  display: none;
+}
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-header,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-header-actions {
+  display: contents;
+}
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-footer {
+  order: 1;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  flex-wrap: nowrap;
+}
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-status {
+  display: block;
+}
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-close {
+  order: 2;
+  flex: 0 0 auto;
+}
+.attachment-page__composer[data-content="sent"][data-sent-reopened="true"]:not([hidden]) {
+  display: grid;
+}
+.attachment-page__composer[data-content="sent"][data-sent-reopened="true"] .attachment-page__composer-header {
+  display: flex;
+}
+.attachment-page__composer[data-content="sent"][data-sent-reopened="true"] .attachment-page__composer-header-actions {
+  display: flex;
+  margin-left: auto;
+}
+.attachment-page__composer[data-content="sent"][data-sent-reopened="true"] .attachment-page__composer-close {
+  order: initial;
+}
+.attachment-page__composer[data-content="sent"][data-sent-reopened="true"] .attachment-page__composer-textarea {
+  display: block;
+}
+.attachment-page__composer[hidden] {
+  display: none;
+  visibility: hidden;
+  pointer-events: none;
+}
+.attachment-page__composer-guard-actions:empty,
+.attachment-page__composer-guard-actions:has(> [hidden] + [hidden]) { display: none; }
+.attachment-page__composer-send {
+  min-width: 5.5rem;
+  min-height: 44px;
+  border-color: #3f86c4;
+  background: #1d4f7a;
+  color: #eaf5ff;
+}
+.attachment-page__composer-send:disabled {
+  cursor: default;
+  opacity: 1;
+  border-color: #2b4055;
+  background: #142536;
+  color: #6f8599;
+}
+/* Image chip strip. The row exists as a grid item only while attachments
+   exist (data-attachments gates the 6-row template), so a composer with no
+   images keeps today's 5-row layout byte for byte. */
+.attachment-page__composer[data-attachments] {
+  grid-template-rows: auto auto auto minmax(24px, 1fr) auto auto;
+}
+.attachment-page__composer-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .3rem;
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.attachment-page__composer-chips[hidden] { display: none; }
+.attachment-page__composer-chip {
+  display: flex;
+  align-items: center;
+  gap: .3rem;
+  min-width: 0;
+  max-width: 100%;
+  padding: .15rem .3rem;
+  border: 1px solid #2b4055;
+  border-radius: .4rem;
+  background: #142536;
+  color: #b7cbe0;
+  font: 600 .72rem/1.35 ui-monospace, monospace;
+}
+.attachment-page__composer-chip[data-status="uploading"] { opacity: .85; }
+.attachment-page__composer-chip[data-status="failed"] { border-color: #7a3b3b; color: #ffb4ab; }
+.attachment-page__composer-chip-label,
+.attachment-page__composer-chip-note {
+  overflow: hidden;
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.attachment-page__composer-chip-label { max-width: 12rem; }
+.attachment-page__composer-chip-size { flex: 0 0 auto; color: #7f98ab; }
+.attachment-page__composer-chip-button {
+  flex: 0 0 auto;
+  min-width: 28px;
+  min-height: 28px;
+  padding: .1rem .25rem;
+  border: 1px solid #2b4055;
+  border-radius: .35rem;
+  background: #101d29;
+  color: #b7cbe0;
+  font: 600 .72rem/1 ui-monospace, monospace;
+  touch-action: manipulation;
+}
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-chips,
+.attachment-page__composer[data-content="sent"] .attachment-page__composer-attach {
+  display: none;
+}
+.attachment-page__dock[data-keybar="hidden"] .attachment-page__composer {
+  margin-bottom: env(safe-area-inset-bottom, 0px);
+}
+.attachment-page__dock[data-keybar="hidden"] .attachment-page__compose-tab {
+  margin-bottom: calc(.5rem + env(safe-area-inset-bottom, 0px));
+}
+[data-composer="open"] .attachment-page__keybar-handle { display: none; }
+
+@media (pointer: coarse) {
+  /* Keep the key-bar handle reachable above the Composer in both states. The
+     Composer keeps its full width, and neither key rows nor actions need to
+     reserve a horizontal notch for the out-of-flow handle. */
+  .attachment-page[data-keyboard="open"] .attachment-page__dock[data-composer="open"] .attachment-page__keybar .attachment-page__keybar-handle {
+    display: block;
+    top: auto;
+    bottom: calc(100% + var(--persea-composer-inset) + 1px);
+  }
+}
+
+@media (min-width: 641px) {
+  .attachment-page__composer {
+    right: auto;
+    left: .6rem;
+    width: min(48rem, calc(100% - 1.2rem));
+  }
+  .attachment-page__composer-textarea { max-height: min(9rem, 100%); }
+  .attachment-page__composer[data-size="expanded"] .attachment-page__composer-textarea {
+    max-height: min(100%, calc(var(--persea-visual-viewport-height, 100dvh) * .6));
+  }
+  .attachment-page[data-composer-density="compact"] .attachment-page__composer-textarea { max-height: min(7.5rem, 100%); }
+  .attachment-page[data-composer-density="compact"] .attachment-page__composer[data-size="expanded"] .attachment-page__composer-textarea {
+    max-height: min(100%, calc(var(--persea-visual-viewport-height, 100dvh) * .5));
+  }
+}
+
+@media (max-width: 640px) {
+  .attachment-page__composer-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
+
+@media (pointer: coarse) {
+  /* iOS zooms the visual viewport when a focused text field computes below 16px. */
+  .attachment-page__compose-tab { font-size: 16px; }
+  .attachment-page__compose-tab:not([hidden]) { display: block; }
+  .attachment-page__composer {
+    /* Preserve the frozen viewport-only projection, then add the live
+       terminal-space budget as the governing declaration. */
+    max-height: max(0px, min(
+      calc(var(--persea-visual-viewport-height, 100dvh) * .5),
+      calc(var(--persea-visual-viewport-height, 100dvh) - 6rem)
+    ));
+    max-height: max(0px, min(
+      calc(var(--persea-visual-viewport-height, 100dvh) * .5),
+      calc(var(--persea-visual-viewport-height, 100dvh) - 6rem),
+      var(--persea-composer-inset-budget, 100dvh)
+    ));
+  }
+  .attachment-page__composer[data-size="expanded"] .attachment-page__composer-textarea {
+    max-height: min(100%, max(24px, calc(var(--persea-visual-viewport-height, 100dvh) * .5 - 8rem)));
+  }
+  .attachment-page[data-composer-density="compact"] .attachment-page__composer[data-size="expanded"] .attachment-page__composer-textarea {
+    max-height: min(100%, max(24px, calc(var(--persea-visual-viewport-height, 100dvh) * .4 - 8rem)));
+  }
+  .attachment-page__composer,
+  .attachment-page__composer button,
+  .attachment-page__composer output {
+    font-size: 16px;
+  }
+}
+
+.attachment-page[data-composer-font-experiment="15px"] .attachment-page__composer-textarea {
+  font-size: 15px;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .attachment-page__composer { transition: opacity 120ms ease, transform 120ms ease; }
+}
+
+@media (pointer: coarse) {
+  /* Thumb room as well as scrollbar clearance. With the keyboard down the caret row
+     would otherwise sit behind the home indicator, so the safe-area inset is added
+     only in that state — the visual viewport already excludes the keyboard, and
+     adding the inset while typing would cost a terminal row for nothing. */
+  .attachment-page { --persea-scroller-gutter: .75rem; }
+  .attachment-page[data-keyboard="closed"] { --persea-scroller-gutter: calc(.75rem + env(safe-area-inset-bottom, 0px)); }
+}
+
+
+.continuous-surface-history, .continuous-surface-live-host { min-width: 100%; width: max-content; }
+.continuous-surface-toolbar { position: static; display: flex; flex-wrap: wrap; gap: .35rem; }
+.continuous-surface-display-controls { display: flex; align-items: center; flex-wrap: nowrap; gap: .35rem; }
+.continuous-surface-display-controls button { border: 1px solid #41617e; border-radius: .3rem; padding: .28rem .48rem; background: #142536; color: inherit; }
+.continuous-surface-display-readout {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 6.5rem;
+}
+.continuous-surface-display-status {
+  min-width: 100%;
+  font: 600 .72rem/1 ui-monospace, monospace;
+  text-align: center;
+}
+.continuous-surface-interaction-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}

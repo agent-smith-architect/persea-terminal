@@ -6,7 +6,8 @@ const fs = require("node:fs") as { readFileSync(path: string, encoding: "utf8"):
 const path = require("node:path") as { join(...parts: string[]): string };
 
 const source = fs.readFileSync(path.join(process.cwd(), "src", "unified_terminal_page.ts"), "utf8");
-const css = fs.readFileSync(path.join(process.cwd(), "src", "attachment_page.css"), "utf8");
+const css = ["attachment_shell", "attachment_composer", "attachment_surface", "unified_terminal_surface", "unified_terminal_toolbar", "unified_terminal_composer", "unified_terminal_overlays", "unified_terminal_disclosures"]
+  .map((name) => fs.readFileSync(path.join(process.cwd(), "src", `${name}.css`), "utf8")).join("\n");
 const assert = (value: boolean, message: string): void => { if (!value) throw new Error(message); };
 
 function luminance(hex: string): number {

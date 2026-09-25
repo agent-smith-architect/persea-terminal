@@ -1,0 +1,412 @@
+/* Unified top bar, geometry forms, and responsive disclosures. */
+
+/* the top bar is one compact disclosure row at every width. View,
+   geometry and appearance keep their existing controllers, but render once
+   in the positioned panel owned by the committed-size button. */
+.persea-unified-toolbar {
+  flex-wrap: nowrap;
+  gap: 0.4rem;
+  padding: 0.35rem 0.5rem;
+}
+.persea-unified-toolbar__controls {
+  flex: none;
+  gap: 0.35rem;
+}
+.persea-unified-toolbar button.persea-unified-view-disclosure {
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+  min-width: 4.2rem;
+  min-height: 2.25rem;
+  padding-inline: 0.45rem;
+}
+.persea-unified-toolbar button.persea-unified-copy,
+.persea-unified-toolbar button.persea-unified-toolbar-paste,
+.persea-unified-toolbar button.persea-unified-view-disclosure,
+.persea-unified-toolbar button.persea-unified-quick-actions,
+.persea-unified-toolbar button.persea-unified-composer-toggle,
+.persea-unified-toolbar button.persea-unified-fit-height,
+.persea-unified-toolbar button.persea-unified-toolbar__more,
+.persea-unified-toolbar button.persea-unified-phone-view {
+  min-height: 44px;
+  padding: 0.3rem 0.35rem;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 0.75rem;
+  font-weight: 600;
+  line-height: 1;
+}
+.persea-unified-toolbar button.persea-unified-copy[data-select-state="selecting"],
+.persea-unified-toolbar button.persea-unified-view-disclosure[aria-expanded="true"],
+.persea-unified-toolbar button.persea-unified-quick-actions[aria-expanded="true"],
+.persea-unified-toolbar button.persea-unified-composer-toggle[aria-expanded="true"],
+.persea-unified-toolbar button.persea-unified-toolbar__more[aria-expanded="true"],
+.persea-unified-toolbar button.persea-unified-phone-view[aria-expanded="true"] {
+  border-color: color-mix(in srgb, var(--persea-accent, #8fc7ff) 30%, var(--persea-chrome-fg, #e6edf3));
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 18%, var(--persea-chrome-bg, #1b1e25));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--persea-accent, #8fc7ff) 48%, transparent);
+}
+.persea-unified-view-popover {
+  position: absolute;
+  top: calc(100% + 0.25rem);
+  right: 0.5rem;
+  z-index: 12;
+  display: grid;
+  box-sizing: border-box;
+  width: min(19rem, calc(100% - 1rem), calc(100vw - 1rem));
+  max-width: min(calc(100% - 1rem), calc(100vw - 1rem));
+  max-height: min(16.25rem, calc(100vh - 1rem));
+  overflow: auto;
+  overscroll-behavior: contain;
+  gap: 0.4rem;
+  padding: 0.5rem;
+  border: 1px solid color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 72%, var(--persea-chrome-bg, #1b1e25));
+  border-radius: 0.5rem;
+  background: var(--persea-chrome-bg, #1b1e25);
+  color: var(--persea-chrome-fg, #f3f4f6);
+  box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+}
+.persea-unified-view-popover[hidden] { display: none; }
+.persea-unified-view-popover__zoom {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(6rem, 1fr) 2.25rem;
+  justify-content: center;
+  gap: 0.3rem;
+}
+.persea-unified-view-popover__zoom button {
+  min-width: 0;
+  min-height: 2rem;
+  height: 2rem;
+  padding: 0.2rem 0.45rem;
+}
+.persea-unified-view-popover__zoom-symbol { font-size: 0; }
+.persea-unified-view-popover__zoom-symbol::before { font-size: 0.8rem; line-height: 1; }
+.persea-unified-view-popover__zoom-out::before { content: "−"; }
+.persea-unified-view-popover__zoom-in::before { content: "+"; }
+.persea-unified-view-popover .persea-unified-size {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  width: auto;
+  min-width: 0;
+  gap: 0.3rem;
+  padding-block: 0.35rem 0;
+  /* the size block closes the card because theme and
+     composer text size to the dashboard — a top divider only. */
+  border-block-start: 1px solid color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 34%, transparent);
+}
+/* two rows, read top-down. First the fit-to-view actions, then
+   the explicit form with both numbers side by side and one Apply. Every
+   action stays under the 132px coarse / 120px fine ceiling. */
+.persea-unified-view-popover .persea-unified-size label { min-width: 0; }
+.persea-unified-view-popover .persea-unified-size__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 8.25rem));
+  gap: 0.35rem;
+  min-width: 0;
+}
+/* One flex row: each label is a real box (caption + input) so the card's
+   containment probes can measure it; Apply closes the row. */
+.persea-unified-view-popover .persea-unified-size__form {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 0.35rem;
+  min-width: 0;
+}
+.persea-unified-view-popover .persea-unified-size__form label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  min-width: 0;
+}
+/* three digits wide, 16px text (the iOS focus-zoom floor),
+   40px tall on a fine pointer and the 44px touch law on a coarse one. */
+.persea-unified-view-popover .persea-unified-size__form input { flex: 0 0 3.4rem; }
+.persea-unified-view-popover .persea-unified-size__caption {
+  white-space: nowrap;
+  font-size: 0.8125rem;
+}
+.persea-unified-view-popover .persea-unified-size input {
+  box-sizing: border-box;
+  inline-size: 3.4rem;
+  width: 3.4rem;
+  min-width: 0;
+  padding: 0.2rem 0.4rem;
+  text-align: end;
+}
+.persea-unified-view-popover .persea-unified-size button {
+  min-width: 2.75rem;
+  min-height: 2.75rem;
+  height: 2.75rem;
+  width: auto;
+  max-width: 7.5rem;
+  padding: 0.2rem 0.55rem;
+  white-space: nowrap;
+}
+.persea-unified-view-popover .persea-unified-size__actions button {
+  width: 100%;
+  max-width: 8.25rem;
+}
+.persea-unified-view-popover .persea-unified-size__form button { flex: 0 0 auto; }
+.persea-unified-view-popover .persea-unified-size__reason {
+  grid-column: 1 / -1;
+  margin: 0;
+  min-height: 1.25rem;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font: 0.75rem/1.35 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.persea-unified-view-popover .persea-unified-size__reason[hidden] { display: none; }
+.persea-unified-view-popover__appearance {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: center;
+  gap: 0.35rem;
+}
+.persea-unified-view-popover .persea-unified-preference {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.3rem;
+  min-width: 0;
+}
+.persea-unified-view-popover .persea-unified-preference__label {
+  white-space: nowrap;
+}
+.persea-unified-view-popover .persea-unified-preference select {
+  justify-self: stretch;
+  width: 100%;
+  max-width: none;
+  min-width: 0;
+  min-height: 2rem;
+  height: 2rem;
+}
+.persea-unified-preference-status--view {
+  grid-column: 1 / -1;
+  max-width: none;
+  margin: 0;
+}
+
+@media (pointer: fine) {
+  .persea-unified-toolbar__controls > button {
+    min-height: 36px !important;
+    height: 36px;
+    padding-block: 0.25rem;
+  }
+}
+
+/* Open is semantic state, not focus. The border width never changes, so the
+   shared treatment cannot move a toolbar or sheet box. */
+.persea-unified-terminal :is(
+  .persea-unified-tag[aria-expanded="true"],
+  .persea-unified-view-disclosure[aria-expanded="true"],
+  .persea-unified-quick-actions[aria-expanded="true"],
+  .persea-unified-composer-toggle[aria-expanded="true"],
+  .persea-unified-keybar-key--bank[aria-pressed="true"],
+  .attachment-page__composer-typography-trigger[aria-expanded="true"],
+  .persea-unified-sheet__tile[aria-expanded="true"],
+  .persea-unified-sheet__tile--select[aria-pressed="true"]
+) {
+  border-color: color-mix(in srgb, var(--persea-accent, #8fc7ff) 30%, var(--persea-chrome-fg, #f3f4f6));
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 18%, var(--persea-chrome-bg, #1b1e25));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--persea-accent, #8fc7ff) 48%, transparent);
+  color: var(--persea-chrome-fg, #f3f4f6);
+}
+/* Keep open controls visibly highlighted after the theme-specific toolbar
+   and keybar rules, with the same treatment for composer and function bank. */
+.persea-unified-terminal[data-theme] .persea-unified-toolbar button.persea-unified-composer-toggle[aria-expanded="true"],
+.persea-unified-terminal[data-theme] .persea-unified-keybar button.persea-unified-keybar-key--bank[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--persea-accent, #8fc7ff) 30%, var(--persea-chrome-fg, #f3f4f6));
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 18%, var(--persea-chrome-bg, #1b1e25));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--persea-accent, #8fc7ff) 48%, transparent);
+  color: var(--persea-chrome-fg, #f3f4f6);
+}
+
+@media (pointer: coarse) {
+  .persea-unified-toolbar button.persea-unified-view-disclosure {
+    width: 44px;
+    min-width: 44px;
+    max-width: 44px;
+    min-height: 44px;
+  }
+  .persea-unified-view-popover__zoom button,
+  .persea-unified-view-popover .persea-unified-size input,
+  .persea-unified-view-popover .persea-unified-size button,
+  .persea-unified-view-popover .persea-unified-preference select { min-height: 44px; }
+  .persea-unified-view-popover__zoom button,
+  .persea-unified-view-popover .persea-unified-size button,
+  .persea-unified-view-popover .persea-unified-preference select { height: 44px; }
+  .persea-unified-view-popover__zoom {
+    grid-template-columns: 44px minmax(6rem, 1fr) 44px;
+  }
+  .persea-unified-view-popover__zoom button,
+  .persea-unified-view-popover .persea-unified-size button { min-width: 44px; }
+  .persea-unified-view-popover {
+    max-height: min(18.75rem, calc(100vh - 1rem));
+  }
+}
+
+@media (pointer: coarse) and (max-width: 719px) {
+  .persea-unified-toolbar,
+  .persea-unified-toolbar__controls { gap: 4px; }
+  .persea-unified-view-popover .persea-unified-size input { inline-size: 4rem; }
+}
+
+/* A workspace folds the real toolbar into the pane header. Keep its opened
+   popover above xterm's layered screen without changing either box. */
+.ws-cell:has(.persea-unified-view-popover:not([hidden])) {
+  z-index: 7;
+  overflow: visible;
+}
+.ws-cell .persea-unified-view-popover {
+  width: min(22rem, calc(100% - 1rem), calc(100vw - 1rem));
+}
+.ws-cell:has(.persea-unified-view-popover:not([hidden])) .persea-unified-toolbar {
+  z-index: 20 !important;
+}
+.ws-cell:has(.persea-unified-view-popover:not([hidden])) .persea-unified-xterm {
+  z-index: 0;
+}
+
+/* tap feedback. A press dims-then-flashes so the operator sees
+   that the tap registered even when the action's own result is elsewhere
+   (a size change, a copy, a fit). Disabled controls are visibly dimmed and
+   never flash. Reduced motion keeps a static highlight. */
+@keyframes persea-tap {
+  0% { box-shadow: 0 0 0 0.5rem color-mix(in srgb, var(--persea-accent, #8fc7ff) 60%, transparent); filter: brightness(1.7); }
+  100% { box-shadow: 0 0 0 0 transparent; filter: brightness(1); }
+}
+.persea-unified-terminal button.persea-tapped,
+.persea-unified-sheet button.persea-tapped,
+.persea-unified-view-popover button.persea-tapped,
+.persea-unified-explainer button.persea-tapped { animation: persea-tap 340ms ease-out; }
+.persea-unified-terminal button:active:not(:disabled):not([aria-disabled="true"]),
+.persea-unified-view-popover button:active:not(:disabled):not([aria-disabled="true"]) { filter: brightness(1.45); transform: scale(0.96); }
+.persea-unified-toolbar button:disabled,
+.persea-unified-view-popover button:disabled,
+.persea-unified-size button:disabled,
+.persea-unified-view-popover button[aria-disabled="true"],
+.persea-unified-size button[aria-disabled="true"] { opacity: 0.45; cursor: help; }
+@media (prefers-reduced-motion: reduce) {
+  .persea-unified-terminal button.persea-tapped,
+  .persea-unified-sheet button.persea-tapped,
+  .persea-unified-view-popover button.persea-tapped,
+  .persea-unified-explainer button.persea-tapped { animation: none; filter: brightness(1.5); }
+  .persea-unified-terminal button:active:not(:disabled):not([aria-disabled="true"]),
+  .persea-unified-view-popover button:active:not(:disabled):not([aria-disabled="true"]) { transform: none; }
+}
+
+/* Keys reserves a local grid row above the keyboard strip. Its measured
+   budget depends only on the available shell band, never remote geometry. */
+.persea-terminal-keys {
+  min-width: 0;
+  min-height: 0;
+  max-height: 240px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--persea-border, #596171);
+  background: var(--persea-chrome-bg, #1b1e25);
+  color: inherit;
+  scrollbar-width: thin;
+}
+.persea-terminal-keys[hidden] { display: none; }
+.persea-terminal-keys button {
+  min-width: 44px;
+  min-height: 44px;
+  box-sizing: border-box;
+  border: 1px solid color-mix(in srgb, var(--persea-chrome-muted-fg, #aeb9cc) 30%, transparent);
+  border-radius: .4rem;
+  padding: 4px 6px;
+  color: inherit;
+  background: var(--persea-control-bg, #282d38);
+  font: 600 13px/1.15 system-ui, sans-serif;
+  touch-action: pan-y;
+}
+.persea-terminal-keys button:focus-visible { outline: 2px solid var(--persea-accent, #8fc7ff); outline-offset: -3px; }
+.persea-terminal-keys button[aria-pressed="true"] { border-color: #7594b5; background: #33455a; color: #e3edf9; }
+.persea-terminal-keys button[aria-disabled="true"] { opacity: .4; }
+.persea-terminal-keys__nav, .persea-terminal-keys__options {
+  display: flex;
+  gap: 4px;
+  padding: 4px;
+  overflow-x: auto;
+}
+.persea-terminal-keys__nav button { flex: 1 0 auto; border-color: transparent; background: transparent; }
+.persea-terminal-keys__nav .persea-terminal-keys__utility { display: flex; align-items: center; justify-content: center; flex: 0 0 44px; color: var(--persea-chrome-muted-fg, #aeb9cc); padding: 0; }
+.persea-terminal-keys__nav .persea-terminal-keys__utility:first-of-type { margin-left: auto; }
+.persea-terminal-keys__options button { flex: 0 0 auto; touch-action: pan-x pan-y; }
+.persea-terminal-keys .persea-terminal-keys__picker-trigger { display: flex; align-items: center; justify-content: space-between; gap: 8px; min-width: 120px; }
+.persea-terminal-keys__options .persea-terminal-keys__picker-trigger { flex: 1 0 120px; }
+.persea-terminal-keys__picker-trigger[aria-expanded="true"] { border-color: #7594b5; background: #33455a; color: #e3edf9; }
+.persea-terminal-keys__picker-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.persea-terminal-keys__options { padding-top: 0; }
+.persea-terminal-keys .persea-terminal-keys__modifier { color: var(--persea-chrome-muted-fg, #c4ccd9); background: color-mix(in srgb, var(--persea-control-bg, #282d38) 85%, #bcb2a0); }
+.persea-terminal-keys .persea-terminal-keys__modifier[aria-pressed="true"] { background: #51432e; color: #ffe0a1; border-color: #ae905c; }
+.persea-terminal-keys[data-view="Fn"] .persea-terminal-keys__options { justify-content: flex-start; }
+.persea-terminal-keys__body { padding: 0 4px 4px; }
+.persea-terminal-keys__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(52px, 1fr)); gap: 4px; }
+.persea-terminal-keys[data-view="Fn"] .persea-terminal-keys__grid { grid-template-columns: repeat(6, minmax(44px, 1fr)); }
+.persea-terminal-keys[data-group="Letters"] .persea-terminal-keys__grid,
+.persea-terminal-keys[data-group="Symbols"] .persea-terminal-keys__grid { grid-template-columns: repeat(auto-fit, minmax(44px, 1fr)); }
+.persea-terminal-keys .persea-terminal-keys__grid.persea-terminal-keys__choices { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); }
+.persea-terminal-keys__choices button { overflow-wrap: anywhere; }
+.persea-terminal-keys__grid button[data-key-kind="special"] { background: color-mix(in srgb, var(--persea-control-bg, #282d38) 90%, var(--persea-chrome-muted-fg, #aeb9cc)); }
+.persea-terminal-keys__status:empty { display: none; }
+.persea-terminal-keys__status { padding: 4px 8px; font-size: .85rem; }
+.persea-terminal-keys__status[data-announcement-only="true"] { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.persea-terminal-keys p { margin: 4px; font-size: .85rem; }
+.persea-unified-keybar-key { white-space: nowrap; padding-inline: 5px; font-size: 13px; }
+.persea-unified-terminal[data-theme] .persea-unified-keybar button.persea-unified-keybar-key--bank { box-shadow: none; border-width: 1px; border-color: color-mix(in srgb, var(--persea-chrome-muted-fg, #aeb9cc) 40%, transparent); }
+.persea-unified-terminal[data-theme] .persea-unified-keybar button.persea-unified-keybar-key--bank[aria-pressed="true"] { background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 12%, var(--persea-chrome-bg, #1b1e25)); box-shadow: none; }
+
+/* In a short visible band the disclosure occupies the existing strip. The
+   fixed Keys button closes it, and every catalog control remains scrollable. */
+.persea-unified-keybar-row[hidden] { display: none; }
+.persea-terminal-keys[data-compact="true"] {
+  display: flex;
+  flex: 1 1 0;
+  height: 44px;
+  border: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  scrollbar-gutter: auto;
+  touch-action: pan-x;
+}
+.persea-terminal-keys[data-compact="true"][hidden] { display: none; }
+.persea-unified-keybar:has(.persea-terminal-keys[data-compact="true"]:not([hidden])) { padding-top: 0; }
+.persea-terminal-keys[data-compact="true"] :is(.persea-terminal-keys__nav, .persea-terminal-keys__body, .persea-terminal-keys__options, .persea-terminal-keys__grid) {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  margin: 0;
+  overflow: visible;
+}
+.persea-terminal-keys[data-compact="true"] button { flex: 0 0 auto; height: 44px; white-space: nowrap; touch-action: pan-x; }
+.persea-terminal-keys[data-compact="true"] .persea-terminal-keys__picker-trigger[aria-expanded="true"] { flex: 0 0 44px; min-width: 44px; justify-content: center; }
+.persea-terminal-keys[data-compact="true"] .persea-terminal-keys__picker-trigger[aria-expanded="true"] .persea-terminal-keys__picker-label { display: none; }
+.persea-terminal-keys[data-compact="true"] .persea-terminal-keys__choices button { min-width: 76px; }
+.persea-terminal-keys[data-compact="true"] :is(p, .persea-terminal-keys__status) { flex: 0 0 220px; max-height: 44px; overflow-y: auto; }
+
+/* Short screens keep navigation above a horizontally scrollable key row.
+   With a composer sharing an exceptionally short band, the keys use one row. */
+.persea-terminal-keys[data-compact="true"][data-compact-rows="2"] { height: 92px; flex-direction: column; gap: 4px; overflow: hidden; }
+.persea-terminal-keys[data-compact="true"][data-compact-rows="2"] :is(.persea-terminal-keys__nav, .persea-terminal-keys__body) { flex: 0 0 44px; width: 100%; min-width: 0; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; }
+.persea-terminal-keys[data-compact="true"][data-compact-rows="2"] .persea-terminal-keys__nav button { min-width: 44px; padding-inline: 5px; }
+.persea-unified-keybar:has(.persea-terminal-keys[data-compact="true"][data-compact-rows="2"]:not([hidden])) .persea-unified-keybar-key--bank { align-self: flex-end; height: 44px; }
+.persea-terminal-keys[data-compact="true"][data-compact-rows="1"] .persea-terminal-keys__nav { order: 2; }
+.persea-terminal-keys[data-compact="true"][data-compact-rows="1"] .persea-terminal-keys__options { display: contents; }
+.persea-terminal-keys[data-compact="true"][data-compact-rows="1"] .persea-terminal-keys__grid { order: 1; }
+.persea-terminal-keys[data-compact="true"][data-compact-rows="1"] .persea-terminal-keys__picker-trigger[aria-expanded="false"] { order: 2; }
+.persea-unified-keybar-key[data-key-glyph="true"],
+.persea-terminal-keys [data-key-control="modifier:shift"],
+.persea-terminal-keys__grid :is([data-key-control^="key:tab:"], [data-key-control^="key:enter:"], [data-key-control^="key:backspace:"], [data-key-control^="key:delete:"], [data-key-control^="key:arrow-"]) { font-size: 18px; }
+@keyframes persea-key-tap { from { filter: brightness(1.15); } to { filter: brightness(1); } }
+.persea-unified-terminal .persea-unified-keybar button.persea-tapped,
+.persea-unified-terminal .persea-terminal-keys button.persea-tapped { animation: persea-key-tap 180ms ease-out; box-shadow: none; }
+@media (prefers-reduced-motion: reduce) {
+  .persea-unified-terminal .persea-unified-keybar button.persea-tapped,
+  .persea-unified-terminal .persea-terminal-keys button.persea-tapped { animation: none; filter: brightness(1.1); }
+}

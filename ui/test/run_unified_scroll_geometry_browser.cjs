@@ -1362,6 +1362,14 @@ async function main() {
       "/geometry_harness.js": path.join(UI, "dist/test/unified_scroll_geometry_browser_harness.js"),
       "/xterm.css": path.join(UI, "node_modules/@xterm/xterm/css/xterm.css"),
       "/attachment.css": path.join(UI, "src/attachment_page.css"),
+      "/attachment_shell.css": path.join(UI, "src/attachment_shell.css"),
+      "/attachment_composer.css": path.join(UI, "src/attachment_composer.css"),
+      "/attachment_surface.css": path.join(UI, "src/attachment_surface.css"),
+      "/unified_terminal_surface.css": path.join(UI, "src/unified_terminal_surface.css"),
+      "/unified_terminal_toolbar.css": path.join(UI, "src/unified_terminal_toolbar.css"),
+      "/unified_terminal_composer.css": path.join(UI, "src/unified_terminal_composer.css"),
+      "/unified_terminal_overlays.css": path.join(UI, "src/unified_terminal_overlays.css"),
+      "/unified_terminal_disclosures.css": path.join(UI, "src/unified_terminal_disclosures.css"),
     };
     const file = routes[pathname];
     if (!file) { response.writeHead(404); response.end("not found"); return; }
