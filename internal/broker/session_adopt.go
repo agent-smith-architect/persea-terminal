@@ -50,8 +50,6 @@ func adoptRefusalCode(err error) string {
 		return "invalid_history"
 	case errors.Is(err, ErrUnifiedAdoptSessionMissing):
 		return "session_gone"
-	case errors.Is(err, ErrUnifiedAdoptAlternateScreen):
-		return "blocked_alt_screen"
 	case errors.Is(err, ErrUnifiedAdoptMultiWindow):
 		return "blocked_multi_window"
 	case errors.Is(err, ErrUnifiedAdoptMultiPane):

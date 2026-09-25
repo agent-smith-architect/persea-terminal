@@ -20,10 +20,10 @@ Before submitting a change, run from the repository directory:
 ```sh
 umask 0022
 export TMPDIR=/tmp
+(cd ui && npm ci && npx --no-install playwright install --with-deps chromium webkit)
 go vet ./...
 go build ./...
 CGO_ENABLED=1 go test -race ./...
-(cd ui && npm ci && npx --no-install playwright install --with-deps chromium webkit)
 (cd ui && npm run test:ci)
 bash scripts/local-runtime-test.sh
 python3 deploy/tests/host-config-test.py
@@ -31,7 +31,9 @@ bash deploy/tests/hermetic-deploy-test.sh
 ```
 
 Browser tests use the locally declared Playwright package and its installed
-browsers. `CHROME_BIN` may select an absolute Chromium-family executable for
+browsers. Install UI dependencies before the Go suite too: its real-tmux
+capture-equivalence regression replays journals through the UI's patched xterm.
+`CHROME_BIN` may select an absolute Chromium-family executable for
 additional compatibility checks. Browser installation with system dependencies
 may need root; run the application and normal suites as an unprivileged user.
 The browser groups are `test:browser:dashboard`, `test:browser:terminal`,

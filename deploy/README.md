@@ -6,6 +6,15 @@ isolated Tailscale Service sidecar. It never creates, discovers, renames,
 resizes, or destroys tmux servers, sessions, windows, or panes. It has no
 Funnel, tailnet-policy, DNS, SSH, or global Tailscale reset operation.
 
+Sessions running full-screen programs can be opened, rotated and explicitly
+refitted while the alternate screen is active. Both visible screens and bounded
+normal history are reconstructed from one drift-checked tmux capture transaction.
+Opening and rotation do not resize the pane or send it input. See
+[terminal reconstruction](../docs/terminal-reconstruction.md) for the capture
+contract and its limits. During a rolling upgrade, an older broker may still
+report that a full-screen program blocks adoption or defers rotation; the front
+door and UI continue to recognize those legacy statuses.
+
 ## Host manifest and realms
 
 Operators configure exactly one file:

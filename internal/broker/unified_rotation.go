@@ -17,7 +17,6 @@ import (
 var (
 	ErrUnifiedRotateUnavailable     = errors.New("unified rotation target is unavailable")
 	ErrUnifiedRotateInProgress      = errors.New("unified rotation is already in progress")
-	ErrUnifiedRotateAlternateScreen = errors.New("unified rotation target is on the alternate screen")
 	ErrUnifiedRotateMultiWindow     = errors.New("unified rotation target has more than one window")
 	ErrUnifiedRotateMultiPane       = errors.New("unified rotation target has more than one pane")
 	ErrUnifiedRotateSlotsExhausted  = errors.New("unified rotation capacity is exhausted")
@@ -26,7 +25,6 @@ var (
 	ErrUnifiedRotateFatal           = errors.New("unified rotation failed after sealing the predecessor")
 	ErrUnifiedRefitMalformed        = errors.New("unified width refit request is malformed")
 	ErrUnifiedRefitStale            = errors.New("unified width refit target is stale")
-	ErrUnifiedRefitAlternateScreen  = errors.New("unified width refit target is on the alternate screen")
 	ErrUnifiedRefitFatal            = errors.New("unified width refit failed after width mutation")
 )
 
@@ -703,15 +701,6 @@ func (unit *unifiedDevUnit) runRotation(ctx context.Context, decoder *controlmod
 	if rotation.holder == nil {
 		return ErrUnifiedRotateUnavailable
 	}
-	if rotation.refit {
-		alternate, probeErr := unit.queryRefitAlternate(ctx, decoder, read, readErr, old.Pane)
-		if probeErr != nil {
-			return probeErr
-		}
-		if alternate {
-			return ErrUnifiedRefitAlternateScreen
-		}
-	}
 	next, nextErr := unit.unusedRotationWitness(old)
 	if nextErr != nil {
 		return nextErr
@@ -1011,60 +1000,6 @@ func (unit *unifiedDevUnit) unusedRotationWitness(old controlmode.PaneWitness) (
 	return controlmode.PaneWitness{}, ErrUnifiedRotateUnstable
 }
 
-// queryRefitAlternate is a pre-PONR policy interrogation on the unit's own
-// ordered observer stream. Output arriving around it is routed normally; only
-// the exact command response is consumed here. A refused alternate-screen
-// refit therefore mutates no tmux geometry, cadence, subscriber or generation.
-func (unit *unifiedDevUnit) queryRefitAlternate(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error, pane string) (bool, error) {
-	var batch controlmode.EventBatch
-	defer batch.Release()
-	line := "display-message -p -t " + shellQuote(pane) + " " + shellQuote("#{alternate_on}") + "\n"
-	if _, err := io.WriteString(unit.ptmx, line); err != nil {
-		return false, err
-	}
-	response := recordingResponse{owner: unit.memory}
-	defer response.release()
-	for {
-		select {
-		case <-ctx.Done():
-			return false, ctx.Err()
-		case err := <-readErr:
-			return false, err
-		case chunk := <-read:
-			events, err := decodeRotationEvents(decoder, chunk, &batch)
-			if err != nil {
-				return false, err
-			}
-			for index, event := range events {
-				switch event.Kind {
-				case controlmode.EventCommandResponse:
-					if err := response.Write(event.Data); err != nil {
-						return false, err
-					}
-				case controlmode.EventCommandError:
-					return false, ErrUnifiedRotateUnavailable
-				case controlmode.EventCommandEnd:
-					for _, rest := range events[index+1:] {
-						if err := unit.owner.consumeObserverEvent(rest); err != nil {
-							return false, err
-						}
-					}
-					value := strings.TrimSpace(response.String())
-					if value != "0" && value != "1" {
-						return false, ErrUnifiedRotateUnavailable
-					}
-					return value == "1", nil
-				case controlmode.EventCommandBegin:
-				default:
-					if err := unit.owner.consumeObserverEvent(event); err != nil {
-						return false, err
-					}
-				}
-			}
-		}
-	}
-}
-
 func tmuxControlCommand(args []string) string {
 	quoted := make([]string, len(args))
 	for index, arg := range args {
@@ -1186,7 +1121,7 @@ func (unit *unifiedDevUnit) commitRotationCapture(responses []string, rotation *
 		return nil, unifiedjournal.Geometry{}, errors.New("unified rotation pane normalization returned unexpected output")
 	}
 	pre := strings.TrimSpace(responses[2])
-	post := strings.TrimSpace(responses[6])
+	post := strings.TrimSpace(responses[7])
 	if unit.owner.adoptionPostTamper != nil {
 		post = unit.owner.adoptionPostTamper(attempt, post)
 	}
@@ -1195,8 +1130,6 @@ func (unit *unifiedDevUnit) commitRotationCapture(responses []string, rotation *
 		return nil, unifiedjournal.Geometry{}, err
 	}
 	switch {
-	case probe.alternate != 0:
-		return nil, unifiedjournal.Geometry{}, ErrUnifiedRotateAlternateScreen
 	case probe.windows != 1:
 		return nil, unifiedjournal.Geometry{}, ErrUnifiedRotateMultiWindow
 	case probe.panes != 1:
@@ -1205,16 +1138,15 @@ func (unit *unifiedDevUnit) commitRotationCapture(responses []string, rotation *
 	if pre != post {
 		return nil, unifiedjournal.Geometry{}, errUnifiedAdoptDrift
 	}
-	modes, err := parseAdoptionModes(strings.TrimSpace(responses[5]))
+	modes, err := parseAdoptionModes(strings.TrimSpace(responses[6]))
 	if err != nil {
 		return nil, unifiedjournal.Geometry{}, err
 	}
 	if rotation.refit && (modes.columns != rotation.refitColumns || modes.rows != rotation.refitRows) {
 		return nil, unifiedjournal.Geometry{}, ErrUnifiedRefitFatal
 	}
-	rows := parseAdoptionCapture(responses[3])
-	pending := strings.TrimSuffix(responses[4], "\n")
-	bootstrap, _, err := synthesizeAdoptionBootstrap(rows, pending, probe.cursorX, probe.cursorY, modes)
+	pending := strings.TrimSuffix(responses[5], "\n")
+	bootstrap, _, err := synthesizeCapturedAdoption(responses[3], responses[4], pending, probe, modes)
 	if err != nil {
 		return nil, unifiedjournal.Geometry{}, err
 	}

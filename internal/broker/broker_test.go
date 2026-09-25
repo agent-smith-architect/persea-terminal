@@ -255,13 +255,13 @@ func TestNoDestructiveOrImplicitResizeProductCallsites(t *testing.T) {
 			return nil
 		})
 	}
-	// Seven capture occurrences: the guarded legacy snapshot (tmux.go), the cut
+	// Eight capture occurrences: the guarded legacy snapshot (tmux.go), the cut
 	// transaction (attachment.go), two error strings naming the verb
-	// (terminal/history.go), the adoption composite's two sub-commands —
-	// the history+screen capture and the pending-prefix -P capture
+	// (terminal/history.go), the adoption composite's three sub-commands —
+	// history+screen, saved normal screen, and pending-prefix -P
 	// (unified_dev.go) — and the dashboard preview's single read-only
 	// plain-text capture (session_preview.go), pinned by shape above.
-	if captureCalls != 7 || attachCalls != 4 {
+	if captureCalls != 8 || attachCalls != 4 {
 		t.Fatalf("guarded tmux callsites: capture=%d attach=%d", captureCalls, attachCalls)
 	}
 	if !previewCaptureShapeChecked {

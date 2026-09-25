@@ -128,7 +128,7 @@ func TestUnifiedRotationTriggerWakeLossFairnessAndPerPaneRetry(t *testing.T) {
 	clock := &rotationScheduleClock{now: time.Unix(3_000, 0)}
 	pressure := make(map[unifiedjournal.PaneKey]unifiedRotationPressure)
 	var attempts []string
-	outcomes := []error{ErrUnifiedRotateAlternateScreen, nil, nil}
+	outcomes := []error{ErrUnifiedRotateUnstable, nil, nil}
 	effects := newRotationScheduleEffects(clock, pressure, &attempts, &outcomes)
 
 	a := rotationScheduleKey("a", 1)
@@ -178,7 +178,7 @@ func TestUnifiedRotationTriggerComesFromDurableCommit(t *testing.T) {
 		case attempted <- session:
 		default:
 		}
-		return ErrUnifiedRotateAlternateScreen
+		return ErrUnifiedRotateUnstable
 	}
 	fixture.effects.mu.Unlock()
 	sessionID := fixture.startPaneCommand(t, "trigger", "exec sh")
@@ -207,7 +207,7 @@ func TestUnifiedRotationTriggerBackoffCapsWithoutDisarming(t *testing.T) {
 	var attempts []string
 	outcomes := make([]error, 12)
 	for index := range outcomes {
-		outcomes[index] = ErrUnifiedRotateAlternateScreen
+		outcomes[index] = ErrUnifiedRotateUnstable
 	}
 	effects := newRotationScheduleEffects(clock, pressure, &attempts, &outcomes)
 	effects.active["deferred"] = key
@@ -235,7 +235,7 @@ func TestUnifiedRotationCadenceAndBackoffStartAtAttemptCompletion(t *testing.T) 
 		wait    time.Duration
 	}{
 		{name: "success", wait: unifiedRotationCadence},
-		{name: "failure", outcome: ErrUnifiedRotateAlternateScreen, wait: unifiedRotationRetryInitial},
+		{name: "failure", outcome: ErrUnifiedRotateUnstable, wait: unifiedRotationRetryInitial},
 	} {
 		t.Run(item.name, func(t *testing.T) {
 			started := time.Unix(20_000, 0)
@@ -410,7 +410,7 @@ func TestEligibilityReleaseInterruptsMaximumBackoffWithoutBusyLoop(t *testing.T)
 	}
 }
 
-func TestAlternateScreenDeferralClearsBelowLowAndOnSessionReplacement(t *testing.T) {
+func TestRotationBackoffClearsBelowLowAndTracksSessionReplacement(t *testing.T) {
 	clock := &rotationScheduleClock{now: time.Unix(50_000, 0)}
 	oldKey := rotationScheduleKey("replace", 1)
 	newKey := rotationScheduleKey("replace", 2)
@@ -419,23 +419,23 @@ func TestAlternateScreenDeferralClearsBelowLowAndOnSessionReplacement(t *testing
 	outcomes := []error{}
 	effects := newRotationScheduleEffects(clock, pressure, &attempts, &outcomes)
 	effects.active[oldKey.Session] = oldKey
-	effects.rotationStates[oldKey.Session] = &unifiedRotationState{key: oldKey, armed: true, deferredAltScreen: true}
+	effects.rotationStates[oldKey.Session] = &unifiedRotationState{key: oldKey, armed: true, backoff: unifiedRotationRetryMaximum}
 	effects.updateRotationPressure(unifiedRotationCandidate{session: oldKey.Session, key: oldKey}, unifiedRotationPressure{logical: 59, logicalCap: 100, physicalCap: 100}, clock.now)
-	if state := effects.rotationState(oldKey.Session); state.armed || state.deferredAltScreen {
-		t.Fatalf("below-LOW state retained deferral: %+v", state)
+	if state := effects.rotationState(oldKey.Session); state.armed || state.backoff != 0 {
+		t.Fatalf("below-LOW state retained backoff: %+v", state)
 	}
 
 	effects.mu.Lock()
 	effects.active[newKey.Session] = newKey
-	effects.rotationStates[newKey.Session] = &unifiedRotationState{key: oldKey, armed: true, deferredAltScreen: true}
+	effects.rotationStates[newKey.Session] = &unifiedRotationState{key: oldKey, armed: true, backoff: unifiedRotationRetryMaximum}
 	effects.mu.Unlock()
 	effects.updateRotationPressure(unifiedRotationCandidate{session: newKey.Session, key: newKey}, unifiedRotationPressure{logical: 80, logicalCap: 100, physicalCap: 100}, clock.now)
-	if state := effects.rotationState(newKey.Session); state.key != newKey || state.deferredAltScreen {
-		t.Fatalf("session replacement retained stale deferral: %+v", state)
+	if state := effects.rotationState(newKey.Session); state.key != newKey {
+		t.Fatalf("session replacement retained stale key: %+v", state)
 	}
 }
 
-func TestUnitReapClearsAlternateScreenDeferral(t *testing.T) {
+func TestUnitReapClearsRotationBackoff(t *testing.T) {
 	effects := &UnifiedDevPaneEffects{
 		units: make(map[string]*unifiedDevUnit), panes: make(map[string]*unifiedDevBirth),
 		active: make(map[string]unifiedjournal.PaneKey), rotationStates: make(map[string]*unifiedRotationState),
@@ -443,10 +443,10 @@ func TestUnitReapClearsAlternateScreenDeferral(t *testing.T) {
 	}
 	unit := &unifiedDevUnit{sessionID: "reaped", birth: unifiedDevCommand{}}
 	effects.units[unit.sessionID] = unit
-	effects.rotationStates[unit.sessionID] = &unifiedRotationState{armed: true, deferredAltScreen: true}
+	effects.rotationStates[unit.sessionID] = &unifiedRotationState{armed: true, backoff: unifiedRotationRetryMaximum}
 	effects.reapUnitOnce(unit)
 	if state := effects.rotationState(unit.sessionID); state != nil {
-		t.Fatalf("unit reap retained rotation deferral: %+v", state)
+		t.Fatalf("unit reap retained rotation backoff: %+v", state)
 	}
 }
 

@@ -30,7 +30,6 @@ func adoptControl(t *testing.T, server *Server, serverLabel, sessionID string) p
 func TestAdoptRefusalCodeMapsEveryTypedError(t *testing.T) {
 	for want, err := range map[string]error{
 		"session_gone":         ErrUnifiedAdoptSessionMissing,
-		"blocked_alt_screen":   ErrUnifiedAdoptAlternateScreen,
 		"blocked_multi_window": ErrUnifiedAdoptMultiWindow,
 		"blocked_multi_pane":   ErrUnifiedAdoptMultiPane,
 		"slots_exhausted":      ErrUnifiedAdoptSlotsExhausted,

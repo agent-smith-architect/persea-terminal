@@ -135,7 +135,7 @@ var (
 	adoptionCursorRE       = regexp.MustCompile(`\x1b\[([0-9]+);([0-9]+)H`)
 )
 
-// adoptionBootstrapParts splits a reconstructed bootstrap into its painted
+// adoptionBootstrapParts splits a normal-screen bootstrap into its painted
 // rows and the synthesis tail. The painted segment cannot contain an
 // 'r'-final CSI: capture -e re-encodes cell attributes as SGR ('m'-final)
 // only, so the first scroll-region sequence is the synthesis tail's start.
@@ -478,14 +478,6 @@ func TestUnifiedAdoptionRefusalsAreTypedAndArtifactFree(t *testing.T) {
 		})
 	}
 
-	t.Run("alternate-screen", func(t *testing.T) {
-		sessionID := fixture.startPaneCommand(t, "altscreen", `printf '\033[?1049h'; exec sleep 600`)
-		pollUntil(t, 5*time.Second, "the alternate screen", func() bool {
-			return fixture.disposable.run("display-message", "-p", "-t", "altscreen:", "#{alternate_on}") == "1"
-		})
-		assertRefusal(t, sessionID, ErrUnifiedAdoptAlternateScreen)
-	})
-
 	t.Run("multi-pane", func(t *testing.T) {
 		sessionID := fixture.startPaneCommand(t, "twopane", "sleep 600")
 		fixture.disposable.run("split-window", "-t", "twopane:", "sleep 600")
@@ -546,41 +538,56 @@ func TestUnifiedAdoptionCompositeAtomicityUnderFlood(t *testing.T) {
 	}
 	const floodCommand = `while :; do echo FLOOD_LINE_OF_CONTINUOUS_OUTPUT; done`
 
-	t.Run("flood", func(t *testing.T) {
-		const composites = 25
-		for index := 0; index < composites; index++ {
-			name := fmt.Sprintf("flood%02d", index)
-			t.Run(name, func(t *testing.T) {
-				fixture := newAdoptionFixture(t, 2)
-				var captures atomic.Int64
-				fixture.effects.adoptionPostTamper = func(_ int, post string) string {
-					captures.Add(1)
-					return post
-				}
-				sessionID := fixture.startPaneCommand(t, name, floodCommand)
-				adoption, err := fixture.effects.AdoptSession(context.Background(), sessionID)
-				if errors.Is(err, unifiedjournal.ErrSourceQuota) {
-					assertFloodAdoptionRefused(t, fixture, sessionID, adoption)
-				} else if err != nil {
-					t.Fatalf("adoption %d under flood: %v", index, err)
-				} else if adoption.Existing || adoption.Key == (unifiedjournal.PaneKey{}) || adoption.SessionID != sessionID {
-					t.Fatalf("adoption %d returned an invalid new generation: %+v", index, adoption)
-				}
-				if captures.Load() != 1 {
-					t.Fatalf("capture attempts=%d, want 1", captures.Load())
-				}
-				// Stop the producer only after the complete adoption outcome, so
-				// the submission span is stressed even when recording is slow.
-				fixture.disposable.run("kill-session", "-t", sessionID)
-				if outputs := fixture.effects.adoptionSpanOutputs.Load(); outputs != 0 {
-					t.Fatalf("%d %%output events were classified inside adoption submission spans, want 0", outputs)
-				}
-				if retries := fixture.effects.adoptionRetries.Load(); retries != 0 {
-					t.Fatalf("%d PRE!=POST retries under flood, want 0", retries)
-				}
-			})
+	for _, alternate := range []bool{false, true} {
+		group := "flood"
+		if alternate {
+			group = "flood-alternate"
 		}
-	})
+		t.Run(group, func(t *testing.T) {
+			const composites = 25
+			for index := 0; index < composites; index++ {
+				name := fmt.Sprintf("flood%02d", index)
+				t.Run(name, func(t *testing.T) {
+					fixture := newAdoptionFixture(t, 2)
+					var captures atomic.Int64
+					fixture.effects.adoptionPostTamper = func(_ int, post string) string {
+						captures.Add(1)
+						return post
+					}
+					command := floodCommand
+					if alternate {
+						command = `printf '\033[?1049h'; ` + command
+					}
+					sessionID := fixture.startPaneCommand(t, name, command)
+					if alternate {
+						pollUntil(t, 5*time.Second, "alternate flood ready", func() bool {
+							return fixture.disposable.run("display-message", "-p", "-t", name+":", "#{alternate_on}") == "1"
+						})
+					}
+					adoption, err := fixture.effects.AdoptSession(context.Background(), sessionID)
+					if errors.Is(err, unifiedjournal.ErrSourceQuota) {
+						assertFloodAdoptionRefused(t, fixture, sessionID, adoption)
+					} else if err != nil {
+						t.Fatalf("adoption %d under flood: %v", index, err)
+					} else if adoption.Existing || adoption.Key == (unifiedjournal.PaneKey{}) || adoption.SessionID != sessionID {
+						t.Fatalf("adoption %d returned an invalid new generation: %+v", index, adoption)
+					}
+					if captures.Load() != 1 {
+						t.Fatalf("capture attempts=%d, want 1", captures.Load())
+					}
+					// Stop the producer only after the complete adoption outcome, so
+					// the submission span is stressed even when recording is slow.
+					fixture.disposable.run("kill-session", "-t", sessionID)
+					if outputs := fixture.effects.adoptionSpanOutputs.Load(); outputs != 0 {
+						t.Fatalf("%d %%output events were classified inside adoption submission spans, want 0", outputs)
+					}
+					if retries := fixture.effects.adoptionRetries.Load(); retries != 0 {
+						t.Fatalf("%d PRE!=POST retries under flood, want 0", retries)
+					}
+				})
+			}
+		})
+	}
 
 	t.Run("quota", func(t *testing.T) {
 		fixture := newAdoptionFixture(t, 2)

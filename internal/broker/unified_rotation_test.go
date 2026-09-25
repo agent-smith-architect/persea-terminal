@@ -279,7 +279,7 @@ func TestUnifiedExplicitWidthRefitAfterRowsChangeRejectsProcessReplacement(t *te
 	}
 }
 
-func TestUnifiedExplicitWidthRefitRefusesAlternateScreenBeforeIssue(t *testing.T) {
+func TestUnifiedExplicitWidthRefitAcceptsAlternateScreen(t *testing.T) {
 	fixture := newAdoptionFixture(t, 4)
 	sessionID := fixture.startPaneCommand(t, "refit-alt", `sh -c 'stty -echo; while IFS= read -r line; do eval "$line"; done'`)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -312,23 +312,21 @@ func TestUnifiedExplicitWidthRefitRefusesAlternateScreenBeforeIssue(t *testing.T
 		t.Fatal(err)
 	}
 	err = fixture.effects.refitSession(ctx, authority, source, source.Columns+11, strings.Repeat("a", 43))
-	if !errors.Is(err, ErrUnifiedRefitAlternateScreen) {
-		t.Fatalf("refit error=%v want alternate-screen refusal", err)
+	if err != nil {
+		t.Fatalf("refit alternate screen: %v", err)
 	}
 	after, err := buildSourceWitness(ctx, fixture.server, authority.BootID, sessionID)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if after.Columns != source.Columns || after.Rows != source.Rows {
-		t.Fatalf("pre-issue refusal mutated geometry=%dx%d want %dx%d", after.Columns, after.Rows, source.Columns, source.Rows)
+	if after.Columns != source.Columns+11 || after.Rows != source.Rows {
+		t.Fatalf("refit geometry=%dx%d want %dx%d", after.Columns, after.Rows, source.Columns+11, source.Rows)
 	}
-	if key, ok := fixture.effects.paneKey(sessionID); !ok || key != adoption.Key {
-		t.Fatalf("pre-issue refusal changed active key=%+v present=%t", key, ok)
+	if key, ok := fixture.effects.paneKey(sessionID); !ok || key == adoption.Key {
+		t.Fatalf("refit did not replace active key=%+v present=%t", key, ok)
 	}
-	select {
-	case <-predecessor.done:
-		t.Fatalf("pre-issue refusal closed predecessor: %q", predecessor.closeReason())
-	case <-time.After(100 * time.Millisecond):
+	if reason := waitRotationSubscriberClose(t, predecessor); reason != proto.SubscriberClosedGenerationRefit {
+		t.Fatalf("refit close reason=%q", reason)
 	}
 }
 
