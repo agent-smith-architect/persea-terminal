@@ -168,13 +168,38 @@ func TestCanceledBeginCannotEndInsideConcurrentSamePaneBegin(t *testing.T) {
 	h := newGeometryBarrierHarness(t, "same-pane-cancel-interleave")
 	runtime := h.registry.retention
 
-	h.journalMu.Lock()
-	locked := true
-	defer func() {
-		if locked {
-			h.journalMu.Unlock()
+	// Stop start1 after dequeue but before acknowledgement, even if the feed
+	// timer flushes PENDING first. At this point PENDING's command slot has
+	// been released, and start1 cannot release its slot until we resume it.
+	pauseReached := make(chan struct{})
+	resume := make(chan struct{})
+	unblock := sync.OnceFunc(func() { close(resume) })
+	defer unblock()
+	var pauseOnce sync.Once
+	runtime.setHook(func(point string, key unifiedjournal.PaneKey) {
+		if point == "before_pause_start_pause" && key == h.key {
+			pauseOnce.Do(func() {
+				close(pauseReached)
+				<-resume
+			})
 		}
-	}()
+	})
+	waitFor := func(done <-chan struct{}, label string) {
+		t.Helper()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Fatalf("%s did not settle", label)
+		}
+	}
+	waitDispatch := func(label string) {
+		t.Helper()
+		done, err := runtime.startDispatchFence()
+		if err != nil {
+			t.Fatalf("%s: %v", label, err)
+		}
+		waitFor(done, label)
+	}
 	if err := runtime.WritePane(h.key, []byte("PENDING")); err != nil {
 		t.Fatalf("queue pending output: %v", err)
 	}
@@ -190,22 +215,23 @@ func TestCanceledBeginCannotEndInsideConcurrentSamePaneBegin(t *testing.T) {
 		ticket, err := h.issuer.BeginGeometry(ctx1)
 		first <- beginResult{ticket: ticket, err: err}
 	}()
-	waitQUsed := func(want int, label string) {
-		deadline := time.Now().Add(5 * time.Second)
-		for {
-			runtime.mu.Lock()
-			used := runtime.qUsed
-			runtime.mu.Unlock()
-			if used >= want {
-				return
+	waitFor(pauseReached, "first pause_start before acknowledgement")
+	queuedStartsFor := func() int {
+		count := 0
+		for _, command := range queuedRetentionCommands(&runtime.queue) {
+			if command.key == h.key && command.reason == "pause_start" {
+				count++
 			}
-			if time.Now().After(deadline) {
-				t.Fatalf("%s: qUsed=%d want-at-least=%d", label, used, want)
-			}
-			time.Sleep(time.Millisecond)
 		}
+		return count
 	}
-	waitQUsed(6, "first pause_start")
+	runtime.mu.Lock()
+	usedBeforeRefusal, startsBeforeRefusal := runtime.qUsed, queuedStartsFor()
+	runtime.mu.Unlock()
+	// Generation floor (2), commit/release/fault (3), start1 (1).
+	if usedBeforeRefusal != 6 || startsBeforeRefusal != 0 {
+		t.Fatalf("first pause_start: qUsed=%d queued pause_start=%d, want 6 and 0", usedBeforeRefusal, startsBeforeRefusal)
+	}
 
 	// A distinct attachment issuer for the same pane must be refused before it
 	// can reserve slots or queue start2. This is the exact start1,start2,end1
@@ -221,15 +247,9 @@ func TestCanceledBeginCannotEndInsideConcurrentSamePaneBegin(t *testing.T) {
 		t.Fatalf("concurrent begin ticket=%T err=%v, want geometry-owner refusal", got2.ticket, got2.err)
 	}
 	runtime.mu.Lock()
-	usedAfterRefusal := runtime.qUsed
-	queuedStarts := 0
-	for _, command := range queuedRetentionCommands(&runtime.queue) {
-		if command.key == h.key && command.reason == "pause_start" {
-			queuedStarts++
-		}
-	}
+	usedAfterRefusal, queuedStarts := runtime.qUsed, queuedStartsFor()
 	runtime.mu.Unlock()
-	if usedAfterRefusal != 6 || queuedStarts != 0 {
+	if usedAfterRefusal != usedBeforeRefusal || queuedStarts != startsBeforeRefusal {
 		t.Fatalf("concurrent refusal touched runtime: qUsed=%d queued pause_start=%d", usedAfterRefusal, queuedStarts)
 	}
 
@@ -246,8 +266,7 @@ func TestCanceledBeginCannotEndInsideConcurrentSamePaneBegin(t *testing.T) {
 		ticket, err := otherIssuer.BeginGeometry(context.Background())
 		third <- beginResult{ticket: ticket, err: err}
 	}()
-	h.journalMu.Unlock()
-	locked = false
+	unblock()
 	got3 := <-third
 	if got3.err != nil || got3.ticket == nil {
 		t.Fatalf("later begin ticket=%T err=%v", got3.ticket, got3.err)
@@ -256,18 +275,12 @@ func TestCanceledBeginCannotEndInsideConcurrentSamePaneBegin(t *testing.T) {
 
 	// Wait until end1 has consumed its reservation. The second ticket still
 	// owns commit/release/fault, so the generation floor plus those slots is 5.
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		runtime.mu.Lock()
-		used := runtime.qUsed
-		runtime.mu.Unlock()
-		if used == 5 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("end1 did not settle: qUsed=%d", used)
-		}
-		time.Sleep(time.Millisecond)
+	waitDispatch("end1 dispatch")
+	runtime.mu.Lock()
+	used := runtime.qUsed
+	runtime.mu.Unlock()
+	if used != 5 {
+		t.Fatalf("end1 did not settle: qUsed=%d", used)
 	}
 
 	if err := runtime.WritePane(h.key, []byte("LEAK")); err != nil {
@@ -276,7 +289,7 @@ func TestCanceledBeginCannotEndInsideConcurrentSamePaneBegin(t *testing.T) {
 	if err := runtime.Boundary(h.key, "geometry_boundary_probe"); err != nil {
 		t.Fatalf("probe boundary: %v", err)
 	}
-	time.Sleep(200 * time.Millisecond)
+	waitDispatch("probe boundary dispatch")
 	if got := h.down.outputText(); strings.Contains(got, "LEAK") {
 		t.Fatalf("canceled begin's pause_end resumed publication inside later barrier: output=%q", got)
 	}
