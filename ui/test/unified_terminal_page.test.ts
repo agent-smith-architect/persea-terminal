@@ -17,6 +17,7 @@ const artifactRoot = process.env.PERSEA_E2E1_ARTIFACT_ROOT;
 const playwrightModule = process.env.PERSEA_PLAYWRIGHT_MODULE || require.resolve("playwright", { paths: [path.join(repo, "ui")] });
 const chromePath = process.env.PERSEA_E2E1_CHROME || process.env.CHROME_BIN || require(playwrightModule).chromium.executablePath();
 const refitOnly = process.env.PERSEA_E2E1_REFIT_ONLY === "1";
+const alternateOnly = process.env.PERSEA_E2E1_ALTERNATE_ONLY === "1";
 const browserEngine = process.env.PERSEA_E2E1_ENGINE || "chromium";
 if (!path.isAbsolute(repo ?? "") || !path.isAbsolute(artifactRoot ?? "") || !path.isAbsolute(playwrightModule ?? "")) {
   throw new Error("E2E1 requires absolute repo, artifact, and Playwright module paths");
@@ -156,6 +157,7 @@ async function main(): Promise<void> {
     ingress: { socket_path: frontSocket, peer_uid: uid, canonical_host: canonicalHost, operator_login: "operator@example.test", max_connections: 64, ...(browserEngine === "webkit" ? { hermetic_tls: true } : {}) },
     realms: [{ name: "e2e1", display_name: "E2E1", socket: brokerSocket, broker_uid: uid }],
     aliases: [], alias_store_path: path.join(tmp, "aliases.json"), handle_ttl_seconds: 120, handle_capacity: 256,
+    workspace_store_path: path.join(tmp, "workspaces.json"),
   });
 
   const binary = path.join(artifactRoot, "persea-terminal-e2e1");
@@ -257,6 +259,38 @@ async function main(): Promise<void> {
   });
 
   await page.goto(base, { waitUntil: "domcontentloaded" });
+  if (alternateOnly) {
+    // The dashboard must adopt an already running full-screen program. The
+    // command waits without reading input; opening must neither type nor resize.
+    command("tmux", ["-S", tmuxSocket, "new-session", "-d", "-s", "unified_target", "-x", "80", "-y", "24",
+      "sh", "-c", "printf 'NORMAL-BEFORE\\r\\n\\033[?1049h\\033[2J\\033[HFULLSCREEN-READY'; exec sleep 600"]);
+    await until("alternate screen active", () => command("tmux", ["-S", tmuxSocket, "display-message", "-p", "-t", "=unified_target:", "#{alternate_on}"]).trim() === "1");
+    const witness = () => command("tmux", ["-S", tmuxSocket, "display-message", "-p", "-t", "=unified_target:", "#{pane_id}|#{pane_pid}|#{pane_width}|#{pane_height}|#{alternate_on}|#{cursor_x}|#{cursor_y}"]).trim();
+    const before = witness();
+    for (const viewport of [{ width: 320, height: 568 }, { width: 390, height: 844 }, { width: 430, height: 932 }, { width: 844, height: 390 }]) {
+      // Each fresh dashboard/terminal navigation consumes the real shared
+      // request budget. Allow its 40-token burst to refill between scenarios.
+      await page.waitForTimeout(4100);
+      await page.setViewportSize(viewport);
+      await page.goto(base, { waitUntil: "domcontentloaded" });
+      const row = page.locator(".session-card").filter({ has: page.getByRole("heading", { name: "unified_target", exact: true }) });
+      const action = row.locator("button.action-unified-adopt, a.action-unified-open");
+      try { await action.waitFor({ state: "visible", timeout: 10000 }); } catch (error) {
+        throw new Error(`alternate Open unavailable: ${await page.locator("body").innerText()} inventory=${JSON.stringify(await page.evaluate(async () => (await fetch("/api/inventory")).json()))}: ${error}`);
+      }
+      assert(await action.isEnabled(), "full-screen session has no enabled Open action");
+      await action.click();
+      await page.waitForURL(url => url.pathname === "/terminal");
+      await page.waitForSelector(".persea-unified-terminal .xterm");
+      await until("alternate display replayed", () => page.locator(".xterm-rows").innerText().then(text => text.includes("FULLSCREEN-READY")));
+      assert(witness() === before, `opening changed pane state at ${JSON.stringify(viewport)}`);
+    }
+    assert(socketEvents.filter(event => event.direction === "sent" && /"type":"(?:INPUT|RESIZE_REQUEST)"/.test(event.payload)).length === 0, "opening sent input or a resize request");
+    assert(pageErrors.length === 0 && consoleMessages.length === 0 && httpErrors.length === 0, `alternate browser findings: ${JSON.stringify({ pageErrors, consoleMessages, httpErrors })}`);
+    emit("pass", { scenario: "dashboard-alternate-screen", viewports: 4, witness: before });
+    console.log("Dashboard alternate-screen adoption and reopen passed at four phone viewports");
+    return;
+  }
   const csrfCookie = (await context.cookies(base)).find((cookie: any) => cookie.name === "__Host-persea-terminal-csrf");
   assert(csrfCookie?.value, "CSRF cookie missing");
   const created = await page.evaluate(async (csrf: string) => {
