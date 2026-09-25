@@ -64,7 +64,7 @@
     "bounded_burst_duration": "segments fix this quick calibration lane at 60000000000 ns; longer qualification repetitions repeat the entire lane with a fresh lane origin and payload indexes"
   },
   "generation_overlap": {"active_successors_per_source": 1, "held_predecessors_per_source": 1, "single_rotation_owner_per_realm": true, "hold_ns": 1000000000, "release_required_before_settlement": true},
-  "current_limits": {"pane_logical_bytes": 8388608, "realm_logical_bytes": 67108864, "pane_physical_bytes": 25165824, "journal_tmpfs_bytes": 100663296, "cgroup_memory_high_bytes": 891289600, "cgroup_memory_max_bytes": 1073741824, "runtime_generations": 64, "runtime_commands": 131072, "runtime_envelopes": 262144, "ingress_bytes": 67108864, "outbox_bytes": 134217728, "subscriber_event_slots": 64, "maximum_configured_front_connections": 256},
+  "current_limits": {"pane_logical_bytes": 8388608, "realm_logical_bytes": 67108864, "pane_physical_bytes": 25165824, "journal_tmpfs_bytes": 100663296, "cgroup_memory_high_bytes": 891289600, "cgroup_memory_max_bytes": 1073741824, "runtime_generations": 64, "runtime_commands": 131072, "runtime_envelopes": 262144, "ingress_bytes": 67108864, "outbox_bytes": 134217728, "subscriber_event_slots": 1024, "maximum_configured_front_connections": 256},
   "candidate_budget": {
     "status": "targets to reconcile with measured ownership; not enforced by this workload",
     "unit": "MiB (1048576 bytes)",

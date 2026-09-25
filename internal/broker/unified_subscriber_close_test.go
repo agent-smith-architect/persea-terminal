@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -58,6 +59,16 @@ type b1Attachment struct {
 
 func b1Open(t *testing.T, effects *UnifiedDevPaneEffects, session, source string) *b1Attachment {
 	t.Helper()
+	attachment := b1Prepare(t, effects, session, source)
+	attachment.admit(t, source)
+	return attachment
+}
+
+// b1Prepare opens an attachment through PREPARE only: its tail is registered
+// and its snapshot sent, but it is not live until admit sends COMMIT. That
+// window is the one in which a browser loads the replay.
+func b1Prepare(t *testing.T, effects *UnifiedDevPaneEffects, session, source string) *b1Attachment {
+	t.Helper()
 	server, client := net.Pipe()
 	attachment := &b1Attachment{session: session, server: server, client: client, resume: make(chan struct{}), readDone: make(chan struct{}), ended: make(chan struct{})}
 	close(attachment.resume)
@@ -91,6 +102,13 @@ func b1Open(t *testing.T, effects *UnifiedDevPaneEffects, session, source string
 	case <-time.After(5 * time.Second):
 		t.Fatalf("%s PREPARE did not complete", session)
 	}
+	return attachment
+}
+
+// admit sends COMMIT, which makes a prepared attachment live: the snapshot's
+// backlog is written, then the tail streams.
+func (attachment *b1Attachment) admit(t *testing.T, source string) {
+	t.Helper()
 	committed := make(chan error, 1)
 	go func() {
 		commit := terminal.Frame{Version: terminal.ProtocolVersion, Type: terminal.FrameCommit, Source: source, Epoch: 1, Cut: 1}
@@ -99,12 +117,11 @@ func b1Open(t *testing.T, effects *UnifiedDevPaneEffects, session, source string
 	select {
 	case err := <-committed:
 		if err != nil {
-			t.Fatalf("%s COMMIT: %v", session, err)
+			t.Fatalf("%s COMMIT: %v", attachment.session, err)
 		}
 	case <-time.After(5 * time.Second):
-		t.Fatalf("%s COMMIT did not complete", session)
+		t.Fatalf("%s COMMIT did not complete", attachment.session)
 	}
-	return attachment
 }
 
 // Read is the peer's byte-level intake: every read of the wire passes the
@@ -287,29 +304,43 @@ func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T)
 		waitLive(index, fmt.Sprintf("pane %d warm-up sentinel", index+1))
 	}
 
-	// 2. Wedge one attachment's downstream writer and overflow its subscriber
-	// channel while unique output keeps flowing on all six panes. The
-	// triggering event is the publication that evicted the subscriber; the
-	// wedged writer can hold at most one in-flight event plus the channel's
-	// capacity, so eviction cannot come before the 65th publication.
+	// 2. Wedge one attachment's downstream writer and keep unique output
+	// flowing on all six panes. The wedged tail owns the record its writer is
+	// parked on plus every record queued behind it, bounded by bytes: the
+	// wedged pane commits maximal 64 KiB records, so the triggering event is
+	// the publication that would take the tail past recordingTailBytes, and
+	// eviction cannot come before the tail owns fullTail records.
+	const fullTail = recordingTailBytes / (64 << 10)
+	var logMu sync.Mutex
+	var logs bytes.Buffer
+	priorLogf := brokerLogf
+	brokerLogf = func(format string, args ...any) {
+		logMu.Lock()
+		defer logMu.Unlock()
+		_, _ = fmt.Fprintf(&logs, format+"\n", args...)
+	}
+	t.Cleanup(func() { brokerLogf = priorLogf })
 	attachments[wedgedIndex].wedge()
 	var trigger []byte
 	round := 0
 	for trigger == nil {
 		round++
-		if round > 512 {
+		if round > 2*fullTail {
 			t.Fatalf("the wedged subscriber was never evicted after %d publications", round)
 		}
 		for index := 0; index < panes; index++ {
 			payload := []byte(fmt.Sprintf("[r%03d-p%d]", round, index+1))
+			if index == wedgedIndex {
+				payload = bytes.Repeat(payload, (64<<10)/len(payload)+1)[:64<<10]
+			}
 			publish(index, payload)
 			if index == wedgedIndex && b1SubscriberCount(effects, keys[wedgedIndex]) == 0 {
 				trigger = payload
 			}
 		}
 	}
-	if round < 65 {
-		t.Fatalf("eviction after %d publications: the 64-record channel was not overflowed", round)
+	if round <= fullTail {
+		t.Fatalf("eviction after %d publications: the tail was refused before it owned its %d-record byte bound", round, fullTail)
 	}
 	if maxPublish > publishLatencyBound {
 		t.Fatalf("S1: publication latency %v exceeded %v while one subscriber was wedged", maxPublish, publishLatencyBound)
@@ -323,8 +354,8 @@ func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T)
 			t.Fatalf("S1: sibling pane %d subscriber was replaced", index+1)
 		}
 	}
-	if evicted := siblingSubscribers[wedgedIndex]; evicted.closeReason() != proto.SubscriberClosedLagged {
-		t.Fatalf("evicted subscriber closeReason=%q want %q", evicted.closeReason(), proto.SubscriberClosedLagged)
+	if evicted := siblingSubscribers[wedgedIndex]; evicted.closeReason() != proto.SubscriberClosedLagged || evicted.closeLimit() != tailLimitQueueBytes {
+		t.Fatalf("evicted subscriber closeReason=%q limit=%q want %q/%q", evicted.closeReason(), evicted.closeLimit(), proto.SubscriberClosedLagged, tailLimitQueueBytes)
 	}
 
 	// 3. The five healthy panes receive every sentinel in order and never
@@ -351,6 +382,12 @@ func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T)
 	if proto.ClassifyAttachmentError(string(proto.SubscriberClosedLagged)) != proto.AttachmentErrorFatal {
 		t.Fatalf("close code %q is not a fatal attachment code: the front door would not close the socket with it", proto.SubscriberClosedLagged)
 	}
+	// The operator log names the bound behind the reconnect.
+	pollUntil(t, 5*time.Second, "subscriber_closed log naming its limit", func() bool {
+		logMu.Lock()
+		defer logMu.Unlock()
+		return strings.Contains(logs.String(), `event=subscriber_closed reason="subscriber_lagged" limit="queue_bytes"`)
+	})
 	// Only now does the peer read again, and only to observe what the broker
 	// left it: the connection is closed, nothing after the last frame it
 	// took, no typed control — an unbuffered pipe to a peer that was not
@@ -386,22 +423,26 @@ func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T)
 	if got := b1SubscriberCount(effects, keys[wedgedIndex]); got != 1 {
 		t.Fatalf("re-minted attachment subscribers=%d want 1", got)
 	}
-	replay := reminted.replayBytes()
-	if !bytes.Equal(replay, expected[wedgedIndex]) {
-		t.Fatalf("re-minted replay does not equal the committed stream: replay=%d committed=%d", len(replay), len(expected[wedgedIndex]))
+	// The replay is capped at terminal.ReplayByteCap; the rest of the snapshot
+	// follows COMMIT as LIVE backlog, ahead of any new record. Together they
+	// must carry everything committed, including the triggering event.
+	rebuilt := func() []byte {
+		live, _, _, _ := reminted.snapshot()
+		return append(reminted.replayBytes(), live...)
 	}
-	if !bytes.Contains(replay, trigger) {
-		t.Fatalf("re-minted replay is missing the triggering event %q", trigger)
+	pollUntil(t, 5*time.Second, "re-minted snapshot+tail equals the committed stream", func() bool {
+		return bytes.Equal(rebuilt(), expected[wedgedIndex])
+	})
+	if replay := reminted.replayBytes(); len(replay) > terminal.ReplayByteCap || !bytes.Contains(rebuilt(), trigger) {
+		t.Fatalf("re-minted replay=%d bytes (cap %d), triggering event present=%v", len(replay), terminal.ReplayByteCap, bytes.Contains(rebuilt(), trigger))
 	}
 
 	// A post-reconnect sentinel arrives on the new attachment exactly once,
 	// and on every healthy sibling exactly once, in order.
 	post := []byte("[post-reconnect-6]")
-	before := len(expected[wedgedIndex])
 	publish(wedgedIndex, post)
 	pollUntil(t, 5*time.Second, "post-reconnect sentinel on the re-minted tail", func() bool {
-		live, _, _, _ := reminted.snapshot()
-		return bytes.Equal(live, expected[wedgedIndex][before:])
+		return bytes.Equal(rebuilt(), expected[wedgedIndex])
 	})
 	newLive, newControls, newClosed, _ := reminted.snapshot()
 	if bytes.Count(newLive, post) != 1 || len(newControls) != 0 || newClosed {
@@ -420,6 +461,49 @@ func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T)
 	}
 	if maxPublish > publishLatencyBound {
 		t.Fatalf("S1: publication latency %v exceeded %v", maxPublish, publishLatencyBound)
+	}
+}
+
+// TestUnifiedSubscriberAdmissionAbsorbsARepaintBurst pins a reconnect loop a
+// full-screen program caused. Between PREPARE and COMMIT the writer does not
+// drain the tail, a browser can take seconds to load the replay, and a TUI
+// such as a coding agent's repaints many times a second in records of a few
+// dozen bytes. The tail must hold that burst and deliver it in order after
+// COMMIT, not evict the attachment so that the browser re-attaches straight
+// into the same burst.
+func TestUnifiedSubscriberAdmissionAbsorbsARepaintBurst(t *testing.T) {
+	// A literal, not recordingTailSlots: it fills the whole tail while COMMIT
+	// is held, and shrinking the tail must fail this test.
+	const burst = 1024
+	effects, key := recordingReaderFixture(t, 0)
+	attachment := b1Prepare(t, effects, key.Session, "admission-burst")
+	subscriber := b1SubscriberOf(effects, key)
+	if subscriber == nil {
+		t.Fatal("PREPARE registered no tail")
+	}
+	var expected []byte
+	for index := 0; index < burst; index++ {
+		record := []byte(fmt.Sprintf("\x1b]0;%04d Working\x07\x1b[?2026h\x1b[47;3H\x1b[?2026l", index))
+		expected = append(expected, record...)
+		b1Commit(t, effects, key, record)
+	}
+	if b1SubscriberCount(effects, key) != 1 || subscriber.closeReason() != "" {
+		t.Fatalf("a %d-record repaint burst during admission evicted the tail: reason=%q limit=%q", burst, subscriber.closeReason(), subscriber.closeLimit())
+	}
+	attachment.admit(t, "admission-burst")
+	pollUntil(t, 5*time.Second, "the admission burst delivered after COMMIT", func() bool {
+		live, _, _, _ := attachment.snapshot()
+		return bytes.Equal(live, expected)
+	})
+	post := []byte("[post-admission]")
+	expected = append(expected, post...)
+	b1Commit(t, effects, key, post)
+	pollUntil(t, 5*time.Second, "a record after the burst", func() bool {
+		live, _, _, _ := attachment.snapshot()
+		return bytes.Equal(live, expected)
+	})
+	if _, controls, closed, _ := attachment.snapshot(); len(controls) != 0 || closed {
+		t.Fatalf("the admitted attachment reconnected: controls=%v closed=%v", controls, closed)
 	}
 }
 

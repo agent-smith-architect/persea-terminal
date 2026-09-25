@@ -23,6 +23,10 @@ type unifiedDevSubscriber struct {
 	// lock. It stays empty when the subscriber's own cancel closed data: that
 	// is the attachment ending on its own terms, not a verdict on it.
 	closedReason proto.SubscriberCloseReason
+	// closedLimit names the bound behind a subscriber_lagged verdict, for the
+	// operator log only. It is written with closedReason, under the same
+	// ordering, and is empty for every other verdict.
+	closedLimit recordingTailLimit
 	// verdict is closed, after closedReason is written and strictly before
 	// data is closed, when the provider removes this subscriber with a typed
 	// reason. It is the one signal of that removal a consumer can observe
@@ -63,6 +67,11 @@ func (subscriber *unifiedDevSubscriber) closeReason() proto.SubscriberCloseReaso
 	return subscriber.closedReason
 }
 
+// closeLimit is valid under the same rule as closeReason.
+func (subscriber *unifiedDevSubscriber) closeLimit() recordingTailLimit {
+	return subscriber.closedLimit
+}
+
 func (effects *UnifiedDevPaneEffects) WritePane(key unifiedjournal.PaneKey, payload []byte) error {
 	return errors.New("unified feed range metadata is required")
 }
@@ -89,13 +98,14 @@ func (effects *UnifiedDevPaneEffects) WritePaneGeometry(key unifiedjournal.PaneK
 // publishEvent fans one committed event out to every live subscriber. A
 // subscriber that has already advanced past this sequence is skipped; one that
 // is behind it has missed an event and is closed rather than fed a gap; one
-// whose buffer is full is wedged and is evicted rather than blocking the
-// publication path — publication holds the realm-wide subscriber lock, so a
-// single stalled reader must never hold back every other pane's live tail.
-// Both closures are one typed outcome, subscriber_lagged, delivered through
-// closeSubscriberLocked: the attachment that owns the subscriber ends with
-// that reason, the browser classifies it reconnectable, and the client is
-// rebuilt from snapshot+tail — which includes the very event that evicted it.
+// whose tail already owns its bound of events or bytes is wedged and is
+// evicted rather than blocking the publication path — publication holds the
+// realm-wide subscriber lock, so a single stalled reader must never hold back
+// every other pane's live tail. Both closures are one typed outcome,
+// subscriber_lagged, delivered through closeLaggedSubscriberLocked: the
+// attachment that owns the subscriber ends with that reason, the browser
+// classifies it reconnectable, and the client is rebuilt from snapshot+tail —
+// which includes the very event that evicted it.
 func (effects *UnifiedDevPaneEffects) publishEvent(key unifiedjournal.PaneKey, event unifiedjournal.Event) error {
 	effects.subscriberMu.Lock()
 	defer effects.subscriberMu.Unlock()
@@ -114,11 +124,15 @@ func (effects *UnifiedDevPaneEffects) publishEvent(key unifiedjournal.PaneKey, e
 			continue
 		}
 		if subscriber.cursor != event.Sequence-1 {
-			effects.closeSubscriberLocked(key, subscriber, proto.SubscriberClosedLagged)
+			effects.closeLaggedSubscriberLocked(key, subscriber, tailLimitSequenceGap)
 			continue
 		}
-		if len(subscriber.data) == cap(subscriber.data) || !subscriber.lease.reserveEvent(recordingEventBytes(event)) {
-			effects.closeSubscriberLocked(key, subscriber, proto.SubscriberClosedLagged)
+		limit := tailLimitQueueEvents
+		if len(subscriber.data) < cap(subscriber.data) {
+			limit = subscriber.lease.reserveTailEvent(recordingEventBytes(event))
+		}
+		if limit != "" {
+			effects.closeLaggedSubscriberLocked(key, subscriber, limit)
 			continue
 		}
 		delivered := event
@@ -137,10 +151,21 @@ func (effects *UnifiedDevPaneEffects) publishEvent(key unifiedjournal.PaneKey, e
 			}
 		default:
 			subscriber.releaseEvent(delivered)
-			effects.closeSubscriberLocked(key, subscriber, proto.SubscriberClosedLagged)
+			effects.closeLaggedSubscriberLocked(key, subscriber, tailLimitQueueEvents)
 		}
 	}
 	return nil
+}
+
+// closeLaggedSubscriberLocked evicts one subscriber with subscriber_lagged and
+// records which bound refused it. Caller holds subscriberMu. The limit is
+// written only while the subscriber is still registered, which is exactly
+// when closeSubscriberLocked goes on to publish the verdict it belongs to.
+func (effects *UnifiedDevPaneEffects) closeLaggedSubscriberLocked(key unifiedjournal.PaneKey, subscriber *unifiedDevSubscriber, limit recordingTailLimit) {
+	if _, present := effects.subscribers[key][subscriber]; present {
+		subscriber.closedLimit = limit
+	}
+	effects.closeSubscriberLocked(key, subscriber, proto.SubscriberClosedLagged)
 }
 
 // removeSubscriberLocked removes one subscriber without publishing a provider
