@@ -409,8 +409,11 @@ func TestSourceAutomaticRotationFreshFrontdoorController(t *testing.T) {
 	})
 	frontSocket, client := frontdoorRotationStartFrontdoor(t, listener.Addr().String())
 
+	const pressureComplete = "ROTATION-PRESSURE-COMPLETE"
+	// Each input line authorizes exactly 1,000 rows. The producer then waits
+	// for the test to observe their commit before it can emit the next burst.
 	disposable.run("new-session", "-d", "-s", "rotation_live", "-x", "80", "-y", "24",
-		"sh", "-c", "stty -echo; exec sh")
+		"sh", "-c", `stty -echo; awk 'BEGIN { for (b=0; b<57; b++) { getline; for (i=b*1000; i<(b+1)*1000; i++) printf "rotation-AUTO-%06d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", i; fflush() } print "`+pressureComplete+`"; fflush() }'; exec sh`)
 	sessionID := strings.TrimSpace(disposable.run("display-message", "-p", "-t", "rotation_live:", "#{session_id}"))
 	ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 	defer cancel()
@@ -422,14 +425,37 @@ func TestSourceAutomaticRotationFreshFrontdoorController(t *testing.T) {
 	predecessorKey = adoption.Key
 	predecessorCloseMu.Unlock()
 
-	const pressureComplete = "ROTATION-PRESSURE-COMPLETE"
-	disposable.run("send-keys", "-t", "rotation_live:",
-		`awk 'BEGIN { for (i=0; i<57000; i++) printf "rotation-AUTO-%06d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", i; print "`+pressureComplete+`"; fflush() }'`, "Enter")
+	// Journal pressure is cumulative retained output, not an ingress overload.
+	// Wait for each bounded burst to commit and release its source credits
+	// before asking the producer for more, even when the recorder is delayed.
+	pressureRegistry := effects.observer.(*paneRegistry)
+	effects.journalMu.Lock()
+	pressureBase := effects.realm.CommittedOffset(adoption.Key)
+	effects.journalMu.Unlock()
+	burst := 0
 	pollUntil(t, 15*time.Second, "automatic journal pressure", func() bool {
 		effects.journalMu.Lock()
 		logical, cap := effects.realm.PaneLogical(adoption.Key)
+		committed := effects.realm.CommittedOffset(adoption.Key)
 		effects.journalMu.Unlock()
-		return logical*4 >= cap*3
+		pressureRegistry.retention.mu.Lock()
+		generation := pressureRegistry.retention.generations[adoption.Key]
+		failed := generation != nil && generation.failed
+		idle := generation != nil && generation.source != nil && generation.source.usage.envelopes == 0
+		failure := pressureRegistry.retention.closeErr
+		pressureRegistry.retention.mu.Unlock()
+		if failed {
+			t.Fatalf("pressure recording failed: %v", failure)
+		}
+		if committed < pressureBase+int64(burst)*71000 || !idle {
+			return false
+		}
+		if burst == 57 {
+			return logical*4 >= cap*3
+		}
+		burst++
+		disposable.run("send-keys", "-t", "rotation_live:", "Enter")
+		return false
 	})
 	// Finish the pressure producer before attaching. Otherwise its remaining
 	// burst can evict the subscriber for lag while this test is specifically
