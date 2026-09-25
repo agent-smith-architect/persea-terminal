@@ -2343,6 +2343,13 @@ func (stream *recordingSettlementStream) abortAdoption(holder *unifiedDevBirth, 
 	reservation.Abort()
 	stream.unit.owner.realm.ReclaimRetired(journalKey(holder.witness))
 	stream.unit.owner.journalMu.Unlock()
+	// Receipt failure can precede registration on the unit, so its reaper
+	// does not yet own this provisional holder. Release it with the abort.
+	stream.unit.owner.mu.Lock()
+	if stream.unit.owner.panes[holder.witness.Pane] == holder {
+		delete(stream.unit.owner.panes, holder.witness.Pane)
+	}
+	stream.unit.owner.mu.Unlock()
 	return cause
 }
 
