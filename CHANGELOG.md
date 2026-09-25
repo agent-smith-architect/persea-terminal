@@ -4,6 +4,10 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+### Fixed
+
+- Composer font changes preserve the draft's scroll position after a scroll gesture is interrupted by switching tabs or leaving the window.
+
 ## 0.1.1 — 2026-09-24
 
 ### Added

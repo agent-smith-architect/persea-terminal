@@ -151,6 +151,75 @@ module.exports = async function composerScrollGestures(browser, engine) {
       assert(Math.abs(releasedTop - 100) <= 1, `${kind}: completed gesture still blocked layout repair: ${releasedTop}`);
       await page.evaluate(() => composer.destroy());
     }
+    const completionEvidence = [];
+    for (const signal of ["pointercancel", "lostpointercapture", "touchcancel", "blur", "hidden",
+      "unrelated-pointer", "remaining-pointer", "unrelated-touch", "remaining-touch", "visible", "textarea-blur"]) {
+      await page.setContent(`<style>
+        textarea { width: 400px; height: 200px !important; overflow: scroll;
+          font: var(--persea-composer-font-size, 11px) monospace; }
+      </style><div id="dock"></div>`);
+      await page.addScriptTag({ content: bundle.outputFiles[0].text });
+      completionEvidence.push(await page.evaluate(async (signal) => {
+        const t = composer.textarea;
+        t.value = Array.from({ length: 300 }, (_, i) => `line ${i}`).join("\n");
+        t.dispatchEvent(new Event("input"));
+        t.focus();
+        t.setSelectionRange(0, 0);
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const pointer = (type, id) => t.dispatchEvent(new PointerEvent(type, { pointerId: id, bubbles: true }));
+        const touch = (type, id) => {
+          const event = new Event(type, { bubbles: true });
+          Object.defineProperty(event, "changedTouches", { value: [{ identifier: id }] });
+          t.dispatchEvent(event);
+        };
+        const usesTouch = signal.includes("touch");
+        if (usesTouch) touch("touchstart", 7);
+        else pointer("pointerdown", 7);
+        // Lifecycle interruptions must clear both representations of a touch
+        // gesture, even when neither release event can reach the document.
+        if (signal === "blur" || signal === "hidden") touch("touchstart", 7);
+        if (signal === "pointercancel" || signal === "lostpointercapture") pointer(signal, 7);
+        else if (signal === "touchcancel") touch(signal, 7);
+        else if (signal === "blur") window.dispatchEvent(new Event("blur"));
+        else if (signal === "hidden" || signal === "visible") {
+          Object.defineProperty(document, "visibilityState", { configurable: true, value: signal });
+          document.dispatchEvent(new Event("visibilitychange"));
+          delete document.visibilityState;
+        } else if (signal === "textarea-blur") t.blur();
+        else if (signal === "unrelated-pointer") pointer("pointercancel", 8);
+        else if (signal === "remaining-pointer") {
+          pointer("pointerdown", 8);
+          pointer("lostpointercapture", 7);
+        } else if (signal === "unrelated-touch") touch("touchcancel", 8);
+        else if (signal === "remaining-touch") {
+          touch("touchstart", 8);
+          touch("touchcancel", 7);
+        }
+        t.scrollTop = 100;
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const saved = window.requestAnimationFrame;
+        const callbacks = [];
+        window.requestAnimationFrame = (callback) => { callbacks.push(callback); return 300000 + callbacks.length; };
+        composer.applyTypographyState({ size: 13, status: "ready", message: "", enabled: true });
+        // Force a layout scroll between publication and repair so a skipped
+        // repair cannot pass simply because the browser kept the old offset.
+        t.scrollTop = 200;
+        t.dispatchEvent(new Event("scroll"));
+        window.requestAnimationFrame = saved;
+        for (const callback of callbacks) callback(performance.now());
+        const repairedTop = t.scrollTop;
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const actualTop = t.scrollTop;
+        composer.destroy();
+        return { signal, repairedTop, actualTop };
+      }, signal));
+    }
+    const completed = new Set(["pointercancel", "lostpointercapture", "touchcancel", "blur", "hidden"]);
+    assert.deepEqual(completionEvidence.filter((proof) => {
+      const expected = completed.has(proof.signal) ? 100 : 200;
+      return Math.abs(proof.repairedTop - expected) > 1 || Math.abs(proof.actualTop - expected) > 1;
+    }), [], "completed gestures must allow repair; remaining gestures must keep their scroll");
+    evidence.push(...completionEvidence);
     assert.deepEqual(messages, [], "composer gesture console must stay clean");
     return evidence;
   } finally {
