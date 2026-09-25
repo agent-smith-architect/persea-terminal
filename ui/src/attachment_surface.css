@@ -1,0 +1,58 @@
+/* Shared surface status and compact viewport rules. */
+/* This inherited the page's 16px sans and so rendered LARGER than the controls it
+   describes — on a phone it was the biggest text on screen, above the terminal,
+   saying that nothing was wrong. It gets the same compact treatment as every other
+   status in the header. */
+.continuous-surface-interaction-status {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  transform: none;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: 600 .72rem/1 ui-monospace, monospace;
+  text-align: center;
+  letter-spacing: .04em;
+  color: #b7cbe0;
+  background: #111923;
+  pointer-events: none;
+}
+.continuous-surface-interaction-status[data-state="control-enabled"],
+.continuous-surface-interaction-status[data-state="control-disabled"],
+.continuous-surface-interaction-status[data-state="control-pending"],
+.continuous-surface-interaction-status[data-state="observe-read-only"] {
+  visibility: hidden;
+  transform: translateY(-100%);
+}
+.continuous-surface-display-readout:has(> .continuous-surface-interaction-status:not([data-state="control-enabled"]):not([data-state="control-disabled"]):not([data-state="control-pending"]):not([data-state="observe-read-only"])) > .continuous-surface-display-status {
+  visibility: hidden;
+}
+.continuous-surface-live-host--local-select { touch-action: none !important; }
+
+@media (max-width: 640px) {
+  .attachment-page__stage { min-height: 0; }
+  /* Interim compaction while the toolbar is restructured. Measured from a phone
+     screenshot, chrome above the terminal was five rows deep — header, zoom, mode
+     and clipboard, selection, status — leaving the terminal well under half the
+     screen with a keyboard up. Tightening type and padding does not fix the real
+     problem, which is that rarely-used controls are inline at all, but it buys
+     back roughly a row and a half now rather than after the restructure. */
+  .continuous-surface-toolbar { padding: 4px 6px; }
+  .continuous-surface-toolbar button {
+    padding: .2rem .4rem;
+    font-size: .78rem;
+    line-height: 1.15;
+  }
+  .continuous-surface-display-status { font-size: .68rem; }
+  .continuous-surface-interaction-status { font-size: .68rem; }
+  .continuous-surface-interaction-controls { gap: 4px; }
+}
+
+@media (orientation: landscape) and (max-height: 520px) {
+  .attachment-page__stage { min-height: 0; }
+}

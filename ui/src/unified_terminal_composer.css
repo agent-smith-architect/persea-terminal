@@ -1,0 +1,466 @@
+/* Unified key bar, composer dock, and typography controls. */
+
+/* The mobile key bar. In flow as the grid's last row so it sits on the
+   software keyboard's top edge without positioning arithmetic. */
+.persea-unified-keybar {
+  display: flex;
+  flex-direction: row;
+  gap: .2rem;
+  min-width: 0;
+  padding: .3rem .25rem calc(.3rem + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid #343844;
+  background: #1b1e25;
+}
+.persea-unified-keybar[hidden] { display: none; }
+
+/* A stable core can scroll on narrow screens while Keys stays fixed. */
+.persea-unified-keybar-row { display: flex; flex: 1; gap: .2rem; min-width: 0; overflow-x: auto; }
+.persea-unified-keybar-row[hidden] { display: none; }
+
+/* Equal flex so the arrow cluster lands in predictable places under the thumb:
+   a key whose position shifts with its label length is a key you have to look
+   at. 44px both ways is the touch-target law on a coarse pointer. */
+.persea-unified-keybar-key {
+  flex: 1 1 0;
+  min-width: 44px;
+  min-height: 44px;
+  box-sizing: border-box;
+  border: 1px solid #596171;
+  border-radius: .4rem;
+  padding: .2rem 0;
+  background: #282d38;
+  color: #f3f4f6;
+  font: 600 .88rem/1 ui-monospace, monospace;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.persea-unified-keybar-key:active { background: #38404f; }
+/* Narrow screens reduce gaps, never the 44px touch targets. */
+@media (max-width: 389px) {
+  .persea-unified-keybar, .persea-unified-keybar-row { gap: 2px; }
+}
+.persea-unified-keybar-key--bank {
+  flex: 0 0 44px;
+  min-width: 44px;
+  min-height: 44px;
+  border-color: color-mix(in srgb, var(--persea-chrome-muted-fg, #aeb9cc) 40%, transparent);
+  background: var(--persea-chrome-bg, #1b1e25);
+}
+.persea-unified-keybar-key--bank[aria-pressed="true"] {
+  border-width: 1px;
+  color: var(--persea-chrome-fg, #e6edf3);
+}
+/* The latch must be unmistakable: an armed modifier that looks unarmed sends
+   the operator's next keystroke somewhere they did not intend. */
+.persea-unified-keybar-key--latch[data-latched="true"] {
+  border-color: #ffc77d;
+  background: #4a3a18;
+  color: #ffc77d;
+}
+
+/* The compact composer. The legacy Composer component docked as an in-flow
+   grid row above the key bar: where the legacy page floats the panel over the
+   terminal's bottom edge and publishes an overlay inset, here the grid row
+   takes real height, the viewport shrinks, and the ResizeObserver's
+   coarse-pointer height-only gate keeps the change out of fitFont. Everything
+   below is an ancestor-scoped compact restyle of the shared component. */
+.persea-unified-composer-dock {
+  min-width: 0;
+}
+
+/* The legacy edge tab is replaced by the key-bar and toolbar toggles; if it
+   rendered here, the "closed" dock row would gain height. */
+.persea-unified-composer-dock .attachment-page__compose-tab { display: none; }
+
+.persea-unified-composer-dock .attachment-page__composer {
+  position: static;
+  z-index: auto;
+  left: auto;
+  right: auto;
+  bottom: auto;
+  /* One chrome row instead of two: the header's symbolic buttons sit beside
+     the footer. The header takes the first, content-sized column so that the
+     footer — whose ➤ is the row's rightmost primary — owns the flexible
+     remainder. The explicit placements below are inert in the sent state,
+     which switches the panel to flex. */
+  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto;
+  gap: .25rem .35rem;
+  max-height: var(--persea-composer-inset-budget, 20rem);
+  padding: .3rem .4rem;
+  border: 0;
+  border-top: 1px solid #343844;
+  border-radius: 0;
+  background: #1b1e25;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+/* With the key bar row hidden (keyboard down) the panel is the shell's bottom
+   edge; keep it above the iPhone home indicator. While the keyboard is up the
+   layout-viewport safe area sits underneath the keyboard, so the pad must not
+   apply then — hence the :has gate rather than an unconditional pad. */
+.persea-unified-terminal:has(.persea-unified-keybar[hidden]) .attachment-page__composer {
+  padding-bottom: calc(.3rem + env(safe-area-inset-bottom, 0px));
+}
+
+.persea-unified-composer-dock .attachment-page__composer-grip {
+  grid-row: 1;
+  grid-column: 1 / -1;
+  height: 14px;
+  margin: -.3rem auto -.2rem;
+}
+.persea-unified-composer-dock .attachment-page__composer-grip::after {
+  margin-top: 5px;
+  background: #596171;
+}
+
+.persea-unified-composer-dock .attachment-page__composer-textarea {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  /* No percentage term here. Auto-grow sets the textarea's inline height to
+     its full scrollHeight and relies on this clamp; a percentage max-height
+     cannot resolve while the auto row is being intrinsically sized, so the
+     browser sizes the row to the unclamped height (a long dictated draft:
+     hundreds of pixels) and the chrome row with ⊕ ⌫ ➤ lands below the
+     keyboard. An absolute clamp sizes the row to the clamp. */
+  max-height: 6rem;
+  padding: .25rem .4rem;
+  border-color: #596171;
+  background: #10131a;
+  /* The operator's composer face, defaulted one step below the 14px this
+     rule used to hardcode for a fine pointer. The coarse-pointer floor below
+     is not negotiable by this preference. */
+  font: var(--persea-composer-font-size, 11px)/1.2 ui-monospace, monospace;
+}
+.persea-unified-composer-dock .attachment-page__composer[data-size="expanded"] .attachment-page__composer-textarea {
+  /* Both terms matter. The first is the share of the VISIBLE band an expanded
+     composer may take — the page publishes that band now, so it is no longer
+     silently 100dvh, which is what let the panel grow under the keyboard. The
+     second is the panel's whole allowance measured by the page (viewport top
+     to the lowest visible edge, less the key bar and four terminal rows); the
+     textarea may never claim all of it, because the chrome row with ⊕ ⌫ ➤
+     lives inside the same box. */
+  max-height: min(
+    calc(var(--persea-visual-viewport-height, 100dvh) * .4),
+    calc(var(--persea-composer-inset-budget, 100dvh) - 4rem)
+  );
+}
+/* / unrestricted-zoom: no coarse floor. The composer face is the operator's
+   chosen size on every pointer. The iOS focus zoom is prevented at the
+   composer (composer.ts: a 16px face for the instant of focus on a coarse
+   pointer), never by a viewport zoom cap — `maximum-scale` / `user-scalable=no`
+   would defeat page zoom (WCAG 1.4.4). */
+
+.persea-unified-composer-dock .attachment-page__composer-guard-actions {
+  grid-row: 3;
+  grid-column: 1 / -1;
+}
+
+/* The chrome row never scrolls. Three zones: the counter/status text, which
+   yields (ellipsis, then hidden below 360px); the optional Fix/Restore word
+   buttons, which yield next; and the ⊕ ⌫ ➤ actions, which are flex:none and
+   geometrically incapable of being pushed out — ➤ is the row's right edge.
+   overflow:hidden rather than auto: a control that needs scrolling to reach
+   is a control the operator cannot find. */
+.persea-unified-composer-dock .attachment-page__composer-header {
+  grid-row: 4;
+  grid-column: 1;
+  min-height: 40px;
+}
+.persea-unified-composer-dock .attachment-page__composer-footer {
+  grid-row: 4;
+  grid-column: 2;
+  min-height: 40px;
+  min-width: 0;
+  padding-right: 0;
+  justify-content: flex-end;
+  overflow: hidden;
+}
+/* Word chrome goes; the aria labels carry the semantics. */
+.persea-unified-composer-dock .attachment-page__composer-label { display: none; }
+
+/* 40px both ways on a fine pointer; 44px — the touch-target law — on a
+   coarse one (below). Three header controls plus ⊕ ⌫ ➤ at 44px fit 390pt
+   with the text zone on its own line (the narrow-width rules below). */
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__button {
+  min-width: 40px;
+  min-height: 40px;
+  padding: .2rem .35rem;
+  border-color: #596171;
+  background: #282d38;
+}
+.persea-unified-composer-dock .attachment-page__composer-typography {
+  position: relative;
+  flex: none;
+}
+.persea-unified-composer-dock .attachment-page__composer-typography-trigger {
+  font: 700 .8rem/1 ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover {
+  position: fixed;
+  z-index: 80;
+  display: grid;
+  width: min(15rem, calc(100vw - 1rem));
+  box-sizing: border-box;
+  gap: .45rem;
+  padding: .65rem;
+  border: 1px solid var(--persea-chrome-control-border);
+  border-radius: .55rem;
+  background: var(--persea-chrome-bg);
+  color: var(--persea-chrome-fg);
+  box-shadow: 0 14px 36px rgb(0 0 0 / 55%);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover[hidden] { display: none; }
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button {
+  min-width: 40px;
+  min-height: 40px;
+  padding: .2rem .35rem;
+  border-color: var(--persea-chrome-control-border);
+  background: var(--persea-chrome-control-bg);
+  color: var(--persea-chrome-fg);
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button[aria-disabled="true"] {
+  cursor: not-allowed;
+  opacity: .65;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover[aria-busy="true"] .attachment-page__button[aria-disabled="true"] {
+  cursor: wait;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-label {
+  font: 700 .78rem/1.2 ui-monospace, monospace;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-stepper,
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-actions {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-current {
+  flex: 1 1 auto;
+  min-width: 3.5rem;
+  text-align: center;
+  font: 700 .82rem/1 ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-actions .attachment-page__button {
+  flex: 1 1 0;
+  white-space: nowrap;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-status {
+  min-height: 1em;
+  color: var(--persea-chrome-muted-fg);
+  font: 600 .68rem/1.3 ui-monospace, monospace;
+  overflow-wrap: anywhere;
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-status[hidden] { display: none; }
+.persea-unified-terminal > .attachment-page__composer-typography-popover:is(
+  [data-status="conflict"], [data-status="unavailable"], [data-status="refused"]
+) {
+  border-color: var(--persea-chrome-notice-fg);
+}
+.persea-unified-terminal > .attachment-page__composer-typography-popover:is(
+  [data-status="conflict"], [data-status="unavailable"], [data-status="refused"]
+) .attachment-page__composer-typography-status {
+  color: var(--persea-chrome-notice-fg);
+}
+/* Hide is neutral navigation, not a mode or resize choice. Its box is 44px on
+   every pointer so the internal and external ways out have equal reach. */
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-close {
+  border-color: transparent;
+  background: transparent;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+}
+/* The semantic marker makes the same target law independently testable
+   without applying the unified dock's presentation to the legacy host. */
+.attachment-page__composer.attachment-page__composer--symbolic .attachment-page__composer-header-actions .attachment-page__composer-close {
+  min-width: 44px;
+  min-height: 44px;
+}
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-close:hover {
+  border-color: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 32%, transparent);
+  background: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 8%, transparent);
+}
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-close:focus-visible {
+  outline: 2px solid var(--persea-accent, #8fc7ff);
+  outline-offset: 2px;
+  border-color: var(--persea-accent, #8fc7ff);
+}
+/* Scoped to the unified dock: the legacy page keeps its pinned compact
+   header geometry and presentation. */
+@media (pointer: coarse) {
+  /* The typography panel is a page-owned portal, not a dock descendant. Keep
+     every one of its enabled and disabled actions inside the same 44px target
+     law as the composer header controls. */
+  .persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .persea-unified-composer-dock .attachment-page__composer .attachment-page__button,
+  .persea-unified-composer-dock .attachment-page__composer-mode .attachment-page__button,
+  .persea-unified-composer-dock .attachment-page__composer-header-actions .attachment-page__button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+  .persea-unified-composer-dock .attachment-page__composer-header,
+  .persea-unified-composer-dock .attachment-page__composer-footer,
+  .persea-unified-composer-dock .attachment-page__composer-actions { min-height: 44px; }
+  /* The text box is a target too: tall enough to land a caret in. */
+  .persea-unified-composer-dock .attachment-page__composer-textarea { min-height: 44px; }
+  /* The grip is a drag target: 24px tall, visibly, with no negative margin
+     eating the box. */
+  .persea-unified-composer-dock .attachment-page__composer-grip {
+    height: 24px;
+    margin: 0 auto;
+  }
+  .persea-unified-composer-dock .attachment-page__composer-grip::after { margin-top: 10px; }
+}
+
+/* The status line at phone widths: its own full-width line above the button
+   row, never sharing a row with the buttons or the counter. The footer
+   dissolves (`display: contents`) so the status and the action group become
+   grid items of the panel: status on its own row spanning both columns, the
+   action group beside the header on the row below. Guard/blocked colours are
+   the same selectors as before and keep applying. */
+.attachment-page__composer-actions { display: contents; }
+@media (max-width: 719px) {
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]) {
+    grid-template-rows: auto auto auto auto auto;
+  }
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]) .attachment-page__composer-footer {
+    display: contents;
+  }
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]) .attachment-page__composer-status {
+    grid-row: 4;
+    grid-column: 1 / -1;
+    min-width: 0;
+    overflow: visible;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    padding: .1rem .15rem 0;
+  }
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]) .attachment-page__composer-header {
+    grid-row: 5;
+  }
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]) .attachment-page__composer-actions {
+    grid-row: 5;
+    grid-column: 2;
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: .35rem;
+    min-width: 0;
+    min-height: 40px;
+    overflow: hidden;
+  }
+  /* With the chip strip present the rows renumber once more. */
+  .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]) {
+    grid-template-rows: auto auto auto auto auto auto;
+  }
+  .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]) .attachment-page__composer-status {
+    grid-row: 5;
+  }
+  .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]) .attachment-page__composer-header,
+  .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]) .attachment-page__composer-actions {
+    grid-row: 6;
+  }
+  /* with no status to show, the chrome row moves up so the
+     empty status track costs no gap. */
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]):has(.attachment-page__composer-status[hidden]) {
+    grid-template-rows: auto auto auto auto;
+  }
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]):has(.attachment-page__composer-status[hidden]) .attachment-page__composer-header,
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]):has(.attachment-page__composer-status[hidden]) .attachment-page__composer-actions {
+    grid-row: 4;
+  }
+  .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]):has(.attachment-page__composer-status[hidden]) {
+    grid-template-rows: auto auto auto auto auto;
+  }
+  .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]):has(.attachment-page__composer-status[hidden]) .attachment-page__composer-header,
+  .persea-unified-composer-dock .attachment-page__composer[data-attachments]:not([data-content="sent"]):has(.attachment-page__composer-status[hidden]) .attachment-page__composer-actions {
+    grid-row: 5;
+  }
+}
+/* The word buttons stay whole while the text zone is there to yield (a
+   "Fix" squeezed to "F…" is no button); below the 360px floor, with the
+   text gone, they are the row's only give and ellipsize before the actions,
+   which never yield. */
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-fix,
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-restore {
+  flex: 0 0 auto;
+  /* the touch-target law applies to the word buttons too — "Fix"
+     measured 35px wide before (the ergonomics census never saw it). They
+     may still ellipsize below the 360 floor, never below 44px. */
+  min-width: 44px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 359px) {
+  .persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-fix,
+  .persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-restore { flex-shrink: 1; }
+}
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-attach,
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-clear,
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-send {
+  flex: none;
+}
+.persea-unified-composer-dock .attachment-page__composer-mode .attachment-page__button[aria-pressed="true"] {
+  border-color: #e6edf3;
+  background: #38404f;
+}
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-send {
+  min-width: 2.75rem;
+  border-color: #3f86c4;
+  background: #1d4f7a;
+  color: #eaf5ff;
+}
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-send:disabled {
+  border-color: #596171;
+  background: #1b1e25;
+  color: #6f8599;
+}
+
+.persea-unified-composer-dock .attachment-page__composer-status {
+  font-size: .68rem;
+}
+
+/* The chip strip in the unified dock's explicitly-placed grid: with
+   attachments present the rows renumber (grip, chips, textarea, guard,
+   chrome); without, the base 4-row placement stands untouched. */
+.persea-unified-composer-dock .attachment-page__composer[data-attachments] {
+  grid-template-rows: auto auto auto auto auto;
+}
+.persea-unified-composer-dock .attachment-page__composer[data-attachments] .attachment-page__composer-chips {
+  grid-row: 2;
+  grid-column: 1 / -1;
+}
+.persea-unified-composer-dock .attachment-page__composer[data-attachments] .attachment-page__composer-textarea {
+  grid-row: 3;
+}
+.persea-unified-composer-dock .attachment-page__composer[data-attachments] .attachment-page__composer-guard-actions {
+  grid-row: 4;
+}
+.persea-unified-composer-dock .attachment-page__composer[data-attachments] .attachment-page__composer-footer,
+.persea-unified-composer-dock .attachment-page__composer[data-attachments] .attachment-page__composer-header {
+  grid-row: 5;
+}
+.persea-unified-composer-dock .attachment-page__composer-chip {
+  border-color: #596171;
+  background: #282d38;
+  color: #f3f4f6;
+}
+.persea-unified-composer-dock .attachment-page__composer-chip[data-status="failed"] {
+  border-color: #7a3b3b;
+  color: #ffb4ab;
+}
+.persea-unified-composer-dock .attachment-page__composer-chip-button {
+  border-color: #596171;
+  background: #1b1e25;
+  color: #f3f4f6;
+}
