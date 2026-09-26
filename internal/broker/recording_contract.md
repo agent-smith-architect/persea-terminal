@@ -453,6 +453,17 @@ accepted work still settles through the initial-state driver and retention
 owners. Original typed errors remain private and preserved; no late ready result
 can restore a generation after the authoritative fault.
 
+`TestRecordingNativeClientOverlapCalibration` measures this process/owner
+distinction. Its transient peak is 45 native clients: 27 attachment clients,
+one active observer and 17 founders held in readiness callbacks. Under pressure
+the supervisor removes exactly those 17 founding client identities while all
+28 others survive. The sustained measurement checks the surviving identities,
+producer progress and memory for 30 seconds; all 18 observer units remain charged
+while the callbacks are held. Attachment overload then leaves only the active
+native observer. Releasing the callbacks settles the 17 founding owners, leaving
+exactly the active unit; final shutdown must settle every owner and native client.
+The transient peak is not a promise of 45 permanently unread native clients.
+
 Slow rotation, spawn, source classification, reap and terminal-retirement retries
 use one lifecycle work slot. RunObserver remains the decision owner and continues
 sampling, accepting bounded requests and reporting admission refusal. At most 18
