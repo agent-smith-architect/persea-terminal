@@ -20,6 +20,7 @@ import {
   TRANSPORT_LIVENESS_PREFIX, decodeServerLivenessFrame, encodeBrowserLivenessPing,
   type TransportLivenessRuntime,
 } from "../src/transport_liveness";
+import { TRANSPORT_FLOW_PREFIX } from "../src/transport_flow";
 import { parseCSRFCookie, refreshCSRFToken } from "../src/csrf_refresh";
 import { classifyUnifiedClose } from "../src/unified_close_policy";
 import { normalizeComposedText, serializeComposerSegments } from "../src/composer";
@@ -285,8 +286,8 @@ test("history_depth_desired_survives_one_class2_reconnect_then_falls_back_after_
       sockets.push(socket);
       return socket as unknown as AttachmentWebSocket;
     },
-    ["persea-terminal.v1", "persea-history.5000"],
-    async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-terminal.v1", "persea-history.5000"]) }),
+    ["persea-terminal.v2", "persea-history.5000"],
+    async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-terminal.v2", "persea-history.5000"]) }),
     () => 0.5,
     clock.runtime,
   );
@@ -328,7 +329,7 @@ test("history_depth_defer_is_pending_not_class2_and_times_out_visibly", async ()
   const transport = new WebSocketAttachmentTransport(
     "ws://example.test/ws",
     () => socket as unknown as AttachmentWebSocket,
-    ["persea-terminal.v1", "persea-history.5000"],
+    ["persea-terminal.v2", "persea-history.5000"],
     undefined,
     () => 0.5,
     clock.runtime,
@@ -380,8 +381,8 @@ test("history_depth_defer_does_not_spend_the_ambiguous_cut_retry", async () => {
       sockets.push(socket);
       return socket as unknown as AttachmentWebSocket;
     },
-    ["persea-terminal.v1", "persea-history.5000"],
-    async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-terminal.v1", "persea-history.5000"]) }),
+    ["persea-terminal.v2", "persea-history.5000"],
+    async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-terminal.v2", "persea-history.5000"]) }),
     () => 0.5,
     clock.runtime,
   );
@@ -414,7 +415,7 @@ test("history_depth_terminal_retirement_clears_the_reader_hold_timer", async () 
     const transport = new WebSocketAttachmentTransport(
       "ws://example.test/ws",
       () => socket as unknown as AttachmentWebSocket,
-      ["persea-terminal.v1", "persea-history.5000"],
+      ["persea-terminal.v2", "persea-history.5000"],
       undefined,
       () => 0.5,
       clock.runtime,
@@ -451,7 +452,7 @@ test("same_depth_reader_retry_replaces_the_old_timeout_generation", async () => 
   const transport = new WebSocketAttachmentTransport(
     "ws://example.test/ws",
     () => socket as unknown as AttachmentWebSocket,
-    ["persea-terminal.v1", "persea-history.5000"],
+    ["persea-terminal.v2", "persea-history.5000"],
     undefined,
     () => 0.5,
     clock.runtime,
@@ -1178,6 +1179,92 @@ test("handoff_closes_start_a_fresh_episode", async () => {
     equal(sockets.length, before + 1, `${reason} did not re-attach at the base delay`);
     transport.detach();
   }
+});
+
+// A transport whose sink holds each frame's consumption until the test
+// releases it, as a page does until its terminal has written the frame.
+const flowTransport = (sockets: TransportFakeSocket[], held: Array<() => void> | undefined) => {
+  const transport = new WebSocketAttachmentTransport(
+    "ws://example.test/ws", () => {
+      const socket = new TransportFakeSocket(1);
+      sockets.push(socket);
+      return socket as unknown as AttachmentWebSocket;
+    }, ["persea-terminal.v2"], undefined, () => 0.5, new FakeReconnectClock().runtime,
+    new FakeLivenessClock().runtime, () => livenessNonce,
+  );
+  transport.bind({
+    openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: () => {},
+    ...(held ? { afterConsumed: (_generation: number, done: () => void) => { held.push(done); } } : {}),
+  });
+  return transport;
+};
+const flowAcks = (socket: TransportFakeSocket) => socket.sent.filter((value) => value.startsWith(TRANSPORT_FLOW_PREFIX));
+const settleFlow = () => Promise.resolve();
+
+test("flow_acknowledges_a_contiguous_prefix_only_after_consumption", async () => {
+  const sockets: TransportFakeSocket[] = [];
+  const held: Array<() => void> = [];
+  const transport = flowTransport(sockets, held);
+  transport.connect();
+  const socket = sockets[0]!;
+  socket.emit("open", {});
+  socket.emit("message", { data: encodeServerFrame(prepare()) });
+  socket.emit("message", { data: `PERSEA-REFUSAL/1 resize_failed` });
+  socket.emit("message", { data: encodeServerFrame(commit()) });
+  socket.emit("message", { data: encodeServerFrame(live()) });
+  await settleFlow();
+  equal(held.length, 3, "a refusal frame was counted as an attachment frame");
+  equal(flowAcks(socket).length, 0, "delivery alone was acknowledged");
+  held[1]!();
+  await settleFlow();
+  equal(flowAcks(socket).length, 0, "an acknowledgement skipped an unconsumed frame");
+  held[0]!();
+  await settleFlow();
+  held[2]!();
+  await settleFlow();
+  socket.emit("message", { data: encodeServerFrame(live()) });
+  socket.emit("message", { data: encodeServerFrame(live()) });
+  held[3]!();
+  held[4]!();
+  await settleFlow();
+  equal(flowAcks(socket).join("|"), `${TRANSPORT_FLOW_PREFIX}ACK 2|${TRANSPORT_FLOW_PREFIX}ACK 3|${TRANSPORT_FLOW_PREFIX}ACK 5`,
+    "acknowledgements were not cumulative, contiguous and coalesced");
+  transport.destroy();
+});
+
+test("flow_acknowledgements_stay_on_their_socket", async () => {
+  const sockets: TransportFakeSocket[] = [];
+  const held: Array<() => void> = [];
+  const transport = flowTransport(sockets, held);
+  transport.connect();
+  sockets[0]!.emit("open", {});
+  sockets[0]!.emit("message", { data: encodeServerFrame(prepare()) });
+  equal(held.length, 1, "the first socket's frame was not delivered");
+  sockets[0]!.emit("close", { code: 1006, reason: "" });
+  transport.connect();
+  const second = sockets.at(-1)!;
+  assert(second !== sockets[0], "no replacement socket");
+  second.emit("open", {});
+  second.emit("message", { data: encodeServerFrame(prepare()) });
+  held[0]!();
+  await settleFlow();
+  equal(flowAcks(sockets[0]!).length + flowAcks(second).length, 0, "a superseded socket's frame was acknowledged");
+  held[1]!();
+  await settleFlow();
+  equal(flowAcks(second).join("|"), `${TRANSPORT_FLOW_PREFIX}ACK 1`, "the replacement socket did not count from one");
+  transport.destroy();
+});
+
+test("flow_without_a_consumption_point_acknowledges_on_delivery", async () => {
+  const sockets: TransportFakeSocket[] = [];
+  const transport = flowTransport(sockets, undefined);
+  transport.connect();
+  sockets[0]!.emit("open", {});
+  sockets[0]!.emit("message", { data: encodeServerFrame(prepare()) });
+  sockets[0]!.emit("message", { data: encodeServerFrame(commit()) });
+  await settleFlow();
+  equal(flowAcks(sockets[0]!).join("|"), `${TRANSPORT_FLOW_PREFIX}ACK 2`);
+  transport.destroy();
 });
 
 test("an_offline_probe_timer_does_not_block_a_session_switch", async () => {

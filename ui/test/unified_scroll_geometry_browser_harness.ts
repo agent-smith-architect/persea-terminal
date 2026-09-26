@@ -199,7 +199,7 @@ async function boot(lines: number, columns = 80, rows = ROWS): Promise<void> {
       rememberSource: () => undefined,
       takeControl: async (source: string | undefined) => {
         takeoverClaims.push(source ?? null);
-        return { url: "wss://harness.invalid/ws", protocols: ["persea-terminal.v1"] };
+        return { url: "wss://harness.invalid/ws", protocols: ["persea-terminal.v2"] };
       },
     });
     (window as any).__page = page;

@@ -48,7 +48,7 @@ func f3AuthorizeTakeover(t *testing.T, addr, offer, requestID, prefix, mutant st
 func f3DialTakeover(addr, handle string) (*websocket.Conn, *http.Response, error) {
 	dialer := websocket.Dialer{Subprotocols: []string{
 		"persea-engine.unified-dev",
-		"persea-terminal.v1",
+		"persea-terminal.v2",
 		"persea-handle." + handle,
 		"persea-mode.control",
 		"persea-csrf." + testCSRF,

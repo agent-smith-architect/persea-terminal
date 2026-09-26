@@ -354,7 +354,7 @@ func parseWSAuthorityPolicy(r *http.Request, requireHistory bool) (wsAuthority, 
 					return a, false
 				}
 				versionSet = true
-				if p != "persea-terminal.v1" {
+				if p != AttachmentProtocol {
 					return a, false
 				}
 			case strings.HasPrefix(p, "persea-handle."):

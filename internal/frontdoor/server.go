@@ -44,6 +44,24 @@ const WSWriteTimeout = 10 * time.Second
 const WSReadTimeout = 40 * time.Second
 const BrokerPingInterval = 30 * time.Second
 
+// AttachmentProtocol names the browser attachment protocol. Version 2 adds
+// flow acknowledgements (PERSEA-FLOW/1): a page that does not acknowledge
+// the attachment frames it consumes would stall at the first window, so a
+// version 1 page, one loaded before an upgrade, is refused at the upgrade
+// and recovers when reloaded.
+const AttachmentProtocol = "persea-terminal.v2"
+
+// BrokerWriteTimeout bounds each write the relay loop makes to the broker.
+// The broker reads input without blocking, but it answers some requests,
+// such as a ping, through the same writer as output. While the flow window is
+// closed the relay stops reading, that writer can park on a full socket, and
+// the reply parks behind it; enough input then fills the socket towards the
+// broker too. An unbounded write would wedge the loop that must still read
+// the acknowledgement that reopens the window, and with it liveness, the
+// control lease and the attachment's teardown. Two seconds keeps a stalled
+// write plus a full window inside the browser's 10 s liveness challenge.
+const BrokerWriteTimeout = 2 * time.Second
+
 // The static bundle a release must contain. session memory added the installable
 // shell: a manifest and three icons, all REGULAR files in the release, all
 // hash-covered by the release MANIFEST. A release is judged by its own
@@ -382,7 +400,7 @@ func newServer(cfg config.Front, staticDir, listen string) *Server {
 	}
 	bindingTTL := time.Duration(cfg.HandleTTLSeconds) * time.Second
 	s := &Server{cfg: cfg, listen: listen, staticDir: staticDir, handles: newHandleStore(bindingTTL, cfg.HandleCapacity), bindings: newSourceBindingStore(bindingTTL, cfg.HandleCapacity), leases: newLeaseStore(LeaseTTL), takeovers: newControlTakeoverStore(LeaseTTL, cfg.HandleCapacity), aliases: aliases, aliasErr: aliasErr, preferences: preferences, preferencesErr: preferencesErr, snippets: snippets, snippetErr: snippetErr, workspaces: workspaces, workspaceErr: workspaceErr, diagnostic: diagnostic, diagnosticErr: diagnosticErr, browserProofTimeout: BrowserProofTimeout, browserProofNow: time.Now, previews: newPreviewStore(time.Now)}
-	s.upgrader = websocket.Upgrader{ReadBufferSize: proto.MaxAttachment, WriteBufferSize: proto.MaxAttachment, Subprotocols: []string{"persea-terminal.v1"}, CheckOrigin: func(*http.Request) bool { return true }}
+	s.upgrader = websocket.Upgrader{ReadBufferSize: proto.MaxAttachment, WriteBufferSize: proto.MaxAttachment, Subprotocols: []string{AttachmentProtocol}, CheckOrigin: func(*http.Request) bool { return true }}
 	s.keyboardPreferences, s.keyboardPreferencesErr = keyboardPreferences, keyboardPreferencesErr
 	s.dashboardPreferences, s.dashboardPreferencesErr = openDashboardPreferencesStore(cfg.PreferencesStorePath)
 	s.clipboardImages, s.clipboardImageErr = openClipboardImageStore(cfg.SnippetStorePath, cfg.ImageUploadMaxBytes)
@@ -1863,6 +1881,11 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 	go brokerReadPump(c, frames, done)
 	brokerPing := time.NewTicker(BrokerPingInterval)
 	defer brokerPing.Stop()
+	var flow flowWindow
+	// Every relay write to the broker is bounded; see BrokerWriteTimeout.
+	boundBrokerWrite := func() bool {
+		return c.SetWriteDeadline(time.Now().Add(BrokerWriteTimeout)) == nil
+	}
 
 	for {
 		if owner != nil {
@@ -1888,7 +1911,9 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 		case read := <-reads:
 			if read.err != nil {
 				if orderlyWebSocketClose(read.err) {
-					_ = writeControl(c, proto.Control{Type: "detach"})
+					if boundBrokerWrite() {
+						_ = writeControl(c, proto.Control{Type: "detach"})
+					}
 					return
 				}
 				s.logTerminalFailure("websocket_read", &a)
@@ -1901,6 +1926,15 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 			}
 			switch read.kind {
 			case websocket.TextMessage:
+				count, flowFrame, flowErr := attachmentwire.DecodeTransportFlowAck(read.payload, attachmentwire.BrowserToServer)
+				if flowFrame {
+					if flowErr != nil || !flow.ack(count) {
+						code := s.logTerminalFailure("bad_flow", &a)
+						_ = writeWSCloseReason(writes, writerDone, code)
+						return
+					}
+					continue
+				}
 				liveness, recognized, livenessErr := attachmentwire.DecodeTransportLiveness(read.payload, attachmentwire.BrowserToServer)
 				if recognized {
 					if livenessErr != nil {
@@ -1941,10 +1975,10 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 				current, wrote := true, true
 				if mode == "control" {
 					current, wrote = s.leases.useOwnerInput(owner, func() bool {
-						return proto.WriteFrame(c, proto.FrameAttachment, read.payload) == nil
+						return boundBrokerWrite() && proto.WriteFrame(c, proto.FrameAttachment, read.payload) == nil
 					})
 				} else {
-					wrote = proto.WriteFrame(c, proto.FrameAttachment, read.payload) == nil
+					wrote = boundBrokerWrite() && proto.WriteFrame(c, proto.FrameAttachment, read.payload) == nil
 				}
 				if !current {
 					if reason, displaced := controlDisplacement(owner); displaced {
@@ -1966,7 +2000,14 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 				_ = writeWSCloseReason(writes, writerDone, code)
 				return
 			}
-		case result := <-frames:
+		case result := <-func() <-chan readBrokerFrame {
+			// A full window stops the relay from reading the broker; browser
+			// frames, liveness and teardown are still served meanwhile.
+			if !flow.open() {
+				return nil
+			}
+			return frames
+		}():
 			if owner != nil && s.leases.ownerFenced(owner) {
 				if reason, displaced := controlDisplacement(owner); displaced {
 					s.logControlDisplacement(reason, &a)
@@ -2049,6 +2090,7 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 					s.logTerminalFailure("websocket_write", &a)
 					return
 				}
+				flow.record(len(result.frame.Payload))
 			default:
 				code := s.logTerminalFailure("broker_protocol", &a)
 				_ = writeWSCloseReason(writes, writerDone, code)
@@ -2059,7 +2101,7 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 				closeBrowserLiveness()
 				return
 			}
-			if writeControl(c, proto.Control{Type: "ping"}) != nil {
+			if !boundBrokerWrite() || writeControl(c, proto.Control{Type: "ping"}) != nil {
 				code := s.logTerminalFailure("broker_write", &a)
 				_ = writeWSCloseReason(writes, writerDone, code)
 				return

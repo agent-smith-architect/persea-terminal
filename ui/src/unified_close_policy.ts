@@ -130,13 +130,14 @@ export const UNIFIED_TERMINAL_REASONS: ReadonlySet<string> = new Set([
   // Front-door-typed refusals of this attachment, including the attachment
   // protocol violations the front closes deterministically: malformed
   // liveness (bad_liveness), a malformed attachment frame (bad_attachment),
-  // control traffic on an observe handle (observe_mode), and a non-text
-  // WebSocket message (websocket_message_type).
+  // a flow acknowledgement the front could not accept (bad_flow), control
+  // traffic on an observe handle (observe_mode), and a non-text WebSocket
+  // message (websocket_message_type).
   // browser_liveness is deliberately absent: the front door closes with it
   // when application proof stops arriving, which is what a stalled or
   // suspended connection looks like. It is loss, not a verdict — transient.
   "lease_unavailable", "lease_lost", "broker_protocol", "stale_snapshot",
-  "bad_liveness", "bad_attachment", "observe_mode", "websocket_message_type",
+  "bad_liveness", "bad_attachment", "bad_flow", "observe_mode", "websocket_message_type",
   // The client-side liveness engine's own protocol judgement: the server
   // answered liveness with an invalid pong. A deterministic peer protocol
   // violation, not infrastructure loss.
@@ -195,6 +196,7 @@ const NOTICES: Readonly<Record<string, UnifiedCloseNotice>> = Object.freeze({
   lease_lost: Object.freeze({ headline: "Control moved elsewhere", detail: "Another window took control of this session." }),
   bad_liveness: Object.freeze({ headline: "The connection broke protocol", detail: "This page sent a liveness message the session host could not read. Reopen the session from the dashboard." }),
   bad_attachment: Object.freeze({ headline: "The connection broke protocol", detail: "This page sent a frame the session host could not read. Reopen the session from the dashboard." }),
+  bad_flow: Object.freeze({ headline: "The connection broke protocol", detail: "This page acknowledged terminal output the session host could not match. Reopen the session from the dashboard." }),
   observe_mode: Object.freeze({ headline: "This view is read-only", detail: "Typing and resizing are not available while observing. Reopen the session in control mode to interact." }),
   websocket_message_type: Object.freeze({ headline: "The connection broke protocol", detail: "A non-text message reached the session host and was refused. Reopen the session from the dashboard." }),
   liveness_protocol: Object.freeze({ headline: "The connection broke protocol", detail: "The session host answered liveness with an invalid message. Try again to reconnect." }),

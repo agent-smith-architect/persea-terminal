@@ -3,6 +3,7 @@ package ingresstest
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -10,6 +11,8 @@ import (
 	"testing"
 
 	"github.com/gorilla/websocket"
+
+	"persea-terminal/internal/attachmentwire"
 )
 
 func TestProbeAdoptsExactSourceBeforeUnifiedAttachAndRejectsReplay(t *testing.T) {
@@ -54,7 +57,7 @@ func TestProbeAdoptsExactSourceBeforeUnifiedAttachAndRejectsReplay(t *testing.T)
 							t.Error("query authority")
 						}
 						protocols := websocket.Subprotocols(r)
-						for _, want := range []string{"persea-engine.unified-dev", "persea-history.5000", "persea-terminal.v1", "persea-handle." + mode, "persea-mode." + mode, "persea-csrf." + csrf} {
+						for _, want := range []string{"persea-engine.unified-dev", "persea-history.5000", "persea-terminal.v2", "persea-handle." + mode, "persea-mode." + mode, "persea-csrf." + csrf} {
 							n := 0
 							for _, got := range protocols {
 								if got == want {
@@ -69,28 +72,53 @@ func TestProbeAdoptsExactSourceBeforeUnifiedAttachAndRejectsReplay(t *testing.T)
 							w.WriteHeader(http.StatusGone)
 							return
 						}
-						upgrader := websocket.Upgrader{Subprotocols: []string{"persea-terminal.v1"}}
+						upgrader := websocket.Upgrader{Subprotocols: []string{"persea-terminal.v2"}}
 						conn, err := upgrader.Upgrade(w, r, nil)
 						if err != nil {
 							t.Error(err)
 							return
 						}
 						defer conn.Close()
+						// Flow acknowledgements may arrive between any two frames;
+						// each must advance the cumulative count.
+						var acknowledged uint64
+						readBrowser := func(message *map[string]any) error {
+							for {
+								_, payload, err := conn.ReadMessage()
+								if err != nil {
+									return err
+								}
+								count, recognized, err := attachmentwire.DecodeTransportFlowAck(payload, attachmentwire.BrowserToServer)
+								if !recognized {
+									return json.Unmarshal(payload, message)
+								}
+								if err != nil || count <= acknowledged {
+									return fmt.Errorf("bad acknowledgement %q after %d", payload, acknowledged)
+								}
+								acknowledged = count
+							}
+						}
 						_ = conn.WriteJSON(map[string]any{"type": "PREPARE", "source": "source-id", "epoch": "1", "cut": "1"})
 						var message map[string]any
-						if err := conn.ReadJSON(&message); err != nil || message["type"] != "READY" {
+						if err := readBrowser(&message); err != nil || message["type"] != "READY" {
 							t.Errorf("READY: %v %v", message, err)
 							return
 						}
 						_ = conn.WriteJSON(map[string]any{"type": "COMMIT", "source": "source-id", "epoch": "1"})
 						if mode == "control" {
-							if err := conn.ReadJSON(&message); err != nil || message["type"] != "MODE_REQUEST" {
+							if err := readBrowser(&message); err != nil || message["type"] != "MODE_REQUEST" {
 								t.Error("missing control request")
 								return
 							}
 							_ = conn.WriteJSON(map[string]any{"type": "MODE", "source": "source-id", "epoch": "1", "mode": "CONTROL"})
-							if err := conn.ReadJSON(&message); err != nil || message["type"] != "INPUT" {
+							if err := readBrowser(&message); err != nil || message["type"] != "INPUT" {
 								t.Error("missing input")
+								return
+							}
+							// A front door sends no more output than the client has
+							// acknowledged; by now PREPARE and COMMIT were consumed.
+							if acknowledged < 2 {
+								t.Errorf("probe acknowledged %d frames before input, want at least PREPARE and COMMIT", acknowledged)
 								return
 							}
 							data, _ := base64.StdEncoding.DecodeString(message["data"].(string))

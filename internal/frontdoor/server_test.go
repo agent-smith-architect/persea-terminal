@@ -272,7 +272,7 @@ func TestFrontRejectsInvalidSubprotocolModeBeforeUpgrade(t *testing.T) {
 	s := newServer(cfg, ".", "127.0.0.1:8080")
 	rr := httptest.NewRecorder()
 	r := httptest.NewRequest(http.MethodGet, "http://localhost/ws", nil)
-	r.Header.Set("Sec-WebSocket-Protocol", "persea-engine.unified-dev, persea-terminal.v1, persea-handle.x, persea-mode.write, persea-csrf.c, persea-history.5000")
+	r.Header.Set("Sec-WebSocket-Protocol", "persea-engine.unified-dev, persea-terminal.v2, persea-handle.x, persea-mode.write, persea-csrf.c, persea-history.5000")
 	// Exercise the current wire grammar; query-string authority is rejected by
 	// a separate gate before mode parsing and has its own refusal tests.
 	s.terminal(rr, r)

@@ -194,12 +194,47 @@ func frontdoorRotationInventoryHandle(t *testing.T, client *http.Client, session
 	return ""
 }
 
-func frontdoorRotationDialController(t *testing.T, frontSocket, handle string) *websocket.Conn {
+// frontdoorRotationClient is a raw controller that acknowledges attachment
+// output the way a page does. The front door keeps only a bounded window of
+// unacknowledged frames in flight, so a client that never acknowledged would
+// stop receiving output once the history exceeded the window. Writes are
+// serialized because the drain helper pings from a second goroutine.
+type frontdoorRotationClient struct {
+	*websocket.Conn
+	writeMu  sync.Mutex
+	consumed uint64
+}
+
+// ReadMessage acknowledges each attachment frame as soon as it is read: these
+// tests have consumed a frame once they have decoded it. A failed
+// acknowledgement means the connection is going away, which the next read
+// reports with its real cause.
+func (c *frontdoorRotationClient) ReadMessage() (int, []byte, error) {
+	kind, payload, err := c.Conn.ReadMessage()
+	if err != nil || kind != websocket.TextMessage ||
+		bytes.HasPrefix(payload, []byte(attachmentwire.TransportLivenessPrefix)) ||
+		bytes.HasPrefix(payload, []byte(attachmentwire.TransportRefusalPrefix)) {
+		return kind, payload, err
+	}
+	c.consumed++
+	if ack, ackErr := attachmentwire.EncodeTransportFlowAck(c.consumed, attachmentwire.BrowserToServer); ackErr == nil {
+		_ = c.WriteMessage(websocket.TextMessage, ack)
+	}
+	return kind, payload, nil
+}
+
+func (c *frontdoorRotationClient) WriteMessage(kind int, data []byte) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	return c.Conn.WriteMessage(kind, data)
+}
+
+func frontdoorRotationDialController(t *testing.T, frontSocket, handle string) *frontdoorRotationClient {
 	t.Helper()
 	dialer := websocket.Dialer{
 		NetDial: func(_, _ string) (net.Conn, error) { return net.Dial("unix", frontSocket) },
 		Subprotocols: []string{
-			"persea-terminal.v1", "persea-handle." + handle, "persea-mode.control",
+			"persea-terminal.v2", "persea-handle." + handle, "persea-mode.control",
 			"persea-csrf." + frontdoorRotationCSRF, "persea-history.5000", "persea-engine.unified-dev",
 		},
 	}
@@ -212,15 +247,15 @@ func frontdoorRotationDialController(t *testing.T, frontSocket, handle string) *
 		}
 		t.Fatalf("controller dial: %v status=%d", err, status)
 	}
-	return ws
+	return &frontdoorRotationClient{Conn: ws}
 }
 
-func frontdoorRotationCommitController(t *testing.T, ws *websocket.Conn) terminal.Frame {
+func frontdoorRotationCommitController(t *testing.T, ws *frontdoorRotationClient) terminal.Frame {
 	t.Helper()
 	return frontdoorRotationCommitControllerWithMarker(t, ws, "")
 }
 
-func frontdoorRotationCommitControllerWithMarker(t *testing.T, ws *websocket.Conn, marker string) terminal.Frame {
+func frontdoorRotationCommitControllerWithMarker(t *testing.T, ws *frontdoorRotationClient, marker string) terminal.Frame {
 	t.Helper()
 	if err := ws.SetReadDeadline(time.Now().Add(10 * time.Second)); err != nil {
 		t.Fatal(err)
@@ -312,7 +347,7 @@ func frontdoorRotationCommitControllerWithMarker(t *testing.T, ws *websocket.Con
 	}
 }
 
-func frontdoorRotationDrainUntilClosed(ws *websocket.Conn) <-chan string {
+func frontdoorRotationDrainUntilClosed(ws *frontdoorRotationClient) <-chan string {
 	done := make(chan string, 1)
 	stopPing := make(chan struct{})
 	go func() {

@@ -22,6 +22,8 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+
+	"persea-terminal/internal/attachmentwire"
 )
 
 // Run serves a disposable loopback model of Tailscale 1.98.9's Unix proxy.
@@ -231,7 +233,7 @@ func Probe(base, realm, session, mode, sentinel string, mutateAlias bool) error 
 	if wsURL.RawQuery != "" {
 		return fmt.Errorf("capability leaked into WebSocket query")
 	}
-	protocols := []string{"persea-engine.unified-dev", "persea-history.5000", "persea-terminal.v1", "persea-handle." + wsHandle, "persea-mode." + mode, "persea-csrf." + csrf}
+	protocols := []string{"persea-engine.unified-dev", "persea-history.5000", "persea-terminal.v2", "persea-handle." + wsHandle, "persea-mode." + mode, "persea-csrf." + csrf}
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second, Subprotocols: protocols, TLSClientConfig: probeTLS}
 	headers := http.Header{"Cookie": []string{cookieHeader}, "Origin": []string{base}}
 	ws, wsResponse, err := dialer.Dial(wsURL.String(), headers)
@@ -241,13 +243,14 @@ func Probe(base, realm, session, mode, sentinel string, mutateAlias bool) error 
 		}
 		return fmt.Errorf("WebSocket upgrade: %w", err)
 	}
-	if ws.Subprotocol() != "persea-terminal.v1" {
+	if ws.Subprotocol() != "persea-terminal.v2" {
 		_ = ws.Close()
 		return fmt.Errorf("unexpected echoed subprotocol")
 	}
 	_ = ws.SetReadDeadline(time.Now().Add(30 * time.Second))
 	committed, controlled, sent := false, false, false
 	live := ""
+	var consumed uint64
 	for {
 		_, payload, e := ws.ReadMessage()
 		if e != nil {
@@ -256,6 +259,17 @@ func Probe(base, realm, session, mode, sentinel string, mutateAlias bool) error 
 		}
 		var frame map[string]any
 		if e := json.Unmarshal(payload, &frame); e != nil {
+			_ = ws.Close()
+			return e
+		}
+		// Acknowledge each attachment frame as it is handled, as a page does:
+		// the front door stops sending output a client has not acknowledged.
+		consumed++
+		ack, e := attachmentwire.EncodeTransportFlowAck(consumed, attachmentwire.BrowserToServer)
+		if e == nil {
+			e = ws.WriteMessage(websocket.TextMessage, ack)
+		}
+		if e != nil {
 			_ = ws.Close()
 			return e
 		}
