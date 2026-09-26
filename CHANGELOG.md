@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+## 0.1.6 — 2026-09-26
+
 ### Changed
 
 - A connection now counts as stable only after its view has received all history and then stayed up for 20 seconds. Before, the 20 seconds started when the view opened, so on a slow connection a view that never finished loading started a new round of quick retries after each loss.
