@@ -135,10 +135,13 @@ export const OFFLINE_RETRY_MS = 15_000;
 // visibility and online together, or a page toggled repeatedly), and each
 // probe costs the server an endpoint mint.
 export const OFFLINE_WAKE_SPACING_MS = 3_000;
-// A COMMIT ends a loss episode only once the connection has stayed up this
-// long (one full liveness proof lifetime). A connection that commits and then
-// drops at once keeps its episode, so a commit-then-close loop spends the fast
-// phase and settles into OFFLINE probing instead of hammering the server.
+// A connection ends a loss episode only once its view has caught up and then
+// stayed up this long (one full liveness proof lifetime). Catching up is the
+// first MODE after COMMIT, which follows the whole history backlog. A
+// connection that drops at once, or before its view catches up, keeps its
+// episode: a commit-then-close loop, or a slow link that cannot finish the
+// backlog, spends the fast phase and settles into OFFLINE probing instead of
+// starting over with every attempt.
 export const STABLE_CONNECTION_MS = 20_000;
 const RECONNECT_BASE_DELAY_MS = 250;
 const RECONNECT_MAX_DELAY_MS = 4_000;
@@ -199,6 +202,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
   private retryDisabled = false;
   private offline = false;
   private committedAt?: number;
+  private caughtUpAt?: number;
   private unsubscribeWake?: () => void;
   private activeAttempt?: ReconnectAttempt;
   private activeLiveness?: ActiveLiveness;
@@ -322,7 +326,16 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     // STABLE_CONNECTION_MS and beginLossEpisode. Its connected time is free.
     this.bankLoss();
     this.committedAt = this.retryRuntime.now();
+    this.caughtUpAt = undefined;
     this.sink?.reconnectStatus?.(Object.freeze({ state: "CONNECTED", attempt: 0 }));
+  }
+
+  // The committed view has caught up: its first MODE arrived, after the whole
+  // history backlog. From here the connection can prove itself stable; see
+  // STABLE_CONNECTION_MS and beginLossEpisode.
+  connectionCaughtUp(generation: number): void {
+    if (generation !== this.generation || this.committedAt === undefined || this.caughtUpAt !== undefined) return;
+    this.caughtUpAt = this.retryRuntime.now();
   }
 
   attachAgain(): void {
@@ -343,6 +356,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
       closeSocket(superseded, CLOSE_ORDERLY, "attach_again_superseded");
     }
     this.committedAt = undefined;
+    this.caughtUpAt = undefined;
     this.startEpisode();
     this.scheduleReconnect(0);
   }
@@ -369,6 +383,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     }
     if (reason === "session_switch") {
       this.committedAt = undefined;
+      this.caughtUpAt = undefined;
       this.startEpisode();
       this.preparedSource = undefined;
       this.preparedSourceGeneration = 0;
@@ -582,6 +597,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     }
     if (UNIFIED_HANDOFF_REASONS.has(reason)) {
       this.committedAt = undefined;
+      this.caughtUpAt = undefined;
       this.startEpisode();
     } else {
       this.beginLossEpisode();
@@ -710,12 +726,14 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     this.startEpisode();
   }
 
-  // Judged once, at the moment a connection is lost: only a connection that
-  // stayed committed for STABLE_CONNECTION_MS ends the previous episode.
+  // Judged once, at the moment a connection is lost: only a connection whose
+  // view caught up and then stayed up for STABLE_CONNECTION_MS ends the
+  // previous episode.
   private beginLossEpisode(): void {
-    const committedAt = this.committedAt;
+    const caughtUpAt = this.caughtUpAt;
     this.committedAt = undefined;
-    const stable = committedAt !== undefined && this.retryRuntime.now() - committedAt >= STABLE_CONNECTION_MS;
+    this.caughtUpAt = undefined;
+    const stable = caughtUpAt !== undefined && this.retryRuntime.now() - caughtUpAt >= STABLE_CONNECTION_MS;
     if (this.episodeActive && !stable) {
       this.lossStartedAt ??= this.retryRuntime.now();
       return;

@@ -115,9 +115,80 @@ async function main() {
       assert(!refused.panes[0].reconnectVisible, `Reconnect must not bypass ${reason}`);
     }
     evidence.reconnect = { exhausted, reconnecting };
+
+    // Every admission asks for its mode, and the first MODE, which follows the
+    // whole history backlog, is reported to the transport as caught up.
+    const admit = async (readmit) => {
+      if (readmit) await page.evaluate(() => window.__loading_state.readmitAll());
+      await page.evaluate(() => window.__loading_state.prepareAll());
+      return page.evaluate(() => window.__loading_state.commitAll());
+    };
+    await page.evaluate(() => window.__loading_state.reset(1, "observe"));
+    await admit(false);
+    const observed = await page.evaluate(() => window.__loading_state.modeAll("OBSERVE"));
+    assert(JSON.stringify(observed.modeRequests) === '["OBSERVE"]' && JSON.stringify(observed.caughtUp) === "[1]" && observed.inputFrames === 0, `observe admission did not learn its catch-up: ${JSON.stringify(observed)}`);
+    // A view evicted for lag before it caught up keeps retrying; the third
+    // failed catch-up in a row stops with a notice. Each page below sees at
+    // most three evictions, which the reattach burst limiter allows, so only
+    // the catch-up rule can stop it.
+    const lag = () => page.evaluate(() => window.__loading_state.failAll("subscriber_lagged"));
+    const stopped = (state) => state.panes[0].noticeVisible || state.detaches.length > 0;
+    await page.evaluate(() => window.__loading_state.reset(1));
+    await admit(false);
+    let caught;
+    for (const failure of [1, 2]) {
+      caught = await lag();
+      assert(!stopped(caught), `failed catch-up ${failure} stopped the page: ${JSON.stringify(caught)}`);
+      await admit(true);
+    }
+    caught = await lag();
+    assert(caught.panes[0].noticeVisible && caught.panes[0].noticeHeadline === "This page kept falling behind" && caught.panes[0].reconnectVisible && JSON.stringify(caught.detaches) === '["subscriber_lagged"]',
+      `three failed catch-ups in a row did not stop with a notice: ${JSON.stringify(caught)}`);
+    evidence.catchUp = caught;
+    // Catching up starts the count again.
+    await page.evaluate(() => window.__loading_state.reset(1));
+    await admit(false);
+    for (const failure of [1, 2]) {
+      caught = await lag();
+      assert(!stopped(caught), `failed catch-up ${failure} stopped the page: ${JSON.stringify(caught)}`);
+      await admit(true);
+    }
+    await page.evaluate(() => window.__loading_state.modeAll("CONTROL"));
+    await page.evaluate(() => window.__loading_state.failAll("transport_error"));
+    await admit(true);
+    caught = await lag();
+    assert(!stopped(caught), `a failed catch-up after a caught-up admission stopped the page: ${JSON.stringify(caught)}`);
+    // A lag after catching up is not counted.
+    await page.evaluate(() => window.__loading_state.reset(1));
+    await admit(false);
+    caught = await page.evaluate(() => window.__loading_state.modeAll("CONTROL"));
+    assert(JSON.stringify(caught.modeRequests) === '["CONTROL"]' && JSON.stringify(caught.caughtUp) === "[1]", `control admission did not report its catch-up: ${JSON.stringify(caught)}`);
+    caught = await lag();
+    assert(!stopped(caught), `a lag after catching up stopped the page: ${JSON.stringify(caught)}`);
+    for (const failure of [1, 2]) {
+      await admit(true);
+      caught = await lag();
+      assert(!stopped(caught), `failed catch-up ${failure} after a lag in live output stopped the page: ${JSON.stringify(caught)}`);
+    }
+
+    // A frame's flow acknowledgement waits until the terminal holds its output.
+    await page.evaluate(() => window.__loading_state.reset(1));
+    await admit(false);
+    await page.evaluate(() => window.__loading_state.modeAll("CONTROL"));
+    const acknowledged = await page.evaluate(() => window.__loading_state.acknowledgeAfterWrite());
+    assert(acknowledged.markerAtAck === true, `a frame was acknowledged before the terminal wrote it: ${JSON.stringify(acknowledged)}`);
+    evidence.acknowledgement = acknowledged;
+
+    // A write callback that throws ends the attachment; xterm keeps writing.
+    await page.evaluate(() => window.__loading_state.reset(1));
+    await admit(false);
+    await page.evaluate(() => window.__loading_state.modeAll("CONTROL"));
+    const thrown = await page.evaluate(() => window.__loading_state.throwingWriteCallback());
+    assert(thrown.loopAlive && thrown.afterWritten && JSON.stringify(thrown.finalized) === '["LIVE_WRITE_FAILED"]', `a throwing write callback froze the terminal: ${JSON.stringify({ loopAlive: thrown.loopAlive, afterWritten: thrown.afterWritten, finalized: thrown.finalized })}`);
+    evidence.writeCallback = { loopAlive: thrown.loopAlive, finalized: thrown.finalized };
     await context.close();
     fs.writeFileSync(path.join(EVIDENCE, "loading-state.json"), JSON.stringify(evidence, null, 2));
-    console.log(`loading state loading state ${ENGINE}: PASS (${evidence.cases.length} layouts + typed failure)`);
+    console.log(`loading state loading state ${ENGINE}: PASS (${evidence.cases.length} layouts + typed failure + catch-up, acknowledgement and write-callback checks)`);
   } finally {
     await browser?.close();
     await new Promise((resolve) => server.close(resolve));
