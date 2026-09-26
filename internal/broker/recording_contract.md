@@ -292,9 +292,10 @@ The public unified attachment acquires this same lease before constructing its
 Epoch or reading its outer frame body. Its additional 4 MiB allowance covers
 the existing attachment work and transport owners; this permits at most 27 such
 attachments admitted sequentially with small snapshots: the twenty-eighth
-cannot fund its PREPARE workspace. The 27 settled attachments charge about
-123.613 MiB before additional tail/snapshot charges. There is no second independently
-refundable attachment budget. Epoch work, PTY reader and process Wait each keep
+funds its PREPARE workspace but cannot fund its 4 MiB attachment allowance.
+The 27 settled attachments charge about 123.613 MiB before additional
+tail/snapshot charges. There is no second independently refundable attachment
+budget. Epoch work, PTY reader and process Wait each keep
 their existing owner hold after cancellation or a timed-out Finalize.
 
 When explicitly paired with `unifiedAttachmentFrameWriter`, the attachment's
