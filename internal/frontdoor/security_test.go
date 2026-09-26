@@ -420,6 +420,28 @@ func TestWSAuthorityStrict(t *testing.T) {
 	}
 }
 
+// A page loaded before the flow-controlled protocol offers v1. It cannot
+// acknowledge output, so it is refused at upgrade, before its handle is
+// spent, and has to be reloaded.
+func TestWSAuthorityRefusesThePreviousProtocolVersion(t *testing.T) {
+	store := newHandleStore(time.Minute, 4)
+	handle, err := store.mint(proto.Authority{}, "operator@example.com", "observe")
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{cfg: config.Front{Ingress: config.Ingress{PeerUIDConfigured: true}}, handles: store}
+	r := httptest.NewRequest(http.MethodGet, "http://localhost/ws", nil)
+	r.Header.Set("Sec-WebSocket-Protocol", "persea-engine.unified-dev, persea-terminal.v1, persea-handle."+handle+", persea-mode.observe, persea-csrf.c, persea-history.5000")
+	w := httptest.NewRecorder()
+	s.terminal(w, r)
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("a v1 page reached the upgrade path: status=%d", w.Code)
+	}
+	if _, err := store.consume(handle, "operator@example.com", "observe"); err != nil {
+		t.Fatalf("the v1 refusal consumed the handle: %v", err)
+	}
+}
+
 func TestWSAuthorityCategoriesArePresentExactlyOnce(t *testing.T) {
 	type category struct {
 		name      string
@@ -429,7 +451,7 @@ func TestWSAuthorityCategoriesArePresentExactlyOnce(t *testing.T) {
 	}
 	categories := []category{
 		{name: "engine", valid: "persea-engine.unified-dev", alternate: "persea-engine.other", empty: "persea-engine."},
-		{name: "version", valid: "persea-terminal.v2", alternate: "persea-terminal.v2", empty: "persea-terminal."},
+		{name: "version", valid: "persea-terminal.v2", alternate: "persea-terminal.v1", empty: "persea-terminal."},
 		{name: "handle", valid: "persea-handle.h", alternate: "persea-handle.other", empty: "persea-handle."},
 		{name: "mode", valid: "persea-mode.observe", alternate: "persea-mode.control", empty: "persea-mode."},
 		{name: "csrf", valid: "persea-csrf.c", alternate: "persea-csrf.other", empty: "persea-csrf."},
