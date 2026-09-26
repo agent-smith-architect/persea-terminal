@@ -1,4 +1,4 @@
-import { UNIFIED_INTERNAL_REASONS, UNIFIED_REATTACH_REASONS, UNIFIED_SUBSCRIBER_CLOSE_REASONS, UNIFIED_TAKEOVER_REASONS, UNIFIED_TERMINAL_REASONS, boundedUnifiedReason, classifyUnifiedClose, unifiedCloseNotice } from "../src/unified_close_policy";
+import { UNIFIED_INTERNAL_REASONS, UNIFIED_REATTACH_REASONS, UNIFIED_RECONNECTABLE_NOTICES, UNIFIED_SUBSCRIBER_CLOSE_REASONS, UNIFIED_TAKEOVER_REASONS, UNIFIED_TERMINAL_REASONS, boundedUnifiedReason, classifyUnifiedClose, unifiedCloseNotice } from "../src/unified_close_policy";
 
 // The enumeration fence reads real sources; the project has no node type
 // declarations, so the two touched surfaces are typed locally.
@@ -23,9 +23,9 @@ for (const reason of [
   "unified_unavailable", "stale_target", "attach_failed", "bad_mode", "bad_history", "protocol",
   "bad_control", "bad_frame", "history_failed",
   "resize_failed", "resize_rejected", "snapshot_failed",
-  "lease_unavailable", "lease_lost", "broker_protocol", "browser_liveness", "stale_snapshot",
+  "lease_unavailable", "lease_lost", "broker_protocol", "stale_snapshot",
   "bad_liveness", "bad_attachment", "observe_mode", "websocket_message_type",
-  "liveness_protocol", "refusal_protocol",
+  "liveness_protocol", "refusal_protocol", "malformed_frame", "non_text_frame", "attachment_fault",
   "attachment_failed",
 ]) {
   assert.equal(classifyUnifiedClose(reason), "terminal", `broker-typed refusal must be terminal: ${reason}`);
@@ -59,7 +59,10 @@ for (const reason of [
   "websocket_1006", "websocket_1001", "transport_error", "transport_send_unavailable",
   "transport_send_failed", "liveness_unavailable", "liveness_timeout",
   "reconnect_attempt_failed", "reconnect_attempt_timeout",
-  "broker_unavailable", "broker_deadline", "malformed_frame", "non_text_frame",
+  "broker_unavailable", "broker_deadline",
+  // The front door expiring application proof: what a stalled or suspended
+  // connection looks like from the server. Loss, not a verdict.
+  "browser_liveness",
 ]) {
   assert.equal(classifyUnifiedClose(reason), "transient", `network-layer loss must stay retryable: ${reason}`);
 }
@@ -150,7 +153,7 @@ for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose
     "bad_liveness", "bad_attachment", "observe_mode", "websocket_message_type",
     "control_displaced", "takeover_superseded",
     "unified_unavailable", "bad_history", "generation_rotated", "generation_refit", "subscriber_lagged", "generation_failed", "refit_faulted",
-    "liveness_protocol", "malformed_frame", "takeover_requested", "destroyed",
+    "liveness_protocol", "malformed_frame", "attachment_fault", "takeover_requested", "destroyed",
   ]) {
     assert.ok(emitted.has(sentinel), `extraction lost a known emitted reason: ${sentinel}`);
   }
@@ -159,7 +162,7 @@ for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose
     // Front-door typed refusals of this attachment.
     bad_liveness: "terminal", bad_attachment: "terminal", observe_mode: "terminal",
     websocket_message_type: "terminal", broker_protocol: "terminal",
-    browser_liveness: "terminal", stale_snapshot: "terminal",
+    browser_liveness: "transient", stale_snapshot: "terminal",
     lease_held: "terminal", lease_lost: "terminal", lease_unavailable: "terminal",
     control_displaced: "terminal", takeover_superseded: "terminal",
     attachment_failed: "terminal",
@@ -180,7 +183,8 @@ for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose
     generation_rotated: "reattach", generation_refit: "reattach", subscriber_lagged: "reattach", generation_failed: "terminal", refit_faulted: "terminal",
     // Client transport self-closes.
     liveness_protocol: "terminal", refusal_protocol: "terminal",
-    malformed_frame: "transient", non_text_frame: "transient",
+    // The transport stops retrying on these, so the page must render them.
+    malformed_frame: "terminal", non_text_frame: "terminal", attachment_fault: "terminal",
     transport_error: "transient", transport_send_failed: "transient",
     transport_send_unavailable: "transient",
     reconnect_attempt_failed: "transient", reconnect_attempt_timeout: "transient",
@@ -244,6 +248,24 @@ for (const reason of ["session_gone", "identity_ambiguous", "identity_invalid", 
   assert.ok(notice.headline !== "This terminal is unavailable", `${reason} must carry reviewed copy, not the generic degradation`);
 }
 assert.equal(unifiedCloseNotice("generation_rotated").headline, "Refreshing terminal history");
+
+// Reconnect is offered exactly where a fresh attachment can clear the notice:
+// the offline state, every page-limited reattach stop, and the peer protocol
+// faults the transport stopped on. Refusals a retry would replay get none.
+for (const reason of ["reconnect_offline", "reconnect_exhausted", "subscriber_lagged", "input_refused", "generation_rotated", "generation_refit",
+  "malformed_frame", "non_text_frame", "liveness_protocol", "refusal_protocol", "attachment_fault"]) {
+  assert.ok(UNIFIED_RECONNECTABLE_NOTICES.has(reason), `a fresh attachment can clear ${reason}; it must offer Reconnect`);
+  assert.ok(unifiedCloseNotice(reason).headline !== "This terminal is unavailable", `${reason} must carry reviewed copy`);
+}
+for (const reason of ["session_gone", "identity_ambiguous", "identity_invalid", "source_binding_unavailable", "reconnect_unavailable",
+  "lease_held", "control_displaced", "takeover_superseded", "stale_target", "generation_failed", "refit_faulted", "bad_liveness"]) {
+  assert.ok(!UNIFIED_RECONNECTABLE_NOTICES.has(reason), `a retry would replay ${reason}; it must not offer Reconnect`);
+}
+// Every terminal reason the transport stops on by itself must be renderable
+// with a way out, never a silent dead end.
+for (const reason of ["malformed_frame", "non_text_frame", "attachment_fault"]) {
+  assert.equal(classifyUnifiedClose(reason), "terminal", `${reason} stops retries, so the page must render it`);
+}
 assert.equal(unifiedCloseNotice("generation_failed").headline, "Terminal history stopped");
 
 console.log("unified close policy tests PASS");

@@ -25,7 +25,7 @@ import { TerminalKeysPanel } from "./terminal_keys_panel";
 import { actionGlyph, keyAction, keyEncodingNote, planKey, resolveAction, type KeyChord, type KeyModifiers, type TerminalActionEntry } from "./terminal_actions";
 import { unifiedComposerAvailability, withCompactDensity, withStoredDensity } from "./unified_composer_adapter";
 import { syntheticCtrlReleaseEvent, syntheticKeydownEvent, unifiedKeyDescriptor, type UnifiedKeyDescriptor } from "./unified_key_bar";
-import { UNIFIED_TAKEOVER_REASONS, boundedUnifiedReason, classifyUnifiedClose, unifiedCloseNotice } from "./unified_close_policy";
+import { UNIFIED_RECONNECTABLE_NOTICES, UNIFIED_TAKEOVER_REASONS, boundedUnifiedReason, classifyUnifiedClose, unifiedCloseNotice } from "./unified_close_policy";
 import { REFUSAL_NOTICE_MS, refusalReleasesFit, unifiedRefusalNotice } from "./unified_refusal_notice";
 import { UnifiedKeyboardBaseline } from "./unified_keyboard_baseline";
 import { SessionSwitcherView, type SessionSwitcherInventory } from "./session_switcher";
@@ -44,6 +44,7 @@ const REATTACH_BURST_LIMIT = 3;
 // A cross-device reopen may auto-take control this many times before it stops
 // fighting, so two devices reopening each other cannot ping-pong forever.
 const MAX_AUTO_TAKEOVERS = 3;
+const INPUT_SATURATED_NOTICE = "Input not sent — the connection is busy";
 const TERMINAL_LONG_PRESS_MS = 500;
 const TERMINAL_LONG_PRESS_MOVE_PX = 12;
 const ANSI_THEME_KEYS = Object.freeze([
@@ -2981,13 +2982,13 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         this.connectionStatus.textContent = `${base} (attempt ${status.attempt})`;
         return;
       }
+      case "OFFLINE":
+        // Automatic attempts continue; the notice says so and offers an
+        // immediate one.
+        this.showFailureNotice("reconnect_offline");
+        return;
       case "EXHAUSTED":
-        this.closePresentationOverlays();
-        this.connectionStatus.textContent = "";
         this.showFailureNotice(status.reason ?? "reconnect_exhausted");
-        this.reconnectButton.hidden = this.options.port.attachAgain === undefined
-          || (status.reason !== undefined && status.reason !== "retry_budget_exhausted"
-            && status.reason !== "reconnect_exhausted");
         return;
       case "DETACHED":
         // Either this page asked for the detach (the notice is already up) or
@@ -2997,7 +2998,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   }
 
   private showFailureNotice(reason: string): void {
-    this.reconnectButton.hidden = true;
+    const code = boundedUnifiedReason(reason);
+    this.reconnectButton.hidden = this.options.port.attachAgain === undefined || !UNIFIED_RECONNECTABLE_NOTICES.has(code);
     this.reconnectButton.disabled = false;
     this.closePresentationOverlays();
     this.selectRestoreKeyboard = false;
@@ -3006,7 +3008,6 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     // A typed terminal failure replaces initial loading; a pane must never
     // expose a blank shell or claim it is still replaying after refusal.
     this.loadingPanel.hidden = true;
-    const code = boundedUnifiedReason(reason);
     const notice = unifiedCloseNotice(code);
     this.noticeHeadline.textContent = notice.headline;
     this.noticeDetail.textContent = notice.detail;
@@ -4335,7 +4336,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
 	  this.sealedInputBytes += data.byteLength;
 	  return;
 	}
-    this.send({ type: "INPUT", version: 1, source: this.prepared.source, epoch: this.prepared.epoch, data });
+    // Input is never queued for later, so a send the transport could not
+    // accept is lost: say so rather than let the keystroke vanish.
+    if (this.send({ type: "INPUT", version: 1, source: this.prepared.source, epoch: this.prepared.epoch, data }) === "SATURATED") {
+      this.showRefusalNotice(INPUT_SATURATED_NOTICE);
+    }
   }
 
   private send(frame: BrowserFrame): PortSendResult {

@@ -613,9 +613,9 @@ async function runFailureSurface(cdp, report, failures) {
   if (dropped.detachCalls.length !== 0) note("a transient loss stopped the retry loop", dropped);
   const waiting = await evaluate(cdp, "window.__harness.reconnectStatus('WAITING', 2)");
   if (!waiting.connectionText.includes("2")) note("the reconnect attempt count is invisible", waiting);
-  const exhausted = await evaluate(cdp, "window.__harness.reconnectStatus('EXHAUSTED', 6, 'retry_budget_exhausted')");
-  if (exhausted.noticeHidden || exhausted.noticeText.length === 0 || !exhausted.codeLine.includes("retry_budget_exhausted")) {
-    note("retry exhaustion rendered no visible terminal state", exhausted);
+  const exhausted = await evaluate(cdp, "window.__harness.reconnectStatus('OFFLINE', 6)");
+  if (exhausted.noticeHidden || exhausted.noticeText.length === 0 || !exhausted.codeLine.includes("reconnect_offline")) {
+    note("a spent fast phase rendered no visible offline state", exhausted);
   }
   if (exhausted.connectionText.length !== 0) {
     note("retry exhaustion left the reconnecting strip up alongside the notice", exhausted);

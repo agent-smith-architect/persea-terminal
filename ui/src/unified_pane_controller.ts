@@ -460,6 +460,13 @@ export class UnifiedPaneController {
     this.transport.detach(reason);
   }
 
+  // A page restored from the back/forward cache was detached on pagehide.
+  // Reattach with fresh authority, exactly as the notice's Reconnect does.
+  resume(): void {
+    if (this.disposed || !this.connected) return;
+    this.transport.attachAgain();
+  }
+
   // A manual control-takeover claim from the pane's host (the workspace
   // cell's own affordance): the page's one manual claim path, nothing new.
   requestControlTakeover(): void {

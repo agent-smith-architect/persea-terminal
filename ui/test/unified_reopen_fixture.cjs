@@ -180,6 +180,9 @@ class Socket {
         // the TCP socket: a browser that sent a close waits for the echo, and
         // a fixture that never sends one keeps the server from closing.
         this.write(0x8, frame.payload.subarray(0, 2));
+        // The browser's own close code: an invalid one never reaches here,
+        // because WebSocket.close() throws instead of sending it.
+        this.peerCloseCode = frame.payload.length >= 2 ? frame.payload.readUInt16BE(0) : null;
         this.finish(frame.payload.length > 2 ? frame.payload.subarray(2).toString("utf8") : "client_close");
         setTimeout(() => { try { this.raw.destroy(); } catch { /* already gone */ } }, 50);
         return;
@@ -893,6 +896,7 @@ function startFixture(ui, options = {}) {
       frames: attachment.frames.slice(),
       inputs: attachment.inputs.slice(),
       closeReason: attachment.closeReason,
+      peerCloseCode: attachment.socket?.peerCloseCode ?? null,
       live: attachment.socket ? !attachment.socket.closed : false,
       session: attachment.session,
       offeredHandle: attachment.offeredHandle,
