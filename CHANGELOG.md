@@ -7,10 +7,11 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 ### Changed
 
 - While a view loads, waiting updates now count against the 4 MiB limit on waiting output by their size alone. Before, the view was also stopped after 1,024 updates, however small they were.
-- After a lost connection, the terminal retries quickly for about 30 seconds as before, then keeps trying on its own: every 15 seconds while the page is visible, and at once when the network comes back, the page becomes visible again or the window gets focus. Meanwhile it shows "Connection lost" with a Reconnect button. Before, it stopped after the quick phase and waited for Reconnect.
-- A connection that drops again right after it reconnects no longer starts a new round of quick retries. Only a connection that stayed up for 20 seconds does, so a view that keeps failing settles into the slower retries.
+- After a lost connection, the terminal retries quickly for about 30 seconds as before, then keeps trying on its own: every 15 seconds while the page is visible, and at once when the network comes back, the page becomes visible again or the window gets focus. Meanwhile it shows "Connection lost" with a Reconnect button; a workspace pane shows the same state with Retry. Before, it stopped after the quick phase and waited for Reconnect.
+- A connection that drops again soon after it reconnects now shares the quick retries of the loss before it, instead of starting a new round. Only a connection that stayed up for 20 seconds starts a new round, so a view that keeps failing settles into the slower retries.
 - When a terminal stops because a view kept falling behind, input kept being refused, or the connection broke protocol, the notice now has a Reconnect button.
 - Typed input that cannot be sent because the connection is congested now shows a short "Input not sent" notice. As before, input is never queued or replayed.
+- A page that reconnects on its own now takes control automatically only while it is visible and within 30 seconds of losing its connection, when control is most likely still held by that lost connection. Otherwise, if another window or device controls the session, the page stops with "Already controlled elsewhere" and a Take control here button. Opening a session, Reconnect and switching sessions take control as before.
 
 ### Fixed
 
@@ -18,7 +19,8 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 - After this page took control from another window, the next dropped connection no longer leaves it saying "Reconnecting…" forever without trying.
 - When the server ends a page that stopped answering its liveness checks, for example a phone that was in the background, the page reconnects instead of showing "This page fell behind".
 - A reconnect attempt that times out now really closes its connection. Before, the browser rejected the close, so the old attempt kept its control lease and the next attempt had to take control from it.
-- A page restored with the browser's back or forward button reconnects instead of staying detached.
+- A terminal page or workspace restored with the browser's back or forward button reconnects instead of staying detached, unless it had stopped with a notice, for example because another device took control.
+- When a workspace pane stops reattaching, for example because its view kept falling behind, it now says why and offers Retry. Before, it kept showing "Reattaching" with nothing running.
 - When the page itself stops a view because of data it cannot use, it now shows a notice with Reconnect instead of freezing silently.
 
 ## 0.1.3 — 2026-09-25

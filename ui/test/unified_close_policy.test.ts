@@ -1,4 +1,4 @@
-import { UNIFIED_INTERNAL_REASONS, UNIFIED_REATTACH_REASONS, UNIFIED_RECONNECTABLE_NOTICES, UNIFIED_SUBSCRIBER_CLOSE_REASONS, UNIFIED_TAKEOVER_REASONS, UNIFIED_TERMINAL_REASONS, boundedUnifiedReason, classifyUnifiedClose, unifiedCloseNotice } from "../src/unified_close_policy";
+import { STALE_LEASE_WINDOW_MS, UNIFIED_HANDOFF_REASONS, UNIFIED_INTERNAL_REASONS, UNIFIED_REATTACH_REASONS, UNIFIED_RECONNECTABLE_NOTICES, UNIFIED_SUBSCRIBER_CLOSE_REASONS, UNIFIED_TAKEOVER_REASONS, UNIFIED_TERMINAL_REASONS, automaticClaimAllowed, boundedUnifiedReason, classifyUnifiedClose, unifiedCloseNotice } from "../src/unified_close_policy";
 
 // The enumeration fence reads real sources; the project has no node type
 // declarations, so the two touched surfaces are typed locally.
@@ -267,5 +267,19 @@ for (const reason of ["malformed_frame", "non_text_frame", "attachment_fault"]) 
   assert.equal(classifyUnifiedClose(reason), "terminal", `${reason} stops retries, so the page must render it`);
 }
 assert.equal(unifiedCloseNotice("generation_failed").headline, "Terminal history stopped");
+
+// A handoff re-attaches like any reattach reason; only its retry budget differs.
+for (const reason of UNIFIED_HANDOFF_REASONS) assert.equal(classifyUnifiedClose(reason), "reattach", `${reason} must stay a reattach close`);
+assert.ok(!UNIFIED_HANDOFF_REASONS.has("subscriber_lagged"), "a lagging view is a loss, not a handoff: its loop must spend the episode");
+
+// Automatic control claims: operator intent always; otherwise only a visible
+// page, and only within the stale-lease window after losing its own control.
+const claim = (operatorIntent: boolean, visible: boolean, controlLostAt: number | undefined, now: number) => automaticClaimAllowed({ operatorIntent, visible, controlLostAt, now });
+assert.equal(claim(true, false, undefined, 1_000_000), true, "an opened page, Reconnect or a switch must claim a held lease");
+assert.equal(claim(false, true, undefined, 1_000_000), false, "a page that never lost control must not claim automatically");
+assert.equal(claim(false, true, 1_000_000, 1_000_000 + STALE_LEASE_WINDOW_MS), true, "a visible page's own stale lease must be reclaimed");
+assert.equal(claim(false, true, 1_000_000, 1_000_000 + STALE_LEASE_WINDOW_MS + 1), false, "a late recovery took control from another device");
+assert.equal(claim(false, false, 1_000_000, 1_000_001), false, "a hidden page took control automatically");
+assert.equal(claim(false, true, 1_000_000, 999_999), false, "a clock step backwards must not open the window");
 
 console.log("unified close policy tests PASS");

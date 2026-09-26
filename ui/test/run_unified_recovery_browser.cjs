@@ -16,11 +16,20 @@
 //                           its socket, so it cannot hold the lease against the
 //                           next attempt and force a takeover;
 //   offline_then_back       the network stays down past the fast retry phase:
-//                           OFFLINE with Reconnect, then recovery on the
-//                           browser's online signal and, without any signal,
-//                           on the slow probe;
+//                           OFFLINE with Reconnect, a probe that leaves open
+//                           details alone, then recovery on the browser's
+//                           online signal and, without any signal, on the
+//                           slow probe;
 //   lag_burst               a view evicted over and over stops with Reconnect;
-//   restored_page           a page back from the back/forward cache reattaches.
+//   restored_page           a page back from the back/forward cache reattaches,
+//                           but one whose control moved elsewhere stays stopped;
+//   hidden_recovery         a hidden page recovering on its own finds control
+//                           held elsewhere and stops instead of taking it;
+//   workspace_*             the same three stops inside a workspace pane: the
+//                           pane shows the stop with Retry instead of an idle
+//                           "Reattaching", OFFLINE recovers on the online
+//                           signal, and a restored workspace reattaches its
+//                           panes instead of leaving dead Retry buttons.
 //
 // The console is captured on every page. The only tolerated entries are
 // Chromium's reports of requests this gate itself aborts while the network is
@@ -28,6 +37,7 @@
 
 const path = require("path");
 const { startFixture } = require("./unified_reopen_fixture.cjs");
+const { startWorkspaceFixture } = require("./workspace_fixture.cjs");
 const chromiumPath = require("./browser_path.cjs");
 
 const UI = path.resolve(__dirname, "..");
@@ -57,6 +67,7 @@ const STATE = () => {
 async function main() {
   const playwright = require(MODULE);
   const fixture = await startFixture(UI);
+  const workspaceFixture = await startWorkspaceFixture(UI);
   const browser = await playwright.chromium.launch({ executablePath: chromiumPath(), headless: true, args: ["--no-sandbox", "--disable-dev-shm-usage"] });
   const control = async (body) => {
     const response = await fetch(`${fixture.origin}/__fixture/control`, body === undefined ? {} : {
@@ -148,22 +159,43 @@ async function main() {
       await newScenario(signal ? "offline_then_back_online_signal" : "offline_then_back_slow_probe");
       const page = await open();
       let cut = true;
-      await page.route("**/api/**", (route) => (cut ? route.abort("internetdisconnected") : route.continue()));
+      let mintsRefused = 0;
+      await page.route("**/api/**", (route) => {
+        if (!cut) return route.continue();
+        // Every endpoint a reconnect attempt can start with: the source
+        // re-mint, and the identity path's inventory read and adoption.
+        if (["/api/attachment-handles", "/api/inventory", "/api/session-adoptions"].includes(new URL(route.request().url()).pathname)) mintsRefused += 1;
+        return route.abort("internetdisconnected");
+      });
       phase = "network-cut";
       await control({ closeLive: "websocket_read" });
       await notice(page, "reconnect_offline", FAST_PHASE_BOUND_MS);
       const offline = await page.evaluate(STATE);
       assert(offline.reconnectVisible, "OFFLINE offered no Reconnect");
       assert(offline.screen.includes("fixture-live"), "OFFLINE discarded the retained output");
+      if (signal) {
+        // A probe that fails again must leave what the operator opened alone.
+        await page.locator(".persea-unified-tag").click();
+        await page.waitForFunction(() => document.querySelector(".persea-unified-identity__details")?.hidden === false, null, { timeout: 5_000 });
+        const refusedBefore = mintsRefused;
+        await page.evaluate(() => window.dispatchEvent(new Event("focus")));
+        for (const deadline = Date.now() + 6_000; mintsRefused === refusedBefore;) {
+          assert(Date.now() < deadline, "a focus signal did not probe from OFFLINE");
+          await page.waitForTimeout(50);
+        }
+        await notice(page, "reconnect_offline", 5_000);
+        await page.waitForFunction(() => document.querySelector(".persea-unified-connection")?.textContent === "", null, { timeout: 5_000 });
+        assert(await page.evaluate(() => document.querySelector(".persea-unified-identity__details")?.hidden === false), "an OFFLINE probe closed the details the operator had opened");
+      }
       const count = (await attachments()).length;
       cut = false;
-      phase = "product";
       if (signal) {
         await page.evaluate(() => window.dispatchEvent(new Event("online")));
         await live(page, "an OFFLINE page after the online signal", 5_000);
       } else {
         await live(page, "an OFFLINE page with no signal at all", OFFLINE_PROBE_BOUND_MS);
       }
+      phase = "product";
       assert((await attachments()).length === count + 1, "recovery from OFFLINE did not open exactly one attachment");
       await page.unroute("**/api/**");
     }
@@ -191,10 +223,123 @@ async function main() {
     await restored.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
     await live(restored, "a restored page");
     assert((await attachments()).length === beforeRestore + 1, "a restored page did not open exactly one attachment");
+
+    // A restore must not undo a stop: a page whose control moved elsewhere
+    // stays stopped, so it can neither replay the refusal nor take control back.
+    await newScenario("restored_after_displacement");
+    const displaced = await open();
+    const newOwner = await open();
+    await notice(displaced, "control_displaced", LIVE_BOUND_MS);
+    const beforeDisplacedRestore = (await attachments()).length;
+    await displaced.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
+    await displaced.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+    // Observation window for an absence: a resume mints and reattaches at once.
+    await displaced.waitForTimeout(2_000);
+    assert((await attachments()).length === beforeDisplacedRestore, "restoring a displaced page reattached it");
+    await notice(displaced, "control_displaced", 1_000);
+    await live(newOwner, "the page that holds control, after the other page's restore", 1_000);
+
+    // A page recovering on its own must not take control from where the
+    // operator moved it: here a hidden page comes back while another holds it.
+    await newScenario("hidden_recovery");
+    const away = await open();
+    let awayCut = true;
+    await away.route("**/api/**", (route) => (awayCut ? route.abort("internetdisconnected") : route.continue()));
+    phase = "network-cut";
+    await control({ closeLive: "websocket_read" });
+    await lost(away);
+    const holder = await open();
+    await away.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", { configurable: true, get: () => "hidden" });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    awayCut = false;
+    await notice(away, "lease_held", FAST_PHASE_BOUND_MS);
+    // Chromium reports a request aborted just before the network returned a
+    // moment later; leave the cut phase only once a request has succeeded.
+    phase = "product";
+    await live(holder, "the page that holds control, after the hidden page came back", 1_000);
+    assert(!(await attachments()).some((attachment) => attachment.takeover), "a hidden recovering page took control");
+    await away.unroute("**/api/**");
+
+    // Workspace panes: the same stops, rendered by the pane.
+    const workspaceControl = async (body) => {
+      const response = await fetch(`${workspaceFixture.origin}/__fixture/control`, body === undefined ? {} : {
+        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      });
+      return response.json();
+    };
+    const tree = { kind: "split", direction: "row", weights: [1, 1], children: ["ws01", "ws02"].map((name) => ({ kind: "leaf", session: { realm: "local", server: "private", name }, on_missing: "offer" })) };
+    const cellState = (page, name) => page.evaluate((session) => {
+      const cell = document.querySelector(`.ws-cell[data-ws-session="${session}"]`);
+      return {
+        state: cell?.dataset.wsState ?? null,
+        code: cell?.querySelector(".ws-cell__state-code")?.textContent ?? "",
+        actions: [...(cell?.querySelectorAll(".ws-cell__action") ?? [])].filter((action) => !action.closest("[hidden]")).map((action) => action.dataset.wsAffordance),
+      };
+    }, name);
+    const workspaceLive = (page, what, timeout = LIVE_BOUND_MS) => page.waitForFunction(() => {
+      const cells = [...document.querySelectorAll(".ws-cell")];
+      return cells.length === 2 && cells.every((cell) => cell.dataset.wsState === "live" && cell.querySelector(".xterm-rows"));
+    }, null, { timeout }).catch(async () => { throw new Error(`${scenario}: ${what}: panes never all went live: ${JSON.stringify([await cellState(page, "ws01"), await cellState(page, "ws02")])}`); });
+    const cellStop = (page, name, code, timeout) => page.waitForFunction(([session, expected]) => {
+      const cell = document.querySelector(`.ws-cell[data-ws-session="${session}"]`);
+      return cell?.dataset.wsState === "failed" && cell.querySelector(".ws-cell__state-code")?.textContent?.includes(expected);
+    }, [name, code], { timeout }).catch(async () => { throw new Error(`${scenario}: pane ${name} never showed ${code}: ${JSON.stringify(await cellState(page, name))}`); });
+    const openWorkspace = async () => {
+      await workspaceControl({ reset: true, sessions: ["ws01", "ws02"], workspace: { name: "ops", tree } });
+      const page = await context.newPage();
+      await page.goto(`${workspaceFixture.origin}/workspace?engine=unified-dev#name=ops`);
+      await page.getByRole("button", { name: /^Open workspace/ }).click();
+      await workspaceLive(page, "the first open");
+      return page;
+    };
+    const workspaceAttachments = async (name) => (await workspaceControl()).attachments.filter((attachment) => attachment.session === name);
+
+    await newScenario("workspace_lag_stop");
+    const lagWorkspace = await openWorkspace();
+    for (let round = 0; round < 3; round += 1) {
+      await workspaceControl({ session: "ws01", closeLive: "subscriber_lagged" });
+      await lagWorkspace.waitForFunction(() => document.querySelector('.ws-cell[data-ws-session="ws01"]')?.dataset.wsState !== "live");
+      await workspaceLive(lagWorkspace, `lag round ${round + 1}`);
+    }
+    await workspaceControl({ session: "ws01", closeLive: "subscriber_lagged" });
+    await cellStop(lagWorkspace, "ws01", "subscriber_lagged", LIVE_BOUND_MS);
+    assert((await cellState(lagWorkspace, "ws01")).actions.includes("retry"), "the stopped pane offered no Retry");
+    await lagWorkspace.locator('.ws-cell[data-ws-session="ws01"] [data-ws-affordance="retry"]').click();
+    await workspaceLive(lagWorkspace, "Retry after the lag stop");
+
+    await newScenario("workspace_offline");
+    const offlineWorkspace = await openWorkspace();
+    let handlesCut = true;
+    // The whole API goes: a pane recovers through its source re-mint or, failing
+    // that, through the inventory, which carries handles too.
+    await offlineWorkspace.route("**/api/**", (route) => (handlesCut ? route.abort("internetdisconnected") : route.continue()));
+    phase = "network-cut";
+    await workspaceControl({ session: "ws01", closeLive: "websocket_read" });
+    await cellStop(offlineWorkspace, "ws01", "reconnect_offline", FAST_PHASE_BOUND_MS);
+    assert((await cellState(offlineWorkspace, "ws01")).actions.includes("retry"), "the OFFLINE pane offered no Retry");
+    const ws02Before = (await workspaceAttachments("ws02")).length;
+    handlesCut = false;
+    await offlineWorkspace.evaluate(() => window.dispatchEvent(new Event("online")));
+    await workspaceLive(offlineWorkspace, "an OFFLINE pane after the online signal", 5_000);
+    phase = "product";
+    assert((await workspaceAttachments("ws02")).length === ws02Before, "recovering one pane reattached its healthy neighbour");
+    await offlineWorkspace.unroute("**/api/**");
+
+    await newScenario("workspace_restored");
+    const restoredWorkspace = await openWorkspace();
+    const counts = [(await workspaceAttachments("ws01")).length, (await workspaceAttachments("ws02")).length];
+    await restoredWorkspace.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pagehide", { persisted: true })));
+    await restoredWorkspace.waitForFunction(() => [...document.querySelectorAll(".ws-cell")].every((cell) => cell.dataset.wsState !== "live"), null, { timeout: LIVE_BOUND_MS });
+    await restoredWorkspace.evaluate(() => window.dispatchEvent(new PageTransitionEvent("pageshow", { persisted: true })));
+    await workspaceLive(restoredWorkspace, "a restored workspace");
+    assert((await workspaceAttachments("ws01")).length === counts[0] + 1 && (await workspaceAttachments("ws02")).length === counts[1] + 1, "a restored workspace did not reattach each pane exactly once");
   } finally {
     if (context) await context.close();
     await browser.close();
     await fixture.close();
+    await workspaceFixture.close();
   }
   assert(findings.length === 0, `console/page findings:\n${findings.join("\n")}`);
   console.log("unified recovery browser gate: PASS");

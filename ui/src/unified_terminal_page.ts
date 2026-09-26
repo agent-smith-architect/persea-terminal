@@ -25,7 +25,7 @@ import { TerminalKeysPanel } from "./terminal_keys_panel";
 import { actionGlyph, keyAction, keyEncodingNote, planKey, resolveAction, type KeyChord, type KeyModifiers, type TerminalActionEntry } from "./terminal_actions";
 import { unifiedComposerAvailability, withCompactDensity, withStoredDensity } from "./unified_composer_adapter";
 import { syntheticCtrlReleaseEvent, syntheticKeydownEvent, unifiedKeyDescriptor, type UnifiedKeyDescriptor } from "./unified_key_bar";
-import { UNIFIED_RECONNECTABLE_NOTICES, UNIFIED_TAKEOVER_REASONS, boundedUnifiedReason, classifyUnifiedClose, unifiedCloseNotice } from "./unified_close_policy";
+import { UNIFIED_RECONNECTABLE_NOTICES, UNIFIED_TAKEOVER_REASONS, automaticClaimAllowed, boundedUnifiedReason, classifyUnifiedClose, unifiedCloseNotice } from "./unified_close_policy";
 import { REFUSAL_NOTICE_MS, refusalReleasesFit, unifiedRefusalNotice } from "./unified_refusal_notice";
 import { UnifiedKeyboardBaseline } from "./unified_keyboard_baseline";
 import { SessionSwitcherView, type SessionSwitcherInventory } from "./session_switcher";
@@ -334,6 +334,16 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // claimed automatically — but only a few times, so two devices cannot fight
   // forever. Reset on a successful commit.
   private autoTakeoverAttempts = 0;
+  // Operator intent to control this session: the page was just opened,
+  // Reconnect was pressed, or the session was switched. The next COMMIT
+  // consumes it; after that only a stale lease of this page's own may be
+  // claimed automatically (automaticClaimAllowed).
+  private claimIntent = true;
+  // When this page last lost a committed control connection to a transport
+  // failure, while the front door may still hold that connection's lease.
+  private controlLostAt?: number;
+  // The code of the failure notice on screen, if any.
+  private shownNotice?: string;
   // The last prepared source binding; survives transport generations so a
   // takeover claim can be source-based once any PREPARE has been seen.
   private knownSource?: string;
@@ -962,6 +972,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         if (!event.isTrusted || reconnectButton.hidden || reconnectButton.disabled || this.noticePanel.hidden) return;
         reconnectButton.disabled = true;
         this.hideFailureNotice();
+        this.claimIntent = true;
         // A trusted retry starts the existing finite recovery cycle. It never
         // reuses a capability or replays input from the disconnected socket.
         this.options.port.attachAgain?.();
@@ -2794,8 +2805,9 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.loadingPanel.hidden = true;
       // A successful commit means the session is healthy again: reset the
       // auto-takeover budget so a later, unrelated displacement gets fresh
-      // attempts.
+      // attempts. The operator intent that opened this connection is spent.
       this.autoTakeoverAttempts = 0;
+      this.claimIntent = false;
       if (!this.firstCommitPublished) {
         this.firstCommitPublished = true;
         this.options.onFirstCommit?.();
@@ -2865,6 +2877,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.admittedViaTakeover = false;
       this.closePresentationOverlays(true);
     }
+    if (closeClass === "transient" && this.committed && this.options.capabilityMode === "control") this.controlLostAt = Date.now();
     this.committed = false;
     this.controlGranted = false;
     this.fitPending = false;
@@ -2904,15 +2917,18 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         return;
       }
       case "terminal":
-        // Reopening is explicit operator intent, so a lease held by another
-        // live attachment is claimed automatically — bounded, so two devices
-        // cannot fight forever. control_displaced/takeover_superseded keep the
-        // manual button: the operator moved control there deliberately.
+        // Opening, Reconnect and a session switch are explicit operator
+        // intent, so a lease held by another live attachment is claimed
+        // automatically — bounded, so two devices cannot fight forever. An
+        // automatic recovery claims only this visible page's own stale lease
+        // (automaticClaimAllowed). control_displaced/takeover_superseded keep
+        // the manual button: the operator moved control there deliberately.
         if (reason === "lease_held"
           && this.options.capabilityMode === "control"
           && this.options.takeControl !== undefined
           && this.options.port.takeControl !== undefined
-          && this.autoTakeoverAttempts < MAX_AUTO_TAKEOVERS) {
+          && this.autoTakeoverAttempts < MAX_AUTO_TAKEOVERS
+          && automaticClaimAllowed({ operatorIntent: this.claimIntent, visible: document.visibilityState === "visible", controlLostAt: this.controlLostAt, now: Date.now() })) {
           this.autoTakeoverAttempts += 1;
           this.claimControl(true);
           return;
@@ -2976,7 +2992,10 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         return;
       case "WAITING":
       case "ATTEMPTING": {
-        this.closePresentationOverlays();
+        // A probe under the OFFLINE notice leaves the page as the operator
+        // arranged it: overlays closed when the connection was lost, and
+        // anything opened since (the switcher, details) stays open.
+        if (this.shownNotice !== "reconnect_offline") this.closePresentationOverlays();
         const name = this.sessionName;
         const base = name ? `Reconnecting to ${name}…` : "Reconnecting…";
         this.connectionStatus.textContent = `${base} (attempt ${status.attempt})`;
@@ -2984,7 +3003,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       }
       case "OFFLINE":
         // Automatic attempts continue; the notice says so and offers an
-        // immediate one.
+        // immediate one. A probe that failed again only clears its strip.
+        if (this.shownNotice === "reconnect_offline") {
+          this.connectionStatus.textContent = "";
+          return;
+        }
         this.showFailureNotice("reconnect_offline");
         return;
       case "EXHAUSTED":
@@ -3020,12 +3043,14 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.takeControlButton.disabled = false;
     this.takeControlButton.textContent = "Take control here";
     this.noticePanel.hidden = false;
+    this.shownNotice = code;
     this.connectionStatus.textContent = "";
     this.renderSessionTag();
   }
 
   private hideFailureNotice(): void {
     this.noticePanel.hidden = true;
+    this.shownNotice = undefined;
     this.renderSessionTag();
   }
 
@@ -3056,6 +3081,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     stageImage?: (file: File, signal: AbortSignal) => Promise<ComposerStagedImage>;
   }>): void {
     if (this.closed) return;
+    this.claimIntent = true;
     this.closePresentationOverlays();
     this.exitSelectMode();
     this.endpointOperation += 1;

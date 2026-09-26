@@ -24,7 +24,7 @@ import { SnippetService, deviceOrigin } from "./snippet_client";
 import { pendingIdentityFromSession, writeLastSession } from "./session_memory";
 import { OperatorPreferencesService } from "./operator_preferences";
 import type { CommitFocusContext } from "./unified_focus_claim";
-import type { UnifiedInventoryDetail } from "./unified_close_policy";
+import { classifyUnifiedClose, type UnifiedInventoryDetail } from "./unified_close_policy";
 import { UnifiedPaneController, fetchInventory, type InventoryResolver, type InventorySnapshot, type ResolvedPaneIdentity, type UnifiedPaneControllerState } from "./unified_pane_controller";
 import {
   PANE_CAP, addLeaf, leaf, leafEntries, parseWorkspace, removeLeaf, sameSession, serializeWorkspace, sessionKey, setLeafAliasHint, split, splitLeaf, unsplit, validateWorkspaceTree, workspaceRefusalMessage,
@@ -465,7 +465,14 @@ export class WorkspacePage {
     this.view = view;
     this.designated = entries[0]?.key;
     this.root.addEventListener("focusin", (event) => this.onFocusIn(event));
-    this.win.addEventListener("pagehide", () => this.teardown("page_hidden"));
+    // A page entering the back/forward cache only suspends its panes, so a
+    // restored page can reattach them; a page that is really unloading tears
+    // everything down.
+    this.win.addEventListener("pagehide", (event) => {
+      if (event.persisted) this.suspend();
+      else this.teardown("page_hidden");
+    });
+    this.win.addEventListener("pageshow", (event) => { if (event.persisted) this.resume(); });
     for (const entry of entries) {
       const cell = view.cell(entry.key);
       if (!cell) continue;
@@ -634,6 +641,11 @@ export class WorkspacePage {
           // OFFLINE keeps probing on its own; the pane says so and offers
           // an immediate retry beside it.
           if (status.state === "OFFLINE") pane.cell.setState(Object.freeze({ kind: "failed", reason: "reconnect_offline" }));
+          // The page's burst limiter stopped a reattach loop: without this the
+          // cell would keep saying "Reattaching" with nothing running.
+          if (status.state === "DETACHED" && status.reason !== undefined && classifyUnifiedClose(status.reason) === "reattach") {
+            pane.cell.setState(Object.freeze({ kind: "failed", reason: status.reason }));
+          }
           if (status.state === "EXHAUSTED") pane.cell.setState(Object.freeze({ kind: "failed", reason: status.reason ?? "reconnect_exhausted" }));
         },
         projectionDetail: (detail) => {
@@ -994,6 +1006,16 @@ export class WorkspacePage {
   designatedKey(): string | undefined { return this.designated; }
   inventoryRequestCount(): number { return this.inventory.requestCount(); }
   posture(): WorkspacePosture { return "desktop"; }
+
+  private suspend(): void {
+    if (this.torndown) return;
+    for (const pane of this.panes.values()) pane.controller?.suspend();
+  }
+
+  private resume(): void {
+    if (this.torndown) return;
+    for (const pane of this.panes.values()) pane.controller?.resume();
+  }
 
   teardown(reason: string): void {
     if (this.torndown) return;
