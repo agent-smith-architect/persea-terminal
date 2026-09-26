@@ -7,7 +7,7 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 ### Changed
 
 - A connection now counts as stable only after its view has received all history and then stayed up for 20 seconds. Before, the 20 seconds started when the view opened, so on a slow connection a view that never finished loading started a new round of quick retries after each loss.
-- When a view falls behind three times in a row before it has received all history, the terminal stops with "This page kept falling behind" and a Reconnect button. Before, it loaded the history again and again.
+- When a view falls behind three times in a row before it has received all history, the terminal stops with "This page kept falling behind" and a Reconnect button, instead of loading the same history again and again. The count starts again when the server shortens the history, when you switch sessions and when you press Reconnect. This is a limit on retries: a view that would have caught up much later also stops, and Reconnect resumes it.
 
 ### Fixed
 

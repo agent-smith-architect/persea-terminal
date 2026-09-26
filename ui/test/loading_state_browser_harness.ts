@@ -16,6 +16,12 @@ let transportOpens = 0;
 let socketConstructions = 0;
 let reconnectRequests = 0;
 document.addEventListener("focusin", () => { focusEvents += 1; }, true);
+// The reattach burst window reads Date.now(). Moving the wall clock lets a
+// check step past that window, so the rule under test is the only one that
+// can stop the page.
+let wallClockOffset = 0;
+const realDateNow = Date.now.bind(Date);
+Date.now = () => realDateNow() + wallClockOffset;
 const NativeWebSocket = window.WebSocket;
 window.WebSocket = new Proxy(NativeWebSocket, {
   construct(target, args) {
@@ -149,6 +155,18 @@ function modeAll(mode: "CONTROL" | "OBSERVE" = "CONTROL"): Record<string, unknow
   return snapshot();
 }
 
+function advanceWallClock(ms: number): Record<string, unknown> {
+  wallClockOffset += ms;
+  return snapshot();
+}
+
+// The session switcher's identity commit, before the new session's endpoint
+// opens.
+function switchSessionAll(): Record<string, unknown> {
+  for (const pane of mounted) pane.page.replaceSessionPresentation({ sessionName: `${pane.name}-next`, composerStorageScope: `${pane.name}-next` });
+  return snapshot();
+}
+
 // The transport's next attempt: a new generation and cut for every pane.
 function readmitAll(): Record<string, unknown> {
   for (const pane of mounted) {
@@ -205,6 +223,38 @@ async function throwingWriteCallback(): Promise<Record<string, unknown>> {
   return { ...snapshot(), loopAlive, afterWritten: bufferHas(terminal, "AFTER-THE-FAILURE") };
 }
 
+// The PREPARE replay write's callback throws: the attachment ends with
+// REPLAY_FAILED, and later writes still complete.
+async function throwingReplayCallback(): Promise<Record<string, unknown>> {
+  const pane = mounted[0]!;
+  const terminal = terminalOf(pane);
+  const page = pane.page as unknown as { syncNativeScroll: (...args: unknown[]) => void };
+  page.syncNativeScroll = () => { throw new Error("replay callback failure"); };
+  pane.page.receiveDecoded(pane.generation, frame(pane, {
+    type: "PREPARE", cut: pane.cut, kind: "INITIAL", columns: 80, rows: 24, history: [], truncated: false,
+    replay: encoder.encode("REPLAY-CALLBACK-THROWS\r\n"),
+  }));
+  const loopAlive = await new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), 3_000);
+    terminal.write("AFTER-THE-REPLAY-FAILURE\r\n", () => { clearTimeout(timer); resolve(true); });
+  });
+  delete (page as { syncNativeScroll?: unknown }).syncNativeScroll;
+  return { ...snapshot(), loopAlive, afterWritten: bufferHas(terminal, "AFTER-THE-REPLAY-FAILURE") };
+}
+
+// The flow acknowledgement callback throws: the attachment ends, and later
+// writes still complete.
+async function throwingAcknowledgement(): Promise<Record<string, unknown>> {
+  const pane = mounted[0]!;
+  const terminal = terminalOf(pane);
+  pane.page.afterConsumed(pane.generation, () => { throw new Error("acknowledgement failure"); });
+  const loopAlive = await new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), 3_000);
+    terminal.write("AFTER-THE-ACK-FAILURE\r\n", () => { clearTimeout(timer); resolve(true); });
+  });
+  return { ...snapshot(), loopAlive, afterWritten: bufferHas(terminal, "AFTER-THE-ACK-FAILURE") };
+}
+
 function failAll(reason = "unified_unavailable"): Record<string, unknown> {
   for (const pane of mounted) pane.page.transportClosed(pane.generation, reason);
   return snapshot();
@@ -228,8 +278,12 @@ declare global {
       commitAll(): Record<string, unknown>;
       modeAll(mode?: "CONTROL" | "OBSERVE"): Record<string, unknown>;
       readmitAll(): Record<string, unknown>;
+      advanceWallClock(ms: number): Record<string, unknown>;
+      switchSessionAll(): Record<string, unknown>;
       acknowledgeAfterWrite(): Promise<Record<string, unknown>>;
       throwingWriteCallback(): Promise<Record<string, unknown>>;
+      throwingReplayCallback(): Promise<Record<string, unknown>>;
+      throwingAcknowledgement(): Promise<Record<string, unknown>>;
       failAll(reason?: string): Record<string, unknown>;
       exhaustAll(reason?: string): Record<string, unknown>;
       snapshot(): Record<string, unknown>;
@@ -237,5 +291,5 @@ declare global {
   }
 }
 
-window.__loading_state = { reset, prepareAll, commitAll, modeAll, readmitAll, acknowledgeAfterWrite, throwingWriteCallback, failAll, exhaustAll, snapshot };
+window.__loading_state = { reset, prepareAll, commitAll, modeAll, readmitAll, advanceWallClock, switchSessionAll, acknowledgeAfterWrite, throwingWriteCallback, throwingReplayCallback, throwingAcknowledgement, failAll, exhaustAll, snapshot };
 document.body.dataset.loading_stateReady = "true";

@@ -25,7 +25,7 @@ import { TerminalKeysPanel } from "./terminal_keys_panel";
 import { actionGlyph, keyAction, keyEncodingNote, planKey, resolveAction, type KeyChord, type KeyModifiers, type TerminalActionEntry } from "./terminal_actions";
 import { unifiedComposerAvailability, withCompactDensity, withStoredDensity } from "./unified_composer_adapter";
 import { syntheticCtrlReleaseEvent, syntheticKeydownEvent, unifiedKeyDescriptor, type UnifiedKeyDescriptor } from "./unified_key_bar";
-import { UNIFIED_RECONNECTABLE_NOTICES, UNIFIED_TAKEOVER_REASONS, automaticClaimAllowed, boundedUnifiedReason, classifyUnifiedClose, unifiedCloseNotice } from "./unified_close_policy";
+import { UNIFIED_HANDOFF_REASONS, UNIFIED_RECONNECTABLE_NOTICES, UNIFIED_TAKEOVER_REASONS, automaticClaimAllowed, boundedUnifiedReason, classifyUnifiedClose, unifiedCloseNotice } from "./unified_close_policy";
 import { REFUSAL_NOTICE_MS, refusalReleasesFit, unifiedRefusalNotice } from "./unified_refusal_notice";
 import { UnifiedKeyboardBaseline } from "./unified_keyboard_baseline";
 import { SessionSwitcherView, type SessionSwitcherInventory } from "./session_switcher";
@@ -45,10 +45,12 @@ const REATTACH_BURST_LIMIT = 3;
 // the history backlog. That alone does not mean it never will: a burst of
 // output ends, and while the output continues it brings the session's journal
 // to its next rotation, which replaces a long history with a short
-// reconstruction. A third such eviction in a row, however far apart the
-// attempts are, means this connection cannot deliver the history faster than
-// the session adds to it, so the page stops instead of streaming the backlog
-// again and again.
+// reconstruction (a handoff, after which the count starts again). After the
+// third such eviction in a row on one history, the page stops and offers
+// Reconnect rather than download that history again and again over a
+// connection that has not kept up with it. This is a retry cutoff, not proof
+// that the view can never catch up: one that would have caught up much later
+// is stopped too, and Reconnect resumes it.
 const MAX_CATCH_UP_FAILURES = 3;
 // A cross-device reopen may auto-take control this many times before it stops
 // fighting, so two devices reopening each other cannot ping-pong forever.
@@ -2932,6 +2934,9 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         // scheduled a re-attach on the same identity — render it, do not stop
         // it. A burst within the window gives up, and so does a view that
         // keeps falling behind before it catches up (MAX_CATCH_UP_FAILURES).
+        // A handoff replaces the history, so earlier failures to catch up
+        // say nothing about the next attempt.
+        if (UNIFIED_HANDOFF_REASONS.has(reason)) this.catchUpFailures = 0;
         if (reason === "subscriber_lagged" && !this.modeReceived && ++this.catchUpFailures >= MAX_CATCH_UP_FAILURES) {
           this.options.port.detach?.(reason);
           this.showFailureNotice(reason);
@@ -3156,6 +3161,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.prepared = undefined;
     this.committed = false;
     this.controlGranted = false;
+    // Catch-up failures describe the previous session's history.
+    this.catchUpFailures = 0;
     this.fitPending = false;
     // A session identity commit is the terminal owner for a pending refit on
     // the previous incarnation. The replacement's later COMMIT must never
