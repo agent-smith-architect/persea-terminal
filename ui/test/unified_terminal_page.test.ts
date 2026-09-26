@@ -18,6 +18,7 @@ const playwrightModule = process.env.PERSEA_PLAYWRIGHT_MODULE || require.resolve
 const chromePath = process.env.PERSEA_E2E1_CHROME || process.env.CHROME_BIN || require(playwrightModule).chromium.executablePath();
 const refitOnly = process.env.PERSEA_E2E1_REFIT_ONLY === "1";
 const alternateOnly = process.env.PERSEA_E2E1_ALTERNATE_ONLY === "1";
+const slowLinkOnly = process.env.PERSEA_E2E1_SLOW_LINK_ONLY === "1";
 const browserEngine = process.env.PERSEA_E2E1_ENGINE || "chromium";
 if (!path.isAbsolute(repo ?? "") || !path.isAbsolute(artifactRoot ?? "") || !path.isAbsolute(playwrightModule ?? "")) {
   throw new Error("E2E1 requires absolute repo, artifact, and Playwright module paths");
@@ -81,13 +82,63 @@ function writeJSON(file: string, value: unknown): void {
   fs.writeFileSync(file, `${JSON.stringify(value, null, 2)}\n`, { mode: 0o600 });
 }
 
+// A shaped link stands in for a slow network path, for terminal WebSockets
+// only: server-to-browser bytes leave at a fixed rate through a bounded
+// bottleneck buffer, and both directions carry a fixed one-way delay. Page
+// loads and API requests stay unshaped, so only the terminal stream pays for
+// the link. The bottleneck stops reading from the front door once it is full,
+// as a congested path stops acknowledging, so the front door's writes block
+// instead of vanishing into proxy memory.
+const shapedLink = { rate: 0, delayMs: 0, pairs: new Set<{ drop: () => void }>() };
+const SHAPED_LINK_BUFFER_BYTES = 64 << 10;
+const SHAPED_LINK_TICK_MS = 50;
+
+function shapeLink(browserSocket: any, upstream: any): { push(chunk: any): void; send(chunk: any): void; end(): void } {
+  const { rate, delayMs } = shapedLink;
+  const queue: any[] = [];
+  let queued = 0;
+  let inAir = 0;
+  let ended = false;
+  const finish = () => { if (ended && queued === 0 && inAir === 0) browserSocket.end(); };
+  const timer = setInterval(() => {
+    let budget = Math.floor(rate * SHAPED_LINK_TICK_MS / 1000);
+    while (budget > 0 && queue.length > 0) {
+      const head = queue[0];
+      const size = Math.min(budget, head.length);
+      const slice = head.subarray(0, size);
+      if (size === head.length) queue.shift(); else queue[0] = head.subarray(size);
+      queued -= size;
+      budget -= size;
+      inAir += 1;
+      setTimeout(() => { inAir -= 1; if (!browserSocket.destroyed) browserSocket.write(slice); finish(); }, delayMs);
+    }
+    if (queued < SHAPED_LINK_BUFFER_BYTES && upstream.isPaused()) upstream.resume();
+  }, SHAPED_LINK_TICK_MS);
+  // A drop is a network loss, not a close: both ends are reset at once.
+  const pair = { drop: () => { browserSocket.resetAndDestroy(); upstream.destroy(); } };
+  const stop = () => { clearInterval(timer); shapedLink.pairs.delete(pair); };
+  shapedLink.pairs.add(pair);
+  browserSocket.on("close", stop);
+  upstream.on("close", stop);
+  return {
+    push(chunk: any) {
+      queue.push(chunk);
+      queued += chunk.length;
+      if (queued >= SHAPED_LINK_BUFFER_BYTES) upstream.pause();
+    },
+    send(chunk: any) { setTimeout(() => { if (!upstream.destroyed) upstream.write(chunk); }, delayMs); },
+    end() { ended = true; finish(); },
+  };
+}
+
 function startTrustedProxy(frontSocket: string, canonicalHost: () => string, scheme: "http" | "https", tlsOptions?: Record<string, unknown>): any {
   const handler = (browserSocket: any) => {
     const upstream = net.createConnection(frontSocket);
     let pending = Buffer.alloc(0);
     let forwarded = false;
+    let shaper: ReturnType<typeof shapeLink> | undefined;
     browserSocket.on("data", (chunk: any) => {
-      if (forwarded) { upstream.write(chunk); return; }
+      if (forwarded) { if (shaper) shaper.send(chunk); else upstream.write(chunk); return; }
       pending = Buffer.concat([pending, chunk]);
       const boundary = pending.indexOf("\r\n\r\n");
       if (boundary < 0) return;
@@ -97,12 +148,14 @@ function startTrustedProxy(frontSocket: string, canonicalHost: () => string, sch
       const kept = lines.filter((line: string) => !/^(host|connection|x-forwarded-host|x-forwarded-proto|tailscale-user-login):/i.test(line));
       const header = [request, "Host: localhost", `X-Forwarded-Host: ${canonicalHost()}`, `X-Forwarded-Proto: ${scheme}`, "Tailscale-User-Login: operator@example.test", `Connection: ${upgrade ? "Upgrade" : "close"}`, ...kept, "", ""].join("\r\n");
       if (proxyRequests++ < 5) emit("trusted-proxy-request", { request, authority: canonicalHost(), headers: header.split("\r\n").slice(0, 10) });
-      upstream.write(Buffer.concat([Buffer.from(header, "latin1"), pending.subarray(boundary + 4)]));
+      if (upgrade && shapedLink.rate > 0) shaper = shapeLink(browserSocket, upstream);
+      const forwardedRequest = Buffer.concat([Buffer.from(header, "latin1"), pending.subarray(boundary + 4)]);
+      if (shaper) shaper.send(forwardedRequest); else upstream.write(forwardedRequest);
       pending = Buffer.alloc(0);
       forwarded = true;
     });
-    upstream.on("data", (chunk: any) => browserSocket.write(chunk));
-    upstream.on("end", () => browserSocket.end());
+    upstream.on("data", (chunk: any) => { if (shaper) shaper.push(chunk); else browserSocket.write(chunk); });
+    upstream.on("end", () => { if (shaper) shaper.end(); else browserSocket.end(); });
     browserSocket.on("end", () => upstream.end());
     browserSocket.on("error", () => upstream.destroy());
     upstream.on("error", () => browserSocket.destroy());
@@ -309,6 +362,177 @@ async function main(): Promise<void> {
   await page.goto(`${base}/terminal#handle=${encodeURIComponent(handle)}&mode=control&history=0&engine=unified-dev`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector(".persea-unified-terminal .xterm");
   await until("initial staged reload capability", () => page.evaluate(() => /^[A-Za-z0-9_-]{43}$/.test(window.sessionStorage.getItem("persea-unified-terminal-reload-handle-v1") ?? "")));
+  if (slowLinkOnly) {
+    // Slow-link acceptance. A session whose journal holds more than a MiB is
+    // opened, used, kept open under steady output, and reconnected through a
+    // link as slow as a poor mobile connection. Admission must stay bounded,
+    // input must wait until the browser has caught up, no stage may loop, and
+    // every liveness round trip must fit the page's window.
+    const target = "=unified_target:";
+    const LIVENESS_WINDOW_MS = 10_000; // the page's liveness challenge window
+    const ATTEMPT_DEADLINE_MS = 5_000; // the page's attempt deadline and the broker's cut timer
+    const HISTORY_BYTES = 1 << 20;
+    const STEADY_MS = 30_000;
+    const LINK_DELAY_MS = 150;
+    const filler = "x".repeat(64);
+    const xterm = page.locator(".persea-unified-xterm");
+    const capture = () => command("tmux", ["-S", tmuxSocket, "capture-pane", "-p", "-S", "-200", "-t", target]);
+    const steadyIn = (text: string) => Math.max(0, ...[...text.matchAll(/STEADY-(\d{6})/g)].map((match) => Number(match[1])));
+    const pageState = () => page.evaluate(() => ({
+      phase: document.querySelector<HTMLElement>(".persea-unified-tag__dot")?.dataset.state ?? "",
+      notice: document.querySelector<HTMLElement>(".persea-unified-notice")?.hidden === false,
+      connection: document.querySelector(".persea-unified-connection")?.textContent ?? "",
+      rows: document.querySelector<HTMLElement>(".xterm-rows")?.innerText ?? "",
+    }));
+    type Attachment = {
+      opened: number; closed: number; commitAt: number; modeAt: number;
+      bytesBeforeMode: number; framesBeforeMode: number; inputsBeforeMode: number; acks: number;
+      pings: Map<string, number>; rtts: number[]; refusals: string[];
+    };
+    const attachments: Attachment[] = [];
+    page.on("websocket", (socket: any) => {
+      if (new URL(socket.url()).pathname !== "/ws") return;
+      const record: Attachment = { opened: Date.now(), closed: 0, commitAt: 0, modeAt: 0, bytesBeforeMode: 0, framesBeforeMode: 0, inputsBeforeMode: 0, acks: 0, pings: new Map(), rtts: [], refusals: [] };
+      attachments.push(record);
+      const text = (event: any) => typeof event.payload === "string" ? event.payload : Buffer.from(event.payload).toString("utf8");
+      socket.on("close", () => { record.closed = Date.now(); });
+      socket.on("framesent", (event: any) => {
+        const payload = text(event);
+        if (payload.startsWith("PERSEA-LIVENESS/1 PING ")) record.pings.set(payload.slice(23), Date.now());
+        else if (payload.startsWith("PERSEA-FLOW/1 ACK ")) record.acks += 1;
+        else if (!record.modeAt && payload.includes('"type":"INPUT"')) record.inputsBeforeMode += 1;
+      });
+      socket.on("framereceived", (event: any) => {
+        const payload = text(event);
+        const now = Date.now();
+        if (payload.startsWith("PERSEA-LIVENESS/1 PONG ")) {
+          const nonce = payload.slice(23);
+          const sent = record.pings.get(nonce);
+          if (sent !== undefined) { record.rtts.push(now - sent); record.pings.delete(nonce); }
+          return;
+        }
+        if (payload.startsWith("PERSEA-")) { record.refusals.push(payload.slice(0, 120)); return; }
+        const frame = JSON.parse(payload);
+        if (!record.modeAt) {
+          const encoded = frame.type === "PREPARE" ? frame.replay : frame.type === "LIVE" ? frame.data : "";
+          record.bytesBeforeMode += encoded ? Buffer.from(encoded, "base64").length : 0;
+          record.framesBeforeMode += 1;
+        }
+        if (frame.type === "COMMIT" && !record.commitAt) record.commitAt = now;
+        if (frame.type === "MODE" && frame.mode === "CONTROL" && !record.modeAt) record.modeAt = now;
+      });
+    });
+    const liveness = (stage: string, record: Attachment) => {
+      const unanswered = [...record.pings.values()].filter((sent) => Date.now() - sent >= LIVENESS_WINDOW_MS);
+      assert(record.rtts.length > 0 && unanswered.length === 0 && Math.max(...record.rtts) < LIVENESS_WINDOW_MS,
+        `${stage}: liveness round trips ${JSON.stringify(record.rtts)} with ${unanswered.length} unanswered past the ${LIVENESS_WINDOW_MS} ms window`);
+    };
+
+    // More than a MiB of history, recorded while the unshaped page is attached,
+    // then steady output that keeps running through every later stage.
+    await until("initial attachment live", async () => (await pageState()).phase === "live");
+    command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, `seq -w 1 16000 | sed 's/.*/HIST-&-${filler}/'; printf 'HIST-%s\\n' DONE`, "Enter"]);
+    await until("history recorded", async () => (await pageState()).rows.includes("HIST-DONE"), 60_000);
+    command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, `(i=0; while :; do for j in 1 2 3 4 5; do i=$((i+1)); printf 'STEADY-%06d-%s\\n' "$i" ${filler}; done; sleep 0.2; done) &`, "Enter"]);
+    await until("steady output", () => steadyIn(capture()) > 0);
+
+    // Each stage waits for the attachment the page opens next, measured from
+    // the moment its cause (navigation or link loss) happened.
+    const attach = async (stage: string, index: number, causedAt: number, rate: number) => {
+      const record = await until(`${stage}: terminal socket`, () => attachments[index], 20_000);
+      await until(`${stage}: COMMIT`, () => record.commitAt, 20_000);
+      // Admission no longer scales with history: it fits the attempt deadline
+      // even on this link.
+      assert(record.commitAt - record.opened < ATTEMPT_DEADLINE_MS, `${stage}: admission took ${record.commitAt - record.opened} ms`);
+      // The backlog is still streaming, so input is sealed: a key typed now
+      // must be dropped, never sent.
+      if (!record.modeAt) {
+        await xterm.focus();
+        await page.keyboard.type("z");
+      }
+      await until(`${stage}: control grant`, () => record.modeAt, Math.ceil(2 * (HISTORY_BYTES * 4 / 3) / rate * 1000) + 60_000);
+      assert(record.bytesBeforeMode >= HISTORY_BYTES, `${stage}: only ${record.bytesBeforeMode} bytes of history preceded the control grant`);
+      assert(record.inputsBeforeMode === 0, `${stage}: ${record.inputsBeforeMode} input frames left before the control grant`);
+      // Flow control must not starve the link: the base64 backlog moves at no
+      // less than half the link rate.
+      const backlogMs = record.modeAt - record.commitAt;
+      const linkMs = record.bytesBeforeMode * 4 / 3 / rate * 1000;
+      assert(backlogMs <= 2 * linkMs + 5_000, `${stage}: the backlog took ${backlogMs} ms where the link needs ${Math.round(linkMs)} ms`);
+      await until(`${stage}: live`, async () => (await pageState()).phase === "live");
+      // Input authority arrived with the browser caught up: a command typed
+      // now runs. Control-U clears the probe key if the grant raced it.
+      const marker = `${stage.replace(/[^a-z0-9]+/gi, "-")}-${rate}`;
+      await xterm.focus();
+      await page.keyboard.press("Control+U");
+      await page.keyboard.type(`printf 'MARK-%s\\n' ${marker}`);
+      await page.keyboard.press("Enter");
+      await until(`${stage}: typed command ran`, () => capture().includes(`MARK-${marker}`), 20_000);
+      const measured = {
+        stage, rate, linkDelayMs: LINK_DELAY_MS,
+        toCommitMs: record.commitAt - causedAt, toControlMs: record.modeAt - causedAt, admissionMs: record.commitAt - record.opened, backlogMs,
+        bytesBeforeControl: record.bytesBeforeMode, framesBeforeControl: record.framesBeforeMode, acknowledgements: record.acks,
+        livenessRoundTripsMs: [...record.rtts],
+      };
+      emit("slow-link-stage", measured);
+      return { record, measured };
+    };
+
+    // Steady output for a while: no reconnect, the session stays live, and
+    // liveness keeps answering. Output that queued behind the backlog drains
+    // meanwhile, so at the end the page must show current output, not merely
+    // hold an open socket.
+    const steady = async (stage: string, record: Attachment) => {
+      const count = attachments.length;
+      const startedAt = Date.now();
+      while (Date.now() - startedAt < STEADY_MS) {
+        const state = await pageState();
+        assert(state.phase === "live" && !state.notice && state.connection === "", `${stage}: left live after ${Date.now() - startedAt} ms: ${JSON.stringify({ ...state, rows: undefined })}`);
+        assert(attachments.length === count && record.closed === 0, `${stage}: reconnected after ${Date.now() - startedAt} ms`);
+        await page.waitForTimeout(250);
+      }
+      const produced = steadyIn(capture());
+      await until(`${stage}: page shows current output`, async () => steadyIn((await pageState()).rows) >= produced, 5_000);
+      liveness(stage, record);
+      assert(record.refusals.length === 0, `${stage}: refusals ${JSON.stringify(record.refusals)}`);
+    };
+
+    const measurements: unknown[] = [];
+    for (const rate of [32 << 10, 256 << 10]) {
+      // A fresh page load through the link.
+      await page.goto(base, { waitUntil: "domcontentloaded" });
+      const handle = await until<string>("fresh control handle", () => page.evaluate(async () => {
+        const inventory = await (await fetch("/api/inventory", { cache: "no-store" })).json();
+        for (const realm of inventory.realms ?? []) for (const server of realm.servers ?? []) for (const session of server.sessions ?? []) {
+          if (session.name === "unified_target") return session.handles?.control ?? "";
+        }
+        return "";
+      }));
+      shapedLink.rate = rate;
+      shapedLink.delayMs = LINK_DELAY_MS;
+      const openIndex = attachments.length;
+      const navigatedAt = Date.now();
+      await page.goto(`${base}/terminal#handle=${encodeURIComponent(handle)}&mode=control&history=0&engine=unified-dev`, { waitUntil: "domcontentloaded" });
+      const opened = await attach("open", openIndex, navigatedAt, rate);
+      await steady(`steady after open at ${rate}`, opened.record);
+      measurements.push({ ...opened.measured, livenessRoundTripsMs: [...opened.record.rtts] });
+
+      // The link drops; the page reconnects by itself, once, through the same
+      // slow link.
+      assert(shapedLink.pairs.size === 1, `expected one shaped terminal link, found ${shapedLink.pairs.size}`);
+      const reconnectIndex = attachments.length;
+      const droppedAt = Date.now();
+      for (const pair of [...shapedLink.pairs]) pair.drop();
+      const reconnected = await attach("reconnect", reconnectIndex, droppedAt, rate);
+      await steady(`steady after reconnect at ${rate}`, reconnected.record);
+      assert(attachments.length === reconnectIndex + 1, `reconnect at ${rate} opened ${attachments.length - reconnectIndex} attachments`);
+      measurements.push({ ...reconnected.measured, livenessRoundTripsMs: [...reconnected.record.rtts] });
+      shapedLink.rate = 0;
+    }
+    assert(pageErrors.length === 0 && consoleMessages.length === 0 && httpErrors.length === 0, `slow-link browser findings: ${JSON.stringify({ pageErrors, consoleMessages, httpErrors })}`);
+    emit("pass", { scenario: "slow-link", measurements });
+    console.log(`Slow-link private stack passed: ${JSON.stringify(measurements)}`);
+    return;
+  }
   await page.waitForTimeout(150);
   const terminal = page.locator(".persea-unified-xterm");
   await terminal.focus();
