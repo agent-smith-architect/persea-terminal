@@ -129,7 +129,7 @@ func TestRotationSnapshotReadDoesNotHoldSubscriberAuthority(t *testing.T) {
 	// without constructing that impossible journal/publication state.
 	sideKey := key
 	sideKey.Pane = "%snapshot-side"
-	sideSubscriber := &unifiedDevSubscriber{data: make(chan unifiedjournal.Event, 1), done: make(chan struct{})}
+	sideSubscriber := &unifiedDevSubscriber{data: newRecordingTailQueue(), done: make(chan struct{})}
 	fixture.effects.subscriberMu.Lock()
 	fixture.effects.subscribers[sideKey] = map[*unifiedDevSubscriber]struct{}{sideSubscriber: {}}
 	fixture.effects.subscriberMu.Unlock()
@@ -139,7 +139,8 @@ func TestRotationSnapshotReadDoesNotHoldSubscriberAuthority(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case got, openForRelease := <-sideSubscriber.events():
+	case <-sideSubscriber.events():
+		got, openForRelease := sideSubscriber.receive()
 		if openForRelease {
 			sideSubscriber.releaseEvent(got)
 		}
@@ -155,7 +156,7 @@ func TestRotationSnapshotReadDoesNotHoldSubscriberAuthority(t *testing.T) {
 		fixture.effects.journalMu.Unlock()
 		t.Fatalf("typed close count=%d want 1", closed)
 	}
-	if _, open := <-sideSubscriber.events(); open {
+	if _, open := sideSubscriber.receive(); open {
 		fixture.effects.journalMu.Unlock()
 		t.Fatal("subscriber remained open")
 	}
@@ -227,7 +228,8 @@ func TestRotationSnapshotRegistrationPublishesConcurrentCommitExactlyOnce(t *tes
 	deadline := time.After(2 * time.Second)
 	for seen == 0 {
 		select {
-		case event, openForRelease := <-subscriber.events():
+		case <-subscriber.events():
+			event, openForRelease := subscriber.receive()
 			if openForRelease {
 				subscriber.releaseEvent(event)
 			}
@@ -239,7 +241,8 @@ func TestRotationSnapshotRegistrationPublishesConcurrentCommitExactlyOnce(t *tes
 		}
 	}
 	select {
-	case event, openForRelease := <-subscriber.events():
+	case <-subscriber.events():
+		event, openForRelease := subscriber.receive()
 		if openForRelease {
 			subscriber.releaseEvent(event)
 		}

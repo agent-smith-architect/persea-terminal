@@ -1011,7 +1011,8 @@ func TestUnifiedTerminalE2E1DelayedDispatcherCarriesExactFeedRanges(t *testing.T
 	deadline := time.After(3 * time.Second)
 	for len(got) < len(a)+len(b) {
 		select {
-		case part, ok := <-tail.events():
+		case <-tail.events():
+			part, ok := tail.receive()
 			if ok {
 				tail.releaseEvent(part)
 			}

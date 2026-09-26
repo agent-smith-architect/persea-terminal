@@ -292,7 +292,8 @@ func TestUnifiedRotationFlowControlTripwireBeforeAndAfterPONR(t *testing.T) {
 				}
 				for {
 					select {
-					case event, open := <-subscriber.events():
+					case <-subscriber.events():
+						event, open := subscriber.receive()
 						if open {
 							subscriber.releaseEvent(event)
 						}

@@ -368,7 +368,7 @@ func (writer *unifiedAttachmentFrameWriter) streamTail() {
 			return
 		default:
 		}
-		event, open := <-tail.events()
+		event, open := tail.receive()
 		if !open {
 			break
 		}

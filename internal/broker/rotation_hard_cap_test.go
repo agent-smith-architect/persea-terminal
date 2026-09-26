@@ -169,7 +169,7 @@ func TestSourceFatalHardCapSettlement(t *testing.T) {
 	drainDone := make(chan struct{})
 	go func() {
 		defer close(drainDone)
-		for deliveredForTest := range subscriber.events() {
+		for deliveredForTest, open := subscriber.receive(); open; deliveredForTest, open = subscriber.receive() {
 			subscriber.releaseEvent(deliveredForTest)
 		}
 	}()

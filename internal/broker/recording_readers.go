@@ -10,25 +10,12 @@ import (
 const (
 	recordingReaderBytes = 128 << 20
 	recordingReaderLimit = 64
-	// recordingTailSlots is the capacity of one reader's tail channel; the
-	// reader may own one event more, the one its writer is sending. It is
-	// sized for admission, the window between PREPARE and COMMIT in which the
-	// writer deliberately does not drain the tail: a full-screen program
-	// repaints up to a frame rate's worth of records of a few dozen bytes per
-	// second, and a browser can take seconds to load the replay, so a count
-	// sized for bulk output evicts such a reader on every attempt. 1024 slots
-	// cover several seconds of admission at 120 frames per second while the
-	// fixed charge below still admits every public attachment the reader
-	// budget admitted before. Bulk output reaches recordingTailBytes first.
-	recordingTailSlots = 1024
-	// recordingTailSlotBytes is the channel memory one slot preallocates:
-	// unsafe.Sizeof(unifiedjournal.Event{}), pinned by a test.
-	recordingTailSlotBytes = 72
-	// The writer uses at most one 64 KiB LIVE encoding at a time. This covers
-	// its base64, JSON work buffer and result, plus maps and fixed reader
-	// state, including the tail channel's preallocated slots.
-	recordingWriterBytes = (512+16)<<10 + recordingTailSlots*recordingTailSlotBytes
-	recordingReaderFloor = 64 << 10
+	// The pointer-bearing queue node includes its allocator header and size
+	// class rounding. Payload allocation is charged separately before copying.
+	recordingTailNodeBytes = 128
+	// At most one LIVE encoding and fixed queue/reader state exist per writer.
+	recordingWriterBytes = (512 + 16) << 10
+	recordingReaderFloor = 64<<10 + recordingTailNodeBytes
 	// PREPARE additionally owns replay assembly and a 256 KiB encoding. Keep
 	// this reserve through backlog settlement, including a blocked PREPARE.
 	recordingPrepareBytes = 2 << 20
@@ -36,9 +23,8 @@ const (
 	// input/transitional queues, its PTY reader and small control egress. Bulk
 	// capture and legacy LIVE JSON are absent on this explicit writer pairing.
 	recordingAttachmentBytes = 4 << 20
-	// recordingTailBytes bounds the payload one reader's tail may own: 4 MiB
-	// of pending output plus one maximal 64 KiB record. Output that outruns a
-	// reader by more than this is cheaper to rebuild from the snapshot.
+	// The same byte ceiling covers queued nodes and payloads plus any event
+	// still in the writer. Output beyond it is rebuilt from the snapshot.
 	recordingTailBytes = 4<<20 + 64<<10
 )
 
@@ -48,13 +34,11 @@ const (
 type recordingTailLimit string
 
 const (
-	tailLimitSequenceGap  recordingTailLimit = "sequence_gap"
-	tailLimitQueueEvents  recordingTailLimit = "queue_events"
-	tailLimitQueueBytes   recordingTailLimit = "queue_bytes"
-	tailLimitReaderEvents recordingTailLimit = "reader_events"
-	tailLimitReaderBytes  recordingTailLimit = "reader_bytes"
-	tailLimitDetached     recordingTailLimit = "detached"
-	tailLimitInvalid      recordingTailLimit = "invalid_event"
+	tailLimitSequenceGap recordingTailLimit = "sequence_gap"
+	tailLimitQueueBytes  recordingTailLimit = "queue_bytes"
+	tailLimitReaderBytes recordingTailLimit = "reader_bytes"
+	tailLimitDetached    recordingTailLimit = "detached"
+	tailLimitInvalid     recordingTailLimit = "invalid_event"
 )
 
 var errRecordingReaders = errors.New("recording reader capacity exhausted")
@@ -137,12 +121,8 @@ func (lease *recordingReaderLease) reserveTailEvent(bytes int64) recordingTailLi
 		return tailLimitDetached
 	case bytes < 0:
 		return tailLimitInvalid
-	case lease.events >= recordingTailSlots+1:
-		return tailLimitQueueEvents
 	case lease.eventBytes+bytes > recordingTailBytes:
 		return tailLimitQueueBytes
-	case budget.events >= recordingReaderLimit*(recordingTailSlots+1):
-		return tailLimitReaderEvents
 	case after-before > budget.capacity()-budget.bytes || !budget.copies.available(after-before):
 		return tailLimitReaderBytes
 	}
@@ -300,7 +280,7 @@ func (lease *recordingReaderLease) releaseTransport(bytes int64) {
 // AllocationCharge is shared with the journal so admission accounts for the
 // allocation made by make([]byte, len), including allocator rounding.
 func recordingEventBytes(event unifiedjournal.Event) int64 {
-	return unifiedjournal.AllocationCharge(int64(len(event.Payload)))
+	return recordingTailNodeBytes + unifiedjournal.AllocationCharge(int64(len(event.Payload)))
 }
 
 func (subscriber *unifiedDevSubscriber) releaseEvent(event unifiedjournal.Event) {
@@ -316,7 +296,7 @@ func (subscriber *unifiedDevSubscriber) releaseSnapshot() {
 // The producer has closed data under subscriberMu. A concurrent receive owns
 // its event until releaseEvent; only events actually drained here are refunded.
 func (subscriber *unifiedDevSubscriber) drainClosed() {
-	for event := range subscriber.data {
+	for event, open := subscriber.receive(); open; event, open = subscriber.receive() {
 		subscriber.releaseEvent(event)
 	}
 }

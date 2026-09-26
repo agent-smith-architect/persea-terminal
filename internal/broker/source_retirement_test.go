@@ -28,7 +28,7 @@ func TestSourceBrowserSocketClosePreservesGeneration(t *testing.T) {
 		t.Fatal(err)
 	}
 	cancel()
-	for deliveredForTest := range subscriber.events() {
+	for deliveredForTest, open := subscriber.receive(); open; deliveredForTest, open = subscriber.receive() {
 		subscriber.releaseEvent(deliveredForTest)
 	}
 	if reason := subscriber.closeReason(); reason != "" {
@@ -137,7 +137,7 @@ func TestSourceSevenDeadSessionsRetireAndEighthAdmits(t *testing.T) {
 			slots == 7 && fixture.journalFileCount(t) == 0
 	})
 	for index, subscriber := range subscribers {
-		for deliveredForTest := range subscriber.events() {
+		for deliveredForTest, open := subscriber.receive(); open; deliveredForTest, open = subscriber.receive() {
 			subscriber.releaseEvent(deliveredForTest)
 		}
 		if reason := subscriber.closeReason(); reason != proto.SubscriberClosedGenerationFailed {
@@ -262,7 +262,7 @@ func TestSourceObserverTransportRecoveryCapturesGapExactlyOnce(t *testing.T) {
 		effects.mu.Unlock()
 		return recoveredUnit != nil && recoveredKey != (unifiedjournal.PaneKey{}) && recoveredKey != adoption.Key
 	})
-	for deliveredForTest := range subscriber.events() {
+	for deliveredForTest, open := subscriber.receive(); open; deliveredForTest, open = subscriber.receive() {
 		subscriber.releaseEvent(deliveredForTest)
 	}
 	if reason := subscriber.closeReason(); reason != proto.SubscriberClosedGenerationFailed {
@@ -400,7 +400,7 @@ func TestSourceTerminalRetirementRetriesAfterRetentionSaturation(t *testing.T) {
 		return !pending && !admitted && logical == 0 && logicalReserved == 0 &&
 			physical == 0 && physicalReserved == 0 && slots == 3 && fixture.journalFileCount(t) == 0
 	})
-	for deliveredForTest := range subscriber.events() {
+	for deliveredForTest, open := subscriber.receive(); open; deliveredForTest, open = subscriber.receive() {
 		subscriber.releaseEvent(deliveredForTest)
 	}
 	if reason := subscriber.closeReason(); reason != proto.SubscriberClosedGenerationFailed {

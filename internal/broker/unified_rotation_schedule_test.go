@@ -599,7 +599,7 @@ func TestUnifiedRotationAutomaticRealTmuxTriggerToSealAndForcedReopen(t *testing
 	drainDone := make(chan struct{})
 	go func() {
 		defer close(drainDone)
-		for deliveredForTest := range predecessor.events() {
+		for deliveredForTest, open := predecessor.receive(); open; deliveredForTest, open = predecessor.receive() {
 			predecessor.releaseEvent(deliveredForTest)
 		}
 	}()
@@ -695,7 +695,8 @@ func TestUnifiedRotationAutomaticRealTmuxTriggerToSealAndForcedReopen(t *testing
 	}
 	fixture.disposable.run("send-keys", "-t", "automatic:", "printf 'AUTO-POST\\n'", "Enter")
 	select {
-	case event, openForRelease := <-successorTail.events():
+	case <-successorTail.events():
+		event, openForRelease := successorTail.receive()
 		if openForRelease {
 			successorTail.releaseEvent(event)
 		}

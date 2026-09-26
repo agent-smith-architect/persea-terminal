@@ -224,7 +224,8 @@ func (fixture *rotationFixture) assertPredecessorLive(marker string, next contro
 	deadline := time.After(2 * time.Second)
 	for {
 		select {
-		case event, ok := <-fixture.subscriber.events():
+		case <-fixture.subscriber.events():
+			event, ok := fixture.subscriber.receive()
 			if ok {
 				fixture.subscriber.releaseEvent(event)
 			}

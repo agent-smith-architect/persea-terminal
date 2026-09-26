@@ -92,9 +92,8 @@ func TestRecordingReaderFullQueuesAndInflightWritesRetainOwnership(t *testing.T)
 		tail.releaseSnapshot()
 		tails[i], cancels[i] = tail, cancel
 	}
-	// Maximal 64 KiB records reach the byte bound long before the count
-	// bound: each tail can own fullTail of them, queued plus in flight.
-	const fullTail = recordingTailBytes / (64 << 10)
+	// The byte bound includes both nodes and payload, queued plus in flight.
+	const fullTail = recordingTailBytes / (64<<10 + recordingTailNodeBytes)
 	payload := bytes.Repeat([]byte{'q'}, 64<<10)
 	for seq := int64(2); seq <= fullTail; seq++ {
 		_ = effects.publishEvent(key, unifiedjournal.Event{Kind: unifiedjournal.RecordOutput, Sequence: seq, Payload: payload})
@@ -104,7 +103,7 @@ func TestRecordingReaderFullQueuesAndInflightWritesRetainOwnership(t *testing.T)
 	}
 	active := make([]unifiedjournal.Event, readers)
 	for i, tail := range tails {
-		active[i] = <-tail.events()
+		active[i], _ = tail.receive()
 	}
 	before := effects.readers.snapshot()
 	if before.Events != readers*(fullTail-1) {
@@ -136,11 +135,8 @@ func TestRecordingReaderFullQueuesAndInflightWritesRetainOwnership(t *testing.T)
 	}
 }
 
-// A full-screen program repaints in records of a few dozen bytes. A tail that
-// is not being drained, as between PREPARE and COMMIT, must absorb
-// recordingTailSlots of them; only the next one is refused, by count, and the
-// refusal is named for the operator log.
-func TestRecordingTailAbsorbsSmallRecordsUpToTheCountBound(t *testing.T) {
+// Small records and geometry consume their allocations, including node overhead.
+func TestRecordingTailAbsorbsSmallRecordsUpToTheByteBound(t *testing.T) {
 	effects, key := recordingReaderFixture(t, 0)
 	_, _, tail, cancel, err := effects.openSnapshotTail(key.Session)
 	if err != nil {
@@ -148,21 +144,21 @@ func TestRecordingTailAbsorbsSmallRecordsUpToTheCountBound(t *testing.T) {
 	}
 	defer cancel()
 	tail.releaseSnapshot()
-	record := func(seq int64) []byte {
-		return []byte(fmt.Sprintf("\x1b]0;%d Working\x07\x1b[?2026h\x1b[47;3H\x1b[?2026l", seq))
-	}
-	for seq := int64(2); seq <= recordingTailSlots+1; seq++ {
-		_ = effects.publishEvent(key, unifiedjournal.Event{Kind: unifiedjournal.RecordOutput, Sequence: seq, Payload: record(seq)})
+	payload := []byte("small repaint")
+	cost := recordingEventBytes(unifiedjournal.Event{Payload: payload})
+	count := int64(recordingTailBytes) / cost
+	for seq := int64(2); seq <= count+1; seq++ {
+		_ = effects.publishEvent(key, unifiedjournal.Event{Kind: unifiedjournal.RecordOutput, Sequence: seq, Payload: payload})
 	}
 	if b1SubscriberCount(effects, key) != 1 || tail.closeReason() != "" {
-		t.Fatalf("%d small records evicted an undrained tail: reason=%q limit=%q", recordingTailSlots, tail.closeReason(), tail.closeLimit())
+		t.Fatalf("byte-funded burst evicted: reason=%q limit=%q", tail.closeReason(), tail.closeLimit())
 	}
-	if got := effects.readers.snapshot(); got.Events != recordingTailSlots {
+	if got := effects.readers.snapshot(); int64(got.Events) != count || got.Bytes != recordingWriterBytes+count*cost {
 		t.Fatalf("burst ownership=%+v", got)
 	}
-	_ = effects.publishEvent(key, unifiedjournal.Event{Kind: unifiedjournal.RecordOutput, Sequence: recordingTailSlots + 2, Payload: record(recordingTailSlots + 2)})
-	if b1SubscriberCount(effects, key) != 0 || tail.closeReason() != proto.SubscriberClosedLagged || tail.closeLimit() != tailLimitQueueEvents {
-		t.Fatalf("record past the count bound: subscribers=%d reason=%q limit=%q", b1SubscriberCount(effects, key), tail.closeReason(), tail.closeLimit())
+	_ = effects.publishEvent(key, unifiedjournal.Event{Kind: unifiedjournal.RecordOutput, Sequence: count + 2, Payload: payload})
+	if b1SubscriberCount(effects, key) != 0 || tail.closeReason() != proto.SubscriberClosedLagged || tail.closeLimit() != tailLimitQueueBytes {
+		t.Fatalf("byte overflow: reason=%q limit=%q", tail.closeReason(), tail.closeLimit())
 	}
 	if got := effects.readers.snapshot(); got.Events != 0 {
 		t.Fatalf("eviction kept queued records: %+v", got)
@@ -183,11 +179,62 @@ func TestRecordingTailSequenceGapIsNamed(t *testing.T) {
 	}
 }
 
-// The tail channel preallocates its slots, and recordingWriterBytes funds them
-// through recordingTailSlotBytes; the constant must cover one Event.
-func TestRecordingTailSlotBytesCoverOneEvent(t *testing.T) {
-	if got := unsafe.Sizeof(unifiedjournal.Event{}); got > recordingTailSlotBytes {
-		t.Fatalf("unifiedjournal.Event is %d bytes; recordingTailSlotBytes=%d leaves the tail channel unfunded", got, recordingTailSlotBytes)
+// Pointer-bearing allocations include the allocator header before rounding.
+func TestRecordingTailNodeBytesCoverAllocation(t *testing.T) {
+	if got := unifiedjournal.AllocationCharge(int64(unsafe.Sizeof(recordingTailNode{})) + 8); got != recordingTailNodeBytes {
+		t.Fatalf("node allocation=%d charge=%d", got, recordingTailNodeBytes)
+	}
+}
+
+func TestRecordingTailPreservesSmallRecordAndGeometryOrder(t *testing.T) {
+	effects, key := recordingReaderFixture(t, 0)
+	_, _, tail, cancel, err := effects.openSnapshotTail(key.Session)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	tail.releaseSnapshot()
+	eventAt := func(sequence int64) unifiedjournal.Event {
+		if sequence%31 == 0 {
+			return unifiedjournal.Event{Kind: unifiedjournal.RecordGeometry, Sequence: sequence, Geometry: unifiedjournal.Geometry{Columns: 80, Rows: int(sequence%100) + 8}}
+		}
+		return unifiedjournal.Event{Kind: unifiedjournal.RecordOutput, Sequence: sequence, Start: sequence * 32, End: sequence*32 + 32, Payload: []byte(fmt.Sprintf("%032d", sequence))}
+	}
+	// Admission has no consumer yet. Each publication must own its copy and
+	// preserve geometry at the exact sequence between output records.
+	const count = 4096
+	for sequence := int64(2); sequence < count+2; sequence++ {
+		event := eventAt(sequence)
+		if err := effects.publishEvent(key, event); err != nil {
+			t.Fatal(err)
+		}
+		clear(event.Payload)
+	}
+	if got := effects.readers.snapshot(); got.Events != count {
+		t.Fatalf("funded burst lost events: %+v", got)
+	}
+	for sequence := int64(2); sequence < count+2; sequence++ {
+		select {
+		case <-tail.events():
+		case <-time.After(5 * time.Second):
+			t.Fatal("queued event did not signal readiness", sequence)
+		}
+		event, open := tail.receive()
+		want := eventAt(sequence)
+		if !open || event.Kind != want.Kind || event.Sequence != want.Sequence || event.Start != want.Start || event.End != want.End || event.Geometry != want.Geometry || !bytes.Equal(event.Payload, want.Payload) {
+			t.Fatalf("event %d: got=%+v want=%+v open=%t", sequence, event, want, open)
+		}
+		tail.releaseEvent(event)
+	}
+	if got := effects.readers.snapshot(); got.Events != 0 || got.Bytes != recordingWriterBytes+recordingReaderFloor {
+		t.Fatalf("drained burst retained event charges: %+v", got)
+	}
+	cancel()
+	if _, open := tail.receive(); open {
+		t.Fatal("cancelled tail remained open")
+	}
+	if got := effects.readers.snapshot(); got.Bytes != 0 {
+		t.Fatalf("settled burst retained owner: %+v", got)
 	}
 }
 
@@ -207,11 +254,11 @@ func TestRecordingReaderCountAndGuaranteedFirstEvent(t *testing.T) {
 	}
 	budget.limit = budget.snapshot().Bytes
 	for _, lease := range leases {
-		if !lease.reserveEvent(64 << 10) {
+		if !lease.reserveEvent(recordingReaderFloor) {
 			t.Fatal("admitted reader lost its funded first event")
 		}
 		lease.detach()
-		lease.releaseEvent(64 << 10)
+		lease.releaseEvent(recordingReaderFloor)
 	}
 	if got := budget.snapshot(); got.Bytes != 0 || got.Readers != 0 {
 		t.Fatalf("reader floor leaked: %+v", got)
@@ -293,7 +340,7 @@ func TestRecordingReaderLiveWriteCannotRefundAtDequeue(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("live write did not park")
 	}
-	if len(tail.data) != 0 {
+	if tail.data.len() != 0 {
 		t.Fatal("writer did not dequeue its event")
 	}
 	cancel()
@@ -305,20 +352,25 @@ func TestRecordingReaderLiveWriteCannotRefundAtDequeue(t *testing.T) {
 	_ = writer.Close(context.Background())
 }
 
-func TestRecordingReaderZeroByteEventsStillOwnCount(t *testing.T) {
+func TestRecordingReaderZeroByteEventsStillOwnBytes(t *testing.T) {
 	effects, key := recordingReaderFixture(t, 0)
 	_, _, tail, cancel, err := effects.openSnapshotTail(key.Session)
 	if err != nil {
 		t.Fatal(err)
 	}
 	tail.releaseSnapshot()
-	for seq := int64(2); seq <= recordingTailSlots+1; seq++ {
+	const count = recordingTailBytes / recordingTailNodeBytes
+	for seq := int64(2); seq <= count; seq++ {
 		_ = effects.publishEvent(key, unifiedjournal.Event{Kind: unifiedjournal.RecordGeometry, Sequence: seq, Geometry: unifiedjournal.Geometry{Columns: 80, Rows: 24}})
 	}
-	active := <-tail.data
-	_ = effects.publishEvent(key, unifiedjournal.Event{Kind: unifiedjournal.RecordGeometry, Sequence: recordingTailSlots + 2, Geometry: unifiedjournal.Geometry{Columns: 80, Rows: 24}})
-	if got := effects.readers.snapshot(); got.Events != recordingTailSlots+1 {
-		t.Fatalf("zero-byte events escaped count: %+v", got)
+	active, _ := tail.receive()
+	_ = effects.publishEvent(key, unifiedjournal.Event{Kind: unifiedjournal.RecordGeometry, Sequence: count + 1, Geometry: unifiedjournal.Geometry{Columns: 80, Rows: 24}})
+	if got := effects.readers.snapshot(); got.Events != count || got.Bytes != recordingWriterBytes+recordingTailBytes {
+		t.Fatalf("zero-byte events escaped byte charge: %+v", got)
+	}
+	_ = effects.publishEvent(key, unifiedjournal.Event{Kind: unifiedjournal.RecordGeometry, Sequence: count + 2, Geometry: unifiedjournal.Geometry{Columns: 80, Rows: 24}})
+	if tail.closeReason() != proto.SubscriberClosedLagged || tail.closeLimit() != tailLimitQueueBytes {
+		t.Fatalf("geometry overflow: reason=%q limit=%q", tail.closeReason(), tail.closeLimit())
 	}
 	cancel()
 	if got := effects.readers.snapshot(); got.Events != 1 || got.Readers != 1 {

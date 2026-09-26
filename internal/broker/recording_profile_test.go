@@ -45,7 +45,7 @@ func recordingProfile(t *testing.T, path, id string) (recordingProfileManifest, 
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sum := fmt.Sprintf("%x", sha256.Sum256(data)); sum != "5d4c7d8bb5e68c10ccc1192c0a474e67a0cc980ca09792a2fb35bf1b8d79da58" {
+	if sum := fmt.Sprintf("%x", sha256.Sum256(data)); sum != "d0d4f3551c63289538127de42a4c6edff7e3c76fc010168275115ca8e5bd4000" {
 		t.Fatal("workload changed", sum)
 	}
 	var manifest recordingProfileManifest
@@ -71,6 +71,38 @@ func recordingProfilePayload(seed, source, index int, lane recordingProfileLane)
 	}
 	copy(data[len(data)-2:], []byte{'\r', '\n'})
 	return data
+}
+
+func TestRecordingWorkloadPinsTailBudget(t *testing.T) {
+	data, err := os.ReadFile("testdata/recording-workload-v1.json")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var manifest struct {
+		Lanes  []recordingProfileLane `json:"lanes"`
+		Limits map[string]int64       `json:"current_limits"`
+	}
+	if err := json.Unmarshal(data, &manifest); err != nil {
+		t.Fatal(err)
+	}
+	if len(manifest.Lanes) == 0 {
+		t.Fatal("workload has no lanes")
+	}
+	recordingProfile(t, "testdata/recording-workload-v1.json", manifest.Lanes[0].ID)
+	for name, want := range map[string]int64{
+		"subscriber_tail_bytes":                  recordingTailBytes,
+		"subscriber_node_bytes":                  recordingTailNodeBytes,
+		"subscriber_maximum_zero_payload_events": recordingTailBytes / recordingTailNodeBytes,
+		"subscriber_writer_bytes":                recordingWriterBytes,
+		"subscriber_first_event_bytes":           recordingReaderFloor,
+	} {
+		if got := manifest.Limits[name]; got != want {
+			t.Errorf("%s=%d want %d", name, got, want)
+		}
+	}
+	if _, exists := manifest.Limits["subscriber_event_slots"]; exists {
+		t.Fatal("workload retains an independent event-count bound")
+	}
 }
 
 func recordingProfileSchedule(manifest recordingProfileManifest, lane recordingProfileLane, source int, emit func(int, int64, []byte)) int {
@@ -360,7 +392,8 @@ func drainRecordingProfileReader(ctx context.Context, effects *UnifiedDevPaneEff
 			case <-ctx.Done():
 				cancel()
 				return nil
-			case event, ok := <-tail.events():
+			case <-tail.events():
+				event, ok := tail.receive()
 				if !ok {
 					cancel()
 					if tail.closeReason() != proto.SubscriberClosedGenerationRotated {

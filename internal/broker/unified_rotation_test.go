@@ -542,7 +542,8 @@ func waitRotationSubscriberClose(t *testing.T, subscriber *unifiedDevSubscriber)
 	defer timer.Stop()
 	for {
 		select {
-		case deliveredForTest, ok := <-subscriber.events():
+		case <-subscriber.events():
+			deliveredForTest, ok := subscriber.receive()
 			if ok {
 				subscriber.releaseEvent(deliveredForTest)
 			}
@@ -673,7 +674,8 @@ func TestUnifiedRotationRealTmuxMidFloodClosesPredecessorAndReplaysSuccessor(t *
 	})
 	pollUntil(t, 10*time.Second, "post-rotation live output", func() bool {
 		select {
-		case event, ok := <-successor.events():
+		case <-successor.events():
+			event, ok := successor.receive()
 			if ok {
 				successor.releaseEvent(event)
 			}
@@ -921,7 +923,8 @@ func TestUnifiedRotationN4AttachRaceNeverStrandsPredecessorTail(t *testing.T) {
 			t.Fatalf("racing snapshot marker count=%d want 1", count)
 		}
 		select {
-		case deliveredForTest, open := <-result.subscriber.events():
+		case <-result.subscriber.events():
+			deliveredForTest, open := result.subscriber.receive()
 			if open {
 				result.subscriber.releaseEvent(deliveredForTest)
 			}
@@ -1076,7 +1079,8 @@ func TestUnifiedRotationN4ActiveSwapWindowBindsSuccessorSnapshotAndTail(t *testi
 	defer deadline.Stop()
 	for bytes.Count(live, []byte(pending)) != 1 || bytes.Count(live, []byte(after)) != 1 {
 		select {
-		case event, open := <-successor.events():
+		case <-successor.events():
+			event, open := successor.receive()
 			if open {
 				successor.releaseEvent(event)
 			}
@@ -1173,7 +1177,8 @@ func TestUnifiedRotationN7NoSubscriberReopensFromSuccessorBootstrap(t *testing.T
 		t.Fatalf("no-subscriber reopen marker count=%d want 1", count)
 	}
 	select {
-	case deliveredForTest, open := <-subscriber.events():
+	case <-subscriber.events():
+		deliveredForTest, open := subscriber.receive()
 		if open {
 			subscriber.releaseEvent(deliveredForTest)
 		}
@@ -1218,18 +1223,15 @@ func TestUnifiedRotationClosesSixPredecessorsOnceAndReopensSuccessorOnce(t *test
 	// the attachment writer's transport-cut behavior is pinned by the B1 suite.
 	for {
 		event := unifiedjournal.Event{Kind: unifiedjournal.RecordOutput, Payload: []byte("wedged")}
-		if !predecessors[5].lease.reserveEvent(recordingEventBytes(event)) {
-			t.Fatal("fixture could not fund its queued event")
+		if limit := predecessors[5].lease.reserveTailEvent(recordingEventBytes(event)); limit != "" {
+			if limit != tailLimitQueueBytes || predecessors[5].data.len() == 0 {
+				t.Fatalf("fixture could not fill its tail: limit=%q", limit)
+			}
+			break
 		}
-		select {
-		case predecessors[5].data <- event:
-		default:
-			predecessors[5].releaseEvent(event)
-			goto wedged
-		}
+		predecessors[5].data.push(event)
 	}
 
-wedged:
 	closeCalls := make(map[*unifiedDevSubscriber]int)
 	fixture.effects.subscriberCloseEdge = func(key unifiedjournal.PaneKey, subscriber *unifiedDevSubscriber, reason proto.SubscriberCloseReason) {
 		if key == adoption.Key && reason == proto.SubscriberClosedGenerationRotated {
@@ -1240,7 +1242,7 @@ wedged:
 		t.Fatal(err)
 	}
 	for index, subscriber := range predecessors {
-		for deliveredForTest := range subscriber.events() {
+		for deliveredForTest, open := subscriber.receive(); open; deliveredForTest, open = subscriber.receive() {
 			subscriber.releaseEvent(deliveredForTest)
 		}
 		if reason := subscriber.closeReason(); reason != proto.SubscriberClosedGenerationRotated {
@@ -1270,7 +1272,8 @@ wedged:
 			t.Fatalf("reopen %d marker count=%d want 1", index, count)
 		}
 		select {
-		case deliveredForTest, open := <-subscriber.events():
+		case <-subscriber.events():
+			deliveredForTest, open := subscriber.receive()
 			if open {
 				subscriber.releaseEvent(deliveredForTest)
 			}
@@ -1822,7 +1825,8 @@ func TestUnifiedRotationN10PrePONRRestoreWaitsForDurableReplay(t *testing.T) {
 			seen := false
 			for !seen {
 				select {
-				case event, open := <-subscriber.events():
+				case <-subscriber.events():
+					event, open := subscriber.receive()
 					if open {
 						subscriber.releaseEvent(event)
 					}
