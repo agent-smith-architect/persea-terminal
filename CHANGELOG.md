@@ -4,6 +4,12 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+## 0.1.7 — 2026-09-26
+
+### Fixed
+
+- 0.1.6 could not be installed. The installer runs the test suite in a deeper temporary directory, and there a new test's Unix socket path was longer than the system allows. 0.1.7 contains the same changes as 0.1.6 and installs; use it instead of 0.1.6. CI now runs the Go tests with a temporary directory as long as the installer's.
+
 ## 0.1.6 — 2026-09-26
 
 ### Changed

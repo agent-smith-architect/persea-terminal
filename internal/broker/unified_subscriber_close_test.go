@@ -833,7 +833,7 @@ func TestUnifiedSubscriberVerdictReachesAPeerOnASlowLink(t *testing.T) {
 		subscribers: make(map[unifiedjournal.PaneKey]map[*unifiedDevSubscriber]struct{}),
 	}
 	prepareRecordingProviderForTest(t, effects, key)
-	listener, err := net.Listen("unix", filepath.Join(t.TempDir(), "peer.sock"))
+	listener, err := net.Listen("unix", filepath.Join(shortSocketDir(t), "peer.sock"))
 	if err != nil {
 		t.Fatal(err)
 	}
