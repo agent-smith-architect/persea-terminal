@@ -106,9 +106,11 @@ func TestUnifiedAdmissionReplayIsBoundedAndBacklogCoalesced(t *testing.T) {
 func TestUnifiedAdmissionBacklogKeepsGeometryBetweenOutput(t *testing.T) {
 	effects, key := recordingReaderFixture(t, 0)
 	const size = 100
-	before := admissionSmallEvents(t, effects, key, "b", 2*unifiedAdmissionReplayBytes/size, size)
+	// Half a frame of backlog before the geometry and a quarter frame after:
+	// without the geometry, one LIVE frame would carry both.
+	before := admissionSmallEvents(t, effects, key, "b", unifiedAdmissionReplayBytes/size+unifiedLiveFrameBytes/size/2, size)
 	admissionCommitGeometry(t, effects, key, unifiedjournal.Geometry{Columns: 80, Rows: 30})
-	after := admissionSmallEvents(t, effects, key, "a", 50, size)
+	after := admissionSmallEvents(t, effects, key, "a", unifiedLiveFrameBytes/size/4, size)
 	wire := &admissionWire{}
 	writer := &unifiedAttachmentFrameWriter{provider: effects, session: key.Session, downstream: &attachmentFrameWriter{wire: &lockedWriter{w: wire}}}
 	defer writer.Close(context.Background())
@@ -120,6 +122,9 @@ func TestUnifiedAdmissionBacklogKeepsGeometryBetweenOutput(t *testing.T) {
 	}
 	frames := admissionFrames(t, &wire.Buffer)
 	prefix := unifiedAdmissionReplayBytes / size * size
+	if len(before)-prefix+len(after) > unifiedLiveFrameBytes {
+		t.Fatalf("fixture: %d bytes of backlog around the geometry exceed one %d-byte LIVE frame", len(before)-prefix+len(after), unifiedLiveFrameBytes)
+	}
 	if len(frames) != 5 || frames[0].Type != terminal.FramePrepare || frames[1].Type != terminal.FrameCommit ||
 		frames[2].Type != terminal.FrameLive || frames[3].Type != terminal.FramePrepare || frames[3].Kind != terminal.CutResize || frames[4].Type != terminal.FrameLive {
 		kinds := make([]string, len(frames))

@@ -8,13 +8,15 @@ package frontdoor
 // of the next liveness PONG and WebSocket ping, and a browser that is merely
 // slow is declared dead. With the window, a control frame waits behind at
 // most this window plus one attachment frame (a LIVE frame carries at most
-// 64 KiB of output, about 88 KiB encoded): at 32 KiB/s that is about 6.8 s,
+// 16 KiB of output, about 22 KiB encoded): at 32 KiB/s that is about 4.7 s,
 // inside the browser's 10 s liveness challenge and the front door's 20 s
-// WebSocket ping cycle; twice the window would not be. On a fast link the
-// window caps output at one window per round trip, far above what an
-// interactive terminal needs. When the browser falls behind, the front door
-// stops reading the broker, and the broker's byte-bounded subscriber tail
-// ends the view with its typed lag verdict rather than buffering without end.
+// WebSocket ping cycle, with room for link overhead and delay. On a fast
+// link the window caps output at one window per round trip, far above what
+// an interactive terminal needs. When the browser falls behind, the front
+// door stops reading the broker, and the broker's byte-bounded subscriber
+// tail ends the view rather than buffering without end. On a slow link the
+// broker may close the connection before its typed lag verdict gets
+// through the window, so the page can see a broken connection instead.
 const FlowWindowBytes = 128 << 10
 
 // flowWindow tracks the attachment frames written to one WebSocket that the

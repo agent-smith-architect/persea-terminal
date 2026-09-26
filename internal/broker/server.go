@@ -224,8 +224,11 @@ const unifiedSubscriberCloseGrace = 1 * time.Second
 // no longer grows with the size of the history.
 const unifiedAdmissionReplayBytes = 16 << 10
 
-// unifiedLiveFrameBytes is the most output one LIVE frame carries.
-const unifiedLiveFrameBytes = 64 << 10
+// unifiedLiveFrameBytes is the most output one LIVE frame carries. The front
+// door admits one frame past its flow window, and the next liveness PONG
+// waits behind that frame, so frames stay small: 16 KiB is about 22 KiB
+// encoded, 0.7 s at 32 KiB/s. The frame envelope costs under 1 % of that.
+const unifiedLiveFrameBytes = 16 << 10
 
 func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw []byte) (resultErr error) {
 	frame, err := terminal.DecodeFrame(raw)
@@ -2107,6 +2110,26 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 			return
 		}
 	}()
+	// Pongs are written by their own goroutine. The output writer can stay
+	// parked on a full socket for as long as the front door's flow window is
+	// closed; a pong written from this loop would wait behind it, and so would
+	// every input frame after the ping. One pending pong answers every ping
+	// that arrives before it is written.
+	pongs := make(chan struct{}, 1)
+	pongsDone := make(chan struct{})
+	defer close(pongsDone)
+	go func() {
+		for {
+			select {
+			case <-pongs:
+				if writer.control(proto.Control{Type: "pong"}) != nil {
+					return
+				}
+			case <-pongsDone:
+				return
+			}
+		}
+	}()
 	var frame proto.Frame
 	var typed terminal.Frame
 	var ingressBytes int64
@@ -2142,8 +2165,9 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 				return
 			}
 			if e == nil && m.Type == "ping" {
-				if writer.control(proto.Control{Type: "pong"}) != nil {
-					return
+				select {
+				case pongs <- struct{}{}:
+				default:
 				}
 				continue
 			}

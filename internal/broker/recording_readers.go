@@ -16,8 +16,9 @@ const (
 	// At most one LIVE encoding and fixed queue/reader state exist per writer.
 	recordingWriterBytes = (512 + 16) << 10
 	recordingReaderFloor = 64<<10 + recordingTailNodeBytes
-	// PREPARE additionally owns replay assembly and a 256 KiB encoding. Keep
-	// this reserve through backlog settlement, including a blocked PREPARE.
+	// PREPARE additionally owns replay assembly and its encoding (at most
+	// 16 KiB of replay). Keep this reserve through backlog settlement,
+	// including a blocked PREPARE.
 	recordingPrepareBytes = 2 << 20
 	// An actual Epoch additionally owns bounded marker/replay/held buffers,
 	// input/transitional queues, its PTY reader and small control egress. Bulk
