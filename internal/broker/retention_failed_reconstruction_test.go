@@ -223,7 +223,8 @@ func failedReconstructionRecover(t *testing.T, fixture *adoptionFixture, session
 	var received string
 	for !strings.Contains(received, marker) {
 		select {
-		case event, ok := <-tail.events():
+		case <-tail.events():
+			event, ok := tail.receive()
 			if !ok {
 				t.Fatalf("new reader closed before marker: %s", tail.closeReason())
 			}

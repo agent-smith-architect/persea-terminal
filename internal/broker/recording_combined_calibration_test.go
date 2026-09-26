@@ -272,19 +272,19 @@ func recordingCombinedOwnershipShape(t *testing.T, recoveredFixture string) {
 		if room == 0 {
 			break
 		}
+		if room < recordingTailNodeBytes {
+			t.Fatal("remaining capacity is below the minimum allocation", room)
+		}
 		sequence++
-		size := min(room, 64<<10)
-		for unifiedjournal.AllocationCharge(size) > room {
+		size := min(room-recordingTailNodeBytes, 64<<10)
+		for unifiedjournal.AllocationCharge(size)+recordingTailNodeBytes > room {
 			size /= 2
 		}
 		size = unifiedjournal.AllocationCharge(size)
-		if size == 0 {
-			t.Fatal("remaining capacity is below the minimum allocation", room)
-		}
 		if err := effects.publishEvent(keys[sources-1], unifiedjournal.Event{Kind: unifiedjournal.RecordOutput, Sequence: sequence, Payload: bytes.Repeat([]byte{'t'}, int(size))}); err != nil {
 			t.Fatal(err)
 		}
-		if len(last.data) == cap(last.data) && effects.readers.snapshot().Bytes < recordingReaderBytes {
+		if last.closeReason() != "" && effects.readers.snapshot().Bytes < recordingReaderBytes {
 			t.Fatal("tail filled before byte ceiling")
 		}
 	}

@@ -14,7 +14,7 @@ type unifiedDevSubscriber struct {
 	// cursor is a sequence, not a byte offset. Geometry events carry no payload,
 	// so consecutive ones share a byte offset and a byte cursor cannot order them.
 	cursor int64
-	data   chan unifiedjournal.Event
+	data   *recordingTailQueue
 	done   chan struct{}
 	once   sync.Once
 	// closedReason is the typed outcome of the provider removing this
@@ -38,10 +38,15 @@ type unifiedDevSubscriber struct {
 	verdict chan struct{}
 }
 
-// events transfers one copied event to its consumer, which must call
+// events signals that receive can proceed, including after tail closure.
+func (subscriber *unifiedDevSubscriber) events() <-chan struct{} { return subscriber.data.wake }
+
+// receive transfers one copied event to its consumer, which must call
 // releaseEvent only after its final write/use returns. Removal drains queued
 // events; it cannot settle an event already received by that consumer.
-func (subscriber *unifiedDevSubscriber) events() <-chan unifiedjournal.Event { return subscriber.data }
+func (subscriber *unifiedDevSubscriber) receive() (unifiedjournal.Event, bool) {
+	return subscriber.data.pop()
+}
 
 // verdictSignal is closed once the provider has removed this subscriber with
 // a typed reason; closeReason is valid after it is observed. Nil (never ready)
@@ -56,11 +61,11 @@ func (subscriber *unifiedDevSubscriber) closeTyped(reason proto.SubscriberCloseR
 	if subscriber.verdict != nil {
 		close(subscriber.verdict)
 	}
-	close(subscriber.data)
+	subscriber.data.close()
 	subscriber.drainClosed()
 }
 
-// closeReason is valid only after events() has been observed closed. Empty
+// closeReason is valid after receive reports closure or verdictSignal fires. Empty
 // means the subscriber cancelled itself; anything else is the provider's typed
 // verdict, which the attachment must carry to the browser as its close reason.
 func (subscriber *unifiedDevSubscriber) closeReason() proto.SubscriberCloseReason {
@@ -98,7 +103,7 @@ func (effects *UnifiedDevPaneEffects) WritePaneGeometry(key unifiedjournal.PaneK
 // publishEvent fans one committed event out to every live subscriber. A
 // subscriber that has already advanced past this sequence is skipped; one that
 // is behind it has missed an event and is closed rather than fed a gap; one
-// whose tail already owns its bound of events or bytes is wedged and is
+// whose tail already owns its byte bound is wedged and is
 // evicted rather than blocking the publication path — publication holds the
 // realm-wide subscriber lock, so a single stalled reader must never hold back
 // every other pane's live tail. Both closures are one typed outcome,
@@ -127,10 +132,16 @@ func (effects *UnifiedDevPaneEffects) publishEvent(key unifiedjournal.PaneKey, e
 			effects.closeLaggedSubscriberLocked(key, subscriber, tailLimitSequenceGap)
 			continue
 		}
-		limit := tailLimitQueueEvents
-		if len(subscriber.data) < cap(subscriber.data) {
-			limit = subscriber.lease.reserveTailEvent(recordingEventBytes(event))
+		select {
+		case <-subscriber.done:
+			if effects.removeSubscriberLocked(key, subscriber) {
+				subscriber.data.close()
+				subscriber.drainClosed()
+			}
+			continue
+		default:
 		}
+		limit := subscriber.lease.reserveTailEvent(recordingEventBytes(event))
 		if limit != "" {
 			effects.closeLaggedSubscriberLocked(key, subscriber, limit)
 			continue
@@ -140,19 +151,8 @@ func (effects *UnifiedDevPaneEffects) publishEvent(key unifiedjournal.PaneKey, e
 			delivered.Payload = make([]byte, len(event.Payload))
 			copy(delivered.Payload, event.Payload)
 		}
-		select {
-		case subscriber.data <- delivered:
-			subscriber.cursor = event.Sequence
-		case <-subscriber.done:
-			subscriber.releaseEvent(delivered)
-			if effects.removeSubscriberLocked(key, subscriber) {
-				close(subscriber.data)
-				subscriber.drainClosed()
-			}
-		default:
-			subscriber.releaseEvent(delivered)
-			effects.closeLaggedSubscriberLocked(key, subscriber, tailLimitQueueEvents)
-		}
+		subscriber.data.push(delivered)
+		subscriber.cursor = event.Sequence
 	}
 	return nil
 }
@@ -233,7 +233,7 @@ func (effects *UnifiedDevPaneEffects) closeSubscribers(key unifiedjournal.PaneKe
 // same representation. Snapshot and tail cannot drift, because they are the same
 // events read at one instant under one lock.
 //
-// The returned tail is the subscriber itself: its events() channel closes when
+// The returned tail is the subscriber itself: receive reports closure when
 // either side removes it, and closeReason() then tells the consumer whether
 // that was its own cancel (empty) or the provider's typed verdict, which the
 // attachment must end with.
@@ -349,7 +349,7 @@ func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string
 			}
 			return nil, unifiedjournal.Geometry{}, nil, nil, errRecordingInitial
 		}
-		subscriber := &unifiedDevSubscriber{lease: lease, cursor: cursor, data: make(chan unifiedjournal.Event, recordingTailSlots), done: make(chan struct{}), verdict: make(chan struct{})}
+		subscriber := &unifiedDevSubscriber{lease: lease, cursor: cursor, data: newRecordingTailQueue(), done: make(chan struct{}), verdict: make(chan struct{})}
 		if effects.subscribers[key] == nil {
 			effects.subscribers[key] = make(map[*unifiedDevSubscriber]struct{})
 		}
@@ -360,7 +360,7 @@ func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string
 			subscriber.once.Do(func() { close(subscriber.done) })
 			effects.subscriberMu.Lock()
 			if effects.removeSubscriberLocked(key, subscriber) {
-				close(subscriber.data)
+				subscriber.data.close()
 				subscriber.drainClosed()
 			}
 			subscriber.lease.detach()

@@ -310,7 +310,7 @@ func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T)
 	// wedged pane commits maximal 64 KiB records, so the triggering event is
 	// the publication that would take the tail past recordingTailBytes, and
 	// eviction cannot come before the tail owns fullTail records.
-	const fullTail = recordingTailBytes / (64 << 10)
+	const fullTail = recordingTailBytes / (64<<10 + recordingTailNodeBytes)
 	var logMu sync.Mutex
 	var logs bytes.Buffer
 	priorLogf := brokerLogf
@@ -472,9 +472,8 @@ func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T)
 // COMMIT, not evict the attachment so that the browser re-attaches straight
 // into the same burst.
 func TestUnifiedSubscriberAdmissionAbsorbsARepaintBurst(t *testing.T) {
-	// A literal, not recordingTailSlots: it fills the whole tail while COMMIT
-	// is held, and shrinking the tail must fail this test.
-	const burst = 1024
+	// This fits the byte budget but exceeds either former channel capacity.
+	const burst = 4096
 	effects, key := recordingReaderFixture(t, 0)
 	attachment := b1Prepare(t, effects, key.Session, "admission-burst")
 	subscriber := b1SubscriberOf(effects, key)
@@ -530,7 +529,8 @@ func TestUnifiedSubscriberSelfCancelIsNotATypedClose(t *testing.T) {
 	}
 	attachment.writer.stopOutput()
 	select {
-	case deliveredForTest, open := <-subscriber.events():
+	case <-subscriber.events():
+		deliveredForTest, open := subscriber.receive()
 		if open {
 			subscriber.releaseEvent(deliveredForTest)
 		}
@@ -563,7 +563,7 @@ func TestUnifiedSubscriberAlreadyDonePublishRemovesLastOuterBucket(t *testing.T)
 	done := make(chan struct{})
 	close(done)
 	subscriber := &unifiedDevSubscriber{
-		data: make(chan unifiedjournal.Event), done: done,
+		data: newRecordingTailQueue(), done: done,
 	}
 	effects := &UnifiedDevPaneEffects{
 		subscribers: map[unifiedjournal.PaneKey]map[*unifiedDevSubscriber]struct{}{
@@ -591,9 +591,9 @@ func TestUnifiedCloseSubscribersIsTheSharedTypedPrimitive(t *testing.T) {
 	keyA := unifiedjournal.PaneKey{Server: "main", Session: "$1", ControlGeneration: 1, Window: "@1", Pane: "%1", Incarnation: "one"}
 	keyB := unifiedjournal.PaneKey{Server: "main", Session: "$2", ControlGeneration: 1, Window: "@2", Pane: "%2", Incarnation: "two"}
 	effects := &UnifiedDevPaneEffects{subscribers: map[unifiedjournal.PaneKey]map[*unifiedDevSubscriber]struct{}{}}
-	first := &unifiedDevSubscriber{data: make(chan unifiedjournal.Event, 1), done: make(chan struct{})}
-	second := &unifiedDevSubscriber{data: make(chan unifiedjournal.Event, 1), done: make(chan struct{})}
-	sibling := &unifiedDevSubscriber{data: make(chan unifiedjournal.Event, 1), done: make(chan struct{})}
+	first := &unifiedDevSubscriber{data: newRecordingTailQueue(), done: make(chan struct{})}
+	second := &unifiedDevSubscriber{data: newRecordingTailQueue(), done: make(chan struct{})}
+	sibling := &unifiedDevSubscriber{data: newRecordingTailQueue(), done: make(chan struct{})}
 	effects.subscribers[keyA] = map[*unifiedDevSubscriber]struct{}{first: {}, second: {}}
 	effects.subscribers[keyB] = map[*unifiedDevSubscriber]struct{}{sibling: {}}
 
@@ -601,7 +601,7 @@ func TestUnifiedCloseSubscribersIsTheSharedTypedPrimitive(t *testing.T) {
 		t.Fatalf("closed=%d want 2", closed)
 	}
 	for _, subscriber := range []*unifiedDevSubscriber{first, second} {
-		if _, open := <-subscriber.events(); open {
+		if _, open := subscriber.receive(); open {
 			t.Fatal("subscriber tail not closed")
 		}
 		if subscriber.closeReason() != proto.SubscriberClosedLagged {
@@ -638,7 +638,7 @@ func TestUnifiedCloseSubscribersIsTheSharedTypedPrimitive(t *testing.T) {
 	effects.subscriberMu.Lock()
 	effects.closeSubscriberLocked(keyB, sibling, proto.SubscriberCloseReason("made_up_reason"))
 	effects.subscriberMu.Unlock()
-	if _, open := <-sibling.events(); open {
+	if _, open := sibling.receive(); open {
 		t.Fatal("sibling tail not closed")
 	}
 	if !proto.IsSubscriberCloseReason(sibling.closeReason()) {
@@ -690,7 +690,7 @@ func TestUnifiedSubscriberVerdictIsBoundedWhileDownstreamStaysWedged(t *testing.
 	parked := []byte("[parked]")
 	publish(parked)
 	pollUntil(t, 5*time.Second, "writer parked on the wedged write", func() bool {
-		return len(subscriber.events()) == 0
+		return subscriber.data.len() == 0
 	})
 	// A second event sits in the tail behind the parked one: the verdict must
 	// outrank it, never drain it.

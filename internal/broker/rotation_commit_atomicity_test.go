@@ -173,7 +173,8 @@ func TestRotationCommitPublishesActiveAndClosesPredecessorSubscribers(t *testing
 	}
 	for index, subscriber := range subscribers {
 		select {
-		case deliveredForTest, open := <-subscriber.events():
+		case <-subscriber.events():
+			deliveredForTest, open := subscriber.receive()
 			if open {
 				subscriber.releaseEvent(deliveredForTest)
 			}

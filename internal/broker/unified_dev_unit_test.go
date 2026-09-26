@@ -1,6 +1,7 @@
 package broker
 
 import (
+	"bytes"
 	"context"
 	"sync"
 	"testing"
@@ -225,12 +226,19 @@ func TestUnifiedDevPublishEventEvictsWedgedSubscriber(t *testing.T) {
 	keyA := unifiedjournal.PaneKey{Server: "main", Session: "$1", ControlGeneration: 1, Window: "@1", Pane: "%1", Incarnation: "one"}
 	keyB := unifiedjournal.PaneKey{Server: "main", Session: "$2", ControlGeneration: 1, Window: "@2", Pane: "%2", Incarnation: "two"}
 	effects := &UnifiedDevPaneEffects{subscribers: map[unifiedjournal.PaneKey]map[*unifiedDevSubscriber]struct{}{}}
-	wedged := &unifiedDevSubscriber{data: make(chan unifiedjournal.Event, 1), done: make(chan struct{})}
-	healthy := &unifiedDevSubscriber{data: make(chan unifiedjournal.Event, 1), done: make(chan struct{})}
+	var budget recordingReaderBudget
+	lease, err := budget.acquire(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lease.releaseSnapshot()
+	defer lease.detach()
+	wedged := &unifiedDevSubscriber{lease: lease, data: newRecordingTailQueue(), done: make(chan struct{})}
+	healthy := &unifiedDevSubscriber{data: newRecordingTailQueue(), done: make(chan struct{})}
 	effects.subscribers[keyA] = map[*unifiedDevSubscriber]struct{}{wedged: {}}
 	effects.subscribers[keyB] = map[*unifiedDevSubscriber]struct{}{healthy: {}}
 	output := func(sequence int64) unifiedjournal.Event {
-		return unifiedjournal.Event{Kind: unifiedjournal.RecordOutput, Sequence: sequence, Start: sequence - 1, End: sequence, Payload: []byte("x")}
+		return unifiedjournal.Event{Kind: unifiedjournal.RecordOutput, Sequence: sequence, Start: sequence - 1, End: sequence, Payload: bytes.Repeat([]byte("x"), recordingTailBytes/2)}
 	}
 
 	if err := effects.publishEvent(keyA, output(1)); err != nil {
@@ -251,7 +259,8 @@ func TestUnifiedDevPublishEventEvictsWedgedSubscriber(t *testing.T) {
 		t.Fatal(err)
 	}
 	select {
-	case event := <-healthy.data:
+	case <-healthy.events():
+		event, _ := healthy.receive()
 		if event.Sequence != 1 {
 			t.Fatalf("healthy subscriber sequence=%d", event.Sequence)
 		}
@@ -265,10 +274,10 @@ func TestUnifiedDevPublishEventEvictsWedgedSubscriber(t *testing.T) {
 	if present {
 		t.Fatal("the wedged subscriber was not evicted")
 	}
-	if len(wedged.data) != 0 {
+	if wedged.data.len() != 0 {
 		t.Fatal("eviction retained the abandoned queued payload")
 	}
-	if _, open := <-wedged.data; open {
+	if _, open := wedged.receive(); open {
 		t.Fatal("the evicted subscriber's channel was not closed")
 	}
 	// Eviction is a typed close, never a bare channel close: the attachment
