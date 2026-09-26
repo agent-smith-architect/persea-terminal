@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+## 0.1.4 — 2026-09-26
+
 ### Changed
 
 - While a view loads, waiting updates now count against the 4 MiB limit on waiting output by their size alone. Before, the view was also stopped after 1,024 updates, however small they were.
@@ -22,6 +24,10 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 - A terminal page or workspace restored with the browser's back or forward button reconnects instead of staying detached, unless it had stopped with a notice, for example because another device took control.
 - When a workspace pane stops reattaching, for example because its view kept falling behind, it now says why and offers Retry. Before, it kept showing "Reattaching" with nothing running.
 - When the page itself stops a view because of data it cannot use, it now shows a notice with Reconnect instead of freezing silently.
+
+### Testing notes
+
+- Recovery was tested in desktop Chromium against simulated connection loss, stalled connections, server liveness closes, control takeovers, back/forward navigation and hidden pages. Real mobile networks, iOS and low-end hardware were not tested.
 
 ## 0.1.3 — 2026-09-25
 
