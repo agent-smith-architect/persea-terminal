@@ -167,9 +167,10 @@ func TestUnifiedAdmissionVerdictStopsBacklog(t *testing.T) {
 		t.Fatal("verdict did not finish")
 	}
 	types := admissionTypes(t, wire)
-	// The first snapshot event is already in flight; the next must not start.
-	if len(types) != 11 || types[10] != "verdict" {
-		t.Fatalf("backlog frames=%v, want PREPARE, COMMIT, 8 chunks, verdict", types)
+	// The first backlog frame is already in flight; the next must not start,
+	// even though it would continue the same snapshot event.
+	if len(types) != 4 || types[2] != terminal.FrameLive || types[3] != "verdict" {
+		t.Fatalf("backlog frames=%v, want PREPARE, COMMIT, 1 chunk, verdict", types)
 	}
 	_ = writer.Close(context.Background())
 }
