@@ -207,4 +207,48 @@ const beta = dashboardSession("beta", "scope-b");
   assert.equal(h.failures.join(","), "attachment_failed", "a post-commit settlement failure was not terminal");
 }
 
+// --- The observer hears a close before the page's reaction to it. A page that
+// stops at once inside its close handling (the reattach burst limit detaches)
+// reports DETACHED through the same sink before its close call returns; the
+// observer must not then overwrite that stop with the close that caused it.
+{
+  type Sink = Readonly<{ transportClosed(generation: number, reason: string): void; reconnectStatus(status: unknown): void }>;
+  const events: string[] = [];
+  let sink: Sink | undefined;
+  const page = {
+    transportClosed: (_generation: number, reason: string) => { sink?.reconnectStatus(Object.freeze({ state: "DETACHED", attempt: 0, reason })); },
+    reconnectStatus: () => {},
+  };
+  const fields = { page, reconnecting: false };
+  Object.setPrototypeOf(fields, UnifiedPaneController.prototype);
+  const observer: UnifiedPaneObserver = Object.freeze({
+    transportClosed: (_generation: number, reason: string) => { events.push(`closed:${reason}`); },
+    reconnectStatus: (status) => { events.push(`status:${status.state}`); },
+  });
+  sink = (fields as unknown as { observingSink(value: UnifiedPaneObserver): Sink }).observingSink(observer);
+  sink.transportClosed(1, "subscriber_lagged");
+  assert.equal(events.join(","), "closed:subscriber_lagged,status:DETACHED", "the observer heard the page's stop before the close that caused it");
+}
+
+// --- A restored page reattaches only a pane that was live or recovering on its
+// own: one stopped with a notice keeps it, so a restore can neither replay a
+// refusal nor take control back from where the operator moved it.
+for (const [recovering, expected] of [[true, 1], [false, 0]] as const) {
+  let attaches = 0;
+  const detaches: string[] = [];
+  const transport = {
+    recoveryActive: () => recovering,
+    detach: (reason: string) => { detaches.push(reason); },
+    attachAgain: () => { attaches += 1; },
+  };
+  const fields = { transport, disposed: false, connected: true, resumeOnRestore: false };
+  Object.setPrototypeOf(fields, UnifiedPaneController.prototype);
+  const controller = fields as unknown as UnifiedPaneController;
+  controller.suspend();
+  assert.equal(detaches.join(","), "page_hidden", "entering the back/forward cache did not detach the pane");
+  controller.resume();
+  controller.resume();
+  assert.equal(attaches, expected, recovering ? "a recovering pane was not reattached exactly once" : "a pane stopped with a notice was reattached on restore");
+}
+
 console.log("unified pane controller tests PASS");

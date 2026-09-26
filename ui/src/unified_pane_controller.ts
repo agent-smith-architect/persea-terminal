@@ -280,6 +280,7 @@ export class UnifiedPaneController {
   private committedOnce = false;
   private connected = false;
   private disposed = false;
+  private resumeOnRestore = false;
   private snapshotGeneration: number;
   private projectionDetail?: UnifiedInventoryDetail;
   private readonly counters = { sourceRemints: 0, identityRemints: 0, takeovers: 0, adoptions: 0, switches: 0 };
@@ -460,10 +461,21 @@ export class UnifiedPaneController {
     this.transport.detach(reason);
   }
 
-  // A page restored from the back/forward cache was detached on pagehide.
+  // A page entering the back/forward cache detaches. Only a pane that was live
+  // or still recovering on its own reattaches when the page is restored: one
+  // stopped with a notice (a control refusal, a typed stop, the burst limit)
+  // keeps it, since reattaching would replay the refusal or take control back
+  // from wherever the operator moved it.
+  suspend(): void {
+    if (this.disposed) return;
+    this.resumeOnRestore = this.transport.recoveryActive();
+    this.transport.detach("page_hidden");
+  }
+
   // Reattach with fresh authority, exactly as the notice's Reconnect does.
   resume(): void {
-    if (this.disposed || !this.connected) return;
+    if (this.disposed || !this.connected || !this.resumeOnRestore) return;
+    this.resumeOnRestore = false;
     this.transport.attachAgain();
   }
 
@@ -838,8 +850,12 @@ export class UnifiedPaneController {
         return verdict;
       },
       transportClosed: (generation: number, reason: string) => {
-        page.transportClosed(generation, reason);
+        // The observer hears the close first: the page may react to it at
+        // once (a burst stop detaches, a lease_held claim reopens), and those
+        // reactions must reach the observer after the close that caused them,
+        // not be overwritten by it.
         observer.transportClosed?.(generation, reason);
+        page.transportClosed(generation, reason);
       },
       reconnectStatus: (status: ReconnectStatus) => {
         this.reconnecting = status.state === "WAITING" || status.state === "ATTEMPTING";

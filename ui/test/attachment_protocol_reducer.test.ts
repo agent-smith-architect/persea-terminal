@@ -13,7 +13,7 @@ import {
 import {
   CLOSE_CLIENT_FAULT, CLOSE_CLIENT_PROTOCOL_FAULT, CLOSE_ORDERLY,
   HISTORY_DEPTH_PENDING_TIMEOUT_MS, MAX_RECONNECT_ATTEMPTS, MAX_RECONNECT_ATTEMPT_MS, MAX_RECONNECT_ELAPSED_MS,
-  OFFLINE_RETRY_MS, STABLE_CONNECTION_MS, WebSocketAttachmentTransport,
+  OFFLINE_RETRY_MS, OFFLINE_WAKE_SPACING_MS, STABLE_CONNECTION_MS, WebSocketAttachmentTransport,
   type AttachmentWebSocket, type HistoryDepthOutcome, type ReconnectRuntime,
 } from "../src/websocket_attachment_transport";
 import {
@@ -21,6 +21,7 @@ import {
   type TransportLivenessRuntime,
 } from "../src/transport_liveness";
 import { parseCSRFCookie, refreshCSRFToken } from "../src/csrf_refresh";
+import { classifyUnifiedClose } from "../src/unified_close_policy";
 import { normalizeComposedText, serializeComposerSegments } from "../src/composer";
 
 type Test = Readonly<{ name: string; run: () => void | Promise<void> }>;
@@ -112,6 +113,12 @@ class FakeReconnectClock {
     visible: () => this.visibleState,
   });
   wake(): void { for (const listener of [...this.wakeListeners]) listener(); }
+  // A device sleep: the clock jumps while pending timers pause, each keeping
+  // the delay it had left.
+  suspend(milliseconds: number): void {
+    this.clock += milliseconds;
+    for (const timer of this.timers.values()) timer.due += milliseconds;
+  }
   wakeSubscribers(): number { return this.wakeListeners.size; }
   now(): number { return this.clock; }
   pending(): number { return this.timers.size; }
@@ -988,6 +995,37 @@ test("offline_wake_probes_at_once_and_a_hidden_page_waits_for_it", async () => {
   transport.detach();
 });
 
+test("offline_wake_bursts_are_spaced_from_the_previous_attempt", async () => {
+  const clock = new FakeReconnectClock();
+  let attempts = 0;
+  const transport = new WebSocketAttachmentTransport(
+    "ws://example.test/ws", () => { throw new Error("socket must not be constructed while inventory is offline"); }, ["persea-handle.consumed"],
+    async () => { attempts += 1; throw new Error("inventory offline"); }, () => 0.5, clock.runtime,
+  );
+  transport.bind({ openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: () => {} });
+  bindTransportSource(transport);
+  transport.attachAgain();
+  await clock.advance(11_500);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS, "fast phase did not end in OFFLINE");
+  // A burst right after the last attempt collapses into one probe, spaced.
+  for (let signal = 0; signal < 20; signal += 1) clock.wake();
+  await clock.advance(OFFLINE_WAKE_SPACING_MS - 1);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS, "a wake burst probed closer than the spacing to the previous attempt");
+  await clock.advance(1);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS + 1, "a wake burst did not bring the probe forward exactly once");
+  // A sustained storm, one signal every 100 ms for 10 s, stays spaced.
+  const before = attempts;
+  const window = 10_000;
+  for (let elapsed = 0; elapsed < window; elapsed += 100) {
+    clock.wake();
+    await clock.advance(100);
+  }
+  assert(attempts - before <= Math.ceil(window / OFFLINE_WAKE_SPACING_MS) + 1, `a wake storm produced ${attempts - before} probes in ${window} ms`);
+  assert(attempts - before >= Math.floor(window / OFFLINE_WAKE_SPACING_MS), "a wake storm stopped bringing probes forward");
+  transport.detach();
+  equal(clock.pending(), 0);
+});
+
 test("commit_then_immediate_loss_keeps_its_episode_and_settles_into_offline_probing", async () => {
   const clock = new FakeReconnectClock();
   const sockets: TransportFakeSocket[] = [];
@@ -1059,6 +1097,169 @@ test("a_connection_that_stays_up_starts_a_fresh_episode_on_its_next_loss", async
   transport.detach();
 });
 
+test("connected_time_between_momentary_commits_does_not_spend_the_fast_phase", async () => {
+  const clock = new FakeReconnectClock();
+  const sockets: TransportFakeSocket[] = [];
+  const statuses: string[] = [];
+  const transport = new WebSocketAttachmentTransport(
+    "ws://example.test/ws", () => {
+      const socket = new TransportFakeSocket(1);
+      sockets.push(socket);
+      return socket as unknown as AttachmentWebSocket;
+    }, ["persea-handle.consumed"],
+    async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-handle.fresh"]) }),
+    () => 0.5, clock.runtime,
+  );
+  transport.bind({
+    openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: () => {},
+    reconnectStatus: (status) => { statuses.push(`${status.state}:${status.attempt}`); },
+  });
+  const first = transport.connect();
+  bindTransportSource(transport, first);
+  transport.connectionCommitted(first);
+  // Every connection stays up just short of stable, so all losses share one
+  // episode and together outlast its elapsed budget in wall time. Only the
+  // disconnected gaps may spend that budget; the attempts still carry over.
+  const up = STABLE_CONNECTION_MS - 1;
+  assert((MAX_RECONNECT_ATTEMPTS - 1) * up > MAX_RECONNECT_ELAPSED_MS, "the probe does not outlast the elapsed budget");
+  for (let loss = 1; loss <= MAX_RECONNECT_ATTEMPTS; loss += 1) {
+    await clock.advance(up);
+    const before = sockets.length;
+    sockets.at(-1)!.emit("close", { code: 1006, reason: "" });
+    equal(statuses.at(-1), `WAITING:${loss}`, `loss ${loss} left the fast phase early`);
+    await clock.advance(RECONNECT_TEST_MAX_FAST_DELAY_MS);
+    equal(sockets.length, before + 1, `loss ${loss} did not reconnect in the fast phase`);
+    transport.connectionCommitted(sockets.length);
+  }
+  await clock.advance(up);
+  sockets.at(-1)!.emit("close", { code: 1006, reason: "" });
+  equal(statuses.at(-1), `OFFLINE:${MAX_RECONNECT_ATTEMPTS}`, "momentary commits refilled the fast phase's attempts");
+  transport.detach();
+});
+
+const recordingTransport = (clock: FakeReconnectClock, sockets: TransportFakeSocket[], statuses: string[], mint: () => Promise<Readonly<{ url: string; protocols: readonly string[] }>>) => {
+  const transport = new WebSocketAttachmentTransport(
+    "ws://example.test/ws", () => {
+      const socket = new TransportFakeSocket(1);
+      sockets.push(socket);
+      return socket as unknown as AttachmentWebSocket;
+    }, ["persea-handle.consumed"], mint, () => 0.5, clock.runtime,
+  );
+  transport.bind({
+    openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: () => {},
+    reconnectStatus: (status) => { statuses.push(`${status.state}:${status.attempt}:${status.delayMs ?? "-"}`); },
+  });
+  return transport;
+};
+const freshEndpoint = async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-handle.fresh"]) });
+const takeoverEndpoint = Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-handle.takeover"]) });
+
+test("handoff_closes_start_a_fresh_episode", async () => {
+  for (const reason of ["generation_refit", "generation_rotated"]) {
+    const clock = new FakeReconnectClock();
+    const sockets: TransportFakeSocket[] = [];
+    const statuses: string[] = [];
+    const transport = recordingTransport(clock, sockets, statuses, freshEndpoint);
+    const first = transport.connect();
+    bindTransportSource(transport, first);
+    transport.connectionCommitted(first);
+    // A shaky link spends the fast phase with momentary commits.
+    for (let loss = 0; loss < MAX_RECONNECT_ATTEMPTS; loss += 1) {
+      sockets.at(-1)!.emit("close", { code: 1006, reason: "" });
+      await clock.advance(RECONNECT_TEST_MAX_FAST_DELAY_MS);
+      transport.connectionCommitted(sockets.length);
+    }
+    // A deliberate handoff moments later is not another loss.
+    await clock.advance(1_000);
+    const before = sockets.length;
+    sockets.at(-1)!.emit("close", { code: 1000, reason });
+    equal(statuses.at(-1), "WAITING:1:250", `${reason} inherited the shaky episode`);
+    await clock.advance(250);
+    equal(sockets.length, before + 1, `${reason} did not re-attach at the base delay`);
+    transport.detach();
+  }
+});
+
+test("an_offline_probe_timer_does_not_block_a_session_switch", async () => {
+  const clock = new FakeReconnectClock();
+  const transport = recordingTransport(clock, [], [], async () => { throw new Error("inventory offline"); });
+  bindTransportSource(transport);
+  transport.attachAgain();
+  equal(transport.endpointReplacementBusy(), true, "a pending fast-phase retry did not count as busy");
+  await clock.advance(11_500);
+  equal(clock.pending(), 1, "OFFLINE armed no probe");
+  equal(transport.endpointReplacementBusy(), false, "an OFFLINE probe timer blocked a session switch");
+  transport.detach();
+});
+
+test("waiting_for_the_operator_does_not_spend_the_episode", async () => {
+  const clock = new FakeReconnectClock();
+  const sockets: TransportFakeSocket[] = [];
+  const statuses: string[] = [];
+  const transport = recordingTransport(clock, sockets, statuses, freshEndpoint);
+  const first = transport.connect();
+  bindTransportSource(transport, first);
+  transport.connectionCommitted(first);
+  sockets[0].emit("close", { code: 1006, reason: "" });
+  await clock.advance(250);
+  // The reconnect finds the lease held and the page waits for the operator.
+  sockets.at(-1)!.emit("close", { code: 1011, reason: "lease_held" });
+  await clock.advance(10 * 60_000);
+  transport.takeControl(takeoverEndpoint);
+  transport.connectionCommitted(sockets.length);
+  await clock.advance(5_000);
+  sockets.at(-1)!.emit("close", { code: 1006, reason: "" });
+  equal(statuses.at(-1)?.split(":").slice(0, 2).join(":"), "WAITING:2", "the wait for the operator spent the episode's elapsed budget");
+  transport.detach();
+});
+
+test("a_takeover_after_an_offline_probe_leaves_offline", async () => {
+  const clock = new FakeReconnectClock();
+  const sockets: TransportFakeSocket[] = [];
+  const statuses: string[] = [];
+  let online = false;
+  let mints = 0;
+  const transport = recordingTransport(clock, sockets, statuses, async () => {
+    mints += 1;
+    if (!online) throw new Error("inventory offline");
+    return freshEndpoint();
+  });
+  bindTransportSource(transport);
+  transport.attachAgain();
+  await clock.advance(11_500);
+  assert(statuses.at(-1)?.startsWith("OFFLINE:"), "the fast phase did not reach OFFLINE");
+  online = true;
+  await clock.advance(OFFLINE_RETRY_MS);
+  equal(sockets.length, 1, "the OFFLINE probe did not open a socket");
+  sockets[0].emit("close", { code: 1011, reason: "lease_held" });
+  transport.takeControl(takeoverEndpoint);
+  const mintsBefore = mints;
+  const statusesBefore = statuses.length;
+  clock.wake();
+  await clock.advance(OFFLINE_WAKE_SPACING_MS);
+  equal(mints, mintsBefore, "a wake over a live takeover minted a probe endpoint");
+  assert(!statuses.slice(statusesBefore).some((status) => status.startsWith("OFFLINE:")), "a wake showed OFFLINE over a working takeover");
+  equal(clock.wakeSubscribers(), 0, "the takeover kept the OFFLINE wake subscription");
+  transport.detach();
+});
+
+test("waking_after_a_device_sleep_replaces_an_overdue_probe", async () => {
+  const clock = new FakeReconnectClock();
+  let attempts = 0;
+  const transport = recordingTransport(clock, [], [], async () => { attempts += 1; throw new Error("inventory offline"); });
+  bindTransportSource(transport);
+  transport.attachAgain();
+  await clock.advance(11_500);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS, "fast-phase attempt cap drifted");
+  await clock.advance(5_000);
+  // Ten minutes asleep: the clock moves on while the probe timer is paused.
+  clock.suspend(10 * 60_000);
+  clock.wake();
+  await clock.advance(0);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS + 1, "waking after a sleep waited for the paused probe");
+  transport.detach();
+});
+
 test("takeover_replacement_recovers_from_a_later_loss_and_from_loss_before_commit", async () => {
   for (const commitFirst of [true, false]) {
     const clock = new FakeReconnectClock();
@@ -1109,7 +1310,11 @@ test("server_proof_expiry_is_recoverable_loss", async () => {
     async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-handle.fresh"]) }),
     () => 0.5, clock.runtime,
   );
-  transport.bind({ openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: () => {} });
+  // The page's rule for a close: a terminal class stops recovery.
+  transport.bind({
+    openTransport: () => {}, receiveDecoded: () => "ENQUEUED",
+    transportClosed: (_generation, reason) => { if (classifyUnifiedClose(reason) === "terminal") transport.detach(reason); },
+  });
   const first = transport.connect();
   bindTransportSource(transport, first);
   transport.connectionCommitted(first);
@@ -1869,7 +2074,10 @@ test("production_document_preserves_nonce_and_source_bound_csrf_contracts", () =
   const app = readWorkspaceText("src/app.ts");
   const endpoints = readWorkspaceText("src/unified_pane_controller.ts");
   const transport = readWorkspaceText("src/websocket_attachment_transport.ts");
-  assert(app.includes('window.addEventListener("pagehide", () => controller.detach("page_hidden"))'), "current pagehide lost attachment cleanup");
+  // pagehide always lets the attachment go: a page entering the back/forward
+  // cache suspends (detach, remembering whether to reattach), any other detaches.
+  assert(app.includes('if (event.persisted) controller.suspend();') && app.includes('else controller.detach("page_hidden");'), "current pagehide lost attachment cleanup");
+  assert(endpoints.includes('this.transport.detach("page_hidden");'), "suspend no longer detaches the attachment");
   assert(endpoints.includes('credentials: "same-origin", signal'), "fresh handle acquisition lost cancelable same-origin ownership");
   assert(endpoints.includes("const csrf = await refreshCSRFToken(signal)")
     && endpoints.indexOf("refreshCSRFToken(signal)") < endpoints.indexOf('window.fetch("/api/attachment-handles"'),

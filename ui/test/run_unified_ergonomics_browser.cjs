@@ -28,6 +28,16 @@ const fs = require("fs");
 const path = require("path");
 const { startClipboardFixture: startFixture } = require("./clipboard_fixture.cjs");
 const { assert, delay, requestJSON, Tab: BaseTab, launchChrome, stopChrome } = require("./unified_browser_lib.cjs");
+// Retry-budget constants, read from the transport so keyboard-restore cannot
+// drift from them: a loss episode ends only after a connection has stayed up
+// STABLE_CONNECTION_MS, and one episode has MAX_RECONNECT_ATTEMPTS fast attempts.
+const transportConstant = (name) => {
+  const match = new RegExp(`export const ${name} = ([0-9_]+);`).exec(fs.readFileSync(path.join(__dirname, "../src/websocket_attachment_transport.ts"), "utf8"));
+  if (!match) throw new Error(`transport constant ${name} not found`);
+  return Number(match[1].replaceAll("_", ""));
+};
+const STABLE_CONNECTION_MS = transportConstant("STABLE_CONNECTION_MS");
+const MAX_RECONNECT_ATTEMPTS = transportConstant("MAX_RECONNECT_ATTEMPTS");
 
 const UI = path.resolve(__dirname, "..");
 const EVIDENCE = process.env.PERSEA_TERMINAL_EVIDENCE_DIR ? path.resolve(process.env.PERSEA_TERMINAL_EVIDENCE_DIR) : null;
@@ -742,8 +752,14 @@ async function main() {
       const settled = await tabA.waitUntil((state) => state.keyboardInset === open && (state.activeKind === "xterm") === focused, 4_000);
       return settled.state ?? settled.last;
     };
+    const restoreCells = [["unfocused+CLOSED", false, false], ["focused+CLOSED", true, false], ["unfocused+OPEN", false, true], ["focused+OPEN", true, true]];
+    assert(restoreCells.length < MAX_RECONNECT_ATTEMPTS, "keyboard-restore: one kind's reopens no longer fit one fast phase");
     for (const kind of ["reconnect", "forced"]) {
-      for (const [cellName, focused, open] of [["unfocused+CLOSED", false, false], ["focused+CLOSED", true, false], ["unfocused+OPEN", false, true], ["focused+OPEN", true, true]]) {
+      // Momentary commits keep a loss episode's retry budget, so each kind
+      // first lets the connection prove stable: its reopens then form one fresh
+      // episode and every one of them is an ordinary fast-phase reconnect.
+      await delay(STABLE_CONNECTION_MS + 1_000);
+      for (const [cellName, focused, open] of restoreCells) {
         const key = `${kind}.${cellName}`;
         const armed = await setCell(focused, open);
         const cellOK = armed.keyboardInset === open && (armed.activeKind === "xterm") === focused;
