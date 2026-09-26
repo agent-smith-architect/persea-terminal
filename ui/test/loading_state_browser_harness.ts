@@ -7,7 +7,10 @@ const encoder = new TextEncoder();
 
 type Mounted = { page: UnifiedTerminalPage; generation: number; cut: bigint; name: string };
 const mounted: Mounted[] = [];
-const sent: Array<{ pane: string; type: string }> = [];
+const sent: Array<{ pane: string; type: string; mode?: string }> = [];
+const detaches: string[] = [];
+const finalized: string[] = [];
+const caughtUp: number[] = [];
 let focusEvents = 0;
 let transportOpens = 0;
 let socketConstructions = 0;
@@ -53,6 +56,10 @@ function snapshot(): Record<string, unknown> {
     sent: [...sent],
     resizeRequests: sent.filter((entry) => entry.type === "RESIZE_REQUEST").length,
     inputFrames: sent.filter((entry) => entry.type === "INPUT").length,
+    modeRequests: sent.filter((entry) => entry.type === "MODE_REQUEST").map((entry) => entry.mode),
+    detaches: [...detaches],
+    finalized: [...finalized],
+    caughtUp: [...caughtUp],
     focusEvents,
     transportOpens,
     socketConstructions,
@@ -61,9 +68,12 @@ function snapshot(): Record<string, unknown> {
   };
 }
 
-function reset(count: number): Record<string, unknown> {
+function reset(count: number, capabilityMode: "control" | "observe" = "control"): Record<string, unknown> {
   for (const pane of mounted.splice(0)) pane.page.destroy();
   sent.splice(0);
+  detaches.splice(0);
+  finalized.splice(0);
+  caughtUp.splice(0);
   focusEvents = 0;
   transportOpens = 0;
   socketConstructions = 0;
@@ -82,15 +92,16 @@ function reset(count: number): Record<string, unknown> {
     pane.page = new UnifiedTerminalPage({
       root,
       port: {
-        trySend: (_generation, value) => { sent.push({ pane: name, type: value.type }); return "ACCEPTED"; },
-        finalize: () => undefined,
-        detach: () => undefined,
+        trySend: (_generation, value) => { sent.push({ pane: name, type: value.type, ...(value.type === "MODE_REQUEST" ? { mode: value.mode } : {}) }); return "ACCEPTED"; },
+        finalize: (intent) => { finalized.push(intent.cause); },
+        detach: (reason) => { detaches.push(reason ?? ""); },
+        connectionCaughtUp: (generation) => { caughtUp.push(generation); },
         attachAgain: () => {
           reconnectRequests += 1;
           pane.page.reconnectStatus({ state: "WAITING", attempt: 1, delayMs: 0 });
         },
       },
-      capabilityMode: "control",
+      capabilityMode,
       styleNonce: NONCE,
       sessionName: name,
       rememberSource: () => undefined,
@@ -104,6 +115,7 @@ function reset(count: number): Record<string, unknown> {
 }
 
 async function prepareAll(): Promise<Record<string, unknown>> {
+  const readyBefore = sent.filter((entry) => entry.type === "READY").length;
   for (const pane of mounted) {
     pane.page.receiveDecoded(pane.generation, frame(pane, {
       type: "PREPARE",
@@ -117,7 +129,7 @@ async function prepareAll(): Promise<Record<string, unknown>> {
     }));
   }
   const deadline = performance.now() + 5_000;
-  while (sent.filter((entry) => entry.type === "READY").length !== mounted.length) {
+  while (sent.filter((entry) => entry.type === "READY").length - readyBefore !== mounted.length) {
     if (performance.now() > deadline) throw new Error("replay writes did not settle");
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
@@ -130,6 +142,67 @@ function commitAll(): Record<string, unknown> {
   // Both snapshots are taken in this one JavaScript task. This is the causal
   // fence: a loader removed by a timer/frame after COMMIT fails the test.
   return { before, after: snapshot() };
+}
+
+function modeAll(mode: "CONTROL" | "OBSERVE" = "CONTROL"): Record<string, unknown> {
+  for (const pane of mounted) pane.page.receiveDecoded(pane.generation, frame(pane, { type: "MODE", mode }));
+  return snapshot();
+}
+
+// The transport's next attempt: a new generation and cut for every pane.
+function readmitAll(): Record<string, unknown> {
+  for (const pane of mounted) {
+    pane.generation += 100;
+    pane.cut += 100n;
+    pane.page.openTransport(pane.generation);
+  }
+  return snapshot();
+}
+
+type TerminalProbe = {
+  write(data: string | Uint8Array, callback?: () => void): void;
+  buffer: { active: { length: number; getLine(row: number): { translateToString(trim?: boolean): string } | undefined } };
+};
+const terminalOf = (pane: Mounted): TerminalProbe => (pane.page as unknown as { terminal: TerminalProbe }).terminal;
+const bufferHas = (terminal: TerminalProbe, marker: string): boolean => {
+  const active = terminal.buffer.active;
+  for (let row = Math.max(0, active.length - 50); row < active.length; row += 1) {
+    if (active.getLine(row)?.translateToString(true).includes(marker)) return true;
+  }
+  return false;
+};
+
+// The flow acknowledgement for a frame fires only once the terminal holds
+// everything the frame wrote. A frame near the LIVE limit takes several of
+// xterm's write batches; its acknowledgement point is requested at once, as
+// the transport does.
+async function acknowledgeAfterWrite(): Promise<Record<string, unknown>> {
+  const pane = mounted[0]!;
+  const terminal = terminalOf(pane);
+  const marker = "FLOW-ACK-FENCE-END";
+  const data = encoder.encode(`${"ack-body ".repeat(50_000)}\r\n${marker}\r\n`);
+  pane.page.receiveDecoded(pane.generation, frame(pane, { type: "LIVE", cut: pane.cut, data }));
+  const markerAtAck = await new Promise<boolean>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("acknowledgement never fired")), 10_000);
+    pane.page.afterConsumed(pane.generation, () => { clearTimeout(timer); resolve(bufferHas(terminal, marker)); });
+  });
+  return { markerAtAck, markerNow: bufferHas(terminal, marker), bytes: data.byteLength };
+}
+
+// A write callback that throws must not stop xterm's write loop: the
+// attachment ends with a failure, and later writes still complete.
+async function throwingWriteCallback(): Promise<Record<string, unknown>> {
+  const pane = mounted[0]!;
+  const terminal = terminalOf(pane);
+  const page = pane.page as unknown as { syncNativeScroll: (...args: unknown[]) => void };
+  page.syncNativeScroll = () => { throw new Error("write callback failure"); };
+  pane.page.receiveDecoded(pane.generation, frame(pane, { type: "LIVE", cut: pane.cut, data: encoder.encode("CALLBACK-THROWS\r\n") }));
+  const loopAlive = await new Promise<boolean>((resolve) => {
+    const timer = setTimeout(() => resolve(false), 3_000);
+    terminal.write("AFTER-THE-FAILURE\r\n", () => { clearTimeout(timer); resolve(true); });
+  });
+  delete (page as { syncNativeScroll?: unknown }).syncNativeScroll;
+  return { ...snapshot(), loopAlive, afterWritten: bufferHas(terminal, "AFTER-THE-FAILURE") };
 }
 
 function failAll(reason = "unified_unavailable"): Record<string, unknown> {
@@ -150,9 +223,13 @@ function exhaustAll(reason?: string): Record<string, unknown> {
 declare global {
   interface Window {
     __loading_state: {
-      reset(count: number): Record<string, unknown>;
+      reset(count: number, capabilityMode?: "control" | "observe"): Record<string, unknown>;
       prepareAll(): Promise<Record<string, unknown>>;
       commitAll(): Record<string, unknown>;
+      modeAll(mode?: "CONTROL" | "OBSERVE"): Record<string, unknown>;
+      readmitAll(): Record<string, unknown>;
+      acknowledgeAfterWrite(): Promise<Record<string, unknown>>;
+      throwingWriteCallback(): Promise<Record<string, unknown>>;
       failAll(reason?: string): Record<string, unknown>;
       exhaustAll(reason?: string): Record<string, unknown>;
       snapshot(): Record<string, unknown>;
@@ -160,5 +237,5 @@ declare global {
   }
 }
 
-window.__loading_state = { reset, prepareAll, commitAll, failAll, exhaustAll, snapshot };
+window.__loading_state = { reset, prepareAll, commitAll, modeAll, readmitAll, acknowledgeAfterWrite, throwingWriteCallback, failAll, exhaustAll, snapshot };
 document.body.dataset.loading_stateReady = "true";

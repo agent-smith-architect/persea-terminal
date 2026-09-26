@@ -4,7 +4,7 @@ import type { WidthRefitResult, WidthRefitAttempt, PendingWidthRefit, UnifiedGeo
 export type { WidthRefitResult, WidthRefitAttempt, UnifiedGeometryAction, UnifiedGeometryAvailabilityCode, UnifiedGeometryAvailability, UnifiedGeometryAvailabilityInput } from "./unified_terminal_geometry_types";
 import type { CopyToClipsResult, UnifiedPopoverOwner, UnifiedExplainerTopic, ScrollAnchor, FontIntent, ComposerFontIntent, InputTraceEntry } from "./unified_terminal_state_types";
 import { Terminal } from "@xterm/xterm";
-import type { PortSendResult } from "./attachment_port";
+import type { FinalizeCause, PortSendResult } from "./attachment_port";
 import type { AttachmentTransportSink, ReconnectStatus } from "./websocket_attachment_transport";
 import { MAX_FIT_CELLS, MAX_FIT_ROWS, MIN_FIT_ROWS, validVerticalFit, validateServerFrame, type BrowserFrame, type Prepare, type ServerFrame } from "./attachment_protocol";
 import { Composer, normalizeComposedText, type ComposerAvailability, type ComposerInjectionResult, type ComposerTypographyState } from "./composer";
@@ -41,6 +41,15 @@ import { bindFrozenSelectionInput } from "./frozen_selection_input";
 // notice rather than looping.
 const REATTACH_WINDOW_MS = 60_000;
 const REATTACH_BURST_LIMIT = 3;
+// A view evicted for falling behind before its first MODE never caught up with
+// the history backlog. That alone does not mean it never will: a burst of
+// output ends, and while the output continues it brings the session's journal
+// to its next rotation, which replaces a long history with a short
+// reconstruction. A third such eviction in a row, however far apart the
+// attempts are, means this connection cannot deliver the history faster than
+// the session adds to it, so the page stops instead of streaming the backlog
+// again and again.
+const MAX_CATCH_UP_FAILURES = 3;
 // A cross-device reopen may auto-take control this many times before it stops
 // fighting, so two devices reopening each other cannot ping-pong forever.
 const MAX_AUTO_TAKEOVERS = 3;
@@ -328,6 +337,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // grant means the history backlog is still arriving, not that control was
   // taken away.
   private modeReceived = false;
+  // Consecutive evictions before a first MODE; see MAX_CATCH_UP_FAILURES.
+  private catchUpFailures = 0;
   // The reattach burst limiter. A broker input_refused recovers by
   // re-attaching, but a session that keeps refusing must still reach a terminal
   // notice rather than loop. Timestamps within the window are counted; the
@@ -978,6 +989,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         reconnectButton.disabled = true;
         this.hideFailureNotice();
         this.claimIntent = true;
+        this.catchUpFailures = 0;
         // A trusted retry starts the existing finite recovery cycle. It never
         // reuses a capability or replays input from the disconnected socket.
         this.options.port.attachAgain?.();
@@ -2827,8 +2839,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       // armed DECSET 1004, and that byte must never reach the broker ahead of
       // the grant — the broker would refuse it and the front door would close
       // the attachment. sendInput additionally refuses until the grant, so even
-      // a synchronous focus report is dropped rather than sent early.
-      if (this.options.capabilityMode === "control") this.send({ type: "MODE_REQUEST", version: 1, source: frame.source, epoch: frame.epoch, mode: "CONTROL" });
+      // a synchronous focus report is dropped rather than sent early. An
+      // observe page asks for OBSERVE, which changes nothing: its answer, like
+      // the grant, arrives after the whole history backlog, so every
+      // admission learns when its view has caught up.
+      this.send({ type: "MODE_REQUEST", version: 1, source: frame.source, epoch: frame.epoch, mode: this.options.capabilityMode === "control" ? "CONTROL" : "OBSERVE" });
       if (this.claimFocusOnCommit()) this.terminal.focus();
       this.restoreKeyboardOnCommit = false;
       if (this.admittedViaTakeover) {
@@ -2845,6 +2860,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       // again if it is ever revoked to OBSERVE.
       if (this.controlGranted !== (frame.mode === "CONTROL")) this.resetKeyInteractionAuthorityForLifecycle();
       this.controlGranted = frame.mode === "CONTROL";
+      if (!this.modeReceived) {
+        // The first MODE follows the whole history backlog: the view caught up.
+        this.catchUpFailures = 0;
+        this.options.port.connectionCaughtUp?.(generation);
+      }
       this.modeReceived = true;
       this.updateGeometryControl();
       return "ENQUEUED";
@@ -2856,12 +2876,12 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       }
       const anchor = this.captureAnchor();
       this.writesInFlight++;
-      this.terminal.write(frame.data, () => {
+      this.terminal.write(frame.data, this.guardedWriteCallback(generation, "LIVE_WRITE_FAILED", () => {
         this.writesInFlight--;
         if (this.closed) return;
         if (anchor.bufferType === this.terminal.buffer.active.type) this.syncNativeScroll(anchor.following, anchor);
         else this.scheduleReconcile();
-      });
+      }));
       return "ENQUEUED";
     }
     if (frame.type === "END") this.transportClosed(generation, frame.reason);
@@ -2910,7 +2930,13 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       case "reattach": {
         // A recoverable broker refusal (input_refused): the transport already
         // scheduled a re-attach on the same identity — render it, do not stop
-        // it. A burst within the window is the only thing that gives up.
+        // it. A burst within the window gives up, and so does a view that
+        // keeps falling behind before it catches up (MAX_CATCH_UP_FAILURES).
+        if (reason === "subscriber_lagged" && !this.modeReceived && ++this.catchUpFailures >= MAX_CATCH_UP_FAILURES) {
+          this.options.port.detach?.(reason);
+          this.showFailureNotice(reason);
+          return;
+        }
         const now = Date.now();
         this.reattachEvents.push(now);
         while (this.reattachEvents.length > 0 && now - this.reattachEvents[0] > REATTACH_WINDOW_MS) this.reattachEvents.shift();
@@ -2965,7 +2991,22 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       done();
       return;
     }
-    this.terminal.write("", done);
+    this.terminal.write("", this.guardedWriteCallback(generation, "LIVE_WRITE_FAILED", done));
+  }
+
+  // xterm runs write callbacks inside its write loop, and a callback that
+  // throws stops that loop for good: every later write, and with it every
+  // flow acknowledgement, would wait behind a frozen view while liveness
+  // keeps the connection open. A failed callback ends the attachment with a
+  // notice instead, and the loop carries on.
+  private guardedWriteCallback(generation: number, cause: FinalizeCause, callback: () => void): () => void {
+    return () => {
+      try {
+        callback();
+      } catch {
+        try { this.options.port.finalize({ generation, cause }); } catch { /* the loop must still continue */ }
+      }
+    };
   }
 
   // An operational refusal relayed in-band by the front door. The transport
@@ -3344,7 +3385,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     // reload wraps its lines the same way the live screen did.
     this.terminal.reset();
     this.applyTerminalGeometry(frame.columns, frame.rows);
-    this.terminal.write(frame.replay, () => {
+    this.terminal.write(frame.replay, this.guardedWriteCallback(this.generation, "REPLAY_FAILED", () => {
       this.replaying = false;
       if (this.prepared !== frame || this.closed) return;
       this.syncNativeScroll(true);
@@ -3353,7 +3394,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       requestAnimationFrame(() => this.autoFitFont());
       this.updateGeometryControl();
       this.send({ type: "READY", version: 1, source: frame.source, epoch: frame.epoch, cut: frame.cut });
-    });
+    }));
   }
 
   // applyCommittedGeometry is the mid-session path, and it is deliberately not

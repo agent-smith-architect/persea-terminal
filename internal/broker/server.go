@@ -202,17 +202,21 @@ func (*unifiedAttachmentFrameWriter) OwnsTerminalOutput() {}
 // unifiedSubscriberCloseGrace bounds how long a typed subscriber close may
 // queue behind this attachment's own downstream write. A verdict is delivered
 // in-band when it can be: the error control is the only way the front door
-// learns the reconnectable reason, and a peer that is merely slow drains the
-// one in-flight frame and receives it. A peer that has not drained within
-// the grace is not going to be told anything: the connection is closed from
-// outside the writer's lock, which aborts the parked write, ends the
+// learns the reconnectable reason. On a slow link the verdict usually finds
+// the writer parked, because the front door stops reading while its flow
+// window is full. It then waits behind the window, the socket buffer and the
+// parked frame, a few hundred KiB that a 32 KiB/s link drains in about 10 s;
+// the grace covers that with room to spare. A peer that has not drained
+// within the grace is not going to be told anything: the connection is closed
+// from outside the writer's lock, which aborts the parked write, ends the
 // attachment through the same teardown every verdict takes, and reaches the
 // front door as a broker close it already classifies as a transient
 // reconnect. Without this bound the verdict — and the attachment's end — sat
-// behind the wedged write until the peer chose to read again.
-// The front door's own WebSocket write timeout is an order of magnitude
-// longer, so this bound is the one that acts.
-const unifiedSubscriberCloseGrace = 1 * time.Second
+// behind the wedged write until the peer chose to read again. A peer that
+// never drains keeps its attachment for the whole grace; eviction has already
+// released the queued tail events, so the wait holds only memory this reader
+// was already charged for.
+const unifiedSubscriberCloseGrace = 15 * time.Second
 
 // unifiedAdmissionReplayBytes bounds the replay a unified PREPARE carries.
 // PREPARE must reach the browser, be written into its terminal and be

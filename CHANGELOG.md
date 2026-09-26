@@ -4,6 +4,20 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+### Changed
+
+- A connection now counts as stable only after its view has received all history and then stayed up for 20 seconds. Before, the 20 seconds started when the view opened, so on a slow connection a view that never finished loading started a new round of quick retries after each loss.
+- When a view falls behind three times in a row before it has received all history, the terminal stops with "This page kept falling behind" and a Reconnect button. Before, it loaded the history again and again.
+
+### Fixed
+
+- On a slow connection, the page now learns why the server ended a view, for example because the view fell behind or because the server shortened the history. Before, the server waited only 1 second for that reason to get through, so the page treated it as a lost connection: it waited between retries, and it could not tell that a view kept falling behind.
+- An error in the page's own handling of written output, such as keeping the scroll position, no longer freezes the view. The terminal now stops with "The terminal stopped" and a Reconnect button. Before, no later output or input reached the screen, and the page did not say why.
+
+### Testing notes
+
+- Tested in desktop Chromium through a local link limited to 32 KiB/s, with 150 ms of delay in each direction, 3.5 MiB of history and about 20 KB/s of new output. The page received the server's reason each time a view ended: once because it fell behind, and once because the server shortened the history, as it does when history grows large. The page then got control after about 2.5 minutes. Real mobile networks were not tested.
+
 ## 0.1.5 — 2026-09-26
 
 ### Changed

@@ -14,9 +14,9 @@ package frontdoor
 // link the window caps output at one window per round trip, far above what
 // an interactive terminal needs. When the browser falls behind, the front
 // door stops reading the broker, and the broker's byte-bounded subscriber
-// tail ends the view rather than buffering without end. On a slow link the
-// broker may close the connection before its typed lag verdict gets
-// through the window, so the page can see a broken connection instead.
+// tail ends the view with its typed lag verdict rather than buffering without
+// end. That verdict queues behind the window too; the broker's close grace
+// (unifiedSubscriberCloseGrace) is sized so it still gets through at 32 KiB/s.
 const FlowWindowBytes = 128 << 10
 
 // flowWindow tracks the attachment frames written to one WebSocket that the

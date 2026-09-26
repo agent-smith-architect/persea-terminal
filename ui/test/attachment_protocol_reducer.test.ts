@@ -1088,13 +1088,50 @@ test("a_connection_that_stays_up_starts_a_fresh_episode_on_its_next_loss", async
   const first = transport.connect();
   bindTransportSource(transport, first);
   transport.connectionCommitted(first);
+  transport.connectionCaughtUp(first);
   for (let loss = 0; loss < MAX_RECONNECT_ATTEMPTS * 2; loss += 1) {
     await clock.advance(STABLE_CONNECTION_MS);
     sockets.at(-1)!.emit("close", { code: 1006, reason: "" });
     equal(statuses.at(-1), "WAITING:1:250", `stable connection ${loss} did not start a fresh episode`);
     await clock.advance(250);
     transport.connectionCommitted(sockets.length);
+    transport.connectionCaughtUp(sockets.length);
   }
+  transport.detach();
+});
+
+test("a_view_that_never_catches_up_keeps_its_episode_however_long_it_stays_up", async () => {
+  const clock = new FakeReconnectClock();
+  const sockets: TransportFakeSocket[] = [];
+  const statuses: string[] = [];
+  const transport = recordingTransport(clock, sockets, statuses, freshEndpoint);
+  const first = transport.connect();
+  bindTransportSource(transport, first);
+  transport.connectionCommitted(first);
+  transport.connectionCaughtUp(first);
+  await clock.advance(STABLE_CONNECTION_MS);
+  sockets[0]!.emit("close", { code: 1006, reason: "" });
+  equal(statuses.at(-1), "WAITING:1:250", "a caught-up, stable connection did not start a fresh episode");
+  // Each successor commits and streams its history backlog for minutes, as
+  // over a slow link, then is evicted before its first MODE. Staying up that
+  // long must not refill the fast phase: the view never caught up.
+  for (let loss = 2; loss <= MAX_RECONNECT_ATTEMPTS; loss += 1) {
+    const before = sockets.length;
+    await clock.advance(RECONNECT_TEST_MAX_FAST_DELAY_MS);
+    equal(sockets.length, before + 1, `attempt ${loss} did not reconnect in the fast phase`);
+    transport.connectionCommitted(sockets.length);
+    await clock.advance(4 * 60_000);
+    sockets.at(-1)!.emit("close", { code: 1000, reason: "subscriber_lagged" });
+    equal(statuses.at(-1)?.split(":").slice(0, 2).join(":"), `WAITING:${loss}`, `a view that never caught up started episode ${loss} afresh`);
+  }
+  // A catch-up that arrives on a later connection counts from its own MODE.
+  await clock.advance(RECONNECT_TEST_MAX_FAST_DELAY_MS);
+  transport.connectionCommitted(sockets.length);
+  await clock.advance(4 * 60_000);
+  transport.connectionCaughtUp(sockets.length);
+  await clock.advance(STABLE_CONNECTION_MS - 1);
+  sockets.at(-1)!.emit("close", { code: 1006, reason: "" });
+  equal(statuses.at(-1)?.split(":").slice(0, 2).join(":"), `OFFLINE:${MAX_RECONNECT_ATTEMPTS}`, "stability was counted from COMMIT instead of the catch-up");
   transport.detach();
 });
 

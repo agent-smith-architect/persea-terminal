@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -32,8 +33,9 @@ import (
 // The harness is the real writer seam (unifiedAttachmentFrameWriter over a
 // lockedWriter) on a real journal realm; the downstream is a net.Pipe, whose
 // unbuffered writes wedge the writer exactly the way a front door that has
-// stopped reading does. The test is the browser: it reads the wire, and it
-// re-mints once by opening a second attachment on the same session.
+// stopped reading does. The slow-link test uses a real socket pair instead,
+// read at a slow link's pace. The test is the browser: it reads the wire, and
+// it re-mints once by opening a second attachment on the same session.
 
 // b1Attachment is one Control attachment as the wire sees it.
 type b1Attachment struct {
@@ -41,6 +43,11 @@ type b1Attachment struct {
 	writer  *unifiedAttachmentFrameWriter
 	server  net.Conn
 	client  net.Conn
+
+	// pace, when set, admits one read of at most paceBytes per tick: the
+	// intake of a front door that passes on only what a slow link acknowledges.
+	pace      <-chan time.Time
+	paceBytes int
 
 	mu       sync.Mutex
 	paused   bool
@@ -70,8 +77,20 @@ func b1Open(t *testing.T, effects *UnifiedDevPaneEffects, session, source string
 func b1Prepare(t *testing.T, effects *UnifiedDevPaneEffects, session, source string) *b1Attachment {
 	t.Helper()
 	server, client := net.Pipe()
+	return b1PrepareOn(t, effects, session, source, server, client, 0)
+}
+
+// b1PrepareOn is b1Prepare over a given connection pair. A positive paceBytes
+// limits the peer's intake to that many bytes per 50 ms.
+func b1PrepareOn(t *testing.T, effects *UnifiedDevPaneEffects, session, source string, server, client net.Conn, paceBytes int) *b1Attachment {
+	t.Helper()
 	attachment := &b1Attachment{session: session, server: server, client: client, resume: make(chan struct{}), readDone: make(chan struct{}), ended: make(chan struct{})}
 	close(attachment.resume)
+	if paceBytes > 0 {
+		ticker := time.NewTicker(50 * time.Millisecond)
+		t.Cleanup(ticker.Stop)
+		attachment.pace, attachment.paceBytes = ticker.C, paceBytes
+	}
 	var endOnce sync.Once
 	attachment.writer = &unifiedAttachmentFrameWriter{
 		downstream: &attachmentFrameWriter{wire: &lockedWriter{w: server}},
@@ -134,6 +153,12 @@ func (attachment *b1Attachment) Read(p []byte) (int, error) {
 	resume := attachment.resume
 	attachment.mu.Unlock()
 	<-resume
+	if attachment.paceBytes > 0 {
+		<-attachment.pace
+		if len(p) > attachment.paceBytes {
+			p = p[:attachment.paceBytes]
+		}
+	}
 	return attachment.client.Read(p)
 }
 
@@ -788,4 +813,72 @@ func TestUnifiedSubscriberVerdictReachesADrainingPeerInBand(t *testing.T) {
 	default:
 		t.Fatal("the broker did not end the attachment after the typed close")
 	}
+}
+
+// TestUnifiedSubscriberVerdictReachesAPeerOnASlowLink is the slow-link
+// companion of the wedged-peer test. The peer keeps reading, but only at the
+// 32 KiB/s a slow browser link acknowledges, and the writer has filled a real
+// socket buffer ahead of it. The typed verdict queues behind that buffer and
+// the frame parked on it; it must still reach the peer in-band, rather than
+// be cut by the close grace into a bare close the browser can only treat as
+// a lost connection.
+func TestUnifiedSubscriberVerdictReachesAPeerOnASlowLink(t *testing.T) {
+	realm := openRetentionRealm(t, "f2-slow-verdict")
+	key := unifiedjournal.PaneKey{Server: "test", Session: "$1", ControlGeneration: 1, Window: "@1", Pane: "%1", Incarnation: "f2-slow"}
+	if err := realm.AdmitPane(key, unifiedjournal.Geometry{Columns: 80, Rows: 24}); err != nil {
+		t.Fatal(err)
+	}
+	effects := &UnifiedDevPaneEffects{
+		realm: realm, active: map[string]unifiedjournal.PaneKey{"$1": key},
+		subscribers: make(map[unifiedjournal.PaneKey]map[*unifiedDevSubscriber]struct{}),
+	}
+	prepareRecordingProviderForTest(t, effects, key)
+	listener, err := net.Listen("unix", filepath.Join(t.TempDir(), "peer.sock"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client, err := net.Dial("unix", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	server, err := listener.Accept()
+	_ = listener.Close()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 1,638 bytes per 50 ms is the slow-link gate's 32 KiB/s shaping.
+	attachment := b1PrepareOn(t, effects, "$1", "f2-slow-source", server, client, 1638)
+	attachment.admit(t, "f2-slow-source")
+	warm := []byte("[warm]")
+	b1Commit(t, effects, key, warm)
+	pollUntil(t, 5*time.Second, "warm-up sentinel", func() bool {
+		live, _, _, _ := attachment.snapshot()
+		return bytes.Equal(live, warm)
+	})
+
+	// Far more output than the socket buffer holds, committed before the peer
+	// can read it: the writer fills the buffer and parks, the rest waits in
+	// the tail, well inside its limit.
+	chunk := bytes.Repeat([]byte("x"), 16<<10)
+	for range 48 {
+		b1Commit(t, effects, key, chunk)
+	}
+	pollUntil(t, 5*time.Second, "the peer reading the fill", func() bool {
+		live, _, _, _ := attachment.snapshot()
+		return len(live) > len(warm)
+	})
+	verdictAt := time.Now()
+	if closed := effects.closeSubscribers(key, proto.SubscriberClosedLagged); closed != 1 {
+		t.Fatalf("closeSubscribers closed=%d want 1", closed)
+	}
+	select {
+	case <-attachment.readDone:
+	case <-time.After(unifiedSubscriberCloseGrace + 10*time.Second):
+		t.Fatal("the peer's connection never ended")
+	}
+	elapsed := time.Since(verdictAt)
+	if _, controls, _, _ := attachment.snapshot(); len(controls) != 1 || controls[0].Type != "error" || controls[0].Code != string(proto.SubscriberClosedLagged) {
+		t.Fatalf("%v after the eviction the peer ended with controls=%+v, want the typed %q verdict in-band", elapsed, controls, proto.SubscriberClosedLagged)
+	}
+	t.Logf("the typed verdict reached the 32 KiB/s peer %v after the eviction", elapsed)
 }

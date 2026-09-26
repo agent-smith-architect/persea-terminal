@@ -24,5 +24,6 @@ export type AttachmentPagePort = Readonly<{
   attachAgain?(): void;
   takeControl?(endpoint: Readonly<{ url: string; protocols: readonly string[] }>): void;
   connectionCommitted?(generation: number): void;
+  connectionCaughtUp?(generation: number): void;
   destroy?(): void;
 }>;
