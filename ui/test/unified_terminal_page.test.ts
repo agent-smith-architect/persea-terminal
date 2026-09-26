@@ -445,10 +445,13 @@ async function main(): Promise<void> {
       // even on this link.
       assert(record.commitAt - record.opened < ATTEMPT_DEADLINE_MS, `${stage}: admission took ${record.commitAt - record.opened} ms`);
       // The backlog is still streaming, so input is sealed: a key typed now
-      // must be dropped, never sent.
+      // must be dropped, never sent, and the page says why.
       if (!record.modeAt) {
         await xterm.focus();
         await page.keyboard.type("z");
+        if (!record.modeAt) {
+          await until(`${stage}: dropped key explained`, () => page.evaluate(() => document.querySelector(".persea-unified-refusal:not([hidden])")?.textContent === "Input not sent — history is still loading"), 2_000);
+        }
       }
       await until(`${stage}: control grant`, () => record.modeAt, Math.ceil(2 * (HISTORY_BYTES * 4 / 3) / rate * 1000) + 60_000);
       assert(record.bytesBeforeMode >= HISTORY_BYTES, `${stage}: only ${record.bytesBeforeMode} bytes of history preceded the control grant`);
@@ -1093,7 +1096,8 @@ main().catch((error: unknown) => {
   // The transcript lives in the artifact root, which the npm script removes
   // on exit; a failure must also reach the console so a chained run explains
   // its exit code.
-  console.error(`width-refit private stack (${process.env.PERSEA_E2E1_ENGINE ?? "chromium"}) FAILED: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+  const scenario = slowLinkOnly ? "slow-link" : alternateOnly ? "alternate-screen" : refitOnly ? "width-refit" : "E2E-1";
+  console.error(`${scenario} private stack (${browserEngine}) FAILED: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
   process.exitCode = 1;
 }).finally(async () => {
   try { await releaseRowGeometryGate?.(); } catch { /* page already terminal */ }
