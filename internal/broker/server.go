@@ -220,7 +220,25 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 		return err
 	}
 	writer.mu.Lock()
-	defer writer.mu.Unlock()
+	verdictClosed := false
+	defer func() {
+		writer.mu.Unlock()
+		if verdictClosed {
+			writer.finish()
+		}
+	}()
+	checkVerdict := func() bool {
+		if writer.tail != nil {
+			select {
+			case <-writer.tail.verdictSignal():
+				writer.terminateLocked(writer.tail.closeReason(), writer.tail.closeLimit())
+				verdictClosed = true
+				return true
+			default:
+			}
+		}
+		return false
+	}
 	defer func() {
 		if resultErr != nil && writer.tail != nil {
 			writer.releaseSnapshotLocked()
@@ -268,6 +286,8 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 		writer.prepared, writer.tail, writer.cancel = true, tail, cancel
 		writer.ended = make(chan struct{})
 		writer.source, writer.epochID, writer.cut = frame.Source, frame.Epoch, frame.Cut
+		// Registration starts the verdict lifetime, including a blocked PREPARE.
+		go writer.watchVerdict(tail, writer.ended)
 		// Replay starts at the generation's birth geometry, never at the current
 		// one: the committed events that follow re-derive the current geometry in
 		// the same order the live session produced it.
@@ -303,6 +323,9 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 		if writer.live {
 			return nil
 		}
+		if checkVerdict() {
+			return terminal.ErrClosed
+		}
 		encoded, err := attachmentwire.Encode(frame, attachmentwire.ServerToBrowser)
 		if err != nil {
 			return err
@@ -313,13 +336,15 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 		writer.live = true
 		writer.cut = frame.Cut
 		for _, event := range writer.backlog {
+			if checkVerdict() {
+				return terminal.ErrClosed
+			}
 			if err := writer.writeEventLocked(event); err != nil {
 				return err
 			}
 		}
 		writer.releaseSnapshotLocked()
 		go writer.streamTail()
-		go writer.watchVerdict(writer.tail, writer.ended)
 		return nil
 	default:
 		return writer.downstream.WriteFrame(ctx, raw)
@@ -404,7 +429,7 @@ func (writer *unifiedAttachmentFrameWriter) watchVerdict(tail *unifiedDevSubscri
 		return
 	case <-grace.C:
 	}
-	brokerLogf("component=broker event=subscriber_close_cut reason=%q session=%q epoch=%d grace=%s", string(tail.closeReason()), writer.session, writer.epochID, unifiedSubscriberCloseGrace)
+	brokerLogf("component=broker event=subscriber_close_cut reason=%q limit=%q session=%q epoch=%d grace=%s", string(tail.closeReason()), string(tail.closeLimit()), writer.session, writer.epochID, unifiedSubscriberCloseGrace)
 	writer.finish()
 }
 
@@ -432,8 +457,13 @@ func (writer *unifiedAttachmentFrameWriter) finish() {
 // drain it within the grace is cut from outside this lock.
 func (writer *unifiedAttachmentFrameWriter) terminate(reason proto.SubscriberCloseReason, limit recordingTailLimit) {
 	writer.mu.Lock()
+	writer.terminateLocked(reason, limit)
+	writer.mu.Unlock()
+	writer.finish()
+}
+
+func (writer *unifiedAttachmentFrameWriter) terminateLocked(reason proto.SubscriberCloseReason, limit recordingTailLimit) {
 	if writer.closing {
-		writer.mu.Unlock()
 		return
 	}
 	writer.closing = true
@@ -443,8 +473,6 @@ func (writer *unifiedAttachmentFrameWriter) terminate(reason proto.SubscriberClo
 	}
 	brokerLogf("component=broker event=subscriber_closed reason=%q%s session=%q epoch=%d", string(reason), detail, writer.session, writer.epochID)
 	_ = writer.downstream.wire.control(proto.Control{Type: "error", Code: string(reason), Msg: "unified subscriber closed"})
-	writer.mu.Unlock()
-	writer.finish()
 }
 
 // writeEventLocked projects one committed journal event onto the browser wire.
