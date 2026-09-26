@@ -4,6 +4,14 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+### Changed
+
+- While a view loads, waiting updates now count against the 4 MiB limit on waiting output by their size alone. Before, the view was also stopped after 1,024 updates, however small they were.
+
+### Fixed
+
+- A view that falls behind while it loads is now stopped at once, so the browser reconnects sooner. Before, the broker could first report the view as live and then stop it, or notice the problem only after all history was sent.
+
 ## 0.1.3 — 2026-09-25
 
 ### Changed
