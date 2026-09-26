@@ -34,7 +34,10 @@ jobs:
           cache-dependency-path: ui/package-lock.json
       - run: cd ui && npm ci
       - run: go vet ./... && go build ./...
-      - run: CGO_ENABLED=1 go test -race ./...
+      # The installer runs these tests with a 20-byte TMPDIR (deploy/install.sh).
+      # Use one as long here, so a Unix socket path that fits only under /tmp
+      # fails in CI rather than at install.
+      - run: mkdir -p /tmp/pt.ci-tests/w/t && TMPDIR=/tmp/pt.ci-tests/w/t CGO_ENABLED=1 go test -race ./...
 
   ui:
     name: UI (${{ matrix.name }})

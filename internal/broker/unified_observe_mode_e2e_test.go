@@ -48,7 +48,7 @@ func unifiedE2E1StartShellBroker(t *testing.T) (string, proto.Authority) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	listener, err := net.Listen("unix", filepath.Join(t.TempDir(), "broker.sock"))
+	listener, err := net.Listen("unix", filepath.Join(shortSocketDir(t), "broker.sock"))
 	if err != nil {
 		t.Fatal(err)
 	}
