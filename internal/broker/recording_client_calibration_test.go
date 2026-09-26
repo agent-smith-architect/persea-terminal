@@ -14,6 +14,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"persea-terminal/internal/proto"
 )
 
 // This is an external-process measurement, not a per-process memory bound.
@@ -79,8 +81,112 @@ func TestRecordingNativeClientOverlapCalibration(t *testing.T) {
 		attachments = append(attachments, conn)
 	}
 	if lease, err := f.effects.readers.acquireAttachment(); err == nil {
+		lease.releaseSnapshot()
 		lease.detach()
+		lease.done()
 		t.Fatal("unexpected twenty-eighth attachment admission")
+	}
+	refused, err := net.Dial("unix", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer refused.Close()
+	if err := refused.SetDeadline(time.Now().Add(5 * time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	unifiedE2E1Hello(t, refused)
+	history := 5000
+	response := unifiedE2E1Control(t, refused, proto.Control{Type: "attach", Mode: "control", Engine: "unified-dev", Authority: &authority, HistoryLimit: &history})
+	if response.Type != "error" || response.Code != "unified_unavailable" {
+		t.Fatalf("twenty-eighth public attachment: %+v", response)
+	}
+	_ = refused.Close()
+	readClients := func() map[int]string {
+		clients := make(map[int]string)
+		for _, line := range strings.Split(f.disposable.run("list-clients", "-F", "#{client_pid}|#{session_id}|#{session_name}|#{client_control_mode}"), "\n") {
+			if line == "" {
+				continue
+			}
+			fields := strings.SplitN(line, "|", 2)
+			if len(fields) != 2 {
+				t.Fatal("invalid client identity", line)
+			}
+			pid, err := strconv.Atoi(fields[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			clients[pid] = fields[1]
+		}
+		return clients
+	}
+	clientPIDs := func(clients map[int]string) []int {
+		pids := make([]int, 0, len(clients))
+		for pid := range clients {
+			pids = append(pids, pid)
+		}
+		sort.Ints(pids)
+		return pids
+	}
+	survivors := readClients()
+	if len(survivors) != 28 {
+		t.Fatal("active observer and attachment population", survivors)
+	}
+	activePID := 0
+	for pid, identity := range survivors {
+		if strings.HasPrefix(identity, active+"|") && strings.HasSuffix(identity, "|1") {
+			if activePID != 0 {
+				t.Fatal("multiple active observers", survivors)
+			}
+			activePID = pid
+		} else if !strings.Contains(identity, "|persea-attach-") {
+			t.Fatal("unexpected attachment identity", identity)
+		}
+	}
+	if activePID == 0 {
+		t.Fatal("active observer missing", survivors)
+	}
+	var founders []*unifiedDevUnit
+	founderPIDs := make(map[int]string)
+	f.effects.mu.Lock()
+	activeUnit := f.effects.units[active]
+	f.effects.mu.Unlock()
+	if activeUnit == nil || activeUnit.process.Process.Pid != activePID {
+		t.Fatal("active owner identity missing")
+	}
+	assertHeld := func() {
+		t.Helper()
+		f.effects.transients.mutex().Lock()
+		units, held := f.effects.transients.units, f.effects.transients.bytes
+		want := int64(recordingObserverUnitLimit * recordingUnitBytes)
+		for _, unit := range append([]*unifiedDevUnit{activeUnit}, founders...) {
+			if unit.memory.refs <= 0 {
+				f.effects.transients.mutex().Unlock()
+				t.Fatal("held unit lost its owner", unit.sessionIdentity)
+			}
+			want += unit.memory.bytes
+		}
+		f.effects.transients.mutex().Unlock()
+		if units != recordingObserverUnitLimit || held != want {
+			t.Fatalf("held callbacks lost ownership: units=%d bytes=%d want=%d", units, held, want)
+		}
+		for _, unit := range founders {
+			select {
+			case <-unit.done:
+				t.Fatal("held founder settled before release")
+			default:
+			}
+		}
+	}
+	assertSurvivors := func(clients map[int]string, want map[int]string) {
+		t.Helper()
+		if len(clients) != len(want) {
+			t.Fatalf("client population: got=%v want=%v", clients, want)
+		}
+		for pid, identity := range want {
+			if clients[pid] != identity {
+				t.Fatalf("client identity changed: pid=%d got=%q want=%q", pid, clients[pid], identity)
+			}
+		}
 	}
 	var sessions, progress []string
 	for i := 1; i < recordingObserverUnitLimit; i++ {
@@ -105,8 +211,41 @@ func TestRecordingNativeClientOverlapCalibration(t *testing.T) {
 		if err := <-done; !errors.Is(err, context.Canceled) {
 			t.Fatal(err)
 		}
+		f.effects.mu.Lock()
+		for unit := range f.effects.supervised {
+			if unit.sessionIdentity == session {
+				founders = append(founders, unit)
+				founderPIDs[unit.process.Process.Pid] = session
+			}
+		}
+		f.effects.mu.Unlock()
 		progress = append(progress, filepath.Join(t.TempDir(), "progress"))
 	}
+	if len(founders) != 17 {
+		t.Fatal("founder owner identities", len(founders))
+	}
+	peak := readClients()
+	if len(peak) != 45 {
+		t.Fatal("co-reachable client population", peak)
+	}
+	for pid, identity := range survivors {
+		if peak[pid] != identity {
+			t.Fatal("survivor missing at peak", pid, identity)
+		}
+	}
+	for pid, session := range founderPIDs {
+		if !strings.HasPrefix(peak[pid], session+"|") || !strings.HasSuffix(peak[pid], "|1") {
+			t.Fatal("founder identity mismatch", pid, session, peak[pid])
+		}
+	}
+	assertHeld()
+	rss, pss, private, maximumPrivate, files, pte, err := recordingClientMemory(clientPIDs(peak))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("native_transient_peak clients=%d identities=%v sum_rss=%d sum_pss=%d sum_private=%d maximum_private=%d mapped_file_union=%d page_tables=%d", len(peak), peak, rss, pss, private, maximumPrivate, files, pte)
+	recordingMemorySample(t, "native_transient_peak")
+	probe.sample("native_transient_peak")
 	// Every held client exists before any producer starts. Each receipt byte is
 	// appended only after a full write: I acknowledges the initial 2 MiB, and
 	// each following byte acknowledges one 8 KiB sustained output block.
@@ -118,26 +257,58 @@ func TestRecordingNativeClientOverlapCalibration(t *testing.T) {
 		command := "exec /usr/bin/python3 " + shellQuote(producer) + " " + shellQuote(progress[i])
 		f.disposable.run("send-keys", "-t", "="+session+":", command, "Enter")
 	}
-	readPIDs := func() []int {
-		var pids []int
-		for _, field := range strings.Fields(f.disposable.run("list-clients", "-F", "#{client_pid}")) {
-			pid, err := strconv.Atoi(field)
-			if err != nil {
-				t.Fatal(err)
+	// The supervisor isolates processes independently of callback settlement.
+	// Every intermediate population must be a subset of the exact peak, with
+	// all attachment clients and the active observer continuously present.
+	cutoff := time.NewTimer(5 * time.Second)
+	defer cutoff.Stop()
+	poll := time.NewTicker(20 * time.Millisecond)
+	defer poll.Stop()
+	lastPopulation := len(peak)
+	for {
+		clients := readClients()
+		for pid, identity := range clients {
+			if peak[pid] != identity {
+				t.Fatal("unexpected client during cutoff", pid, identity)
 			}
-			pids = append(pids, pid)
 		}
-		return pids
-	}
-	if pids := readPIDs(); len(pids) != recordingObserverUnitLimit+len(attachments) {
-		t.Fatal("co-reachable client population", len(pids))
+		for pid, identity := range survivors {
+			if clients[pid] != identity {
+				t.Fatal("supervision removed a survivor", pid, identity)
+			}
+		}
+		assertHeld()
+		faulted := 0
+		for _, unit := range founders {
+			if unit.supervisorFault.Load() {
+				faulted++
+			}
+		}
+		if len(clients) != lastPopulation {
+			t.Logf("native_supervisor_cutoff clients=%d faulted_founders=%d identities=%v", len(clients), faulted, clients)
+			recordingMemorySample(t, "native_supervisor_cutoff")
+			probe.sample("native_supervisor_cutoff")
+			lastPopulation = len(clients)
+		}
+		if len(clients) == len(survivors) && faulted == len(founders) {
+			assertSurvivors(clients, survivors)
+			break
+		}
+		select {
+		case <-poll.C:
+		case <-cutoff.C:
+			t.Fatal("founder isolation did not complete", clients, faulted)
+		}
 	}
 	baseline := recordingWaitNativeInitial(t, progress, 60*time.Second)
 	previous := append([]int64(nil), baseline...)
 	measurementStart, previousAt := time.Now(), time.Now()
 	var initialPrivate, finalPrivate, peakPrivate, peakRSS, peakPTE, peakFiles int64
+	measure := time.NewTicker(time.Second)
+	defer measure.Stop()
+	peakPrivate, peakRSS, peakPTE, peakFiles = private, rss, pte, files
 	for sample := 0; sample < 30; sample++ {
-		time.Sleep(time.Second)
+		<-measure.C
 		now := time.Now()
 		current := recordingNativeReceipts(t, progress)
 		var total int64
@@ -153,10 +324,10 @@ func TestRecordingNativeClientOverlapCalibration(t *testing.T) {
 		}
 		t.Logf("native_receipt_window=%d elapsed_seconds=%.6f source_bytes=%v minimum_source_bytes=%d total_bytes=%d minimum_source_bytes_per_second=%.3f total_bytes_per_second=%.3f", sample+1, now.Sub(previousAt).Seconds(), deltas, minimum, total, float64(minimum)/now.Sub(previousAt).Seconds(), float64(total)/now.Sub(previousAt).Seconds())
 		previous, previousAt = current, now
-		pids := readPIDs()
-		if len(pids) != recordingObserverUnitLimit+len(attachments) {
-			t.Fatal("client left before sustained measurement", len(pids))
-		}
+		clients := readClients()
+		assertSurvivors(clients, survivors)
+		assertHeld()
+		pids := clientPIDs(clients)
 		rss, pss, private, maximumPrivate, files, pte, err := recordingClientMemory(pids)
 		if err != nil {
 			t.Fatal(err)
@@ -185,13 +356,23 @@ func TestRecordingNativeClientOverlapCalibration(t *testing.T) {
 	probe.sample("authoritative_overload_started")
 	deadline := time.Now().Add(10 * time.Second)
 	for {
-		pids := readPIDs()
+		clients := readClients()
+		for pid, identity := range clients {
+			if survivors[pid] != identity {
+				t.Fatal("unexpected overload survivor", pid, identity)
+			}
+		}
+		if clients[activePID] != survivors[activePID] {
+			t.Fatal("overload removed active observer", clients)
+		}
+		assertHeld()
+		pids := clientPIDs(clients)
 		f.effects.readers.mutex().Lock()
 		readers, held := f.effects.readers.readers, f.effects.readers.bytes
 		f.effects.readers.mutex().Unlock()
 		t.Logf("native_teardown clients=%d readers=%d reader_bytes=%d", len(pids), readers, held)
 		recordingMemorySample(t, "native_teardown")
-		if readers == 0 && len(pids) == recordingObserverUnitLimit {
+		if readers == 0 && held == 0 && len(pids) == 1 {
 			break
 		}
 		if time.Now().After(deadline) {
@@ -199,7 +380,7 @@ func TestRecordingNativeClientOverlapCalibration(t *testing.T) {
 			break
 		}
 		probe.sample("attachment_overload_settlement")
-		time.Sleep(250 * time.Millisecond)
+		<-poll.C
 	}
 	for _, conn := range attachments {
 		_ = conn.Close()
@@ -219,23 +400,32 @@ func TestRecordingNativeClientOverlapCalibration(t *testing.T) {
 			break
 		}
 		probe.sample("peer_connection_settlement")
-		time.Sleep(250 * time.Millisecond)
+		<-poll.C
 	}
+	assertHeld()
 	once.Do(func() { close(release) })
+	for _, unit := range founders {
+		select {
+		case <-unit.done:
+		case <-time.After(5 * time.Second):
+			t.Fatal("released founder did not settle")
+		}
+	}
 	probe.sample("founder_consumers_released")
 	deadline = time.Now().Add(10 * time.Second)
 	for {
 		f.effects.transients.mutex().Lock()
-		units := f.effects.transients.units
+		units, held := f.effects.transients.units, f.effects.transients.bytes
 		f.effects.transients.mutex().Unlock()
-		if units == 1 {
+		if units == 1 && held == recordingUnitBytes {
+			assertSurvivors(readClients(), map[int]string{activePID: survivors[activePID]})
 			break
 		}
 		if time.Now().After(deadline) {
 			t.Errorf("actual founding settlement did not refund: units=%d", units)
 			break
 		}
-		time.Sleep(time.Millisecond)
+		<-poll.C
 	}
 	if _, err := f.effects.AdoptSession(context.Background(), active); err != nil {
 		t.Error("reader overload stopped authoritative recording", err)
@@ -246,7 +436,7 @@ func TestRecordingNativeClientOverlapCalibration(t *testing.T) {
 		f.effects.transients.mutex().Lock()
 		units, held := f.effects.transients.units, f.effects.transients.bytes
 		f.effects.transients.mutex().Unlock()
-		if units == 0 {
+		if units == 0 && held == 0 {
 			t.Logf("native_observer_shutdown units=%d held_bytes=%d", units, held)
 			break
 		}
@@ -255,13 +445,14 @@ func TestRecordingNativeClientOverlapCalibration(t *testing.T) {
 			break
 		}
 		probe.sample("observer_shutdown_settlement")
-		time.Sleep(250 * time.Millisecond)
+		<-poll.C
 	}
 	for i := 0; i < 5; i++ {
 		probe.sample("post_broker_client_close")
-		time.Sleep(time.Second)
+		<-measure.C
 	}
-	t.Logf("native_post_close_client_pids=%v", readPIDs())
+	assertSurvivors(readClients(), map[int]string{})
+	t.Log("native_post_close_client_pids=[]")
 	probe.sample("before_private_source_shutdown")
 	if out, err := tmuxCombinedOutput(f.disposable.path, "kill-server"); err != nil {
 		t.Errorf("private source shutdown: %v %s", err, out)
