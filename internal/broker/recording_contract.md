@@ -264,7 +264,8 @@ charges include allocator rounding. A failed admission allocates no snapshot.
 Each admitted reader reserves 528 KiB for its writer and fixed queue state,
 a 64 KiB + 128 byte first-event allowance, and
 an additional 2 MiB through PREPARE/backlog settlement.
-PREPARE assembles at most 256 KiB; LIVE writes use at most 64 KiB per encoding.
+PREPARE assembles at most 16 KiB of replay; a LIVE write carries at most 16 KiB
+of output per encoding. The reserves above leave headroom beyond these bounds.
 The initial event index and payload slab remain charged while any backlog suffix
 can retain them. `releaseSnapshot` means the final consumer has finished; cancelling
 the tail alone does not provide that proof.

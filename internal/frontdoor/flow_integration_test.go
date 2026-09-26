@@ -64,6 +64,17 @@ func (c *flowClient) ack(count uint64) {
 	}
 }
 
+// requireFlowPaused proves the relay has stopped reading the broker: a
+// liveness PING is answered before any further attachment frame arrives.
+func requireFlowPaused(t *testing.T, client *flowClient, nonce string) {
+	t.Helper()
+	received := client.frames
+	writeApplicationPing(t, client.ws, nonce)
+	if got := client.next(); string(got) != attachmentwire.TransportLivenessPrefix+"PONG "+nonce || client.frames != received {
+		t.Fatalf("the relay did not pause: %d attachment frames arrived before the PONG", client.frames-received)
+	}
+}
+
 func flowOutput(t *testing.T, broker *fakeAttachBroker, index int, size int) []byte {
 	t.Helper()
 	data := bytes.Repeat([]byte{byte('a' + index%26)}, size)
@@ -185,6 +196,7 @@ func TestWebSocketFlowWindowReleasesOnCloseWhilePaused(t *testing.T) {
 	for client.bytes < FlowWindowBytes {
 		client.next()
 	}
+	requireFlowPaused(t, client, "ffeeddccbbaa99887766554433221100")
 	snapshotLease(t, front.leases, authority)
 	if err := client.ws.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
 		t.Fatal(err)
