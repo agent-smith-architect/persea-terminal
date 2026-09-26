@@ -45,6 +45,7 @@ const REATTACH_BURST_LIMIT = 3;
 // fighting, so two devices reopening each other cannot ping-pong forever.
 const MAX_AUTO_TAKEOVERS = 3;
 const INPUT_SATURATED_NOTICE = "Input not sent — the connection is busy";
+const INPUT_CATCHING_UP_NOTICE = "Input not sent — history is still loading";
 const TERMINAL_LONG_PRESS_MS = 500;
 const TERMINAL_LONG_PRESS_MOVE_PX = 12;
 const ANSI_THEME_KEYS = Object.freeze([
@@ -323,6 +324,10 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // and the vertical fit all gate on this, and no INPUT — a keystroke or
   // xterm's own focus-in report — is emitted before it. Reset per admission.
   private controlGranted = false;
+  // Whether this admission has received its first MODE. Until then a missing
+  // grant means the history backlog is still arriving, not that control was
+  // taken away.
+  private modeReceived = false;
   // The reattach burst limiter. A broker input_refused recovers by
   // re-attaching, but a session that keeps refusing must still reach a terminal
   // notice rather than loop. Timestamps within the window are counted; the
@@ -2840,6 +2845,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       // again if it is ever revoked to OBSERVE.
       if (this.controlGranted !== (frame.mode === "CONTROL")) this.resetKeyInteractionAuthorityForLifecycle();
       this.controlGranted = frame.mode === "CONTROL";
+      this.modeReceived = true;
       this.updateGeometryControl();
       return "ENQUEUED";
     }
@@ -3322,6 +3328,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.prepared = frame;
     this.committed = false;
     this.controlGranted = false;
+    this.modeReceived = false;
     this.fitPending = false;
     this.knownSource = frame.source;
     // A fresh admission supersedes any earlier failure surface.
@@ -4370,7 +4377,14 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
 	  this.pendingRefit.droppedBytes += data.byteLength;
       return;
     }
-	if (this.selectMode || !this.prepared || !this.committed || !this.controlGranted || this.options.capabilityMode !== "control") return;
+	if (this.selectMode || !this.prepared || !this.committed || this.options.capabilityMode !== "control") return;
+	if (!this.controlGranted) {
+	  // Control follows the history backlog, which a slow link can take a
+	  // while to deliver. A keystroke typed before it is dropped, and the
+	  // operator is told why.
+	  if (!this.modeReceived) this.showRefusalNotice(INPUT_CATCHING_UP_NOTICE);
+	  return;
+	}
 	if (this.fitPending || this.refitPending) {
 	  this.sealedInputBytes += data.byteLength;
 	  return;

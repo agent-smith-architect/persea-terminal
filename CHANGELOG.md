@@ -6,7 +6,7 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ### Changed
 
-- Opening or reconnecting to a session with a long history now works on slow connections. The terminal opens after a small part of the history arrives, and the rest follows at the speed of the connection. The server sends output only as fast as the page can show it, so liveness checks never wait behind more than 128 KiB of output. As before, you can type only after the page has received all history: on a 32 KiB/s connection, 1 MiB of history takes about 45 seconds.
+- Opening or reconnecting to a session with a long history now works on slow connections. The terminal opens after a small part of the history arrives, and the rest follows at the speed of the connection. The server sends output only as fast as the page can show it, so liveness checks wait behind at most about 150 KiB of output. As before, you can type only after the page has received all history: on a 32 KiB/s connection, 1 MiB of history takes about 45 seconds. A key typed before then now shows "Input not sent — history is still loading".
 - The terminal connection uses a new protocol version. A terminal page that was open during the upgrade cannot reconnect; reload it.
 
 ### Fixed
