@@ -35,6 +35,25 @@ let proxy: any;
 let browser: any;
 let releaseRowGeometryGate: (() => Promise<void>) | undefined;
 let proxyRequests = 0;
+// The front door charges every request against one operator budget: a burst
+// of 40 that refills at 10 a second (operatorBurst and operatorRefill in
+// internal/frontdoor/security.go). Every request passes the trusted proxy,
+// which follows the same budget, so a scenario can pace its cold page loads
+// as the budget requires of a real operator.
+const OPERATOR_BURST = 40;
+const OPERATOR_REFILL_PER_MS = 10 / 1000;
+const operatorBudget = { tokens: OPERATOR_BURST, at: 0 };
+function operatorTokens(now = Date.now()): number {
+  if (operatorBudget.at === 0) return OPERATOR_BURST;
+  return Math.min(OPERATOR_BURST, operatorBudget.tokens + (now - operatorBudget.at) * OPERATOR_REFILL_PER_MS);
+}
+function chargeOperatorBudget(): void {
+  const now = Date.now();
+  const tokens = operatorTokens(now);
+  // A refused request is not charged.
+  operatorBudget.tokens = tokens >= 1 ? tokens - 1 : tokens;
+  operatorBudget.at = now;
+}
 const tmp = fs.mkdtempSync("/tmp/persea-e2e1-browser-");
 fs.chmodSync(tmp, 0o700);
 
@@ -147,6 +166,7 @@ function startTrustedProxy(frontSocket: string, canonicalHost: () => string, sch
       const upgrade = lines.some((line: string) => /^upgrade:\s*websocket$/i.test(line));
       const kept = lines.filter((line: string) => !/^(host|connection|x-forwarded-host|x-forwarded-proto|tailscale-user-login):/i.test(line));
       const header = [request, "Host: localhost", `X-Forwarded-Host: ${canonicalHost()}`, `X-Forwarded-Proto: ${scheme}`, "Tailscale-User-Login: operator@example.test", `Connection: ${upgrade ? "Upgrade" : "close"}`, ...kept, "", ""].join("\r\n");
+      chargeOperatorBudget();
       if (proxyRequests++ < 5) emit("trusted-proxy-request", { request, authority: canonicalHost(), headers: header.split("\r\n").slice(0, 10) });
       if (upgrade && shapedLink.rate > 0) shaper = shapeLink(browserSocket, upstream);
       const forwardedRequest = Buffer.concat([Buffer.from(header, "latin1"), pending.subarray(boundary + 4)]);
@@ -501,7 +521,10 @@ async function main(): Promise<void> {
 
     const measurements: unknown[] = [];
     for (const rate of [32 << 10, 256 << 10]) {
-      // A fresh page load through the link.
+      // A fresh page load through the link. Cold dashboard and terminal loads
+      // take most of the operator budget, and the first ones came just before
+      // this, so wait until the budget is whole again.
+      await until("operator request budget refilled", () => operatorTokens() === OPERATOR_BURST);
       await page.goto(base, { waitUntil: "domcontentloaded" });
       const handle = await until<string>("fresh control handle", () => page.evaluate(async () => {
         const inventory = await (await fetch("/api/inventory", { cache: "no-store" })).json();
