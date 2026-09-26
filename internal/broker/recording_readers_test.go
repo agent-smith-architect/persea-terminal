@@ -311,8 +311,10 @@ func TestRecordingReaderBacklogChargeSurvivesBlockedWriteAndCancel(t *testing.T)
 	default:
 	}
 	unblock()
-	if err := <-done; err != nil {
-		t.Fatal(err)
+	// The verdict arrived while the first backlog frame was held, so the rest
+	// of the backlog is not written, even the rest of the same event.
+	if err := <-done; !errors.Is(err, terminal.ErrClosed) {
+		t.Fatalf("COMMIT after a verdict returned %v, want ErrClosed", err)
 	}
 	<-closed
 	pollUntil(t, time.Second, "reader settlement", func() bool { return effects.readers.snapshot().Bytes == 0 })

@@ -214,6 +214,19 @@ func (*unifiedAttachmentFrameWriter) OwnsTerminalOutput() {}
 // longer, so this bound is the one that acts.
 const unifiedSubscriberCloseGrace = 1 * time.Second
 
+// unifiedAdmissionReplayBytes bounds the replay a unified PREPARE carries.
+// PREPARE must reach the browser, be written into its terminal and be
+// answered with READY inside the epoch's 5 s cut timer and the page's 5 s
+// attempt deadline, and on a slow link every replay byte spends that
+// deadline: 16 KiB is about 22 KiB of base64, 0.7 s at 32 KiB/s, which
+// leaves the rest for connection setup and the READY round trip. Everything
+// past it streams after COMMIT as ordinary backlog, so the cost of admission
+// no longer grows with the size of the history.
+const unifiedAdmissionReplayBytes = 16 << 10
+
+// unifiedLiveFrameBytes is the most output one LIVE frame carries.
+const unifiedLiveFrameBytes = 64 << 10
+
 func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw []byte) (resultErr error) {
 	frame, err := terminal.DecodeFrame(raw)
 	if err != nil {
@@ -292,14 +305,14 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 		// one: the committed events that follow re-derive the current geometry in
 		// the same order the live session produced it.
 		frame.Columns, frame.Rows = initial.Columns, initial.Rows
-		replay := make([]byte, 0, terminal.ReplayByteCap)
+		replay := make([]byte, 0, unifiedAdmissionReplayBytes)
 		rest := events
 		for index, event := range events {
 			if event.Kind != unifiedjournal.RecordOutput {
 				rest = events[index:]
 				break
 			}
-			if len(replay)+len(event.Payload) > terminal.ReplayByteCap {
+			if len(replay)+len(event.Payload) > unifiedAdmissionReplayBytes {
 				rest = events[index:]
 				break
 			}
@@ -335,13 +348,8 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 		}
 		writer.live = true
 		writer.cut = frame.Cut
-		for _, event := range writer.backlog {
-			if checkVerdict() {
-				return terminal.ErrClosed
-			}
-			if err := writer.writeEventLocked(event); err != nil {
-				return err
-			}
+		if err := writer.writeBacklogLocked(checkVerdict); err != nil {
+			return err
 		}
 		writer.releaseSnapshotLocked()
 		go writer.streamTail()
@@ -493,23 +501,74 @@ func (writer *unifiedAttachmentFrameWriter) writeEventLocked(event unifiedjourna
 		}
 		return writer.downstream.wire.frame(proto.FrameAttachment, encoded)
 	}
-	payload := event.Payload
-	for len(payload) != 0 {
-		chunkBytes := len(payload)
-		if chunkBytes > 64<<10 {
-			chunkBytes = 64 << 10
-		}
-		frame := terminal.Frame{Version: terminal.ProtocolVersion, Type: terminal.FrameLive, Source: writer.source, Epoch: writer.epochID, Cut: writer.cut, Data: payload[:chunkBytes]}
-		encoded, err := attachmentwire.Encode(frame, attachmentwire.ServerToBrowser)
-		if err != nil {
-			return err
-		}
-		if err := writer.downstream.wire.frame(proto.FrameAttachment, encoded); err != nil {
+	for payload := event.Payload; len(payload) != 0; {
+		chunkBytes := min(len(payload), unifiedLiveFrameBytes)
+		if err := writer.writeLiveLocked(payload[:chunkBytes]); err != nil {
 			return err
 		}
 		payload = payload[chunkBytes:]
 	}
 	return nil
+}
+
+func (writer *unifiedAttachmentFrameWriter) writeLiveLocked(data []byte) error {
+	frame := terminal.Frame{Version: terminal.ProtocolVersion, Type: terminal.FrameLive, Source: writer.source, Epoch: writer.epochID, Cut: writer.cut, Data: data}
+	encoded, err := attachmentwire.Encode(frame, attachmentwire.ServerToBrowser)
+	if err != nil {
+		return err
+	}
+	return writer.downstream.wire.frame(proto.FrameAttachment, encoded)
+}
+
+// writeBacklogLocked writes the part of the snapshot that PREPARE did not
+// carry. It is history rather than live output, so consecutive output events
+// share LIVE frames up to unifiedLiveFrameBytes: written one frame per event,
+// a history of many small events would cost a frame envelope per event on
+// the wire and a terminal write per event in the page, which on a slow link
+// multiplies the time to catch up. A geometry event ends the run before it,
+// so it keeps its exact position between output bytes. stopped reports a
+// typed verdict and is checked before every frame, as before every event.
+func (writer *unifiedAttachmentFrameWriter) writeBacklogLocked(stopped func() bool) error {
+	var run []byte
+	flush := func() error {
+		if len(run) == 0 {
+			return nil
+		}
+		if stopped() {
+			return terminal.ErrClosed
+		}
+		err := writer.writeLiveLocked(run)
+		run = run[:0]
+		return err
+	}
+	for _, event := range writer.backlog {
+		if event.Kind != unifiedjournal.RecordOutput {
+			if err := flush(); err != nil {
+				return err
+			}
+			if stopped() {
+				return terminal.ErrClosed
+			}
+			if err := writer.writeEventLocked(event); err != nil {
+				return err
+			}
+			continue
+		}
+		for payload := event.Payload; len(payload) != 0; {
+			if run == nil {
+				run = make([]byte, 0, unifiedLiveFrameBytes)
+			}
+			take := min(unifiedLiveFrameBytes-len(run), len(payload))
+			run = append(run, payload[:take]...)
+			payload = payload[take:]
+			if len(run) == unifiedLiveFrameBytes {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return flush()
 }
 
 func (writer *unifiedAttachmentFrameWriter) Close(context.Context) error {
