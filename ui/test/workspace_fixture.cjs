@@ -22,7 +22,7 @@ const http = require("http");
 const https = require("https");
 const os = require("os");
 const path = require("path");
-const { Socket, subprotocols, cookieCSRF, createSnippetStore, readJSON, token, WS_GUID, LIVENESS_PREFIX, REFUSAL_PREFIX } = require("./unified_reopen_fixture.cjs");
+const { Socket, subprotocols, cookieCSRF, createSnippetStore, readJSON, token, WS_GUID, LIVENESS_PREFIX, REFUSAL_PREFIX, attachFlow } = require("./unified_reopen_fixture.cjs");
 
 const STYLE_NONCE = "BBBBBBBBBBBBBBBBBBBBBB";
 const CSRF_TOKEN = "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww";
@@ -568,7 +568,7 @@ function startWorkspaceFixture(ui, options = {}) {
     };
     if (url.pathname !== "/ws" || url.search !== "") { refuse(400, "invalid mode"); return; }
     const offered = subprotocols(request);
-    if (!offered.values.includes("persea-terminal.v1") || !offered.handle || (offered.mode !== "control" && offered.mode !== "observe")) {
+    if (!offered.values.includes("persea-terminal.v2") || !offered.handle || (offered.mode !== "control" && offered.mode !== "observe")) {
       refuse(400, "invalid mode"); return;
     }
     if (offered.csrf !== CSRF_TOKEN || offered.csrf !== cookieCSRF(request)) { refuse(403, "csrf"); return; }
@@ -582,7 +582,7 @@ function startWorkspaceFixture(ui, options = {}) {
     entry.consumed = true;
     const accept = crypto.createHash("sha1").update(request.headers["sec-websocket-key"] + WS_GUID).digest("base64");
     raw.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-      + `Sec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: persea-terminal.v1\r\n\r\n`);
+      + `Sec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: persea-terminal.v2\r\n\r\n`);
     nextAttachmentId += 1;
     const attachment = {
       id: nextAttachmentId,
@@ -611,6 +611,7 @@ function startWorkspaceFixture(ui, options = {}) {
     attachment.socket = socket;
     attachment.close = (code, reason) => { attachment.closeReason = reason; socket.close(code, reason); };
     const closeWith = attachment.close;
+    const flowFrame = attachFlow(attachment, socket, () => closeWith(1011, "bad_flow"));
 
     if (offered.mode === "control") {
       if (session.lease && !offered.takeover) {
@@ -680,6 +681,7 @@ function startWorkspaceFixture(ui, options = {}) {
     }
     let live = false;
     function onText(text) {
+      if (flowFrame(text)) return;
       if (text.startsWith(LIVENESS_PREFIX)) {
         const nonce = text.slice(LIVENESS_PREFIX.length + "PING ".length);
         socket.sendText(`${LIVENESS_PREFIX}PONG ${nonce}`);

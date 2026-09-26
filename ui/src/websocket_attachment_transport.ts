@@ -7,6 +7,7 @@ import {
   TransportLiveness, browserTransportLivenessRuntime, decodeServerLivenessFrame,
   secureTransportLivenessNonce, type TransportLivenessNonceSource, type TransportLivenessRuntime,
 } from "./transport_liveness";
+import { FlowAcknowledger } from "./transport_flow";
 import { UNIFIED_HANDOFF_REASONS, UNIFIED_TAKEOVER_REASONS } from "./unified_close_policy";
 import { decodeServerRefusalFrame } from "./unified_refusal_notice";
 
@@ -18,6 +19,11 @@ export type AttachmentTransportSink = Readonly<{
   // An in-band operational refusal: one request's outcome on a transport
   // that stays open. Nothing about the attachment changes.
   operationalRefusal?(generation: number, code: string): void;
+  // Calls done once everything the frame just delivered caused in the
+  // terminal has been written. The transport acknowledges the frame to the
+  // server only then, which is what paces output to a page that falls
+  // behind. Absent means a frame is consumed on delivery.
+  afterConsumed?(generation: number, done: () => void): void;
 }>;
 
 export type AttachmentEndpoint = Readonly<{ url: string; protocols: readonly string[] }>;
@@ -104,6 +110,15 @@ type ActiveLiveness = Readonly<{
   heartbeat: TransportLiveness;
 }>;
 
+// One WebSocket's flow acknowledgements. A superseded one needs no retiring:
+// it can only send on the socket it was made for, and only while that socket
+// is still this transport's open socket.
+type ActiveFlow = Readonly<{
+  socket: AttachmentWebSocket;
+  generation: number;
+  acks: FlowAcknowledger;
+}>;
+
 const SOCKET_CONNECTING = 0;
 const SOCKET_OPEN = 1;
 // The fast phase of one loss episode: up to MAX_RECONNECT_ATTEMPTS attempts
@@ -187,6 +202,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
   private unsubscribeWake?: () => void;
   private activeAttempt?: ReconnectAttempt;
   private activeLiveness?: ActiveLiveness;
+  private activeFlow?: ActiveFlow;
   private preparedSource?: string;
   private preparedSourceGeneration = 0;
   private effectiveHistoryRows?: HistoryChoice;
@@ -468,7 +484,19 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
       this.livenessNonce,
     );
     this.activeLiveness = Object.freeze({ socket, generation, heartbeat });
+    this.activeFlow = Object.freeze({ socket, generation, acks: new FlowAcknowledger((payload) => this.sendFlow(socket, generation, payload)) });
     heartbeat.start();
+  }
+
+  private sendFlow(socket: AttachmentWebSocket, generation: number, payload: string): boolean {
+    if (this.socket !== socket || generation !== this.generation || socket.readyState !== SOCKET_OPEN) return false;
+    try {
+      socket.send(payload);
+      return true;
+    } catch {
+      this.closeCurrent(socket, generation, "transport_send_failed", true);
+      return false;
+    }
   }
 
   private onMessage(socket: AttachmentWebSocket, generation: number, event: MessageEvent<unknown>): void {
@@ -496,6 +524,9 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
       this.closeCurrent(socket, generation, "refusal_protocol", true);
       return;
     }
+    const flow = this.activeFlow?.socket === socket && this.activeFlow.generation === generation ? this.activeFlow.acks : undefined;
+    const sequence = flow?.receive();
+    let result: "ENQUEUED" | "STALE" | "CLOSED" | undefined;
     try {
       const frame = decodeServerFrame(event.data);
       if (frame.type === "PREPARE") this.recordPreparedSource(generation, frame.source);
@@ -517,11 +548,19 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
           }
         }
       }
-      const result = this.sink?.receiveDecoded(generation, frame);
-      if (result === "CLOSED") this.closeCurrent(socket, generation, "page_closed", false);
+      result = this.sink?.receiveDecoded(generation, frame);
     } catch {
       this.closeCurrent(socket, generation, "malformed_frame", false);
+      return;
     }
+    if (result === "CLOSED") {
+      this.closeCurrent(socket, generation, "page_closed", false);
+      return;
+    }
+    if (!flow || sequence === undefined) return;
+    const consumed = () => flow.consume(sequence);
+    if (this.sink?.afterConsumed) this.sink.afterConsumed(generation, consumed);
+    else consumed();
   }
 
   private onClose(socket: AttachmentWebSocket, generation: number, event: CloseEvent): void {

@@ -2949,6 +2949,19 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     return name ? `Reconnecting to ${name}…` : "Connection lost — reconnecting…";
   }
 
+  // The flow acknowledgement point for a delivered frame. xterm runs write
+  // callbacks in order, so an empty write completes only after every write
+  // the frame caused, replay and output alike, has been parsed. A frame for a
+  // superseded generation is consumed at once: its socket is gone and the
+  // transport can no longer send for it.
+  afterConsumed(generation: number, done: () => void): void {
+    if (this.closed || generation !== this.generation) {
+      done();
+      return;
+    }
+    this.terminal.write("", done);
+  }
+
   // An operational refusal relayed in-band by the front door. The transport
   // is still open and the attachment is still live: the only local state a
   // refusal touches is the Fit seal it answers.

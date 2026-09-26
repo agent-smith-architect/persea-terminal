@@ -33,7 +33,7 @@ const os = require("os");
 const path = require("path");
 const childProcess = require("child_process");
 
-const { Socket, subprotocols, cookieCSRF, readJSON, token, WS_GUID, LIVENESS_PREFIX, STYLE_NONCE, CSRF_TOKEN, defaultKeyboardRecord } = require("./unified_reopen_fixture.cjs");
+const { Socket, subprotocols, cookieCSRF, readJSON, token, WS_GUID, LIVENESS_PREFIX, STYLE_NONCE, CSRF_TOKEN, defaultKeyboardRecord, attachFlow } = require("./unified_reopen_fixture.cjs");
 const { assert, delay, freePort, requestJSON, CDP, launchChrome, stopChrome } = require("./unified_browser_lib.cjs");
 
 const UI = path.resolve(__dirname, "..");
@@ -270,12 +270,13 @@ async function startStack({ tls }) {
     entry.consumed = true;
     const accept = crypto.createHash("sha1").update(request.headers["sec-websocket-key"] + WS_GUID).digest("base64");
     raw.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-      + `Sec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: persea-terminal.v1\r\n\r\n`);
+      + `Sec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: persea-terminal.v2\r\n\r\n`);
     const attachment = { id: state.attachments.length + 1, frames: [], closeReason: null, socket: null };
     state.attachments.push(attachment);
     const socket = new Socket(raw, (text) => onText(text), (reason) => { attachment.closeReason = attachment.closeReason || reason; });
     attachment.socket = socket;
     const closeWith = (code, reason) => { attachment.closeReason = reason; socket.close(code, reason); };
+    const flowFrame = attachFlow(attachment, socket, () => closeWith(1011, "bad_flow"));
     // Declared before every early return: the socket's data callback is armed
     // the moment the Socket exists, so a late frame must never meet a dead zone.
     let live = false;
@@ -288,6 +289,7 @@ async function startStack({ tls }) {
     socket.sendText(frame({ type: "PREPARE", cut, kind: "INITIAL", columns: 80, rows: 24, history: [], truncated: false, replay: Buffer.from("session_memory-replay\r\n", "binary").toString("base64") }));
     if (state.attachmentFailure === "after_prepare") setTimeout(() => { if (!socket.closed) closeWith(1011, "stale_target"); }, 500);
     function onText(text) {
+      if (flowFrame(text)) return;
       if (text.startsWith(LIVENESS_PREFIX)) {
         socket.sendText(`${LIVENESS_PREFIX}PONG ${text.slice(LIVENESS_PREFIX.length + "PING ".length)}`);
         return;

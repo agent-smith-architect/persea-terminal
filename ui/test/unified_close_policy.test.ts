@@ -24,7 +24,7 @@ for (const reason of [
   "bad_control", "bad_frame", "history_failed",
   "resize_failed", "resize_rejected", "snapshot_failed",
   "lease_unavailable", "lease_lost", "broker_protocol", "stale_snapshot",
-  "bad_liveness", "bad_attachment", "observe_mode", "websocket_message_type",
+  "bad_liveness", "bad_attachment", "bad_flow", "observe_mode", "websocket_message_type",
   "liveness_protocol", "refusal_protocol", "malformed_frame", "non_text_frame", "attachment_fault",
   "attachment_failed",
 ]) {
@@ -160,7 +160,7 @@ for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose
 
   const EXPLICIT: Readonly<Record<string, "terminal" | "transient" | "reattach" | "internal">> = Object.freeze({
     // Front-door typed refusals of this attachment.
-    bad_liveness: "terminal", bad_attachment: "terminal", observe_mode: "terminal",
+    bad_liveness: "terminal", bad_attachment: "terminal", bad_flow: "terminal", observe_mode: "terminal",
     websocket_message_type: "terminal", broker_protocol: "terminal",
     browser_liveness: "transient", stale_snapshot: "terminal",
     lease_held: "terminal", lease_lost: "terminal", lease_unavailable: "terminal",
@@ -226,7 +226,7 @@ assert.equal(boundedUnifiedReason("UPPER_CASE"), "attachment_failed");
 // the mapped codes carry their reviewed copy.
 for (const reason of [
   "lease_held", "unified_unavailable", "stale_target", "attach_failed", "reconnect_exhausted", "never_seen_before",
-  "bad_liveness", "bad_attachment", "observe_mode", "websocket_message_type", "liveness_protocol",
+  "bad_liveness", "bad_attachment", "bad_flow", "observe_mode", "websocket_message_type", "liveness_protocol",
 ]) {
   const notice = unifiedCloseNotice(reason);
   assert.ok(notice.headline.length > 0 && notice.detail.length > 0, `notice for ${reason} must have visible text`);
@@ -234,6 +234,7 @@ for (const reason of [
 // The protocol violations carry specific copy, not just the generic degradation.
 assert.equal(unifiedCloseNotice("observe_mode").headline, "This view is read-only");
 assert.equal(unifiedCloseNotice("bad_liveness").headline, "The connection broke protocol");
+assert.equal(unifiedCloseNotice("bad_flow").headline, "The connection broke protocol");
 assert.equal(unifiedCloseNotice("unified_unavailable").headline, "Unified terminal unavailable");
 assert.equal(unifiedCloseNotice("never_seen_before").headline, "This terminal is unavailable");
 

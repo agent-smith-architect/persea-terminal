@@ -134,7 +134,7 @@ func TestRefitPostPONRCaptureFailureCarriesClosedMetadata(t *testing.T) {
 	}
 }
 
-func refit_failureWriteAndObserve(t *testing.T, ws *websocket.Conn, prepared terminal.Frame, marker string) {
+func refit_failureWriteAndObserve(t *testing.T, ws *frontdoorRotationClient, prepared terminal.Frame, marker string) {
 	t.Helper()
 	input, err := attachmentwire.Encode(terminal.Frame{
 		Version: terminal.ProtocolVersion, Type: terminal.FrameInput,

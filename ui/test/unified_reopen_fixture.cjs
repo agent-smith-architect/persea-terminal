@@ -78,6 +78,31 @@ const LIVENESS_PREFIX = "PERSEA-LIVENESS/1 ";
 // Operational refusals travel in-band on an open socket (front door
 // attachment error policy): one request's outcome, never a close.
 const REFUSAL_PREFIX = "PERSEA-REFUSAL/1 ";
+const FLOW_PREFIX = "PERSEA-FLOW/1 ";
+
+// The front door's flow accounting for one fixture attachment: it counts the
+// attachment frames sent (every text frame but liveness and refusals) and
+// checks each acknowledgement the page returns the way the front door does:
+// canonical, advancing, and never beyond what was sent. It returns a text
+// handler that consumes flow frames, which are transport frames and are not
+// recorded among the attachment's frames.
+function attachFlow(attachment, socket, violation) {
+  attachment.flowSent = 0;
+  attachment.flowAcked = 0;
+  const send = socket.sendText.bind(socket);
+  socket.sendText = (text) => {
+    send(text);
+    if (!text.startsWith(LIVENESS_PREFIX) && !text.startsWith(REFUSAL_PREFIX)) attachment.flowSent += 1;
+  };
+  return (text) => {
+    if (!text.startsWith(FLOW_PREFIX)) return false;
+    const match = /^ACK ([1-9][0-9]{0,15})$/.exec(text.slice(FLOW_PREFIX.length));
+    const count = match ? Number(match[1]) : Number.NaN;
+    if (!Number.isSafeInteger(count) || count <= attachment.flowAcked || count > attachment.flowSent) violation();
+    else attachment.flowAcked = count;
+    return true;
+  };
+}
 const AUTHORITY = Object.freeze({
   realm: "local",
   server: "private",
@@ -1359,7 +1384,7 @@ function startFixture(ui, options = {}) {
     };
     if (url.pathname !== "/ws" || url.search !== "") { refuse(400, "invalid mode"); return; }
     const offered = subprotocols(request);
-    if (!offered.values.includes("persea-terminal.v1") || !offered.handle || (offered.mode !== "control" && offered.mode !== "observe")) {
+    if (!offered.values.includes("persea-terminal.v2") || !offered.handle || (offered.mode !== "control" && offered.mode !== "observe")) {
       refuse(400, "invalid mode"); return;
     }
     if (offered.csrf !== CSRF_TOKEN || offered.csrf !== cookieCSRF(request)) { refuse(403, "csrf"); return; }
@@ -1380,7 +1405,7 @@ function startFixture(ui, options = {}) {
     const setLease = (value) => { if (sessionKey === "B") state.leaseB = value; else state.lease = value; };
     const accept = crypto.createHash("sha1").update(request.headers["sec-websocket-key"] + WS_GUID).digest("base64");
     raw.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-      + `Sec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: persea-terminal.v1\r\n\r\n`);
+      + `Sec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: persea-terminal.v2\r\n\r\n`);
     const attachment = {
       id: state.attachments.length + 1,
       session: sessionKey,
@@ -1404,6 +1429,7 @@ function startFixture(ui, options = {}) {
     });
     attachment.socket = socket;
     const closeWith = (code, reason) => { attachment.closeReason = reason; socket.close(code, reason); };
+    const flowFrame = attachFlow(attachment, socket, () => closeWith(1011, "bad_flow"));
 
     if (offered.mode === "control") {
       if (currentLease() && !offered.takeover) {
@@ -1469,6 +1495,7 @@ function startFixture(ui, options = {}) {
     }
     let live = false;
     function onText(text) {
+      if (flowFrame(text)) return;
       if (text.startsWith(LIVENESS_PREFIX)) {
         const nonce = text.slice(LIVENESS_PREFIX.length + "PING ".length);
         socket.sendText(`${LIVENESS_PREFIX}PONG ${nonce}`);
@@ -1580,4 +1607,4 @@ function startFixture(ui, options = {}) {
   });
 }
 
-module.exports = { startFixture, createSnippetStore, defaultKeyboardRecord, STYLE_NONCE, CSRF_TOKEN, DRAFT_SCOPE, DRAFT_SCOPE_B, SOURCE, SOURCE_B, Socket, subprotocols, cookieCSRF, readJSON, token, WS_GUID, LIVENESS_PREFIX, REFUSAL_PREFIX };
+module.exports = { startFixture, createSnippetStore, defaultKeyboardRecord, STYLE_NONCE, CSRF_TOKEN, DRAFT_SCOPE, DRAFT_SCOPE_B, SOURCE, SOURCE_B, Socket, subprotocols, cookieCSRF, readJSON, token, WS_GUID, LIVENESS_PREFIX, REFUSAL_PREFIX, FLOW_PREFIX, attachFlow };

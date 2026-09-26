@@ -282,7 +282,7 @@ func TestCapabilityReplayDenialIsBounded(t *testing.T) {
 	cfg := config.Front{Ingress: config.Ingress{SocketPath: "/tmp/front.sock", PeerUID: uint32(os.Geteuid()), PeerUIDConfigured: true, CanonicalHost: "localhost:43210", OperatorLogin: "operator@example.com"}}
 	s := &Server{cfg: cfg, handles: newHandleStore(time.Minute, 4)}
 	r := httptest.NewRequest(http.MethodGet, "http://localhost/ws", nil)
-	r.Header.Set("Sec-WebSocket-Protocol", "persea-engine.unified-dev, persea-terminal.v1, persea-handle."+marker+", persea-mode.observe, persea-csrf."+testCSRF+", persea-history.5000")
+	r.Header.Set("Sec-WebSocket-Protocol", "persea-engine.unified-dev, persea-terminal.v2, persea-handle."+marker+", persea-mode.observe, persea-csrf."+testCSRF+", persea-history.5000")
 	r.Header.Set("Cookie", csrfCookie+"="+testCSRF)
 	r.Header.Set("Origin", "http://localhost:43210")
 	r = r.WithContext(context.WithValue(r.Context(), ingressKey{}, ingressIdentity{uid: cfg.Ingress.PeerUID, operator: cfg.Ingress.OperatorLogin, origin: "http://localhost:43210"}))
@@ -297,7 +297,7 @@ func TestCapabilityReplayDenialIsBounded(t *testing.T) {
 }
 
 func TestUnifiedDevWebSocketSelectorIsClosedAndUnique(t *testing.T) {
-	base := "persea-terminal.v1, persea-handle.h, persea-mode.control, persea-csrf.c, persea-history.5000"
+	base := "persea-terminal.v2, persea-handle.h, persea-mode.control, persea-csrf.c, persea-history.5000"
 	request := httptest.NewRequest(http.MethodGet, "http://localhost/ws", nil)
 	request.Header.Set("Sec-WebSocket-Protocol", base+", persea-engine.unified-dev")
 	authority, ok := parseWSAuthority(request)
@@ -405,16 +405,16 @@ func TestIngressDenialLogDoesNotContainAuthorityMaterial(t *testing.T) {
 }
 func TestWSAuthorityStrict(t *testing.T) {
 	r := httptest.NewRequest("GET", "http://localhost/ws", nil)
-	r.Header.Set("Sec-WebSocket-Protocol", "persea-engine.unified-dev, persea-terminal.v1, persea-handle.h, persea-mode.observe, persea-csrf.c, persea-history.5000")
+	r.Header.Set("Sec-WebSocket-Protocol", "persea-engine.unified-dev, persea-terminal.v2, persea-handle.h, persea-mode.observe, persea-csrf.c, persea-history.5000")
 	a, ok := parseWSAuthority(r)
 	if !ok || a.handle != "h" {
 		t.Fatal("valid protocols rejected")
 	}
-	r.Header.Set("Sec-WebSocket-Protocol", "persea-engine.unified-dev, persea-terminal.v1, persea-handle.h, persea-mode.observe, persea-csrf.c, persea-history.5000, evil")
+	r.Header.Set("Sec-WebSocket-Protocol", "persea-engine.unified-dev, persea-terminal.v2, persea-handle.h, persea-mode.observe, persea-csrf.c, persea-history.5000, evil")
 	if _, ok := parseWSAuthority(r); ok {
 		t.Fatal("unknown protocol accepted")
 	}
-	r.Header.Set("Sec-WebSocket-Protocol", "persea-engine.unified-dev, persea-terminal.v1, persea-handle.h, persea-handle.other, persea-mode.observe, persea-csrf.c, persea-history.5000")
+	r.Header.Set("Sec-WebSocket-Protocol", "persea-engine.unified-dev, persea-terminal.v2, persea-handle.h, persea-handle.other, persea-mode.observe, persea-csrf.c, persea-history.5000")
 	if _, ok := parseWSAuthority(r); ok {
 		t.Fatal("duplicate handle protocol accepted")
 	}
@@ -429,7 +429,7 @@ func TestWSAuthorityCategoriesArePresentExactlyOnce(t *testing.T) {
 	}
 	categories := []category{
 		{name: "engine", valid: "persea-engine.unified-dev", alternate: "persea-engine.other", empty: "persea-engine."},
-		{name: "version", valid: "persea-terminal.v1", alternate: "persea-terminal.v2", empty: "persea-terminal."},
+		{name: "version", valid: "persea-terminal.v2", alternate: "persea-terminal.v2", empty: "persea-terminal."},
 		{name: "handle", valid: "persea-handle.h", alternate: "persea-handle.other", empty: "persea-handle."},
 		{name: "mode", valid: "persea-mode.observe", alternate: "persea-mode.control", empty: "persea-mode."},
 		{name: "csrf", valid: "persea-csrf.c", alternate: "persea-csrf.other", empty: "persea-csrf."},
@@ -485,7 +485,7 @@ func TestWSAuthorityDuplicateRejectsBeforeHandleConsumptionAndUpgrade(t *testing
 	}
 	s := &Server{cfg: config.Front{Ingress: config.Ingress{PeerUIDConfigured: true}}, handles: store}
 	r := httptest.NewRequest(http.MethodGet, "http://localhost/ws", nil)
-	r.Header.Set("Sec-WebSocket-Protocol", "persea-engine.unified-dev, persea-terminal.v1, persea-handle., persea-handle."+handle+", persea-mode.observe, persea-csrf.c, persea-history.5000")
+	r.Header.Set("Sec-WebSocket-Protocol", "persea-engine.unified-dev, persea-terminal.v2, persea-handle., persea-handle."+handle+", persea-mode.observe, persea-csrf.c, persea-history.5000")
 	w := httptest.NewRecorder()
 	s.terminal(w, r)
 	if w.Code != http.StatusBadRequest {
@@ -497,7 +497,7 @@ func TestWSAuthorityDuplicateRejectsBeforeHandleConsumptionAndUpgrade(t *testing
 }
 
 func TestWSHistoryProtocolExactChoiceAndNegativeMatrix(t *testing.T) {
-	base := "persea-engine.unified-dev, persea-terminal.v1, persea-handle.h, persea-mode.observe, persea-csrf.c"
+	base := "persea-engine.unified-dev, persea-terminal.v2, persea-handle.h, persea-mode.observe, persea-csrf.c"
 	for _, want := range []int{0, 500, 1_000, 2_000, 5_000, 7_500, 10_000} {
 		r := httptest.NewRequest("GET", "http://localhost/ws", nil)
 		r.Header.Set("Sec-WebSocket-Protocol", fmt.Sprintf("%s, persea-history.%d", base, want))

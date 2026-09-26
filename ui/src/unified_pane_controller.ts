@@ -41,7 +41,7 @@ export function attachmentURL(handle: string, mode: "observe" | "control"): stri
 }
 
 export function attachmentProtocols(handle: string, mode: AttachmentMode, historyRows: number, engine: UnifiedEngine): string[] {
-  return ["persea-terminal.v1", `persea-handle.${handle}`, `persea-mode.${mode}`, `persea-csrf.${csrfToken()}`, `persea-history.${historyRows}`, `persea-engine.${engine}`];
+  return ["persea-terminal.v2", `persea-handle.${handle}`, `persea-mode.${mode}`, `persea-csrf.${csrfToken()}`, `persea-history.${historyRows}`, `persea-engine.${engine}`];
 }
 
 function takeoverProtocols(handle: string, historyRows: number, engine: UnifiedEngine): string[] {
@@ -866,6 +866,7 @@ export class UnifiedPaneController {
         page.operationalRefusal(generation, code);
         observer.operationalRefusal?.(generation, code);
       },
+      afterConsumed: (generation: number, done: () => void) => page.afterConsumed(generation, done),
     });
   }
 }
