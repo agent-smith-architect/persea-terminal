@@ -24,7 +24,6 @@ export class FlowAcknowledger {
   private acknowledged = 0;
   private readonly completed = new Set<number>();
   private scheduled = false;
-  private retired = false;
 
   constructor(
     // Sends one acknowledgement; false when the socket can no longer carry it.
@@ -39,7 +38,7 @@ export class FlowAcknowledger {
 
   // Marks one numbered frame consumed.
   consume(sequence: number): void {
-    if (this.retired || sequence <= this.consumed || sequence > this.received || this.completed.has(sequence)) return;
+    if (sequence <= this.consumed || sequence > this.received || this.completed.has(sequence)) return;
     this.completed.add(sequence);
     while (this.completed.delete(this.consumed + 1)) this.consumed++;
     if (this.consumed > this.acknowledged && !this.scheduled) {
@@ -48,14 +47,9 @@ export class FlowAcknowledger {
     }
   }
 
-  retire(): void {
-    this.retired = true;
-    this.completed.clear();
-  }
-
   private flush(): void {
     this.scheduled = false;
-    if (this.retired || this.consumed <= this.acknowledged) return;
+    if (this.consumed <= this.acknowledged) return;
     if (this.send(encodeBrowserFlowAck(this.consumed))) this.acknowledged = this.consumed;
   }
 }
