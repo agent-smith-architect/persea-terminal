@@ -91,6 +91,9 @@ async function main() {
 
     const context = await browser.newContext({ viewport: { width: 1100, height: 760 } });
     const page = await context.newPage();
+    const laterPageErrors = []; const laterConsoleErrors = [];
+    page.on("pageerror", (error) => laterPageErrors.push(String(error)));
+    page.on("console", (message) => { if (message.type() === "error") laterConsoleErrors.push(message.text()); });
     await page.goto(origin, { waitUntil: "load" });
     await page.waitForFunction(() => document.body?.dataset.loading_stateReady === "true");
     await page.evaluate(() => window.__loading_state.reset(1));
@@ -145,6 +148,43 @@ async function main() {
     assert(caught.panes[0].noticeVisible && caught.panes[0].noticeHeadline === "This page kept falling behind" && caught.panes[0].reconnectVisible && JSON.stringify(caught.detaches) === '["subscriber_lagged"]',
       `three failed catch-ups in a row did not stop with a notice: ${JSON.stringify(caught)}`);
     evidence.catchUp = caught;
+    // A trusted Reconnect starts the count again. The wall clock first moves
+    // past the reattach burst window, which would otherwise stop the page too.
+    await page.evaluate(() => window.__loading_state.advanceWallClock(61_000));
+    await page.getByRole("button", { name: "Reconnect", exact: true }).click();
+    await admit(true);
+    caught = await lag();
+    assert(!caught.panes[0].noticeVisible && JSON.stringify(caught.detaches) === '["subscriber_lagged"]', `a failed catch-up after Reconnect stopped the page: ${JSON.stringify(caught)}`);
+    // Switching to another session starts the count again.
+    await page.evaluate(() => window.__loading_state.reset(1));
+    await admit(false);
+    for (const failure of [1, 2]) {
+      caught = await lag();
+      assert(!stopped(caught), `failed catch-up ${failure} stopped the page: ${JSON.stringify(caught)}`);
+      await admit(true);
+    }
+    await page.evaluate(() => window.__loading_state.switchSessionAll());
+    await admit(true);
+    caught = await lag();
+    assert(!stopped(caught), `a failed catch-up on a newly selected session stopped the page: ${JSON.stringify(caught)}`);
+    // A handoff replaces the history, so the count starts again. The wall
+    // clock then moves past the reattach burst window, which would otherwise
+    // stop the page too.
+    await page.evaluate(() => window.__loading_state.reset(1));
+    await admit(false);
+    for (const failure of [1, 2]) {
+      caught = await lag();
+      assert(!stopped(caught), `failed catch-up ${failure} stopped the page: ${JSON.stringify(caught)}`);
+      await admit(true);
+    }
+    caught = await page.evaluate(() => window.__loading_state.failAll("generation_rotated"));
+    assert(!stopped(caught), `a rotation handoff stopped the page: ${JSON.stringify(caught)}`);
+    await page.evaluate(() => window.__loading_state.advanceWallClock(61_000));
+    for (const failure of [1, 2]) {
+      await admit(true);
+      caught = await lag();
+      assert(!stopped(caught), `failed catch-up ${failure} after a handoff stopped the page: ${JSON.stringify(caught)}`);
+    }
     // Catching up starts the count again.
     await page.evaluate(() => window.__loading_state.reset(1));
     await admit(false);
@@ -186,6 +226,17 @@ async function main() {
     const thrown = await page.evaluate(() => window.__loading_state.throwingWriteCallback());
     assert(thrown.loopAlive && thrown.afterWritten && JSON.stringify(thrown.finalized) === '["LIVE_WRITE_FAILED"]', `a throwing write callback froze the terminal: ${JSON.stringify({ loopAlive: thrown.loopAlive, afterWritten: thrown.afterWritten, finalized: thrown.finalized })}`);
     evidence.writeCallback = { loopAlive: thrown.loopAlive, finalized: thrown.finalized };
+    await page.evaluate(() => window.__loading_state.reset(1));
+    const replayThrown = await page.evaluate(() => window.__loading_state.throwingReplayCallback());
+    assert(replayThrown.loopAlive && replayThrown.afterWritten && JSON.stringify(replayThrown.finalized) === '["REPLAY_FAILED"]', `a throwing replay callback froze the terminal: ${JSON.stringify({ loopAlive: replayThrown.loopAlive, afterWritten: replayThrown.afterWritten, finalized: replayThrown.finalized })}`);
+    await page.evaluate(() => window.__loading_state.reset(1));
+    await admit(false);
+    await page.evaluate(() => window.__loading_state.modeAll("CONTROL"));
+    const ackThrown = await page.evaluate(() => window.__loading_state.throwingAcknowledgement());
+    assert(ackThrown.loopAlive && ackThrown.afterWritten && JSON.stringify(ackThrown.finalized) === '["LIVE_WRITE_FAILED"]', `a throwing acknowledgement froze the terminal: ${JSON.stringify({ loopAlive: ackThrown.loopAlive, afterWritten: ackThrown.afterWritten, finalized: ackThrown.finalized })}`);
+    evidence.replayCallback = { loopAlive: replayThrown.loopAlive, finalized: replayThrown.finalized };
+    evidence.acknowledgementCallback = { loopAlive: ackThrown.loopAlive, finalized: ackThrown.finalized };
+    assert(laterPageErrors.length === 0 && laterConsoleErrors.length === 0, `browser errors: ${JSON.stringify({ laterPageErrors, laterConsoleErrors })}`);
     await context.close();
     fs.writeFileSync(path.join(EVIDENCE, "loading-state.json"), JSON.stringify(evidence, null, 2));
     console.log(`loading state loading state ${ENGINE}: PASS (${evidence.cases.length} layouts + typed failure + catch-up, acknowledgement and write-callback checks)`);
