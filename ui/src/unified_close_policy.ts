@@ -14,9 +14,10 @@
 //   retry them — and are additionally claimable via control takeover.
 // - TRANSIENT: network-layer or infrastructure loss where a fresh attempt can
 //   genuinely succeed (the broker restarting, a dropped connection, a failed
-//   reconnect attempt). The transport keeps its bounded auto-retry; the page
-//   renders a visible reconnecting state, and retry exhaustion arrives as a
-//   ReconnectStatus EXHAUSTED, which the page renders terminally.
+//   reconnect attempt, the front door expiring a page that stopped proving
+//   liveness). The transport retries; the page renders a visible reconnecting
+//   state, and once the fast phase is spent a ReconnectStatus OFFLINE, which
+//   the page renders with Reconnect while slower automatic probes continue.
 // - REATTACH: a broker close that is NOT a permanent verdict on this
 //   session. Retrying with a fresh handle on the SAME session identity
 //   genuinely recovers it, so the page keeps the transport's bounded
@@ -100,15 +101,21 @@ export const UNIFIED_TERMINAL_REASONS: ReadonlySet<string> = new Set([
   // liveness (bad_liveness), a malformed attachment frame (bad_attachment),
   // control traffic on an observe handle (observe_mode), and a non-text
   // WebSocket message (websocket_message_type).
-  "lease_unavailable", "lease_lost", "broker_protocol", "browser_liveness", "stale_snapshot",
+  // browser_liveness is deliberately absent: the front door closes with it
+  // when application proof stops arriving, which is what a stalled or
+  // suspended connection looks like. It is loss, not a verdict — transient.
+  "lease_unavailable", "lease_lost", "broker_protocol", "stale_snapshot",
   "bad_liveness", "bad_attachment", "observe_mode", "websocket_message_type",
   // The client-side liveness engine's own protocol judgement: the server
   // answered liveness with an invalid pong. A deterministic peer protocol
   // violation, not infrastructure loss.
   "liveness_protocol",
   // The transport's judgement of an in-band refusal frame whose code it could
-  // not read: the same class of peer protocol violation.
-  "refusal_protocol",
+  // not read, of an unreadable or non-text server frame, and the page's own
+  // judgement of a frame that broke the attachment protocol: the same class
+  // of peer protocol violation. The transport has already stopped retrying,
+  // so the page must show it.
+  "refusal_protocol", "malformed_frame", "non_text_frame", "attachment_fault",
   // canonicalFailureCode's fallback for an unrepresentable code.
   "attachment_failed",
 ]);
@@ -155,18 +162,20 @@ const NOTICES: Readonly<Record<string, UnifiedCloseNotice>> = Object.freeze({
   attach_failed: Object.freeze({ headline: "The session could not be attached", detail: "The session host refused this attachment. Try again from the dashboard." }),
   lease_unavailable: Object.freeze({ headline: "Control could not be taken", detail: "This session could not be locked for typing. Try again from the dashboard." }),
   lease_lost: Object.freeze({ headline: "Control moved elsewhere", detail: "Another window took control of this session." }),
-  browser_liveness: Object.freeze({ headline: "This page fell behind", detail: "The session host stopped trusting this page's liveness. Reopen it from the dashboard." }),
   bad_liveness: Object.freeze({ headline: "The connection broke protocol", detail: "This page sent a liveness message the session host could not read. Reopen the session from the dashboard." }),
   bad_attachment: Object.freeze({ headline: "The connection broke protocol", detail: "This page sent a frame the session host could not read. Reopen the session from the dashboard." }),
   observe_mode: Object.freeze({ headline: "This view is read-only", detail: "Typing and resizing are not available while observing. Reopen the session in control mode to interact." }),
   websocket_message_type: Object.freeze({ headline: "The connection broke protocol", detail: "A non-text message reached the session host and was refused. Reopen the session from the dashboard." }),
-  liveness_protocol: Object.freeze({ headline: "The connection broke protocol", detail: "The session host answered liveness with an invalid message. Reopen the session from the dashboard." }),
-  refusal_protocol: Object.freeze({ headline: "The connection broke protocol", detail: "The session host sent a refusal this page could not read. Reopen the session from the dashboard." }),
+  liveness_protocol: Object.freeze({ headline: "The connection broke protocol", detail: "The session host answered liveness with an invalid message. Select Reconnect to try again." }),
+  refusal_protocol: Object.freeze({ headline: "The connection broke protocol", detail: "The session host sent a refusal this page could not read. Select Reconnect to try again." }),
+  malformed_frame: Object.freeze({ headline: "The connection broke protocol", detail: "The session host sent a message this page could not read. Select Reconnect to try again." }),
+  non_text_frame: Object.freeze({ headline: "The connection broke protocol", detail: "The session host sent a message this page could not read. Select Reconnect to try again." }),
+  attachment_fault: Object.freeze({ headline: "The terminal stopped", detail: "This page received terminal data it could not use and stopped showing it. The session is still running; select Reconnect to try again." }),
   reconnect_exhausted: Object.freeze({ headline: "Connection lost", detail: "The connection could not be re-established." }),
-  // The transport's retry-exhaustion reasons all mean the same thing to an
-  // operator: automatic attempts stopped. A trusted Reconnect starts a new
-  // finite cycle with fresh authority; no disconnected input is replayed.
-  retry_budget_exhausted: Object.freeze({ headline: "Connection lost", detail: "Automatic reconnect stopped. When your connection returns, select Reconnect to try again." }),
+  // The fast retry phase is spent; slower automatic attempts continue and
+  // restart at once when the network or the page comes back. A trusted
+  // Reconnect starts a fresh fast phase; no disconnected input is replayed.
+  reconnect_offline: Object.freeze({ headline: "Connection lost", detail: "Retrying automatically. Select Reconnect to try now." }),
   reconnect_unavailable: Object.freeze({ headline: "Connection lost", detail: "The connection could not be re-established." }),
   source_binding_unavailable: Object.freeze({ headline: "Connection lost", detail: "This session's identity expired while reconnecting. Reopen it from the dashboard." }),
   // Genuinely unresolvable identities, surfaced by the transport's identity
@@ -175,11 +184,11 @@ const NOTICES: Readonly<Record<string, UnifiedCloseNotice>> = Object.freeze({
   identity_ambiguous: Object.freeze({ headline: "This session is ambiguous", detail: "More than one session now matches this tab's identity. Pick the one you want from the dashboard." }),
   identity_invalid: Object.freeze({ headline: "This link is incomplete", detail: "This tab is missing the identity needed to reopen its session. Open it again from the dashboard." }),
   // The reattach burst limiter's terminal outcome: input kept being refused.
-  input_refused: Object.freeze({ headline: "Input kept being refused", detail: "The session repeatedly refused input and could not be recovered here. Reopen it from the dashboard." }),
+  input_refused: Object.freeze({ headline: "Input kept being refused", detail: "The session repeatedly refused input. Select Reconnect to try again, or reopen it from the dashboard." }),
   // The reattach burst limiter's terminal outcome for a subscriber close: the
   // page kept falling behind the session's output faster than it could be
   // rebuilt. The session is fine; this page is not keeping up.
-  subscriber_lagged: Object.freeze({ headline: "This page kept falling behind", detail: "The session produced output faster than this page could receive it, repeatedly. The session is still running; reopen it from the dashboard." }),
+  subscriber_lagged: Object.freeze({ headline: "This page kept falling behind", detail: "The session produced output faster than this page could receive it, repeatedly. The session is still running; select Reconnect to try again." }),
   generation_rotated: Object.freeze({ headline: "Refreshing terminal history", detail: "The terminal journal advanced to a new generation. This page is reconnecting from the authoritative snapshot." }),
   generation_refit: Object.freeze({ headline: "Refitting terminal width", detail: "The terminal width changed and this page is reconnecting from the authoritative post-width snapshot." }),
   generation_failed: Object.freeze({ headline: "Terminal history stopped", detail: "The new terminal journal could not be made durable. Reopen this session from the dashboard to start a fresh unified attachment." }),
@@ -190,6 +199,15 @@ const NOTICES: Readonly<Record<string, UnifiedCloseNotice>> = Object.freeze({
   // at whatever geometry the host now holds.
   attachment_failed: Object.freeze({ headline: "This attachment ended", detail: "The session host ended this attachment. The session is still running; reopen it from the dashboard." }),
 });
+
+// Notices a fresh attachment on the same identity can genuinely clear: the
+// page shows Reconnect with them. Refusals a retry would only replay (the
+// session is gone, control moved, a typed broker refusal) are not listed.
+export const UNIFIED_RECONNECTABLE_NOTICES: ReadonlySet<string> = new Set([
+  "reconnect_offline", "reconnect_exhausted",
+  ...UNIFIED_REATTACH_REASONS,
+  "malformed_frame", "non_text_frame", "liveness_protocol", "refusal_protocol", "attachment_fault",
+]);
 
 export function unifiedCloseNotice(reason: string): UnifiedCloseNotice {
   return NOTICES[reason] ?? Object.freeze({ headline: "This terminal is unavailable", detail: "The connection ended and cannot be resumed here. Reopen the session from the dashboard." });

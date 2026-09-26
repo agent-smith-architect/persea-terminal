@@ -270,6 +270,7 @@ async function boot(): Promise<void> {
   });
   controller.connect();
   window.addEventListener("pagehide", () => controller.detach("page_hidden"));
+  window.addEventListener("pageshow", (event) => { if (event.persisted) controller.resume(); });
 }
 
 void boot().catch((error: unknown) => {

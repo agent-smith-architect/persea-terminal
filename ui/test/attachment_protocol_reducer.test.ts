@@ -11,7 +11,9 @@ import {
   MAX_ATTACHMENT_WIRE_BYTES, decodeBrowserFrame, decodeServerFrame, encodeBrowserFrame, encodeServerFrame,
 } from "../src/attachment_wire";
 import {
-  HISTORY_DEPTH_PENDING_TIMEOUT_MS, MAX_RECONNECT_ATTEMPTS, MAX_RECONNECT_ATTEMPT_MS, MAX_RECONNECT_ELAPSED_MS, WebSocketAttachmentTransport,
+  CLOSE_CLIENT_FAULT, CLOSE_CLIENT_PROTOCOL_FAULT, CLOSE_ORDERLY,
+  HISTORY_DEPTH_PENDING_TIMEOUT_MS, MAX_RECONNECT_ATTEMPTS, MAX_RECONNECT_ATTEMPT_MS, MAX_RECONNECT_ELAPSED_MS,
+  OFFLINE_RETRY_MS, STABLE_CONNECTION_MS, WebSocketAttachmentTransport,
   type AttachmentWebSocket, type HistoryDepthOutcome, type ReconnectRuntime,
 } from "../src/websocket_attachment_transport";
 import {
@@ -29,6 +31,8 @@ const equal = (actual: unknown, expected: unknown, message = "values differ") =>
 const throws = (fn: () => unknown, message = "expected throw") => { let threw = false; try { fn(); } catch { threw = true; } assert(threw, message); };
 const readWorkspaceText = (relative: string) => readFileSync(relative, "utf8");
 const TRANSPORT_TEST_SOURCE = "S".repeat(43);
+// The longest fast-phase wait at jitter 1 (the 4 s cap).
+const RECONNECT_TEST_MAX_FAST_DELAY_MS = 4_000;
 
 test("composer_normalization_orders_line_endings_controls_and_trailing_newlines", () => {
   equal(normalizeComposedText("a\r\nb\rc\n\n"), "a\nb\nc");
@@ -54,6 +58,15 @@ const bindTransportSource = (transport: WebSocketAttachmentTransport, generation
     .recordPreparedSource(generation, TRANSPORT_TEST_SOURCE);
 };
 
+// Mirrors WebSocket.close() in a browser: page script may pass only 1000 or an
+// application code in 3000–4999. Anything else throws InvalidAccessError and
+// leaves the socket exactly as it was.
+const assertBrowserCloseCode = (code?: number): void => {
+  if (code !== undefined && code !== 1000 && (code < 3000 || code > 4999)) {
+    throw Object.assign(new Error(`InvalidAccessError: close code ${code}`), { name: "InvalidAccessError" });
+  }
+};
+
 class TransportFakeSocket {
   bufferedAmount = 0;
   failSend = false;
@@ -70,7 +83,11 @@ class TransportFakeSocket {
     if (this.failSend) throw new Error("simulated send loss");
     this.sent.push(String(value));
   }
-  close(code?: number, reason?: string): void { this.readyState = 3; this.closes.push(Object.freeze({ code, reason })); }
+  close(code?: number, reason?: string): void {
+    assertBrowserCloseCode(code);
+    this.readyState = 3;
+    this.closes.push(Object.freeze({ code, reason }));
+  }
   emit(type: string, event: unknown): void { for (const listener of this.listeners.get(type) ?? []) listener(event); }
 }
 
@@ -78,6 +95,8 @@ class FakeReconnectClock {
   private clock = 0;
   private next = 1;
   private readonly timers = new Map<number, { due: number; callback: () => void }>();
+  private readonly wakeListeners = new Set<() => void>();
+  visibleState = true;
   readonly runtime: ReconnectRuntime = Object.freeze({
     now: () => this.clock,
     setTimeout: (callback: () => void, delayMs: number) => {
@@ -86,7 +105,14 @@ class FakeReconnectClock {
       return id;
     },
     clearTimeout: (handle: unknown) => { if (typeof handle === "number") this.timers.delete(handle); },
+    subscribeWake: (callback: () => void) => {
+      this.wakeListeners.add(callback);
+      return () => { this.wakeListeners.delete(callback); };
+    },
+    visible: () => this.visibleState,
   });
+  wake(): void { for (const listener of [...this.wakeListeners]) listener(); }
+  wakeSubscribers(): number { return this.wakeListeners.size; }
   now(): number { return this.clock; }
   pending(): number { return this.timers.size; }
   async advance(milliseconds: number): Promise<void> {
@@ -505,7 +531,7 @@ test("wrong_malformed_and_duplicated_liveness_pongs_fail_closed", () => {
     equal(clock.activeWakeSubscriptions(), 1, "protocol fixture did not start with one wake subscription");
     socket.emit("message", { data: response });
     equal(closed.join(","), "liveness_protocol", "invalid server liveness was not retryable protocol loss");
-    equal(socket.closes[0]?.code, 1002);
+    equal(socket.closes[0]?.code, CLOSE_CLIENT_PROTOCOL_FAULT);
     equal(clock.activeWakeSubscriptions(), 0, "protocol failure retained its wake subscription");
   }
 
@@ -817,7 +843,7 @@ test("websocket_attachment_transport_is_generation_bound_bounded_and_never_repla
       this.listeners.set(type, values);
     }
     send(value: unknown): void { assert(typeof value === "string", "transport sent a non-text frame"); this.sent.push(value); }
-    close(code?: number, reason?: string): void { this.readyState = 3; this.closes.push(Object.freeze({ code, reason })); }
+    close(code?: number, reason?: string): void { assertBrowserCloseCode(code); this.readyState = 3; this.closes.push(Object.freeze({ code, reason })); }
     emit(type: string, event: unknown): void { for (const listener of this.listeners.get(type) ?? []) listener(event); }
   }
 
@@ -853,7 +879,7 @@ test("websocket_attachment_transport_is_generation_bound_bounded_and_never_repla
   first.bufferedAmount = 0;
   first.emit("message", { data: "not-json" });
   equal(closed.length, 1);
-  equal(first.closes[0].code, 1002);
+  equal(first.closes[0].code, CLOSE_CLIENT_PROTOCOL_FAULT);
 
   const generation2 = transport.connect();
   equal(generation2, 2);
@@ -879,7 +905,7 @@ test("websocket_attachment_transport_is_generation_bound_bounded_and_never_repla
   equal(closed.length, 3);
 });
 
-test("reconnect_uses_fresh_endpoints_and_stops_at_the_finite_attempt_budget", async () => {
+test("reconnect_spends_the_fast_phase_then_keeps_probing_offline_until_detached", async () => {
   const clock = new FakeReconnectClock();
   const statuses: string[] = [];
   let attempts = 0;
@@ -893,11 +919,233 @@ test("reconnect_uses_fresh_endpoints_and_stops_at_the_finite_attempt_budget", as
   });
   bindTransportSource(transport);
   transport.attachAgain();
-  await clock.runUntilIdle();
-  equal(attempts, MAX_RECONNECT_ATTEMPTS, "retry attempt cap drifted");
-  equal(statuses.at(-1), `EXHAUSTED:${MAX_RECONNECT_ATTEMPTS}`, "retry budget did not terminate visibly");
+  // Fast phase at jitter 1: 0, 500, 1500, 3500, 7500, 11500 ms.
+  await clock.advance(11_500);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS, "fast-phase attempt cap drifted");
+  equal(statuses.at(-1), `OFFLINE:${MAX_RECONNECT_ATTEMPTS}`, "a spent fast phase did not go OFFLINE visibly");
+  assert(!statuses.some((status) => status.startsWith("EXHAUSTED")), "ordinary loss was reported as unrecoverable");
+  equal(clock.wakeSubscribers(), 1, "OFFLINE did not listen for the network or the page coming back");
+  await clock.advance(OFFLINE_RETRY_MS - 1);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS, "an OFFLINE probe ran before its slow interval");
+  await clock.advance(1);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS + 1, "OFFLINE stopped probing after the fast phase");
+  await clock.advance(OFFLINE_RETRY_MS);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS + 2, "OFFLINE probing did not continue");
   transport.detach();
   equal(clock.pending(), 0, "Detach left a retry timer armed");
+  equal(clock.wakeSubscribers(), 0, "Detach left the wake subscription");
+  await clock.advance(OFFLINE_RETRY_MS * 4);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS + 2, "a detached transport kept probing");
+});
+
+test("offline_wake_probes_at_once_and_a_hidden_page_waits_for_it", async () => {
+  const clock = new FakeReconnectClock();
+  const sockets: TransportFakeSocket[] = [];
+  const statuses: string[] = [];
+  let online = false;
+  let attempts = 0;
+  const transport = new WebSocketAttachmentTransport(
+    "ws://example.test/ws", () => {
+      const socket = new TransportFakeSocket(1);
+      sockets.push(socket);
+      return socket as unknown as AttachmentWebSocket;
+    }, ["persea-handle.consumed"],
+    async () => {
+      attempts += 1;
+      if (!online) throw new Error("inventory offline");
+      return Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze([`persea-handle.fresh-${attempts}`]) });
+    }, () => 0.5, clock.runtime,
+  );
+  transport.bind({
+    openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: () => {},
+    reconnectStatus: (status) => { statuses.push(`${status.state}:${status.delayMs === undefined ? "-" : status.delayMs}`); },
+  });
+  bindTransportSource(transport);
+  transport.attachAgain();
+  await clock.advance(11_500);
+  equal(statuses.at(-1), `OFFLINE:${OFFLINE_RETRY_MS}`, "fast phase did not settle into visible OFFLINE probing");
+  clock.visibleState = false;
+  await clock.advance(OFFLINE_RETRY_MS);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS + 1, "the armed probe did not run");
+  equal(statuses.at(-1), "OFFLINE:-", "a hidden page armed a blind probe");
+  equal(clock.pending(), 0, "a hidden page kept a probe timer");
+  await clock.advance(OFFLINE_RETRY_MS * 4);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS + 1, "a hidden page probed without a wake signal");
+  online = true;
+  clock.visibleState = true;
+  clock.wake();
+  clock.wake();
+  await clock.advance(0);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS + 2, "wake signals did not collapse into exactly one immediate probe");
+  equal(sockets.length, 1, "the wake probe did not open one socket");
+  transport.connectionCommitted(1);
+  equal(statuses.at(-1), "CONNECTED:-");
+  equal(clock.wakeSubscribers(), 0, "COMMIT kept the OFFLINE wake subscription");
+  equal(clock.pending(), 0, "COMMIT left OFFLINE work armed");
+  clock.wake();
+  await clock.advance(0);
+  equal(sockets.length, 1, "a wake signal on a live connection opened another socket");
+  transport.detach();
+});
+
+test("commit_then_immediate_loss_keeps_its_episode_and_settles_into_offline_probing", async () => {
+  const clock = new FakeReconnectClock();
+  const sockets: TransportFakeSocket[] = [];
+  const statuses: string[] = [];
+  const opened: number[] = [];
+  const transport = new WebSocketAttachmentTransport(
+    "ws://example.test/ws", () => {
+      const socket = new TransportFakeSocket(1);
+      sockets.push(socket);
+      return socket as unknown as AttachmentWebSocket;
+    }, ["persea-handle.consumed"],
+    async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-handle.fresh"]) }),
+    () => 0.5, clock.runtime,
+  );
+  transport.bind({
+    openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: () => {},
+    reconnectStatus: (status) => { statuses.push(status.state); },
+  });
+  const first = transport.connect();
+  bindTransportSource(transport, first);
+  transport.connectionCommitted(first);
+  // Each successor commits and is evicted at once, the shape of a view that
+  // cannot keep up. COMMIT must not refill the fast phase.
+  sockets[0].emit("close", { code: 1000, reason: "subscriber_lagged" });
+  for (let round = 0; round < MAX_RECONNECT_ATTEMPTS * 3 && !statuses.includes("OFFLINE"); round += 1) {
+    const before = sockets.length;
+    await clock.advance(RECONNECT_TEST_MAX_FAST_DELAY_MS);
+    if (sockets.length === before) continue;
+    opened.push(clock.now());
+    const generation = sockets.length;
+    transport.connectionCommitted(generation);
+    sockets.at(-1)!.emit("close", { code: 1000, reason: "subscriber_lagged" });
+  }
+  assert(statuses.includes("OFFLINE"), "a commit-then-evict loop never left the fast phase");
+  equal(opened.length, MAX_RECONNECT_ATTEMPTS, "the loop ran more fast attempts than one episode allows");
+  const socketsAtOffline = sockets.length;
+  await clock.advance(OFFLINE_RETRY_MS - 1);
+  equal(sockets.length, socketsAtOffline, "OFFLINE loop reattached faster than the slow interval");
+  transport.detach();
+});
+
+test("a_connection_that_stays_up_starts_a_fresh_episode_on_its_next_loss", async () => {
+  const clock = new FakeReconnectClock();
+  const sockets: TransportFakeSocket[] = [];
+  const statuses: string[] = [];
+  const transport = new WebSocketAttachmentTransport(
+    "ws://example.test/ws", () => {
+      const socket = new TransportFakeSocket(1);
+      sockets.push(socket);
+      return socket as unknown as AttachmentWebSocket;
+    }, ["persea-handle.consumed"],
+    async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-handle.fresh"]) }),
+    () => 0.5, clock.runtime,
+  );
+  transport.bind({
+    openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: () => {},
+    reconnectStatus: (status) => { statuses.push(`${status.state}:${status.attempt}:${status.delayMs ?? "-"}`); },
+  });
+  const first = transport.connect();
+  bindTransportSource(transport, first);
+  transport.connectionCommitted(first);
+  for (let loss = 0; loss < MAX_RECONNECT_ATTEMPTS * 2; loss += 1) {
+    await clock.advance(STABLE_CONNECTION_MS);
+    sockets.at(-1)!.emit("close", { code: 1006, reason: "" });
+    equal(statuses.at(-1), "WAITING:1:250", `stable connection ${loss} did not start a fresh episode`);
+    await clock.advance(250);
+    transport.connectionCommitted(sockets.length);
+  }
+  transport.detach();
+});
+
+test("takeover_replacement_recovers_from_a_later_loss_and_from_loss_before_commit", async () => {
+  for (const commitFirst of [true, false]) {
+    const clock = new FakeReconnectClock();
+    const sockets: TransportFakeSocket[] = [];
+    const statuses: string[] = [];
+    let mints = 0;
+    const transport = new WebSocketAttachmentTransport(
+      "ws://example.test/ws", () => {
+        const socket = new TransportFakeSocket(1);
+        sockets.push(socket);
+        return socket as unknown as AttachmentWebSocket;
+      }, ["persea-handle.consumed"],
+      async () => { mints += 1; return Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze([`persea-handle.fresh-${mints}`]) }); },
+      () => 0.5, clock.runtime,
+    );
+    transport.bind({
+      openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: () => {},
+      reconnectStatus: (status) => { statuses.push(status.state); },
+    });
+    const first = transport.connect();
+    bindTransportSource(transport, first);
+    sockets[0].emit("close", { code: 1000, reason: "lease_held" });
+    equal(clock.pending(), 0, "a held lease did not stop automatic retries for the page's claim");
+    transport.takeControl(Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-handle.takeover"]) }));
+    equal(sockets.length, 2, "takeover did not open its replacement");
+    if (commitFirst) transport.connectionCommitted(2);
+    sockets[1].emit("close", { code: 1006, reason: "" });
+    equal(clock.pending(), 1, `loss ${commitFirst ? "after" : "before"} the takeover COMMIT left no retry armed`);
+    await clock.advance(250);
+    equal(mints, 1, "takeover loss did not mint a fresh endpoint");
+    equal(sockets.length, 3, "takeover loss did not reattach");
+    transport.connectionCommitted(3);
+    sockets[2].emit("close", { code: 1000, reason: "control_displaced" });
+    equal(clock.pending(), 0, "control moving elsewhere still auto-retried");
+    transport.detach();
+  }
+});
+
+test("server_proof_expiry_is_recoverable_loss", async () => {
+  const clock = new FakeReconnectClock();
+  const sockets: TransportFakeSocket[] = [];
+  const transport = new WebSocketAttachmentTransport(
+    "ws://example.test/ws", () => {
+      const socket = new TransportFakeSocket(1);
+      sockets.push(socket);
+      return socket as unknown as AttachmentWebSocket;
+    }, ["persea-handle.consumed"],
+    async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-handle.fresh"]) }),
+    () => 0.5, clock.runtime,
+  );
+  transport.bind({ openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: () => {} });
+  const first = transport.connect();
+  bindTransportSource(transport, first);
+  transport.connectionCommitted(first);
+  sockets[0].emit("close", { code: 1008, reason: "browser_liveness" });
+  await clock.advance(250);
+  equal(sockets.length, 2, "front-door proof expiry did not reattach with a fresh endpoint");
+  transport.detach();
+});
+
+test("page_fault_finalize_tells_the_page_and_leaves_manual_reconnect", async () => {
+  const clock = new FakeReconnectClock();
+  const sockets: TransportFakeSocket[] = [];
+  const closed: string[] = [];
+  const transport = new WebSocketAttachmentTransport(
+    "ws://example.test/ws", () => {
+      const socket = new TransportFakeSocket(1);
+      sockets.push(socket);
+      return socket as unknown as AttachmentWebSocket;
+    }, ["persea-handle.consumed"],
+    async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-handle.fresh"]) }),
+    () => 0.5, clock.runtime,
+  );
+  transport.bind({ openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: (_generation, reason) => { closed.push(reason); } });
+  const generation = transport.connect();
+  bindTransportSource(transport, generation);
+  transport.finalize(Object.freeze({ generation, cause: "ACTIVE_TUPLE_MISMATCH" }));
+  equal(closed.join(","), "attachment_fault", "a page fault left the page without a close to render");
+  equal(sockets[0].readyState, 3, "a page fault left its socket open");
+  transport.finalize(Object.freeze({ generation, cause: "ACTIVE_TUPLE_MISMATCH" }));
+  equal(closed.length, 1, "a repeated finalize notified twice");
+  await clock.advance(MAX_RECONNECT_ELAPSED_MS);
+  equal(sockets.length, 1, "a page fault retried automatically");
+  transport.attachAgain();
+  await clock.advance(0);
+  equal(sockets.length, 2, "Reconnect after a page fault did not reattach");
+  transport.detach();
 });
 
 test("unexpected_close_reconnects_with_only_the_fresh_inventory_capability", async () => {
@@ -1047,7 +1295,7 @@ test("reconnect_source_is_captured_from_prepare_and_is_immutable_within_each_gen
   sockets[1].emit("message", { data: encodeServerFrame(prepare({ source: "U".repeat(43), kind: "RECONNECT", epoch: 2n })) });
   equal(delivered, 2, "same-generation changed source reached the page");
   equal(closed.at(-1), "malformed_frame", "changed reconnect source did not fail closed");
-  equal(sockets[1].closes[0]?.code, 1002, "changed reconnect source was not closed as a protocol fault");
+  equal(sockets[1].closes[0]?.code, CLOSE_CLIENT_PROTOCOL_FAULT, "changed reconnect source was not closed as a protocol fault");
   transport.detach();
 });
 
@@ -1135,7 +1383,7 @@ test("current_socket_send_throw_is_owned_once_and_late_events_cannot_duplicate_r
   equal(closed.length, 1, "send throw did not notify exactly once");
   equal(closed[0].reason, "transport_send_failed");
   equal(sockets[0].closes.length, 1, "send throw did not retire the exact socket once");
-  equal(sockets[0].closes[0].code, 1011, "send throw was mislabeled orderly");
+  equal(sockets[0].closes[0].code, CLOSE_CLIENT_FAULT, "send throw was mislabeled orderly");
   equal(clock.pending(), 1, "send throw did not arm bounded reconnect");
 
   sockets[0].emit("error", {});
@@ -1195,8 +1443,8 @@ test("fault_close_is_abnormal_retry_disabled_and_manual_attach_again_only", asyn
   bindTransportSource(transport, generation);
   transport.finalize(Object.freeze({ generation, cause: "OUT_OF_STATE" }));
   equal(sockets[0].closes.length, 1);
-  equal(sockets[0].closes[0].code, 1002, "OUT_OF_STATE was mislabeled orderly");
-  sockets[0].emit("close", { code: 1002, reason: "OUT_OF_STATE" });
+  equal(sockets[0].closes[0].code, CLOSE_CLIENT_PROTOCOL_FAULT, "OUT_OF_STATE was mislabeled orderly");
+  sockets[0].emit("close", { code: CLOSE_CLIENT_PROTOCOL_FAULT, reason: "OUT_OF_STATE" });
   await clock.advance(MAX_RECONNECT_ELAPSED_MS);
   equal(endpoints, 0, "fault closure retried without explicit Attach Again");
   equal(sockets.length, 1, "fault closure created an automatic replacement socket");
@@ -1212,7 +1460,7 @@ test("fault_close_is_abnormal_retry_disabled_and_manual_attach_again_only", asyn
   const internal = new WebSocketAttachmentTransport("ws://example.test/ws", () => internalSocket as unknown as AttachmentWebSocket);
   internal.bind({ openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: () => {} });
   internal.finalize(Object.freeze({ generation: internal.connect(), cause: "RESOURCE_FAILURE" }));
-  equal(internalSocket.closes[0].code, 1011, "resource fault did not use an abnormal internal-error close");
+  equal(internalSocket.closes[0].code, CLOSE_CLIENT_FAULT, "resource fault did not use an abnormal client-fault close");
 
   const lossClock = new FakeReconnectClock();
   const lossSocket = new TransportFakeSocket(1);
@@ -1297,7 +1545,7 @@ test("immediate_attach_again_retries_lease_held_without_protocol_fault", async (
   transport.detach();
 });
 
-test("never_resolving_endpoint_is_aborted_and_exhausts_the_global_budget", async () => {
+test("never_resolving_endpoint_is_aborted_and_goes_offline_after_the_fast_phase", async () => {
   const clock = new FakeReconnectClock();
   const signals: AbortSignal[] = [];
   const statuses: string[] = [];
@@ -1312,16 +1560,17 @@ test("never_resolving_endpoint_is_aborted_and_exhausts_the_global_budget", async
   });
   bindTransportSource(transport);
   transport.attachAgain();
-  await clock.runUntilIdle();
+  await clock.advance(MAX_RECONNECT_ELAPSED_MS + MAX_RECONNECT_ATTEMPT_MS);
   assert(signals.length > 0 && signals.length <= MAX_RECONNECT_ATTEMPTS, "never-resolving endpoint attempts were not bounded");
   assert(signals.every((signal) => signal.aborted), "timed-out inventory acquisition was not aborted");
   equal(sockets, 0, "never-resolving inventory created a socket");
-  assert(statuses.at(-1)?.startsWith("EXHAUSTED:"), "never-resolving inventory did not publish EXHAUSTED");
-  assert(clock.now() <= MAX_RECONNECT_ELAPSED_MS, "global retry budget was exceeded");
+  assert(statuses.at(-1)?.startsWith("OFFLINE:"), "never-resolving inventory did not go OFFLINE within the fast phase and one attempt");
+  transport.detach();
+  equal(clock.pending(), 0);
 });
 
 for (const socketState of [0, 1] as const) {
-  test(socketState === 0 ? "forever_connecting_socket_is_closed_and_exhausts" : "open_without_commit_is_closed_and_exhausts", async () => {
+  test(socketState === 0 ? "forever_connecting_socket_is_closed_and_goes_offline" : "open_without_commit_is_closed_and_goes_offline", async () => {
     const clock = new FakeReconnectClock();
     const sockets: TransportFakeSocket[] = [];
     const protocols: string[][] = [];
@@ -1343,12 +1592,15 @@ for (const socketState of [0, 1] as const) {
     });
     bindTransportSource(transport);
     transport.attachAgain();
-    await clock.runUntilIdle();
+    await clock.advance(MAX_RECONNECT_ELAPSED_MS + MAX_RECONNECT_ATTEMPT_MS);
     assert(sockets.length > 0 && sockets.length <= MAX_RECONNECT_ATTEMPTS, "socket-to-COMMIT attempts were not bounded");
-    assert(sockets.every((socket) => socket.closes.length === 1 && socket.closes[0].code === 1011), "timed-out socket was not closed abnormally exactly once");
+    // A browser refuses an invalid close code and leaves the socket open, so
+    // the attempt would keep its server attachment and lease: each abandoned
+    // socket must actually reach CLOSED.
+    assert(sockets.every((socket) => socket.readyState === 3 && socket.closes.length === 1 && socket.closes[0].code === CLOSE_CLIENT_FAULT), "timed-out socket was not closed exactly once with a browser-accepted code");
     assert(protocols.every((values) => values.length === 1 && values[0].startsWith("persea-handle.fresh-") && !values.includes("persea-handle.consumed")), "reconnect reused a consumed capability");
-    equal(statuses.at(-1), "EXHAUSTED", "socket-to-COMMIT hang did not end visibly");
-    assert(clock.now() <= MAX_RECONNECT_ELAPSED_MS, "socket-to-COMMIT exceeded the global budget");
+    equal(statuses.at(-1), "OFFLINE", "socket-to-COMMIT hang did not go OFFLINE visibly");
+    transport.detach();
   });
 }
 

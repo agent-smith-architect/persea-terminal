@@ -137,10 +137,12 @@ function failAll(reason = "unified_unavailable"): Record<string, unknown> {
   return snapshot();
 }
 
-function exhaustAll(reason = "retry_budget_exhausted"): Record<string, unknown> {
+// Without a reason: the fast phase is spent and the transport went OFFLINE.
+// With one: an unrecoverable EXHAUSTED outcome.
+function exhaustAll(reason?: string): Record<string, unknown> {
   for (const pane of mounted) {
     pane.page.transportClosed(pane.generation, "transport_error");
-    pane.page.reconnectStatus({ state: "EXHAUSTED", attempt: 6, reason });
+    pane.page.reconnectStatus(reason === undefined ? { state: "OFFLINE", attempt: 6 } : { state: "EXHAUSTED", attempt: 6, reason });
   }
   return snapshot();
 }

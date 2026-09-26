@@ -631,6 +631,9 @@ export class WorkspacePage {
           pane.cell.setState(paneStateFromClose(reason));
         },
         reconnectStatus: (status) => {
+          // OFFLINE keeps probing on its own; the pane says so and offers
+          // an immediate retry beside it.
+          if (status.state === "OFFLINE") pane.cell.setState(Object.freeze({ kind: "failed", reason: "reconnect_offline" }));
           if (status.state === "EXHAUSTED") pane.cell.setState(Object.freeze({ kind: "failed", reason: status.reason ?? "reconnect_exhausted" }));
         },
         projectionDetail: (detail) => {

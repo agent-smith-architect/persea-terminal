@@ -165,7 +165,9 @@ const closeOverlays = source.match(/private closePresentationOverlays\([^)]*\): 
 for (const required of ["setViewPopover(false, true)", "setIdentityDetails(false, true)", "setSheet(false, true)", "closeExplainer(true)", "this.composer?.closeTypographyPopover(true)", 'this.popoverOwner = "none"']) {
   assert(closeOverlays.includes(required), `lifecycle overlay teardown is missing ${required}`);
 }
-assert((source.match(/this\.closePresentationOverlays\([^)]*\);/g) ?? []).length === 7, "destroy, transport close, reconnect/exhaustion, failure, replacement and explicit refit must share overlay teardown");
+// Offline and exhaustion render through the failure notice, which owns their
+// teardown, so they add no call site of their own.
+assert((source.match(/this\.closePresentationOverlays\([^)]*\);/g) ?? []).length === 6, "destroy, transport close, reconnect attempts, failure (including offline and exhaustion), replacement and explicit refit must share overlay teardown");
 assert(/this\.pendingRefit = \{[\s\S]*?\};\n\s*this\.closePresentationOverlays\(\);/.test(source), "explicit refit must publish its exact owner and tear down presentation overlays before awaiting the width transaction");
 
 // every programmatic text source converges on the one xterm paste

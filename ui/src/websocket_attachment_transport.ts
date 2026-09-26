@@ -22,7 +22,11 @@ export type AttachmentTransportSink = Readonly<{
 
 export type AttachmentEndpoint = Readonly<{ url: string; protocols: readonly string[] }>;
 export type EndpointReplacementReason = "takeover_requested" | "session_switch";
-export type ReconnectStatus = Readonly<{ state: "DETACHED" | "WAITING" | "ATTEMPTING" | "CONNECTED" | "EXHAUSTED"; attempt: number; delayMs?: number; reason?: string }>;
+// OFFLINE: the fast retry phase is spent. Recovery continues on its own —
+// a slow probe while the page is visible, and an immediate one when the
+// network or the page comes back — and the page offers Reconnect meanwhile.
+// EXHAUSTED is reserved for outcomes a retry cannot change.
+export type ReconnectStatus = Readonly<{ state: "DETACHED" | "WAITING" | "ATTEMPTING" | "CONNECTED" | "OFFLINE" | "EXHAUSTED"; attempt: number; delayMs?: number; reason?: string }>;
 export type HistoryDepthOutcome =
   | Readonly<{ status: "pending_reader"; desired: HistoryChoice; effective: HistoryChoice; reason: import("./continuous_surface/types").ReconciliationDeferReason }>
   | Readonly<{ status: "effective"; desired: HistoryChoice; effective: HistoryChoice }>
@@ -51,7 +55,33 @@ export type ReconnectRuntime = Readonly<{
   now(): number;
   setTimeout(callback: () => void, delayMs: number): unknown;
   clearTimeout(handle: unknown): void;
+  // Signals that connectivity or the page may be back (online, a visible
+  // page, a restored page, focus). Absent means no such signals.
+  subscribeWake?(callback: () => void): () => void;
+  // Absent means always visible.
+  visible?(): boolean;
 }>;
+
+export const browserReconnectRuntime: ReconnectRuntime = Object.freeze({
+  now: () => Date.now(),
+  setTimeout: (callback: () => void, delayMs: number) => globalThis.setTimeout(callback, delayMs),
+  clearTimeout: (handle: unknown) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
+  subscribeWake: (callback: () => void) => {
+    const wake = () => callback();
+    const visible = () => { if (document.visibilityState === "visible") callback(); };
+    globalThis.addEventListener("online", wake);
+    globalThis.addEventListener("focus", wake);
+    globalThis.addEventListener("pageshow", wake);
+    document.addEventListener("visibilitychange", visible);
+    return () => {
+      globalThis.removeEventListener("online", wake);
+      globalThis.removeEventListener("focus", wake);
+      globalThis.removeEventListener("pageshow", wake);
+      document.removeEventListener("visibilitychange", visible);
+    };
+  },
+  visible: () => document.visibilityState === "visible",
+});
 
 export type AttachmentWebSocket = Pick<WebSocket,
   "readyState" | "bufferedAmount" | "send" | "close" | "addEventListener"
@@ -76,11 +106,29 @@ type ActiveLiveness = Readonly<{
 
 const SOCKET_CONNECTING = 0;
 const SOCKET_OPEN = 1;
+// The fast phase of one loss episode: up to MAX_RECONNECT_ATTEMPTS attempts
+// within MAX_RECONNECT_ELAPSED_MS. After it, the episode goes OFFLINE and
+// probes every OFFLINE_RETRY_MS while the page is visible, so an outage longer
+// than the fast phase still recovers without the operator.
 export const MAX_RECONNECT_ATTEMPTS = 6;
 export const MAX_RECONNECT_ELAPSED_MS = 30_000;
 export const MAX_RECONNECT_ATTEMPT_MS = 5_000;
+export const OFFLINE_RETRY_MS = 15_000;
+// A COMMIT ends a loss episode only once the connection has stayed up this
+// long (one full liveness proof lifetime). A connection that commits and then
+// drops at once keeps its episode, so a commit-then-close loop spends the fast
+// phase and settles into OFFLINE probing instead of hammering the server.
+export const STABLE_CONNECTION_MS = 20_000;
 const RECONNECT_BASE_DELAY_MS = 250;
 const RECONNECT_MAX_DELAY_MS = 4_000;
+// Page script may close a WebSocket only with 1000 or an application code in
+// 3000–4999. Any other code throws InvalidAccessError and leaves the socket
+// open after this transport has already let go of it, so an abandoned attempt
+// would keep its server attachment and control lease alive. Client faults use
+// application codes; the reason text carries the specific cause.
+export const CLOSE_ORDERLY = 1000;
+export const CLOSE_CLIENT_PROTOCOL_FAULT = 4002;
+export const CLOSE_CLIENT_FAULT = 4011;
 export const HISTORY_DEPTH_PENDING_TIMEOUT_MS = 60_000;
 
 function historyProtocolValue(protocols?: readonly string[]): HistoryChoice | undefined {
@@ -101,6 +149,13 @@ function withHistoryProtocol(protocols: readonly string[], desired?: HistoryChoi
 const protocolFaults = new Set<FinalizeCause>([
   "MALFORMED_FRAME", "OUT_OF_STATE", "ACTIVE_TUPLE_MISMATCH", "ADMISSION_INVARIANT",
 ]);
+const protocolFaultReasons = new Set(["malformed_frame", "non_text_frame", "liveness_protocol", "refusal_protocol"]);
+
+function closeSocket(socket: AttachmentWebSocket, code: number, reason: string): void {
+  // Every code used here is one the browser accepts; a throw can only mean
+  // the socket is already closing, which is the outcome wanted.
+  try { socket.close(code, reason.slice(0, 64)); } catch { /* already closing */ }
+}
 // The takeover policy set is the close policy's exported classification —
 // never a private copy, so the transport and the page cannot drift apart.
 const takeoverPolicyReasons = UNIFIED_TAKEOVER_REASONS;
@@ -115,6 +170,9 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
   private retryStartedAt?: number;
   private retryToken = 0;
   private retryDisabled = false;
+  private offline = false;
+  private committedAt?: number;
+  private unsubscribeWake?: () => void;
   private activeAttempt?: ReconnectAttempt;
   private activeLiveness?: ActiveLiveness;
   private preparedSource?: string;
@@ -136,11 +194,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     private protocols?: readonly string[],
     private readonly freshEndpoint?: FreshEndpointProvider,
     private readonly random: () => number = Math.random,
-    private readonly retryRuntime: ReconnectRuntime = Object.freeze({
-      now: () => Date.now(),
-      setTimeout: (callback, delayMs) => globalThis.setTimeout(callback, delayMs),
-      clearTimeout: (handle) => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
-    }),
+    private readonly retryRuntime: ReconnectRuntime = browserReconnectRuntime,
     private readonly livenessRuntime: TransportLivenessRuntime = browserTransportLivenessRuntime,
     private readonly livenessNonce: TransportLivenessNonceSource = secureTransportLivenessNonce,
     // Appended at the tail so the established positional callers are untouched.
@@ -214,10 +268,11 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     const socket = this.socket;
     this.cancelLiveness(socket, intent.generation);
     this.socket = undefined;
+    if (socket) closeSocket(socket, protocolFaults.has(intent.cause) ? CLOSE_CLIENT_PROTOCOL_FAULT : CLOSE_CLIENT_FAULT, intent.cause);
+    // The page stops this generation, so it must also be told it ended:
+    // otherwise its last frame stays on screen with no notice and no action.
+    this.notifyClosed(intent.generation, "attachment_fault");
     this.closedGeneration = Math.max(this.closedGeneration, intent.generation);
-    if (!socket) return;
-    const code = protocolFaults.has(intent.cause) ? 1002 : 1011;
-    try { socket.close(code, intent.cause.slice(0, 64)); } catch { /* the page already owns the terminal fault */ }
   }
 
   private recordPreparedSource(generation: number, source: string): void {
@@ -232,8 +287,10 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
   connectionCommitted(generation: number): void {
     if (generation !== this.generation) return;
     this.cancelRetryWork();
-    this.retryAttempt = 0;
-    this.retryStartedAt = undefined;
+    this.setOffline(false);
+    // The episode's budget is kept until this connection proves stable; see
+    // STABLE_CONNECTION_MS and beginLossEpisode.
+    this.committedAt = this.retryRuntime.now();
     this.sink?.reconnectStatus?.(Object.freeze({ state: "CONNECTED", attempt: 0 }));
   }
 
@@ -247,14 +304,16 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     const supersededGeneration = this.generation;
     this.retryDisabled = false;
     this.cancelRetryWork();
+    this.setOffline(false);
     if (superseded && this.socket === superseded) {
       this.cancelLiveness(superseded, supersededGeneration);
       this.socket = undefined;
       this.notifyClosed(supersededGeneration, "attach_again_superseded");
-      try { superseded.close(1000, "attach_again_superseded"); } catch { /* manual supersession is best effort */ }
+      closeSocket(superseded, CLOSE_ORDERLY, "attach_again_superseded");
     }
     this.retryAttempt = 0;
     this.retryStartedAt = this.retryRuntime.now();
+    this.committedAt = undefined;
     this.scheduleReconnect(0);
   }
 
@@ -262,14 +321,19 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     this.replaceEndpoint(endpoint, "takeover_requested");
   }
 
-  // One endpoint-replacement primitive. Takeover keeps its landed behaviour;
-  // a session switch additionally starts a fresh finite retry budget for the
-  // newly committed identity before opening its socket.
+  // One endpoint-replacement primitive. A session switch additionally starts
+  // a fresh retry budget for the newly committed identity before opening its
+  // socket. Neither leaves retries disabled: the replacement is an ordinary
+  // attachment, so a later loss — even before its COMMIT — recovers like any
+  // other. A close that refuses control (control_displaced,
+  // takeover_superseded) still stops recovery in onClose.
   replaceEndpoint(endpoint: AttachmentEndpoint, reason: EndpointReplacementReason): void {
     if (!endpoint || endpoint.url.length === 0 || endpoint.protocols.length === 0) throw new Error("takeover endpoint is unavailable");
-    this.retryDisabled = reason === "takeover_requested";
+    this.retryDisabled = false;
     this.cancelRetryWork();
     if (reason === "session_switch") {
+      this.setOffline(false);
+      this.committedAt = undefined;
       this.retryAttempt = 0;
       this.retryStartedAt = this.retryRuntime.now();
       this.preparedSource = undefined;
@@ -282,7 +346,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
       this.cancelLiveness(prior, priorGeneration);
       this.socket = undefined;
       this.notifyClosed(priorGeneration, reason);
-      try { prior.close(1000, reason); } catch { /* the explicit replacement already owns the next generation */ }
+      closeSocket(prior, CLOSE_ORDERLY, reason);
     }
     this.url = endpoint.url;
     this.protocols = [...endpoint.protocols];
@@ -320,6 +384,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     this.retryDisabled = true;
     this.clearPendingHistoryTimer();
     this.cancelRetryWork();
+    this.setOffline(false);
     this.disconnect(reason);
     this.sink?.reconnectStatus?.(Object.freeze({ state: "DETACHED", attempt: this.retryAttempt, reason }));
   }
@@ -328,6 +393,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     this.retryDisabled = true;
     this.clearPendingHistoryTimer();
     this.cancelRetryWork();
+    this.setOffline(false);
     this.disconnect("destroyed");
   }
 
@@ -339,7 +405,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     this.cancelLiveness(socket, generation);
     this.socket = undefined;
     this.notifyClosed(generation, reason);
-    try { socket.close(1000, reason.slice(0, 64)); } catch { /* notification and socket detachment already happened */ }
+    closeSocket(socket, CLOSE_ORDERLY, reason);
   }
 
   private openSocket(url: string, protocols?: readonly string[], attempt?: ReconnectAttempt): number {
@@ -443,7 +509,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
       this.cancelRetryWork();
       return;
     }
-    this.ensureRetrySession();
+    this.beginLossEpisode();
     this.scheduleReconnect();
   }
 
@@ -457,10 +523,11 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     if (!retryable) {
       this.retryDisabled = true;
       this.cancelRetryWork();
+      this.setOffline(false);
     }
-    try { socket.close(reason === "malformed_frame" || reason === "non_text_frame" || reason === "liveness_protocol" ? 1002 : 1011, reason.slice(0, 64)); } catch { /* notification already happened */ }
+    closeSocket(socket, protocolFaultReasons.has(reason) ? CLOSE_CLIENT_PROTOCOL_FAULT : CLOSE_CLIENT_FAULT, reason);
     if (retryable) {
-      this.ensureRetrySession();
+      this.beginLossEpisode();
       this.scheduleReconnect();
     }
     return true;
@@ -563,9 +630,44 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
 
   private ensureRetrySession(): void {
     if (this.retryStartedAt !== undefined) return;
+    this.startEpisode();
+  }
+
+  // Judged once, at the moment a connection is lost: only a connection that
+  // stayed committed for STABLE_CONNECTION_MS ends the previous episode.
+  private beginLossEpisode(): void {
+    const committedAt = this.committedAt;
+    this.committedAt = undefined;
+    const stable = committedAt !== undefined && this.retryRuntime.now() - committedAt >= STABLE_CONNECTION_MS;
+    if (this.retryStartedAt !== undefined && !stable) return;
+    this.startEpisode();
+  }
+
+  private startEpisode(): void {
+    this.setOffline(false);
     this.retryAttempt = 0;
     this.retryStartedAt = this.retryRuntime.now();
     this.retryToken++;
+  }
+
+  private setOffline(offline: boolean): void {
+    this.offline = offline;
+    if (offline && !this.unsubscribeWake) {
+      this.unsubscribeWake = this.retryRuntime.subscribeWake?.(() => this.onWake());
+    } else if (!offline && this.unsubscribeWake) {
+      const unsubscribe = this.unsubscribeWake;
+      this.unsubscribeWake = undefined;
+      unsubscribe();
+    }
+  }
+
+  // Connectivity or the page may be back: probe now instead of waiting for
+  // the slow timer. Several signals in a row collapse into one probe.
+  private onWake(): void {
+    if (this.retryDisabled || !this.offline || this.activeAttempt) return;
+    if (this.retryTimer !== undefined) this.retryRuntime.clearTimeout(this.retryTimer);
+    this.retryTimer = undefined;
+    this.scheduleReconnect(0);
   }
 
   private cancelRetryWork(): void {
@@ -592,25 +694,48 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     return Math.max(0, MAX_RECONNECT_ELAPSED_MS - Math.max(0, this.retryRuntime.now() - this.retryStartedAt));
   }
 
-  private exhaustRetry(reason = "retry_budget_exhausted"): void {
+  // Outcomes a retry cannot change: an unresolvable identity, or no way to
+  // mint an endpoint at all.
+  private exhaustRetry(reason: string): void {
     const attempt = this.retryAttempt;
     this.retryDisabled = true;
     this.cancelRetryWork();
+    this.setOffline(false);
     this.sink?.reconnectStatus?.(Object.freeze({ state: "EXHAUSTED", attempt, reason }));
   }
 
+  private fastPhaseSpent(): boolean {
+    return this.retryAttempt >= MAX_RECONNECT_ATTEMPTS || this.remainingRetryMs() <= 0;
+  }
+
+  private jitter(): number {
+    return 0.8 + Math.min(1, Math.max(0, this.random())) * 0.4;
+  }
+
   private scheduleReconnect(delayOverride?: number): void {
-    if (this.retryDisabled || !this.freshEndpoint || this.retryTimer !== undefined || this.activeAttempt) return;
-    this.ensureRetrySession();
-    const remaining = this.remainingRetryMs();
-    if (this.retryAttempt >= MAX_RECONNECT_ATTEMPTS || remaining <= 0) {
-      this.exhaustRetry();
+    if (this.retryDisabled || this.retryTimer !== undefined || this.activeAttempt) return;
+    if (!this.freshEndpoint && !this.identityEndpoint) {
+      this.exhaustRetry("reconnect_unavailable");
       return;
     }
-    const exponential = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * (2 ** this.retryAttempt));
-    const jitter = 0.8 + Math.min(1, Math.max(0, this.random())) * 0.4;
-    const delay = Math.min(remaining, delayOverride ?? Math.round(exponential * jitter));
+    this.ensureRetrySession();
     const token = this.retryToken;
+    if (this.offline || this.fastPhaseSpent()) {
+      this.setOffline(true);
+      // A hidden page waits for its wake signal rather than probing blind.
+      const visible = this.retryRuntime.visible?.() ?? true;
+      const delay = delayOverride ?? Math.round(OFFLINE_RETRY_MS * this.jitter());
+      this.sink?.reconnectStatus?.(Object.freeze({ state: "OFFLINE", attempt: this.retryAttempt, ...(visible ? { delayMs: delay } : {}) }));
+      if (!visible) return;
+      this.retryTimer = this.retryRuntime.setTimeout(() => {
+        this.retryTimer = undefined;
+        void this.attemptReconnect(token);
+      }, delay);
+      return;
+    }
+    const remaining = this.remainingRetryMs();
+    const exponential = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * (2 ** this.retryAttempt));
+    const delay = Math.min(remaining, delayOverride ?? Math.round(exponential * this.jitter()));
     this.sink?.reconnectStatus?.(Object.freeze({ state: "WAITING", attempt: this.retryAttempt + 1, delayMs: delay }));
     this.retryTimer = this.retryRuntime.setTimeout(() => {
       this.retryTimer = undefined;
@@ -650,9 +775,8 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
 
   private async attemptReconnect(token: number): Promise<void> {
     if (this.retryDisabled || token !== this.retryToken || (!this.freshEndpoint && !this.identityEndpoint)) return;
-    const remaining = this.remainingRetryMs();
-    if (remaining <= 0 || this.retryAttempt >= MAX_RECONNECT_ATTEMPTS) {
-      this.exhaustRetry();
+    if (!this.offline && this.fastPhaseSpent()) {
+      this.scheduleReconnect();
       return;
     }
     const attempt: ReconnectAttempt = {
@@ -661,11 +785,10 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
       controller: new AbortController(),
     };
     this.activeAttempt = attempt;
-    const deadline = Math.min(MAX_RECONNECT_ATTEMPT_MS, remaining);
     attempt.deadlineTimer = this.retryRuntime.setTimeout(() => {
       attempt.deadlineTimer = undefined;
       this.expireAttempt(attempt);
-    }, deadline);
+    }, MAX_RECONNECT_ATTEMPT_MS);
     this.sink?.reconnectStatus?.(Object.freeze({ state: "ATTEMPTING", attempt: attempt.attempt }));
     try {
       const endpoint = await this.resolveReconnectEndpoint(attempt);
@@ -683,7 +806,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
         this.cancelLiveness(socket, generation);
         this.socket = undefined;
         if (generation !== undefined) this.notifyClosed(generation, "reconnect_attempt_failed");
-        try { socket.close(1011, "reconnect_attempt_failed"); } catch { /* exact failed attempt is detached */ }
+        closeSocket(socket, CLOSE_CLIENT_FAULT, "reconnect_attempt_failed");
       }
       // A terminal identity outcome ends the retry with its own code; anything
       // else is ordinary infrastructure loss and stays within the budget.
@@ -708,7 +831,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
       this.cancelLiveness(socket, generation);
       this.socket = undefined;
       if (generation !== undefined) this.notifyClosed(generation, "reconnect_attempt_timeout");
-      try { socket.close(1011, "reconnect_attempt_timeout"); } catch { /* exact attempt is already detached */ }
+      closeSocket(socket, CLOSE_CLIENT_FAULT, "reconnect_attempt_timeout");
     }
     this.scheduleReconnect();
   }

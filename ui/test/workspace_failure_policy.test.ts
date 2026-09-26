@@ -68,9 +68,9 @@ collect(uiLiveness, /\.fail\("([a-z0-9_]+)"\)/g, false);
 // The controller's identity refusals and the workspace's own attach-time codes.
 const uiController = fs.readFileSync(path.join(uiRoot, "src", "unified_pane_controller.ts"), "utf8");
 collect(uiController, /new ReconnectRefusal\("([a-z0-9_]+)"\)/g, false);
-for (const code of ["rate_limited", "attach_failed", "reconnect_exhausted", "websocket_1006", "websocket_1011"]) emitted.add(code);
+for (const code of ["rate_limited", "attach_failed", "reconnect_exhausted", "reconnect_offline", "websocket_1006", "websocket_1011"]) emitted.add(code);
 for (const set of [UNIFIED_TAKEOVER_REASONS, UNIFIED_TERMINAL_REASONS, UNIFIED_REATTACH_REASONS, UNIFIED_INTERNAL_REASONS, UNIFIED_SUBSCRIBER_CLOSE_REASONS]) for (const reason of set) emitted.add(reason);
-for (const sentinel of ["closed", "canceled", "fault", "subscriber_lagged", "lease_held", "control_displaced", "takeover_superseded", "stale_target", "session_gone", "identity_ambiguous", "identity_invalid", "source_binding_unavailable", "retry_budget_exhausted", "input_refused", "page_hidden", "malformed_frame"]) {
+for (const sentinel of ["closed", "canceled", "fault", "subscriber_lagged", "lease_held", "control_displaced", "takeover_superseded", "stale_target", "session_gone", "identity_ambiguous", "identity_invalid", "source_binding_unavailable", "reconnect_unavailable", "attachment_fault", "input_refused", "page_hidden", "malformed_frame"]) {
   assert.ok(emitted.has(sentinel), `extraction lost a known emitted reason: ${sentinel}`);
 }
 assert.ok(emitted.size >= 40, `emitted reason extraction is implausibly small: ${emitted.size}`);
