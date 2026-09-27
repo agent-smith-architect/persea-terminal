@@ -4,6 +4,8 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+## 0.1.9 — 2026-09-27
+
 ### Changed
 
 - Each open terminal page now costs the server about 64 KiB of connection buffers instead of 32 MiB. With four pages open, the front door's memory high-water mark fell from about 80 MiB to about 22 MiB in testing.
@@ -14,6 +16,10 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 ### Fixed
 
 - A page that kept answering the server's connection checks but stopped taking in terminal output kept its connection, and control of the session, indefinitely. The server now closes such a connection when output has waited 30 seconds without progress. A page that works again reconnects by itself.
+
+### Testing notes
+
+- Tested on a local stack in desktop Chromium through a link limited to 32 KiB/s, with 150 ms of delay in each direction. 11 seconds after about 1 MiB of output, a page that was still taking it in refused a typed command: no key reached the shell and nothing more was sent until Resume typing was pressed, and the command typed after that ran. On this link the notice appeared about 12 seconds after typing began, because it waits behind output already on its way to the page; keys typed meanwhile were not sent either. Real mobile networks and iPhone keyboards were not tested.
 
 ## 0.1.8 — 2026-09-27
 
