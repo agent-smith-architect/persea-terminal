@@ -113,17 +113,22 @@ func TestRecordingReaderFullQueuesAndInflightWritesRetainOwnership(t *testing.T)
 	if got := effects.readers.snapshot(); got.Events != readers*fullTail {
 		t.Fatalf("queued + in-flight=%+v", got)
 	}
+	// Past its byte bound a tail is not evicted and not copied to: it catches
+	// up from the journal, keeping exactly what it already owns.
 	_ = effects.publishEvent(key, unifiedjournal.Event{Kind: unifiedjournal.RecordOutput, Sequence: fullTail + 2, Payload: payload})
 	for i, tail := range tails {
-		if tail.closeReason() != proto.SubscriberClosedLagged || tail.closeLimit() != tailLimitQueueBytes {
-			t.Fatalf("tail %d past its byte bound: reason=%q limit=%q", i, tail.closeReason(), tail.closeLimit())
+		if tail.closeReason() != "" || !tail.data.isCatchingUp() || b1SubscriberCount(effects, key) != readers {
+			t.Fatalf("tail %d past its byte bound: reason=%q limit=%q catching up=%v", i, tail.closeReason(), tail.closeLimit(), tail.data.isCatchingUp())
 		}
+	}
+	if got := effects.readers.snapshot(); got.Events != readers*fullTail {
+		t.Fatalf("a tail past its byte bound was copied to: %+v", got)
 	}
 	for _, cancel := range cancels {
 		cancel()
 	}
 	if got := effects.readers.snapshot(); got.Events != readers || got.Readers != readers || got.Bytes != readers*(recordingWriterBytes+recordingReaderFloor) {
-		t.Fatalf("eviction must drain queued bytes but retain actual writes: %+v", got)
+		t.Fatalf("cancellation must drain queued bytes but retain actual writes: %+v", got)
 	}
 	for i, tail := range tails {
 		event := active[i]
@@ -157,11 +162,15 @@ func TestRecordingTailAbsorbsSmallRecordsUpToTheByteBound(t *testing.T) {
 		t.Fatalf("burst ownership=%+v", got)
 	}
 	_ = effects.publishEvent(key, unifiedjournal.Event{Kind: unifiedjournal.RecordOutput, Sequence: count + 2, Payload: payload})
-	if b1SubscriberCount(effects, key) != 0 || tail.closeReason() != proto.SubscriberClosedLagged || tail.closeLimit() != tailLimitQueueBytes {
-		t.Fatalf("byte overflow: reason=%q limit=%q", tail.closeReason(), tail.closeLimit())
+	if b1SubscriberCount(effects, key) != 1 || tail.closeReason() != "" || !tail.data.isCatchingUp() {
+		t.Fatalf("byte overflow: reason=%q limit=%q catching up=%v, want catching up", tail.closeReason(), tail.closeLimit(), tail.data.isCatchingUp())
 	}
+	if got := effects.readers.snapshot(); int64(got.Events) != count || got.Bytes != recordingWriterBytes+count*cost {
+		t.Fatalf("overflow copied past the byte bound or dropped owned records: %+v", got)
+	}
+	cancel()
 	if got := effects.readers.snapshot(); got.Events != 0 {
-		t.Fatalf("eviction kept queued records: %+v", got)
+		t.Fatalf("cancellation kept queued records: %+v", got)
 	}
 }
 
@@ -371,8 +380,11 @@ func TestRecordingReaderZeroByteEventsStillOwnBytes(t *testing.T) {
 		t.Fatalf("zero-byte events escaped byte charge: %+v", got)
 	}
 	_ = effects.publishEvent(key, unifiedjournal.Event{Kind: unifiedjournal.RecordGeometry, Sequence: count + 2, Geometry: unifiedjournal.Geometry{Columns: 80, Rows: 24}})
-	if tail.closeReason() != proto.SubscriberClosedLagged || tail.closeLimit() != tailLimitQueueBytes {
-		t.Fatalf("geometry overflow: reason=%q limit=%q", tail.closeReason(), tail.closeLimit())
+	if tail.closeReason() != "" || !tail.data.isCatchingUp() {
+		t.Fatalf("geometry overflow: reason=%q limit=%q catching up=%v, want catching up", tail.closeReason(), tail.closeLimit(), tail.data.isCatchingUp())
+	}
+	if got := effects.readers.snapshot(); got.Events != count {
+		t.Fatalf("geometry overflow copied past the byte bound: %+v", got)
 	}
 	cancel()
 	if got := effects.readers.snapshot(); got.Events != 1 || got.Readers != 1 {

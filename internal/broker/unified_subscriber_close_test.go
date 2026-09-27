@@ -8,7 +8,6 @@ import (
 	"io"
 	"net"
 	"path/filepath"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -29,6 +28,8 @@ import (
 // here is that EVERY provider-side subscriber removal is a typed close that
 // ends the attachment with a reconnectable reason, and that re-attaching on
 // the same session replays the journal INCLUDING the event that evicted it.
+// A reader that is merely slow is no longer removed at all: it catches up
+// from the journal on the same attachment.
 //
 // The harness is the real writer seam (unifiedAttachmentFrameWriter over a
 // lockedWriter) on a real journal realm; the downstream is a net.Pipe, whose
@@ -236,14 +237,18 @@ func (attachment *b1Attachment) replayBytes() []byte {
 // fsync.
 func b1Commit(t *testing.T, effects *UnifiedDevPaneEffects, key unifiedjournal.PaneKey, payload []byte) time.Duration {
 	t.Helper()
+	// Commits hold journalMu, as the retention runtime's do: a catching-up
+	// writer reads the journal concurrently under the same lock.
+	effects.journalMu.Lock()
 	record, err := effects.realm.Append(key, payload)
+	if err == nil {
+		err = effects.realm.Sync(key)
+	}
+	if err == nil {
+		err = effects.realm.AdvanceCommitted(key, record)
+	}
+	effects.journalMu.Unlock()
 	if err != nil {
-		t.Fatal(err)
-	}
-	if err := effects.realm.Sync(key); err != nil {
-		t.Fatal(err)
-	}
-	if err := effects.realm.AdvanceCommitted(key, record); err != nil {
 		t.Fatal(err)
 	}
 	started := time.Now()
@@ -268,16 +273,19 @@ func b1SubscriberOf(effects *UnifiedDevPaneEffects, key unifiedjournal.PaneKey) 
 	return nil
 }
 
-// TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable is regression test
-// A lagged subscriber closes within the publication-latency bound while
-// sibling subscriber counts remain unchanged. A wedged attachment must
-// receive a typed close without receiving the triggering event.
-func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T) {
+// TestUnifiedWedgedSubscriberCatchesUpFromTheJournal pins what a reader that
+// stops draining costs. It used to be evicted once its tail owned its byte
+// bound, and its page reloaded the whole history — on a slow link, straight
+// into the same overflow. Now publication stops copying to it without waiting
+// for it or disturbing its siblings, and when its peer reads again the same
+// attachment delivers every committed byte exactly once, in order: the queued
+// events, then the rest read from the journal, then the live queue again.
+func TestUnifiedWedgedSubscriberCatchesUpFromTheJournal(t *testing.T) {
 	const panes = 6
 	const wedgedIndex = panes - 1
 	const publishLatencyBound = 500 * time.Millisecond
 
-	realm := openRetentionRealm(t, "b1-subscriber-close")
+	realm := openRetentionRealm(t, "b1-subscriber-catch-up")
 	effects := &UnifiedDevPaneEffects{
 		realm: realm, active: map[string]unifiedjournal.PaneKey{},
 		subscribers: make(map[unifiedjournal.PaneKey]map[*unifiedDevSubscriber]struct{}),
@@ -302,13 +310,10 @@ func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T)
 	expected := make([][]byte, panes)
 	for index := range attachments {
 		attachments[index] = b1Open(t, effects, sessions[index], fmt.Sprintf("b1-source-%d", index+1))
-		if got := b1SubscriberCount(effects, keys[index]); got != 1 {
-			t.Fatalf("pane %d subscribers=%d after open, want 1", index+1, got)
-		}
 	}
-	siblingSubscribers := make([]*unifiedDevSubscriber, panes)
-	for index := range siblingSubscribers {
-		siblingSubscribers[index] = b1SubscriberOf(effects, keys[index])
+	subscribers := make([]*unifiedDevSubscriber, panes)
+	for index := range subscribers {
+		subscribers[index] = b1SubscriberOf(effects, keys[index])
 	}
 	var maxPublish time.Duration
 	publish := func(index int, payload []byte) {
@@ -318,73 +323,55 @@ func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T)
 		}
 	}
 	waitLive := func(index int, what string) {
-		pollUntil(t, 5*time.Second, what, func() bool {
+		pollUntil(t, 10*time.Second, what, func() bool {
 			live, _, _, _ := attachments[index].snapshot()
 			return bytes.Equal(live, expected[index])
 		})
 	}
-	// Precondition: every pane is live on its own tail.
+	// Precondition: every pane is live on its own queue.
 	for index := range attachments {
 		publish(index, []byte(fmt.Sprintf("[warm-%d]", index+1)))
 		waitLive(index, fmt.Sprintf("pane %d warm-up sentinel", index+1))
+		if subscribers[index].data.isCatchingUp() {
+			t.Fatalf("pane %d still catching up after its warm-up", index+1)
+		}
 	}
 
-	// 2. Wedge one attachment's downstream writer and keep unique output
-	// flowing on all six panes. The wedged tail owns the record its writer is
-	// parked on plus every record queued behind it, bounded by bytes: the
-	// wedged pane commits maximal 64 KiB records, so the triggering event is
-	// the publication that would take the tail past recordingTailBytes, and
-	// eviction cannot come before the tail owns fullTail records.
+	// 2. Wedge one attachment's peer and keep unique output flowing on all six
+	// panes, well past the wedged tail's byte bound: it owns the record its
+	// writer is parked on plus every record queued behind it.
 	const fullTail = recordingTailBytes / (64<<10 + recordingTailNodeBytes)
-	var logMu sync.Mutex
-	var logs bytes.Buffer
-	priorLogf := brokerLogf
-	brokerLogf = func(format string, args ...any) {
-		logMu.Lock()
-		defer logMu.Unlock()
-		_, _ = fmt.Fprintf(&logs, format+"\n", args...)
-	}
-	t.Cleanup(func() { brokerLogf = priorLogf })
 	attachments[wedgedIndex].wedge()
-	var trigger []byte
-	round := 0
-	for trigger == nil {
-		round++
-		if round > 2*fullTail {
-			t.Fatalf("the wedged subscriber was never evicted after %d publications", round)
-		}
+	for round := 1; round <= fullTail+16; round++ {
 		for index := 0; index < panes; index++ {
 			payload := []byte(fmt.Sprintf("[r%03d-p%d]", round, index+1))
 			if index == wedgedIndex {
 				payload = bytes.Repeat(payload, (64<<10)/len(payload)+1)[:64<<10]
 			}
 			publish(index, payload)
-			if index == wedgedIndex && b1SubscriberCount(effects, keys[wedgedIndex]) == 0 {
-				trigger = payload
-			}
 		}
-	}
-	if round <= fullTail {
-		t.Fatalf("eviction after %d publications: the tail was refused before it owned its %d-record byte bound", round, fullTail)
 	}
 	if maxPublish > publishLatencyBound {
-		t.Fatalf("S1: publication latency %v exceeded %v while one subscriber was wedged", maxPublish, publishLatencyBound)
+		t.Fatalf("publication latency %v exceeded %v while one subscriber was wedged", maxPublish, publishLatencyBound)
 	}
-	// the five sibling keys keep exactly the subscriber they had.
+	wedged := subscribers[wedgedIndex]
+	if b1SubscriberOf(effects, keys[wedgedIndex]) != wedged || wedged.closeReason() != "" {
+		t.Fatalf("the wedged subscriber was removed: reason=%q limit=%q", wedged.closeReason(), wedged.closeLimit())
+	}
+	if !wedged.data.isCatchingUp() {
+		t.Fatal("the wedged subscriber is still copied to past its byte bound")
+	}
+	if queued := wedged.data.len(); queued > fullTail {
+		t.Fatalf("the wedged tail holds %d records, more than its %d-record byte bound", queued, fullTail)
+	}
 	for index := 0; index < wedgedIndex; index++ {
-		if got := b1SubscriberCount(effects, keys[index]); got != 1 {
-			t.Fatalf("S1: sibling pane %d subscribers=%d after eviction, want 1", index+1, got)
+		if b1SubscriberOf(effects, keys[index]) != subscribers[index] {
+			t.Fatalf("sibling pane %d subscriber was replaced", index+1)
 		}
-		if b1SubscriberOf(effects, keys[index]) != siblingSubscribers[index] {
-			t.Fatalf("S1: sibling pane %d subscriber was replaced", index+1)
-		}
-	}
-	if evicted := siblingSubscribers[wedgedIndex]; evicted.closeReason() != proto.SubscriberClosedLagged || evicted.closeLimit() != tailLimitQueueBytes {
-		t.Fatalf("evicted subscriber closeReason=%q limit=%q want %q/%q", evicted.closeReason(), evicted.closeLimit(), proto.SubscriberClosedLagged, tailLimitQueueBytes)
 	}
 
-	// 3. The five healthy panes receive every sentinel in order and never
-	// reconnect: no control on their wire, socket still open, tail intact.
+	// 3. The five healthy panes receive every record in order and never
+	// reconnect: no control on their wire, socket still open.
 	for index := 0; index < wedgedIndex; index++ {
 		waitLive(index, fmt.Sprintf("pane %d full ordered output", index+1))
 		_, controls, closed, readErr := attachments[index].snapshot()
@@ -393,99 +380,34 @@ func TestUnifiedSubscriberLagClosesAttachmentTypedAndReconnectable(t *testing.T)
 		}
 	}
 
-	// 4. The wedged writer stays wedged: the peer never drains. Eviction closes
-	// the subscriber's tail, but the causal writer holds writer.mu inside
-	// writeEventLocked on a downstream write the peer will never complete.
-	// The broker must end the attachment
-	// itself within a bound that does not depend on the peer, and must never
-	// have delivered the triggering event on the old attachment.
+	// 4. The peer reads again. The same attachment catches up: every committed
+	// byte arrives exactly once, in order, with no verdict and no close.
+	attachments[wedgedIndex].unwedge()
+	waitLive(wedgedIndex, "the wedged attachment's catch-up")
+	pollUntil(t, 5*time.Second, "the caught-up subscriber rejoining the live queue", func() bool {
+		return !wedged.data.isCatchingUp()
+	})
+	if _, controls, closed, readErr := attachments[wedgedIndex].snapshot(); len(controls) != 0 || closed {
+		t.Fatalf("the caught-up attachment saw controls=%v closed=%v err=%v", controls, closed, readErr)
+	}
 	select {
 	case <-attachments[wedgedIndex].ended:
-	case <-time.After(unifiedSubscriberCloseGrace + 5*time.Second):
-		t.Fatalf("F1: the broker did not end the wedged attachment within %v of the eviction", unifiedSubscriberCloseGrace+5*time.Second)
-	}
-	if proto.ClassifyAttachmentError(string(proto.SubscriberClosedLagged)) != proto.AttachmentErrorFatal {
-		t.Fatalf("close code %q is not a fatal attachment code: the front door would not close the socket with it", proto.SubscriberClosedLagged)
-	}
-	// The operator log names the bound behind the reconnect.
-	pollUntil(t, 5*time.Second, "subscriber_closed log naming its limit", func() bool {
-		logMu.Lock()
-		defer logMu.Unlock()
-		return strings.Contains(logs.String(), `event=subscriber_closed reason="subscriber_lagged" limit="queue_bytes"`)
-	})
-	// Only now does the peer read again, and only to observe what the broker
-	// left it: the connection is closed, nothing after the last frame it
-	// took, no typed control — an unbuffered pipe to a peer that was not
-	// reading cannot carry one; the verdict is recorded on the subscriber
-	// and in the broker journal, and the front door turns the close into a
-	// reconnect.
-	attachments[wedgedIndex].unwedge()
-	pollUntil(t, 5*time.Second, "closure observed on the wedged attachment", func() bool {
-		_, _, closed, _ := attachments[wedgedIndex].snapshot()
-		return closed
-	})
-	live, controls, closed, readErr := attachments[wedgedIndex].snapshot()
-	if len(controls) != 0 {
-		t.Fatalf("a peer that never read received controls=%+v", controls)
-	}
-	if !closed || !(errors.Is(readErr, io.EOF) || errors.Is(readErr, io.ErrClosedPipe) || errors.Is(readErr, io.ErrUnexpectedEOF)) {
-		t.Fatalf("wedged attachment was not ended by the broker: closed=%v err=%v", closed, readErr)
-	}
-	if bytes.Contains(live, trigger) {
-		t.Fatalf("the old attachment delivered the triggering event %q after eviction", trigger)
-	}
-	if !bytes.HasPrefix(expected[wedgedIndex], live) {
-		t.Fatalf("the old attachment's output is not a prefix of the committed stream")
-	}
-	if b1SubscriberCount(effects, keys[wedgedIndex]) != 0 {
-		t.Fatal("the evicted subscriber is still registered")
+		t.Fatal("the broker ended an attachment that was only slow")
+	default:
 	}
 
-	// Re-mint once: the browser re-attaches on the same session. The
-	// snapshot must carry everything committed, including the triggering
-	// event, and the new tail must be the only subscriber of that key.
-	reminted := b1Open(t, effects, sessions[wedgedIndex], "b1-source-6-reminted")
-	if got := b1SubscriberCount(effects, keys[wedgedIndex]); got != 1 {
-		t.Fatalf("re-minted attachment subscribers=%d want 1", got)
-	}
-	// The replay is capped at terminal.ReplayByteCap; the rest of the snapshot
-	// follows COMMIT as LIVE backlog, ahead of any new record. Together they
-	// must carry everything committed, including the triggering event.
-	rebuilt := func() []byte {
-		live, _, _, _ := reminted.snapshot()
-		return append(reminted.replayBytes(), live...)
-	}
-	pollUntil(t, 5*time.Second, "re-minted snapshot+tail equals the committed stream", func() bool {
-		return bytes.Equal(rebuilt(), expected[wedgedIndex])
-	})
-	if replay := reminted.replayBytes(); len(replay) > terminal.ReplayByteCap || !bytes.Contains(rebuilt(), trigger) {
-		t.Fatalf("re-minted replay=%d bytes (cap %d), triggering event present=%v", len(replay), terminal.ReplayByteCap, bytes.Contains(rebuilt(), trigger))
-	}
-
-	// A post-reconnect sentinel arrives on the new attachment exactly once,
-	// and on every healthy sibling exactly once, in order.
-	post := []byte("[post-reconnect-6]")
-	publish(wedgedIndex, post)
-	pollUntil(t, 5*time.Second, "post-reconnect sentinel on the re-minted tail", func() bool {
-		return bytes.Equal(rebuilt(), expected[wedgedIndex])
-	})
-	newLive, newControls, newClosed, _ := reminted.snapshot()
-	if bytes.Count(newLive, post) != 1 || len(newControls) != 0 || newClosed {
-		t.Fatalf("re-minted attachment: post sentinel count=%d controls=%v closed=%v", bytes.Count(newLive, post), newControls, newClosed)
-	}
-	if oldLive, _, _, _ := attachments[wedgedIndex].snapshot(); bytes.Contains(oldLive, post) {
-		t.Fatal("the closed attachment received the post-reconnect sentinel")
-	}
-	for index := 0; index < wedgedIndex; index++ {
-		publish(index, []byte(fmt.Sprintf("[post-%d]", index+1)))
-		waitLive(index, fmt.Sprintf("pane %d post-reconnect sentinel", index+1))
-		_, controls, closed, _ := attachments[index].snapshot()
-		if len(controls) != 0 || closed {
-			t.Fatalf("healthy pane %d reconnected: controls=%v closed=%v", index+1, controls, closed)
+	// 5. Live again: a sentinel reaches every pane exactly once, in order.
+	for index := 0; index < panes; index++ {
+		post := []byte(fmt.Sprintf("[post-%d]", index+1))
+		publish(index, post)
+		waitLive(index, fmt.Sprintf("pane %d post sentinel", index+1))
+		live, controls, closed, _ := attachments[index].snapshot()
+		if bytes.Count(live, post) != 1 || len(controls) != 0 || closed {
+			t.Fatalf("pane %d post sentinel count=%d controls=%v closed=%v", index+1, bytes.Count(live, post), controls, closed)
 		}
 	}
 	if maxPublish > publishLatencyBound {
-		t.Fatalf("S1: publication latency %v exceeded %v", maxPublish, publishLatencyBound)
+		t.Fatalf("publication latency %v exceeded %v", maxPublish, publishLatencyBound)
 	}
 }
 

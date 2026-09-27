@@ -9,7 +9,6 @@ import (
 
 	"persea-terminal/internal/config"
 	"persea-terminal/internal/controlmode"
-	"persea-terminal/internal/proto"
 	"persea-terminal/internal/terminal"
 	"persea-terminal/internal/unifiedjournal"
 )
@@ -222,7 +221,10 @@ func TestUnifiedDevCommandErrorConsumesDecodedRemainder(t *testing.T) {
 // and every other pane's tail keeps flowing. The evicted reader recovers by
 // reconnecting through snapshot+tail, the same contract as lagging-cursor
 // eviction.
-func TestUnifiedDevPublishEventEvictsWedgedSubscriber(t *testing.T) {
+// A subscriber whose tail owns its byte bound is behind, not broken: publication
+// neither waits for it nor evicts it. It stops copying to it, leaves what it
+// already owns queued, and leaves its consumer to catch up from the journal.
+func TestUnifiedDevPublishEventMovesWedgedSubscriberToCatchUp(t *testing.T) {
 	keyA := unifiedjournal.PaneKey{Server: "main", Session: "$1", ControlGeneration: 1, Window: "@1", Pane: "%1", Incarnation: "one"}
 	keyB := unifiedjournal.PaneKey{Server: "main", Session: "$2", ControlGeneration: 1, Window: "@2", Pane: "%2", Incarnation: "two"}
 	effects := &UnifiedDevPaneEffects{subscribers: map[unifiedjournal.PaneKey]map[*unifiedDevSubscriber]struct{}{}}
@@ -271,19 +273,25 @@ func TestUnifiedDevPublishEventEvictsWedgedSubscriber(t *testing.T) {
 	effects.subscriberMu.Lock()
 	_, present := effects.subscribers[keyA][wedged]
 	effects.subscriberMu.Unlock()
-	if present {
-		t.Fatal("the wedged subscriber was not evicted")
+	if !present || wedged.closeReason() != "" {
+		t.Fatalf("the wedged subscriber was evicted: present=%v reason=%q", present, wedged.closeReason())
 	}
-	if wedged.data.len() != 0 {
-		t.Fatal("eviction retained the abandoned queued payload")
+	if !wedged.data.isCatchingUp() {
+		t.Fatal("the wedged subscriber was not moved to catch-up")
 	}
-	if _, open := wedged.receive(); open {
-		t.Fatal("the evicted subscriber's channel was not closed")
+	if wedged.data.len() != 1 {
+		t.Fatalf("wedged queue=%d events, want only the one it owned before its bound", wedged.data.len())
 	}
-	// Eviction is a typed close, never a bare channel close: the attachment
-	// that tails this subscriber ends with this reason (B1).
-	if wedged.closeReason() != proto.SubscriberClosedLagged {
-		t.Fatalf("evicted subscriber closeReason=%q want %q", wedged.closeReason(), proto.SubscriberClosedLagged)
+	if err := effects.publishEvent(keyA, output(3)); err != nil || wedged.data.len() != 1 {
+		t.Fatalf("publication copied to a catching-up subscriber: queue=%d err=%v", wedged.data.len(), err)
+	}
+	event, state := wedged.data.next()
+	if state != recordingTailEvent || event.Sequence != 1 {
+		t.Fatalf("owned event state=%v sequence=%d", state, event.Sequence)
+	}
+	wedged.releaseEvent(event)
+	if _, state := wedged.data.next(); state != recordingTailCatchUp {
+		t.Fatalf("drained catching-up queue state=%v, want a catch-up turn", state)
 	}
 	if healthy.closeReason() != "" {
 		t.Fatalf("healthy subscriber carries a close reason %q", healthy.closeReason())

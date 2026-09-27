@@ -35,3 +35,18 @@ func (realm *Realm) SnapshotAllocation(key PaneKey) (bytes, records int64, err e
 	}
 	return bytes + AllocationCharge(pane.committed), records, nil
 }
+
+// SuffixAllocation describes ReadCommittedEventsAfter's two allocations for
+// the same arguments, under the same journal serialization. Zero records means
+// cursor is the committed frontier and the read allocates nothing.
+func (realm *Realm) SuffixAllocation(key PaneKey, after CommittedCursor, maxBytes int64) (bytes, records int64, err error) {
+	pane, err := realm.committedEventsPane(key)
+	if err != nil {
+		return 0, 0, err
+	}
+	last, records, payload, err := committedSuffix(pane, after, maxBytes)
+	if err != nil || last == nil {
+		return 0, 0, err
+	}
+	return AllocationCharge(records*int64(unsafe.Sizeof(Event{}))+8) + AllocationCharge(payload), records, nil
+}

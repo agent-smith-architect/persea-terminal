@@ -107,9 +107,13 @@ function writeJSON(file: string, value: unknown): void {
 // loads and API requests stay unshaped, so only the terminal stream pays for
 // the link. The bottleneck stops reading from the front door once it is full,
 // as a congested path stops acknowledging, so the front door's writes block
-// instead of vanishing into proxy memory.
+// instead of vanishing into proxy memory. It holds a whole flow window and its
+// final frame, like the deep buffers of a mobile path: a front door that
+// closes after its last frame is read to the end, so the close frame is never
+// stranded unread behind a paused read when a late acknowledgement fails.
+// Whatever the link has taken still crosses it after the front door closes.
 const shapedLink = { rate: 0, delayMs: 0, pairs: new Set<{ drop: () => void }>() };
-const SHAPED_LINK_BUFFER_BYTES = 64 << 10;
+const SHAPED_LINK_BUFFER_BYTES = 256 << 10;
 const SHAPED_LINK_TICK_MS = 50;
 
 function shapeLink(browserSocket: any, upstream: any): { push(chunk: any): void; send(chunk: any): void; end(): void } {
@@ -118,7 +122,11 @@ function shapeLink(browserSocket: any, upstream: any): { push(chunk: any): void;
   let queued = 0;
   let inAir = 0;
   let ended = false;
-  const finish = () => { if (ended && queued === 0 && inAir === 0) browserSocket.end(); };
+  const finish = () => {
+    if (!ended || queued !== 0 || inAir !== 0) return;
+    stop();
+    if (!browserSocket.destroyed) browserSocket.end();
+  };
   const timer = setInterval(() => {
     let budget = Math.floor(rate * SHAPED_LINK_TICK_MS / 1000);
     while (budget > 0 && queue.length > 0) {
@@ -135,10 +143,12 @@ function shapeLink(browserSocket: any, upstream: any): { push(chunk: any): void;
   }, SHAPED_LINK_TICK_MS);
   // A drop is a network loss, not a close: both ends are reset at once.
   const pair = { drop: () => { browserSocket.resetAndDestroy(); upstream.destroy(); } };
-  const stop = () => { clearInterval(timer); shapedLink.pairs.delete(pair); };
+  function stop() { clearInterval(timer); shapedLink.pairs.delete(pair); }
   shapedLink.pairs.add(pair);
   browserSocket.on("close", stop);
-  upstream.on("close", stop);
+  // The front door closing, or its socket failing, ends the link only after
+  // the bytes already taken from it have crossed.
+  upstream.on("close", () => { ended = true; finish(); });
   return {
     push(chunk: any) {
       queue.push(chunk);
@@ -178,7 +188,7 @@ function startTrustedProxy(frontSocket: string, canonicalHost: () => string, sch
     upstream.on("end", () => { if (shaper) shaper.end(); else browserSocket.end(); });
     browserSocket.on("end", () => upstream.end());
     browserSocket.on("error", () => upstream.destroy());
-    upstream.on("error", () => browserSocket.destroy());
+    upstream.on("error", () => { if (shaper) shaper.end(); else browserSocket.destroy(); });
   };
   return tlsOptions ? tls.createServer(tlsOptions, handler) : net.createServer(handler);
 }

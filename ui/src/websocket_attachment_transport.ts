@@ -443,7 +443,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     this.clearPendingHistoryTimer();
     this.cancelRetryWork();
     this.setOffline(false);
-    this.bankLoss();
+    this.retireConnection();
     this.disconnect(reason);
     this.sink?.reconnectStatus?.(Object.freeze({ state: "DETACHED", attempt: this.retryAttempt, reason }));
   }
@@ -592,7 +592,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
       this.setOffline(false);
       // Waiting for the operator is not disconnected time: a manual claim
       // minutes later must not find the episode's budget spent.
-      this.bankLoss();
+      this.retireConnection();
       return;
     }
     if (UNIFIED_HANDOFF_REASONS.has(reason)) {
@@ -616,7 +616,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
       this.retryDisabled = true;
       this.cancelRetryWork();
       this.setOffline(false);
-      this.bankLoss();
+      this.retireConnection();
     }
     closeSocket(socket, protocolFaultReasons.has(reason) ? CLOSE_CLIENT_PROTOCOL_FAULT : CLOSE_CLIENT_FAULT, reason);
     if (retryable) {
@@ -739,6 +739,19 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
       return;
     }
     this.startEpisode();
+  }
+
+  // A connection that ends without an automatic retry — control moved
+  // elsewhere, a refusal, a detach — is judged now, like a loss, and takes its
+  // timestamps with it. A later claim or reattach opens its own connection,
+  // judged on that connection's catch-up alone; a stable one here starts a
+  // fresh episode for whatever follows. The wait for the operator is banked.
+  private retireConnection(): void {
+    const caughtUpAt = this.caughtUpAt;
+    this.committedAt = undefined;
+    this.caughtUpAt = undefined;
+    if (caughtUpAt !== undefined && this.retryRuntime.now() - caughtUpAt >= STABLE_CONNECTION_MS) this.startEpisode();
+    this.bankLoss();
   }
 
   private startEpisode(): void {

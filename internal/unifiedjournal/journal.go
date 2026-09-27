@@ -1928,6 +1928,77 @@ func (realm *Realm) ReadCommittedEvents(key PaneKey) ([]Event, error) {
 	return events, nil
 }
 
+// CommittedCursor is a reader's position in one generation's committed
+// projection: the last sequence it has consumed and the byte offset that
+// sequence ends at. The sequence orders geometry records, which share their
+// byte offset with a neighbour; the offset locates the payload.
+type CommittedCursor struct {
+	Sequence int64
+	Offset   int64
+}
+
+// ErrCursorMismatch reports a cursor that is not a record boundary of the
+// committed projection it was presented to.
+var ErrCursorMismatch = errors.New("journal cursor is not a committed record boundary")
+
+// committedSuffix selects the records one bounded read after cursor returns:
+// every record through the last one ending within maxBytes of the cursor, and
+// always at least the first, however large. It walks only the suffix, from the
+// newest page back to the record after cursor. An empty selection (nil last)
+// means cursor is the committed frontier.
+func committedSuffix(pane *paneJournal, after CommittedCursor, maxBytes int64) (last *eventPage, records, bytes int64, err error) {
+	if after.Sequence < 0 || after.Sequence > pane.committedSequence {
+		return nil, 0, 0, ErrCursorMismatch
+	}
+	if after.Sequence == pane.committedSequence {
+		if after.Offset != pane.committed {
+			return nil, 0, 0, ErrCursorMismatch
+		}
+		return nil, 0, 0, nil
+	}
+	var first *eventPage
+	for page := pane.verified.view; page != nil && page.event.Sequence > after.Sequence; page = page.previous {
+		if page.event.Sequence > pane.committedSequence {
+			continue
+		}
+		if last == nil && (page.event.End-after.Offset <= maxBytes || page.event.Sequence == after.Sequence+1) {
+			last = page
+		}
+		first = page
+	}
+	if first == nil || first.event.Sequence != after.Sequence+1 || first.event.Start != after.Offset {
+		return nil, 0, 0, ErrCursorMismatch
+	}
+	return last, last.event.Sequence - after.Sequence, last.event.End - after.Offset, nil
+}
+
+// ReadCommittedEventsAfter is the committed projection after cursor, bounded
+// by maxBytes as committedSuffix describes. Like ReadCommittedEvents it returns
+// caller-owned copies in one payload allocation, and SuffixAllocation, read
+// under the same journal serialization, describes both allocations first.
+func (realm *Realm) ReadCommittedEventsAfter(key PaneKey, after CommittedCursor, maxBytes int64) ([]Event, error) {
+	pane, err := realm.committedEventsPane(key)
+	if err != nil {
+		return nil, err
+	}
+	last, records, bytes, err := committedSuffix(pane, after, maxBytes)
+	if err != nil || last == nil {
+		return nil, err
+	}
+	events := make([]Event, records)
+	payload := make([]byte, bytes)
+	for page := last; page != nil && page.event.Sequence > after.Sequence; page = page.previous {
+		event := page.event
+		if event.Kind == RecordOutput {
+			start, end := event.Start-after.Offset, event.End-after.Offset
+			event.Payload = payload[start:end:end]
+			copyEventPayload(event.Payload, page)
+		}
+		events[event.Sequence-after.Sequence-1] = event
+	}
+	return events, nil
+}
+
 func (realm *Realm) committedEventsPane(key PaneKey) (*paneJournal, error) {
 	pane := realm.panes[key]
 	if pane == nil {

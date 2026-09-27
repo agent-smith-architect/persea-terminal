@@ -4,6 +4,7 @@ package broker
 import (
 	"errors"
 	"persea-terminal/internal/proto"
+	"persea-terminal/internal/terminal"
 	"persea-terminal/internal/unifiedjournal"
 	"sync"
 	"time"
@@ -11,8 +12,13 @@ import (
 
 type unifiedDevSubscriber struct {
 	lease *recordingReaderLease
+	// key is the exact generation this subscriber was registered on; a
+	// catch-up read addresses that generation's journal and no other.
+	key unifiedjournal.PaneKey
 	// cursor is a sequence, not a byte offset. Geometry events carry no payload,
 	// so consecutive ones share a byte offset and a byte cursor cannot order them.
+	// While data is catching up, publication leaves cursor alone and the
+	// consumer, not the queue, owns the position.
 	cursor int64
 	data   *recordingTailQueue
 	done   chan struct{}
@@ -102,15 +108,17 @@ func (effects *UnifiedDevPaneEffects) WritePaneGeometry(key unifiedjournal.PaneK
 
 // publishEvent fans one committed event out to every live subscriber. A
 // subscriber that has already advanced past this sequence is skipped; one that
-// is behind it has missed an event and is closed rather than fed a gap; one
-// whose tail already owns its byte bound is wedged and is
-// evicted rather than blocking the publication path — publication holds the
-// realm-wide subscriber lock, so a single stalled reader must never hold back
-// every other pane's live tail. Both closures are one typed outcome,
-// subscriber_lagged, delivered through closeLaggedSubscriberLocked: the
-// attachment that owns the subscriber ends with that reason, the browser
-// classifies it reconnectable, and the client is rebuilt from snapshot+tail —
-// which includes the very event that evicted it.
+// is behind it has missed an event and is closed rather than fed a gap. A
+// subscriber whose tail already owns its byte bound, or whose event the
+// aggregate reader budget refuses, is behind its consumer rather than broken:
+// publication stops copying to it and its consumer catches up from the journal,
+// which already holds every event it skips. Publication never waits for a
+// reader either way — it holds the realm-wide subscriber lock, so a single
+// stalled reader must never hold back every other pane's live tail. A gap and
+// the remaining refusals are one typed outcome, subscriber_lagged, delivered
+// through closeLaggedSubscriberLocked: the attachment that owns the subscriber
+// ends with that reason, the browser classifies it reconnectable, and the
+// client is rebuilt from snapshot+tail.
 func (effects *UnifiedDevPaneEffects) publishEvent(key unifiedjournal.PaneKey, event unifiedjournal.Event) error {
 	effects.subscriberMu.Lock()
 	defer effects.subscriberMu.Unlock()
@@ -125,6 +133,9 @@ func (effects *UnifiedDevPaneEffects) publishEvent(key unifiedjournal.PaneKey, e
 		effects.publishedSequence[key] = event.Sequence
 	}
 	for subscriber := range effects.subscribers[key] {
+		if subscriber.data.isCatchingUp() {
+			continue
+		}
 		if subscriber.cursor >= event.Sequence {
 			continue
 		}
@@ -141,8 +152,12 @@ func (effects *UnifiedDevPaneEffects) publishEvent(key unifiedjournal.PaneKey, e
 			continue
 		default:
 		}
-		limit := subscriber.lease.reserveTailEvent(recordingEventBytes(event))
-		if limit != "" {
+		switch limit := subscriber.lease.reserveTailEvent(recordingEventBytes(event)); limit {
+		case "":
+		case tailLimitQueueBytes, tailLimitReaderBytes:
+			subscriber.data.enterCatchUp()
+			continue
+		default:
 			effects.closeLaggedSubscriberLocked(key, subscriber, limit)
 			continue
 		}
@@ -238,10 +253,14 @@ func (effects *UnifiedDevPaneEffects) closeSubscribers(key unifiedjournal.PaneKe
 // that was its own cancel (empty) or the provider's typed verdict, which the
 // attachment must end with.
 func (effects *UnifiedDevPaneEffects) openSnapshotTail(sessionID string) ([]unifiedjournal.Event, unifiedjournal.Geometry, *unifiedDevSubscriber, func(), error) {
-	return effects.openSnapshotTailWithLease(sessionID, nil)
+	return effects.openSnapshotTailWithLease(sessionID, nil, false)
 }
 
-func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string, attachment *recordingReaderLease) ([]unifiedjournal.Event, unifiedjournal.Geometry, *unifiedDevSubscriber, func(), error) {
+// openSnapshotTailWithLease is openSnapshotTail on an attachment's lease.
+// catchUp registers the tail already catching up: publication copies nothing
+// while the consumer writes the snapshot, and the consumer then reads what
+// arrived meanwhile from the journal before it joins the live queue.
+func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string, attachment *recordingReaderLease, catchUp bool) ([]unifiedjournal.Event, unifiedjournal.Geometry, *unifiedDevSubscriber, func(), error) {
 	releaseAttempt := func(lease *recordingReaderLease) {
 		lease.releaseSnapshot()
 		if attachment == nil {
@@ -349,7 +368,8 @@ func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string
 			}
 			return nil, unifiedjournal.Geometry{}, nil, nil, errRecordingInitial
 		}
-		subscriber := &unifiedDevSubscriber{lease: lease, cursor: cursor, data: newRecordingTailQueue(), done: make(chan struct{}), verdict: make(chan struct{})}
+		subscriber := &unifiedDevSubscriber{lease: lease, key: key, cursor: cursor, data: newRecordingTailQueue(), done: make(chan struct{}), verdict: make(chan struct{})}
+		subscriber.data.catchingUp = catchUp
 		if effects.subscribers[key] == nil {
 			effects.subscribers[key] = make(map[*unifiedDevSubscriber]struct{})
 		}
@@ -369,4 +389,62 @@ func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string
 		return events, initial, subscriber, cancel, nil
 	}
 	return nil, unifiedjournal.Geometry{}, nil, nil, errors.New("unified snapshot registration did not stabilize")
+}
+
+// readCatchUp is one catch-up round for a subscriber whose consumer has
+// written everything through after. At the committed frontier it rejoins the
+// live queue: under journalMu no commit can land and under subscriberMu no
+// publication can run, so every later event is copied to it in order and
+// every earlier one — including a commit whose publication is still pending —
+// has already been read. Otherwise it returns the next bounded run of committed
+// events, copied out of the journal after its charge was reserved on the
+// subscriber's lease; the caller releases charge after its last write.
+//
+// A refusal ends the subscriber with a typed verdict, which the caller reads
+// from the subscriber like any other: the aggregate budget refusing the copy
+// is reader_bytes, and a journal that no longer serves this generation or
+// cursor is catch_up_read. A subscriber already removed — cancelled, or closed
+// by rotation — gets ErrClosed and keeps whatever verdict it already has.
+func (effects *UnifiedDevPaneEffects) readCatchUp(subscriber *unifiedDevSubscriber, after unifiedjournal.CommittedCursor) (events []unifiedjournal.Event, charge int64, rejoined bool, err error) {
+	effects.journalMu.Lock()
+	defer effects.journalMu.Unlock()
+	key := subscriber.key
+	registered := func() bool {
+		_, present := effects.subscribers[key][subscriber]
+		return present
+	}
+	if effects.realm.CommittedSequence(key) == after.Sequence {
+		effects.subscriberMu.Lock()
+		defer effects.subscriberMu.Unlock()
+		if !registered() {
+			return nil, 0, false, terminal.ErrClosed
+		}
+		subscriber.cursor = after.Sequence
+		subscriber.data.leaveCatchUp()
+		return nil, 0, true, nil
+	}
+	limit := tailLimitCatchUpRead
+	charge, _, err = effects.realm.SuffixAllocation(key, after, recordingCatchUpReadBytes)
+	if err == nil {
+		if !subscriber.lease.reserveCatchUp(charge) {
+			limit, err = tailLimitReaderBytes, errRecordingReaders
+		} else if events, err = effects.realm.ReadCommittedEventsAfter(key, after, recordingCatchUpReadBytes); err != nil {
+			subscriber.lease.releaseCatchUp(charge)
+		}
+	}
+	if err == nil && len(events) == 0 {
+		// A frontier behind the cursor is a journal that is not this
+		// subscriber's history any more.
+		subscriber.lease.releaseCatchUp(charge)
+		err = unifiedjournal.ErrCursorMismatch
+	}
+	if err != nil {
+		effects.subscriberMu.Lock()
+		defer effects.subscriberMu.Unlock()
+		if registered() {
+			effects.closeLaggedSubscriberLocked(key, subscriber, limit)
+		}
+		return nil, 0, false, terminal.ErrClosed
+	}
+	return events, charge, false, nil
 }

@@ -66,10 +66,23 @@ func geometryReadinessReceive[T any](t *testing.T, values <-chan T, label string
 // handler runs. Neither geometry nor following output may unseal the browser
 // until that handler has actually restored input admission. No tmux or sleep
 // is involved: the source and the handler are held at explicit lifecycle seams.
+//
+// The same fence holds on both output paths: records copied to the live queue,
+// and records a catching-up tail reads back from the journal.
 func TestUnifiedGeometryReadinessWaitsForActualReady(t *testing.T) {
-	for _, outcome := range []string{"ready", "close", "ready_failure", "subscriber_verdict"} {
-		t.Run(outcome, func(t *testing.T) {
-			effects, key := unifiedE2E1JournalProvider(t, "geometry-ready-"+outcome, "$0")
+	for _, path := range []string{"queue", "catch_up"} {
+		for _, outcome := range []string{"ready", "close", "ready_failure", "subscriber_verdict"} {
+			t.Run(path+"/"+outcome, func(t *testing.T) {
+				testUnifiedGeometryReadinessWaitsForActualReady(t, path, outcome)
+			})
+		}
+	}
+}
+
+func testUnifiedGeometryReadinessWaitsForActualReady(t *testing.T, path, outcome string) {
+	{
+		{
+			effects, key := unifiedE2E1JournalProvider(t, "geometry-ready-"+path+"-"+outcome, "$0")
 			server, client := net.Pipe()
 			frames := make(chan terminal.Frame, 16)
 			readerDone := make(chan struct{})
@@ -159,6 +172,37 @@ func TestUnifiedGeometryReadinessWaitsForActualReady(t *testing.T) {
 				t.Fatal(err)
 			}
 			tx.resize = func() error {
+				if path == "catch_up" {
+					// Committed but never copied to the tail: the writer reads
+					// all three back from the journal, geometry included.
+					commit := func(append func() (unifiedjournal.Record, error)) error {
+						effects.journalMu.Lock()
+						defer effects.journalMu.Unlock()
+						record, err := append()
+						if err == nil {
+							err = effects.realm.Sync(key)
+						}
+						if err == nil {
+							err = effects.realm.AdvanceCommitted(key, record)
+						}
+						return err
+					}
+					for _, append := range []func() (unifiedjournal.Record, error){
+						func() (unifiedjournal.Record, error) { return effects.realm.Append(key, []byte("before")) },
+						func() (unifiedjournal.Record, error) {
+							return effects.realm.AppendGeometry(key, unifiedjournal.Geometry{Columns: 80, Rows: 37})
+						},
+						func() (unifiedjournal.Record, error) { return effects.realm.Append(key, []byte("after")) },
+					} {
+						if err := commit(append); err != nil {
+							return err
+						}
+					}
+					effects.subscriberMu.Lock()
+					writer.tail.data.enterCatchUp()
+					effects.subscriberMu.Unlock()
+					return nil
+				}
 				for _, event := range []unifiedjournal.Event{
 					{Kind: unifiedjournal.RecordOutput, Sequence: 2, Start: 0, End: 6, Payload: []byte("before")},
 					{Kind: unifiedjournal.RecordGeometry, Sequence: 3, Start: 6, End: 6, Geometry: unifiedjournal.Geometry{Columns: 80, Rows: 37}},
@@ -223,7 +267,7 @@ func TestUnifiedGeometryReadinessWaitsForActualReady(t *testing.T) {
 				default:
 				}
 			}
-		})
+		}
 	}
 }
 
