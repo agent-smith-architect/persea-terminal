@@ -28,9 +28,10 @@ const (
 	// still in the writer. Output beyond it is not copied: the subscriber
 	// catches up from the journal instead.
 	recordingTailBytes = 4<<20 + 64<<10
-	// A catch-up round copies at most this much committed output (and always
-	// at least one record) out of the journal. It is charged to the reader's
-	// lease before the copy and released after its last write returns.
+	// A catch-up round copies at most this much committed output plus event
+	// index (and always at least one record) out of the journal. It is charged
+	// to the reader's lease before the copy and released after its last write
+	// returns.
 	recordingCatchUpReadBytes = 512 << 10
 )
 

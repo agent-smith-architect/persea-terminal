@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -242,5 +243,40 @@ func TestRecordingCatchUpRefusedReadEndsTheAttachmentTyped(t *testing.T) {
 	}
 	if types := admissionTypes(t, wire); len(types) != 3 || types[1] != terminal.FrameCommit || types[2] != "verdict" {
 		t.Fatalf("wire=%v, want PREPARE, COMMIT, verdict", types)
+	}
+}
+
+// A round the reader budget refuses is never copied: the reservation comes
+// before the allocation, so the refusal allocates nothing like the round.
+func TestRecordingCatchUpRefusedRoundAllocatesNothing(t *testing.T) {
+	effects, key := recordingReaderFixture(t, 0)
+	events, _, tail, cancel, err := effects.openSnapshotTailWithLease(key.Session, nil, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cancel()
+	tail.releaseSnapshot()
+	after := unifiedjournal.CommittedCursor{}
+	if len(events) != 0 {
+		last := events[len(events)-1]
+		after = unifiedjournal.CommittedCursor{Sequence: last.Sequence, Offset: last.End}
+	}
+	events = nil
+	catchUpCommit(t, effects, key, bytes.Repeat([]byte{'a'}, 2<<20))
+	effects.readers.mutex().Lock()
+	effects.readers.limit = effects.readers.bytes + 1
+	effects.readers.mutex().Unlock()
+	var before, after2 runtime.MemStats
+	runtime.ReadMemStats(&before)
+	got, _, rejoined, err := effects.readCatchUp(tail, after)
+	runtime.ReadMemStats(&after2)
+	if got != nil || rejoined || err == nil {
+		t.Fatalf("refused round read=%d rejoined=%v err=%v", len(got), rejoined, err)
+	}
+	if allocated := after2.TotalAlloc - before.TotalAlloc; allocated > 256<<10 {
+		t.Fatalf("a refused 2 MiB round allocated %d bytes", allocated)
+	}
+	if tail.closeReason() != proto.SubscriberClosedLagged || tail.closeLimit() != tailLimitReaderBytes {
+		t.Fatalf("verdict=%q limit=%q, want %q/%q", tail.closeReason(), tail.closeLimit(), proto.SubscriberClosedLagged, tailLimitReaderBytes)
 	}
 }

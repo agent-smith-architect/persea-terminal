@@ -286,10 +286,12 @@ the queue catching up and stops copying to it; it never waits for the reader.
 The writer drains what is queued, then reads the committed suffix after the
 last event it wrote from the journal (`ReadCommittedEventsAfter`, addressed by
 sequence and byte offset, walking only the suffix) in rounds of at most
-512 KiB of output and always at least one record. Each round's event index and
+512 KiB of output plus event index, and always at least one record. Each round's event index and
 payload slab are charged to the reader's lease before the copy and released
 after the round's last write returns; a parked write keeps its round charged
-through cancellation. Only one round is owned at a time. Under `journalMu` and
+through cancellation. Only one round is owned at a time. Selecting and copying a round walks the
+pending suffix under `journalMu`, so a large suffix of tiny records costs a few
+milliseconds of journal lock per round. Under `journalMu` and
 `subscriberMu`, when the writer's position equals the committed frontier, the
 subscriber's cursor is set to it and it rejoins the queue: no commit can land
 and no publication can run in that interval, so every later event is copied
