@@ -389,7 +389,7 @@ function startWorkspaceFixture(ui, options = {}) {
       if (!session || url.searchParams.get("realm") !== REALM || url.searchParams.get("server") !== SERVER) { response.writeHead(404); response.end("unknown preview session"); return; }
       response.setHeader("Cache-Control", "no-store"); response.setHeader("Content-Type", "application/json");
       response.end(JSON.stringify({ realm: REALM, server: SERVER, session_id: session.sessionId,
-        rows: ["Fixture workspace session preview."], width: session.columns, height: session.rows, captured_at: Date.now(), truncated: false }));
+        rows: ["Fixture workspace session preview."], ansi_rows: ["Fixture workspace session preview."], width: session.columns, height: session.rows, captured_at: Date.now(), truncated: false }));
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/inventory") {
@@ -711,7 +711,7 @@ function startWorkspaceFixture(ui, options = {}) {
         return;
       }
       if (value.type === "INPUT") {
-        if (attachment.mode !== "CONTROL") { closeWith(1011, "input_refused"); return; }
+        if (attachment.mode !== "CONTROL") { socket.sendText("PERSEA-REFUSAL/1 input_refused"); return; }
         attachment.inputs.push(Buffer.from(value.data, "base64").toString("binary"));
         return;
       }

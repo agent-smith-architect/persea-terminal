@@ -90,7 +90,7 @@ function sampleStates(): readonly PaneState[] {
       case "create_failed": states.push({ kind, code: "name_taken", status: 409 }, { kind, code: "weird", status: 503 }); break;
       case "projection": for (const state of PROJECTION_PANE_STATES) states.push({ kind, state }); break;
       case "reconnecting": states.push(paneStateFromClose("websocket_1006")); break;
-      case "reattaching": states.push(paneStateFromClose("input_refused")); break;
+      case "reattaching": states.push(paneStateFromClose("subscriber_lagged")); break;
       case "takeover_pending": states.push(paneStateFromClose("lease_held")); break;
       case "displaced": states.push(paneStateFromClose("control_displaced"), paneStateFromClose("takeover_superseded")); break;
       case "failed": states.push(paneStateFromClose("attach_failed"), paneStateFromClose("stale_target"), paneStateFromClose("<hostile>")); break;

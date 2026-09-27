@@ -1,5 +1,5 @@
 import { REFUSAL_NOTICE_MS, TRANSPORT_REFUSAL_PREFIX, UNIFIED_OPERATIONAL_CODES, decodeServerRefusalFrame, refusalPausesTyping, refusalReleasesFit, unifiedRefusalNotice } from "../src/unified_refusal_notice";
-import { classifyUnifiedClose } from "../src/unified_close_policy";
+import * as closePolicy from "../src/unified_close_policy";
 
 declare const require: (name: string) => unknown;
 const fs = require("node:fs") as { readFileSync(file: string, encoding: "utf8"): string };
@@ -43,11 +43,13 @@ for (const code of [...UNIFIED_OPERATIONAL_CODES].filter((value) => value !== "i
 }
 assert.ok(!refusalPausesTyping("some_future_code"), "an unknown code must not pause typing");
 
-// --- belt and braces: every operational code is still classified for the
-// close path, so a front door that closes on one cannot dead-end the page.
+// Operational refusals never enter any close-policy set. observe_mode is
+// also a front-door protocol close, so it alone belongs to the terminal set.
 for (const code of UNIFIED_OPERATIONAL_CODES) {
-  const cls = classifyUnifiedClose(code);
-  assert.ok(cls === "reattach" || cls === "terminal", `operational code ${code} has no close classification`);
+  for (const [name, reasons] of Object.entries(closePolicy)) {
+    if (!(reasons instanceof Set)) continue;
+    assert.equal(reasons.has(code), code === "observe_mode" && name === "UNIFIED_TERMINAL_REASONS", `operational code ${code} in close-policy set ${name}`);
+  }
 }
 
 // --- source-to-policy: the UI operational set IS the Go authority --------------

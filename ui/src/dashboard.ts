@@ -57,8 +57,7 @@ function object(value: unknown, label: string): ObjectValue { if (value === null
 function array(value: unknown, label: string): unknown[] { if (!Array.isArray(value)) throw new Error(`${label} must be an array`); return value; }
 function string(value: unknown, label: string, allowEmpty = false): string { if (typeof value !== "string" || (!allowEmpty && value.length === 0)) throw new Error(`${label} must be a nonempty string`); return value; }
 function integer(value: unknown, label: string, minimum = 0): number { if (typeof value !== "number" || !Number.isSafeInteger(value) || value < minimum) throw new Error(`${label} must be an integer >= ${minimum}`); return value; }
-// Absent means false: an older broker that does not report the field simply
-// offers no creation affordance, rather than the UI guessing that it may.
+// The broker omits false capability flags; absence grants no affordance.
 function boolean(value: unknown, label: string): boolean { if (value === undefined || value === null) return false; if (typeof value !== "boolean") throw new Error(`${label} must be a boolean`); return value; }
 function optionalString(value: unknown, label: string): string | undefined {return value === undefined ? undefined : string(value, label); }
 
@@ -261,22 +260,22 @@ export function adoptFailureMessage(code: string, status: number): string {
     default: return status === 503 ? "The realm is unreachable." : "The session could not be opened.";
   }
 }
-export type SessionPreview = Readonly<{ rows: readonly string[]; ansiRows?: readonly string[]; capturedAt: number; width: number; height: number; truncated: boolean }>;
+export type SessionPreview = Readonly<{ rows: readonly string[]; ansiRows: readonly string[]; capturedAt: number; width: number; height: number; truncated: boolean }>;
 /**
  * Strict parse of one on-demand pane preview, same discipline as
  * parseInventory: a wrong shape throws and renders as an error state, never as
- * partially-trusted content. Plain rows are always available. Optional SGR
+ * partially-trusted content. Plain rows are always available. Bounded SGR
  * styling becomes text spans with bounded colors, never executable markup.
  */
 export function parsePreview(value: unknown): SessionPreview {
   const v = object(value, "preview");
   const rows = array(v.rows, "preview.rows").map((row, i) => string(row, `preview.rows[${i}]`, true));
   if (rows.length > 41 || rows.join("\n").length > 8192) throw new Error("Preview exceeds its bounds");
-  const ansiRows = v.ansi_rows == null ? undefined : array(v.ansi_rows, "preview.ansi_rows").map((row, i) => string(row, `preview.ansi_rows[${i}]`, true));
-  if (ansiRows && (ansiRows.length !== rows.length || ansiRows.join("\n").length > 8192)) throw new Error("Preview styling exceeds its bounds");
+  const ansiRows = array(v.ansi_rows, "preview.ansi_rows").map((row, i) => string(row, `preview.ansi_rows[${i}]`, true));
+  if (ansiRows.length !== rows.length || ansiRows.join("\n").length > 8192) throw new Error("Preview styling exceeds its bounds");
   return {
     rows,
-    ...(ansiRows ? { ansiRows } : {}),
+    ansiRows,
     capturedAt: integer(v.captured_at, "preview.captured_at", 1),
     width: integer(v.width, "preview.width", 1),
     height: integer(v.height, "preview.height", 1),
@@ -1328,7 +1327,7 @@ export class Dashboard {
       if (!preview) return;
       let end = preview.rows.length;
       while (end > 1 && preview.rows[end - 1].trim() === "") end--;
-      renderTerminalPreview(target, preview.rows.slice(0, end), preview.ansiRows?.slice(0, end), unifiedTheme(this.preferences.snapshot().preferences.theme));
+      renderTerminalPreview(target, preview.rows.slice(0, end), preview.ansiRows.slice(0, end), unifiedTheme(this.preferences.snapshot().preferences.theme));
       target.scrollTop = target.scrollHeight;
     };
     const sync = (): void => {

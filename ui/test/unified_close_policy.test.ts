@@ -13,8 +13,8 @@ const assert = {
 };
 
 // TERMINAL: typed refusals of this attachment — the page must stop the retry
-// loop and render the reason. ALL
-// broker/front-door-typed refusals are terminal — including the attachment
+// loop and render the reason. Fatal
+// broker/front-door-typed refusals include the attachment
 // protocol violations the front closes deterministically: bad_liveness,
 // bad_attachment, observe_mode, websocket_message_type, and the client-side
 // liveness protocol judgement liveness_protocol.
@@ -22,7 +22,7 @@ for (const reason of [
   "lease_held", "control_displaced", "takeover_superseded",
   "unified_unavailable", "stale_target", "attach_failed", "bad_mode", "bad_history", "protocol",
   "bad_control", "bad_frame", "history_failed",
-  "resize_failed", "resize_rejected", "snapshot_failed",
+  "snapshot_failed",
   "lease_unavailable", "lease_lost", "broker_protocol", "stale_snapshot",
   "bad_liveness", "bad_attachment", "bad_flow", "observe_mode", "websocket_message_type",
   "liveness_protocol", "refusal_protocol", "malformed_frame", "attachment_fault",
@@ -31,13 +31,6 @@ for (const reason of [
   assert.equal(classifyUnifiedClose(reason), "terminal", `broker-typed refusal must be terminal: ${reason}`);
 }
 
-// REATTACH: input_refused is not a permanent verdict — the broker treats it as
-// non-fatal and re-attaching on the same identity recovers it. The page holds
-// the transport's bounded auto-retry and only its own burst limiter promotes it
-// to terminal.
-for (const reason of ["input_refused"]) {
-  assert.equal(classifyUnifiedClose(reason), "reattach", `re-attachable refusal must classify reattach: ${reason}`);
-}
 for (const reason of UNIFIED_REATTACH_REASONS) assert.equal(classifyUnifiedClose(reason), "reattach");
 
 // Rotation and lag close only this attachment view and are reconnectable.
@@ -105,18 +98,24 @@ for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose
   };
   const goFront = readGoPackage("frontdoor");
   const goBroker = readGoPackage("broker");
+  const goProto = readGoPackage("proto");
+  const operationalBlock = goProto.slice(goProto.indexOf("var operationalAttachmentCodes"), goProto.indexOf("var fatalAttachmentCodes"));
+  const operationalCodes = new Set([...operationalBlock.matchAll(/"([a-z0-9_]+)":\s*\{\}/g)].map((match) => match[1]));
+  for (const code of ["input_refused", "input_paused", "resize_failed", "resize_rejected", "observe_mode"]) {
+    assert.ok(operationalCodes.has(code), `extraction lost a known operational code: ${code}`);
+  }
   const uiTransport = fs.readFileSync(path.join(uiRoot, "src", "websocket_attachment_transport.ts"), "utf8");
   const uiLiveness = fs.readFileSync(path.join(uiRoot, "src", "transport_liveness.ts"), "utf8");
 
   const CANONICAL = /^[a-z][a-z0-9_]{0,63}$/;
   const emitted = new Set<string>();
-  const collect = (source: string, pattern: RegExp, canonicalize: boolean): number => {
+  const collect = (source: string, pattern: RegExp, canonicalize: boolean, excluded: ReadonlySet<string> = new Set()): number => {
     let count = 0;
     for (const match of source.matchAll(pattern)) {
       const code = match[1];
       // logTerminalFailure codes pass through canonicalFailureCode before
       // they can appear in a close frame; mirror that exactly.
-      emitted.add(CANONICAL.test(code) ? code : (canonicalize ? "attachment_failed" : code));
+      if (!excluded.has(code)) emitted.add(CANONICAL.test(code) ? code : (canonicalize ? "attachment_failed" : code));
       count += 1;
     }
     return count;
@@ -126,12 +125,12 @@ for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose
   assert.ok(collect(goFront, /logTerminalFailure\(\s*"([^"]*)"/g, true) >= 15, "front-door close-reason extraction found too few sites");
   // Control displacement closes carry their literal reason string.
   assert.ok(collect(goFront, /\breason :?= "([a-z0-9_]+)"/g, false) >= 2, "displacement reason extraction found too few sites");
-  // Broker typed refusals are forwarded verbatim as the close reason.
-  assert.ok(collect(goBroker, /Type: "error", Code: "([a-z0-9_]+)"/g, false) >= 10, "broker refusal-code extraction found too few sites");
+  // The front door relays broker operational refusals in-band. Only exclude
+  // them here: observe_mode is independently a front-door protocol close.
+  assert.ok(collect(goBroker, /Type: "error", Code: "([a-z0-9_]+)"/g, false, operationalCodes) >= 10, "broker refusal-code extraction found too few sites");
   // Subscriber close reasons are written as error codes from the typed
   // constants in internal/proto, not as literals at the broker call site:
   // read the closed set itself, so a value rotation adds there is fenced.
-  const goProto = readGoPackage("proto");
   assert.ok(collect(goProto, /SubscriberCloseReason = "([a-z0-9_]+)"/g, false) >= 1, "subscriber close-reason extraction found too few members");
   for (const match of goProto.matchAll(/SubscriberCloseReason = "([a-z0-9_]+)"/g)) {
     assert.ok(UNIFIED_SUBSCRIBER_CLOSE_REASONS.has(match[1]), `broker subscriber close reason "${match[1]}" is not enumerated in UNIFIED_SUBSCRIBER_CLOSE_REASONS`);
@@ -160,6 +159,9 @@ for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose
   ]) {
     assert.ok(emitted.has(sentinel), `extraction lost a known emitted reason: ${sentinel}`);
   }
+  for (const code of operationalCodes) {
+    if (code !== "observe_mode") assert.ok(!emitted.has(code), `operational code ${code} leaked into the close enumeration`);
+  }
 
   const EXPLICIT: Readonly<Record<string, "terminal" | "transient" | "reattach" | "internal">> = Object.freeze({
     // Front-door typed refusals of this attachment.
@@ -178,11 +180,7 @@ for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose
     // Broker typed refusals forwarded verbatim.
     attach_failed: "terminal", bad_control: "terminal", bad_frame: "terminal",
     bad_history: "terminal", bad_mode: "terminal", history_failed: "terminal",
-    input_refused: "reattach", protocol: "terminal", resize_failed: "terminal",
-    // Operational, relayed in-band like input_refused and never a close; kept
-    // re-attachable so a front door that closed on it cannot dead-end the page.
-    input_paused: "reattach",
-    resize_rejected: "terminal", snapshot_failed: "terminal",
+    protocol: "terminal", snapshot_failed: "terminal",
     stale_target: "terminal", unified_unavailable: "terminal",
     // Broker typed subscriber closes (internal/proto SubscriberCloseReason):
     // this attachment's view of the journal ended; the session did not.
@@ -249,7 +247,7 @@ assert.equal(unifiedCloseNotice("never_seen_before").headline, "This terminal is
 // attachment_failed is the broker's verdict on the attachment — including a
 // Fit whose transaction failed after the host already resized — and names the
 // way back (reopen) rather than degrading to the generic headline.
-for (const reason of ["session_gone", "identity_ambiguous", "identity_invalid", "input_refused", "attachment_failed"]) {
+for (const reason of ["session_gone", "identity_ambiguous", "identity_invalid", "attachment_failed"]) {
   const notice = unifiedCloseNotice(reason);
   assert.ok(notice.headline.length > 0 && notice.detail.length > 0, `notice for ${reason} must have visible text`);
   assert.ok(notice.headline !== "This terminal is unavailable", `${reason} must carry reviewed copy, not the generic degradation`);
@@ -259,7 +257,7 @@ assert.equal(unifiedCloseNotice("generation_rotated").headline, "Refreshing term
 // Reconnect is offered exactly where a fresh attachment can clear the notice:
 // the offline state, every page-limited reattach stop, and the peer protocol
 // faults the transport stopped on. Refusals a retry would replay get none.
-for (const reason of ["reconnect_offline", "reconnect_exhausted", "subscriber_lagged", "input_refused", "generation_rotated", "generation_refit",
+for (const reason of ["reconnect_offline", "reconnect_exhausted", "subscriber_lagged", "generation_rotated", "generation_refit",
   "malformed_frame", "liveness_protocol", "refusal_protocol", "attachment_fault"]) {
   assert.ok(UNIFIED_RECONNECTABLE_NOTICES.has(reason), `a fresh attachment can clear ${reason}; it must offer Reconnect`);
   assert.ok(unifiedCloseNotice(reason).headline !== "This terminal is unavailable", `${reason} must carry reviewed copy`);

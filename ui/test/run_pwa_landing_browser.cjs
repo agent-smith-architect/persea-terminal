@@ -191,7 +191,7 @@ async function startStack({ tls }) {
       response.setHeader("Content-Type", "application/json");
       response.end(JSON.stringify({
         realm: "local", server: "private", session_id: url.searchParams.get("session_id"),
-        rows: ["LANDING_PREVIEW_READ_ONLY"], width: 80, height: 24,
+        rows: ["LANDING_PREVIEW_READ_ONLY"], ansi_rows: ["LANDING_PREVIEW_READ_ONLY"], width: 80, height: 24,
         captured_at: Date.now(), truncated: false,
       }));
       return;

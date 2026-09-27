@@ -77,8 +77,8 @@ func (s *Server) preview(writer *lockedWriter, ctrl proto.Control) {
 		refuse("preview_failed")
 		return
 	}
-	// Keep the text representation for older dashboards. The separate styled
-	// representation permits only bounded SGR, never terminal commands or OSC.
+	// Plain rows let the page verify that styling cannot change the text.
+	// The styled representation permits only bounded SGR, never commands or OSC.
 	data, truncated := boundHistory([]byte(previewRowsWithStyle(sanitizePreviewANSI(out))), proto.PreviewRowLimit, PreviewByteLimit/2)
 	styled := sanitizePreviewANSI(string(data))
 	lines := strings.Split(strings.TrimSuffix(previewSGR.ReplaceAllString(styled, ""), "\n"), "\n")

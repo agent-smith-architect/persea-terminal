@@ -76,10 +76,10 @@ function cssColor(color: Color | undefined, palette: UnifiedTheme): string | und
   return `rgb(${channel(Math.floor(n / 36))},${channel(Math.floor(n / 6) % 6)},${channel(n % 6)})`;
 }
 
-export function renderTerminalPreview(screen: HTMLElement, rows: readonly string[], ansiRows: readonly string[] | undefined, palette: UnifiedTheme): void {
+export function renderTerminalPreview(screen: HTMLElement, rows: readonly string[], ansiRows: readonly string[], palette: UnifiedTheme): void {
   let runs: readonly PreviewRun[];
   try {
-    runs = previewRuns(ansiRows ?? rows);
+    runs = previewRuns(ansiRows);
     if (runs.map(run => run.text).join("") !== rows.join("\n")) throw new Error("Preview representations differ");
   } catch {
     // A malformed styling stream can only lose color. It cannot gain markup,

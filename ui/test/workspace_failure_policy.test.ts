@@ -34,20 +34,26 @@ const readGoPackage = (name: string): string => {
 };
 const CANONICAL = /^[a-z][a-z0-9_]{0,63}$/;
 const emitted = new Set<string>();
-const collect = (source: string, pattern: RegExp, canonicalize: boolean): void => {
+const collect = (source: string, pattern: RegExp, canonicalize: boolean, excluded: ReadonlySet<string> = new Set()): void => {
   for (const match of source.matchAll(pattern)) {
     const code = match[1];
-    emitted.add(CANONICAL.test(code) ? code : (canonicalize ? "attachment_failed" : code));
+    if (!excluded.has(code)) emitted.add(CANONICAL.test(code) ? code : (canonicalize ? "attachment_failed" : code));
   }
 };
 const goFront = readGoPackage("frontdoor");
 const goBroker = readGoPackage("broker");
 const goProto = readGoPackage("proto");
+const operationalBlock = goProto.slice(goProto.indexOf("var operationalAttachmentCodes"), goProto.indexOf("var fatalAttachmentCodes"));
+const operationalCodes = new Set([...operationalBlock.matchAll(/"([a-z0-9_]+)":\s*\{\}/g)].map((match) => match[1]));
+for (const code of ["input_refused", "input_paused", "resize_failed", "resize_rejected", "observe_mode"]) {
+  assert.ok(operationalCodes.has(code), `extraction lost a known operational code: ${code}`);
+}
 const uiTransport = fs.readFileSync(path.join(uiRoot, "src", "websocket_attachment_transport.ts"), "utf8");
 const uiLiveness = fs.readFileSync(path.join(uiRoot, "src", "transport_liveness.ts"), "utf8");
 collect(goFront, /logTerminalFailure\(\s*"([^"]*)"/g, true);
 collect(goFront, /\breason :?= "([a-z0-9_]+)"/g, false);
-collect(goBroker, /Type: "error", Code: "([a-z0-9_]+)"/g, false);
+// Broker operational refusals stay in-band; front-door protocol closes do not.
+collect(goBroker, /Type: "error", Code: "([a-z0-9_]+)"/g, false, operationalCodes);
 collect(goProto, /SubscriberCloseReason = "([a-z0-9_]+)"/g, false);
 const brokerDetails = [...goProto.matchAll(/UnifiedSessionDetail[A-Za-z0-9_]+\s*=\s*"([a-z0-9_]+)"/g)].map((match) => match[1]).sort();
 assert.equal(JSON.stringify([...UNIFIED_INVENTORY_DETAILS].sort()), JSON.stringify(brokerDetails), "broker inventory-detail vocabulary drifted from the shared UI policy");
@@ -70,10 +76,14 @@ const uiController = fs.readFileSync(path.join(uiRoot, "src", "unified_pane_cont
 collect(uiController, /new ReconnectRefusal\("([a-z0-9_]+)"\)/g, false);
 for (const code of ["rate_limited", "attach_failed", "reconnect_exhausted", "reconnect_offline", "websocket_1006", "websocket_1011"]) emitted.add(code);
 for (const set of [UNIFIED_TAKEOVER_REASONS, UNIFIED_TERMINAL_REASONS, UNIFIED_REATTACH_REASONS, UNIFIED_INTERNAL_REASONS, UNIFIED_SUBSCRIBER_CLOSE_REASONS]) for (const reason of set) emitted.add(reason);
-for (const sentinel of ["closed", "canceled", "fault", "subscriber_lagged", "lease_held", "control_displaced", "takeover_superseded", "stale_target", "session_gone", "identity_ambiguous", "identity_invalid", "source_binding_unavailable", "reconnect_unavailable", "attachment_fault", "input_refused", "page_hidden", "malformed_frame"]) {
+for (const sentinel of ["closed", "canceled", "fault", "subscriber_lagged", "lease_held", "control_displaced", "takeover_superseded", "stale_target", "session_gone", "identity_ambiguous", "identity_invalid", "source_binding_unavailable", "reconnect_unavailable", "attachment_fault", "generation_rotated", "page_hidden", "malformed_frame"]) {
   assert.ok(emitted.has(sentinel), `extraction lost a known emitted reason: ${sentinel}`);
 }
 assert.ok(emitted.size >= 40, `emitted reason extraction is implausibly small: ${emitted.size}`);
+assert.ok(emitted.has("observe_mode"), "front-door observe_mode must remain a close reason");
+for (const code of operationalCodes) {
+  if (code !== "observe_mode") assert.ok(!emitted.has(code), `operational code ${code} leaked into the close enumeration`);
+}
 
 const nonblank = (state: PaneState, label: string): void => {
   const copy = paneStateCopy(state);
@@ -168,7 +178,7 @@ for (const kind of PANE_STATE_KINDS) {
 for (const file of ["workspace_layout.ts", "workspace_page.ts", "unified_pane_controller.ts"]) {
   const source = fs.readFileSync(path.join(uiRoot, "src", file), "utf8").replace(/\/\/[^\n]*/g, "");
   assert.ok(!/default:\s*(?:return|\{[^}]*return)[^;]*unavailable/.test(source), `${file}: a default => unavailable escape exists`);
-  assert.ok(!/new Set\(\[[^\]]*"(?:lease_held|control_displaced|subscriber_lagged|input_refused)"/.test(source), `${file}: a private close table exists`);
+  assert.ok(!/new Set\(\[[^\]]*"(?:lease_held|control_displaced|subscriber_lagged|input_refused|generation_rotated)"/.test(source), `${file}: a private close table exists`);
 }
 const pageSource = fs.readFileSync(path.join(uiRoot, "src", "workspace_page.ts"), "utf8");
 assert.ok(pageSource.includes("paneStateFromClose(reason)"), "the workspace page must classify transport closes through the shared policy");

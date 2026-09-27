@@ -194,7 +194,7 @@ type Control struct {
 	// control bytes stripped broker-side, split on newlines. The row and byte
 	// bounds keep the whole response inside one control frame.
 	Lines []string `json:"lines,omitempty"`
-	// ANSILines is an optional colored representation of those same preview
+	// ANSILines is the colored representation of those same preview
 	// rows. Only SGR styling survives the broker's sanitizer.
 	ANSILines []string `json:"ansi_lines,omitempty"`
 }

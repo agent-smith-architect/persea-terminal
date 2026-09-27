@@ -4,16 +4,10 @@
 //
 // The operator's contract: a unified terminal tab that was closed — same tab
 // restored, a new tab on the same device, or another device — reopens into
-// live control without a hand. Two production defects sat behind the reported
-// dead end ("This terminal is unavailable · code: input_refused"):
-//
-//   input-before-control  the page sent its first INPUT (xterm's focus-in report, emitted by
-//       terminal.focus() once the replayed journal had enabled DECSET 1004)
-//       BEFORE the MODE_REQUEST, the broker refused it, and the front door
-//       closed the attachment with input_refused — a terminal class;
-//   consumed-handle-reopen  a consumed or expired fragment handle answered 410 at /ws, the
-//       transport knew no source binding, and the retry exhausted into
-//       source_binding_unavailable.
+// live control without a hand. Input waits for the control grant, and a
+// consumed or expired fragment handle is re-minted from the session identity.
+// Operational refusals leave the attachment live; subscriber closes rebuild
+// the view from the same session.
 //
 // Every scenario drives the REAL bundled page in real Chromium against the
 // fixture's one-time handles, control lease, takeover offers, source bindings,
@@ -161,9 +155,8 @@ async function main() {
     evidence.s0 = { frames: s0Attachment.frames, navigationType: s0.state.navigationType };
 
     // --- input-before-control no INPUT before the control grant (the production trigger) ---------
-    // The broker refuses INPUT while its automaton is still in observe mode,
-    // and the front door turns that refusal into a socket close. The page must
-    // therefore never emit INPUT — a keystroke OR xterm's focus-in report,
+    // The broker refuses INPUT while its automaton is still in observe mode.
+    // The page must never emit INPUT — a keystroke OR xterm's focus-in report,
     // which the replayed journal's DECSET 1004 arms — before the MODE grant.
     // Holding the grant opens exactly that window deterministically.
     await control({ reset: true, replayFocusReporting: true, holdModeGrant: true });
@@ -178,8 +171,8 @@ async function main() {
     const r1Mode = r1Attachment.frames.indexOf("MODE_REQUEST");
     const r1EarlyInput = r1Attachment.frames.slice(0, r1Mode < 0 ? undefined : r1Mode + 1).some((frame) => frame.startsWith("INPUT:"));
     const r1PreGrantInput = r1Attachment.frames.filter((frame, index) => frame.startsWith("INPUT:") && (r1Attachment.mode !== "CONTROL"));
-    evidence.r1 = { frames: r1Attachment.frames, closeReason: r1Attachment.closeReason, windowed: r1Windowed.state ?? r1Windowed.last };
-    if (r1EarlyInput || r1PreGrantInput.length > 0 || r1Attachment.closeReason === "input_refused") {
+    evidence.r1 = { frames: r1Attachment.frames, closeReason: r1Attachment.closeReason, refusals: r1Attachment.refusals, windowed: r1Windowed.state ?? r1Windowed.last };
+    if (r1EarlyInput || r1PreGrantInput.length > 0 || r1Attachment.closeReason !== null || r1Attachment.refusals !== 0) {
       fail("input-before-control", "the page sent INPUT to the broker before the control grant, so the broker refused it (input_refused)", evidence.r1);
     }
     // Release the grant: the page must now be live and typed input must land.
@@ -295,43 +288,6 @@ async function main() {
     }
     await tabB.close(debugPort);
     tabs.pop();
-
-    // --- input-refusal-reconnect mid-session input_refused: re-attach, never a dead end ------------
-    await control({ reset: true });
-    await tabA.navigate(unifiedURL(await freshControlHandle()));
-    const r5Live = await tabA.waitUntil(isLive);
-    assert(r5Live.state, `R5 precondition: fresh open did not reach live control: ${JSON.stringify(r5Live.last)}`);
-    await control({ refuseInputs: 1 });
-    const beforeR5 = await snapshot();
-    await tabA.type("y");
-    const r5 = await tabA.waitUntil((state) => hasNotice(state) || (isLive(state) && state.connection === "" && false), 50);
-    const r5Recovered = await tabA.waitUntil((state) => isLive(state) || hasNotice(state), 8_000);
-    const afterR5 = await snapshot();
-    evidence.r5 = { strips: [...new Set([...r5.strips, ...r5Recovered.strips])], state: r5Recovered.state ?? r5Recovered.last, attachments: afterR5.attachments.length - beforeR5.attachments.length, reasons: afterR5.attachments.map((item) => item.closeReason) };
-    if (!r5Recovered.state || !isLive(r5Recovered.state)) {
-      fail("input-refusal-reconnect", "an input_refused close stranded the page instead of re-attaching", evidence.r5);
-    } else {
-      if (!evidence.r5.strips.some((text) => text.includes("Reconnecting to alpha"))) fail("input-refusal-reconnect", "no reconnecting strip was shown during the re-attach", evidence.r5);
-      await tabA.type("z");
-      await delay(150);
-      const typed = await lastAttachment();
-      if (!typed.inputs.includes("z")) fail("input-refusal-reconnect", "input after the re-attach was not delivered", typed);
-    }
-
-    // --- refusal-burst-notice a refusal burst degrades to a visible terminal notice, never a loop
-    await control({ refuseInputs: 50 });
-    let r6 = null;
-    for (let round = 0; round < 8 && !r6; round += 1) {
-      const live = await tabA.waitUntil((state) => isLive(state) || (hasNotice(state) && state.code.includes("input_refused")), 8_000);
-      if (!live.state) break;
-      if (hasNotice(live.state)) { r6 = live.state; break; }
-      await tabA.type("q");
-      await delay(100);
-    }
-    const afterR6 = await snapshot();
-    evidence.r6 = { state: r6, attachments: afterR6.attachments.length, liveSockets: afterR6.attachments.filter((item) => item.live).length };
-    if (!r6 || !nonBlank(r6)) fail("refusal-burst-notice", "a burst of refusals did not settle into a visible terminal notice", evidence.r6);
-    else if (afterR6.attachments.length > 8) fail("refusal-burst-notice", "the re-attach loop is unbounded", evidence.r6);
 
     // --- session-gone-notice genuinely unresolvable: the session is gone ------------------------
     await control({ reset: true });

@@ -9,7 +9,7 @@
 // `lease_held` and records a takeover offer for the losing handle), the
 // source binding behind /api/attachment-handles, and the broker automaton
 // that refuses INPUT before the control grant with `input_refused` — which
-// the real front door turns into a WebSocket close. This module reproduces
+// the front door relays in-band. This module reproduces
 // exactly those semantics over a hand-rolled RFC 6455 server (Node has no
 // built-in WebSocket server and the UI deliberately has no such dependency),
 // so the gate drives the REAL bundled page against them. Everything else —
@@ -753,7 +753,6 @@ function startFixture(ui, options = {}) {
     holdLeaseRefusalMs: 0,
     failSessionBConnections: 0,
     replayFocusReporting: false,   // replay carries ESC[?1004h
-    refuseInputs: 0,               // broker refuses the next N INPUT frames regardless of mode (legacy close path)
     refuseInputsInBand: 0,         // front relays the next N INPUT refusals in-band; the socket stays open
     refuseResize: "",              // non-empty: RESIZE_REQUEST answered in-band with this code instead of a geometry event
     closeResize: "",               // non-empty: RESIZE_REQUEST answered by closing the socket with this fatal reason (the broker's post-mutation verdict)
@@ -823,7 +822,6 @@ function startFixture(ui, options = {}) {
     state.holdLeaseRefusalMs = 0;
     state.failSessionBConnections = 0;
     state.replayFocusReporting = false;
-    state.refuseInputs = 0;
     state.refuseInputsInBand = 0;
     state.refuseResize = "";
     state.closeResize = "";
@@ -978,7 +976,6 @@ function startFixture(ui, options = {}) {
         if (typeof input.holdKeyboardPreferencePuts === "number") state.holdKeyboardPreferencePuts = Math.max(0, Math.floor(input.holdKeyboardPreferencePuts));
         if (input.releaseKeyboardPreferencePut) state.keyboardPreferencePutReleases.shift()?.();
         if (typeof input.replayFocusReporting === "boolean") state.replayFocusReporting = input.replayFocusReporting;
-        if (typeof input.refuseInputs === "number") state.refuseInputs = input.refuseInputs;
         if (typeof input.refuseInputsInBand === "number") state.refuseInputsInBand = input.refuseInputsInBand;
         if (typeof input.refuseResize === "string") state.refuseResize = input.refuseResize;
         if (typeof input.closeResize === "string") state.closeResize = input.closeResize;
@@ -1208,7 +1205,7 @@ function startFixture(ui, options = {}) {
       if (!session) { response.writeHead(404); response.end("unknown preview session"); return; }
       response.setHeader("Cache-Control", "no-store"); response.setHeader("Content-Type", "application/json");
       response.end(JSON.stringify({ realm: session.realm, server: session.server, session_id: session.session_id,
-        rows: ["Fixture session preview."], width: session.width, height: session.height, captured_at: Date.now(), truncated: false }));
+        rows: ["Fixture session preview."], ansi_rows: ["Fixture session preview."], width: session.width, height: session.height, captured_at: Date.now(), truncated: false }));
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/inventory") {
@@ -1543,17 +1540,9 @@ function startFixture(ui, options = {}) {
       }
       if (value.type === "INPUT") {
         // The real broker answers `error input_refused` for input outside the
-        // control grant and means it as a per-frame refusal; the real front
-        // door closes the socket with that reason. The browser sees the close.
-        if (attachment.mode !== "CONTROL" || state.refuseInputs > 0) {
-          if (state.refuseInputs > 0) state.refuseInputs -= 1;
-          closeWith(1011, "input_refused");
-          return;
-        }
-        if (state.refuseInputsInBand > 0) {
-          // A current front door: the refusal is the frame's outcome, relayed
-          // in-band; the frame is dropped and the socket stays open.
-          state.refuseInputsInBand -= 1;
+        // control grant. The front door relays it in-band and keeps the socket.
+        if (attachment.mode !== "CONTROL" || state.refuseInputsInBand > 0) {
+          if (state.refuseInputsInBand > 0) state.refuseInputsInBand -= 1;
           attachment.refusals = (attachment.refusals || 0) + 1;
           socket.sendText(`${REFUSAL_PREFIX}input_refused`);
           return;

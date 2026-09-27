@@ -237,14 +237,10 @@ func requestRealmPreview(realm config.Realm, server, sessionID string) (previewO
 	}
 	switch m.Type {
 	case "preview_ok":
-		if m.Width < 1 || m.Width > 1000 || m.Height < 1 || m.Height > 1000 || m.FrozenAt <= 0 || len(m.Lines) > proto.PreviewRowLimit+1 || m.ANSILines != nil && len(m.ANSILines) != len(m.Lines) {
+		if m.Width < 1 || m.Width > 1000 || m.Height < 1 || m.Height > 1000 || m.FrozenAt <= 0 || m.Lines == nil || m.ANSILines == nil || len(m.Lines) > proto.PreviewRowLimit+1 || len(m.ANSILines) != len(m.Lines) {
 			return previewOutcome{}, fmt.Errorf("preview response out of bounds")
 		}
-		rows := m.Lines
-		if rows == nil {
-			rows = []string{}
-		}
-		return previewOutcome{rows: rows, ansiRows: m.ANSILines, width: m.Width, height: m.Height, capturedAt: m.FrozenAt, truncated: m.Truncated}, nil
+		return previewOutcome{rows: m.Lines, ansiRows: m.ANSILines, width: m.Width, height: m.Height, capturedAt: m.FrozenAt, truncated: m.Truncated}, nil
 	case "preview_refused":
 		if m.Code == "" {
 			return previewOutcome{}, fmt.Errorf("refusal without a code")

@@ -1,7 +1,7 @@
 // Close-reason policy for the unified terminal page.
 //
 // Every transport loss reaches the page as a canonicalized lowercase reason
-// code: server-side refusals travel in the WebSocket close payload
+// code: fatal server-side refusals travel in the WebSocket close payload
 // (frontdoor writeWSCloseReason / the broker error codes it forwards), the
 // transport's own client-side faults use its literal reason strings, and a
 // bare network drop arrives as `websocket_<code>` because the close frame
@@ -24,27 +24,17 @@
 //   re-attach (source re-mint, then identity re-mint) and renders a
 //   reconnecting strip. A burst (the page's own limiter) is the only thing
 //   that degrades it to a terminal notice, so a genuinely stuck session cannot
-//   loop forever. Two kinds of member:
-//   * `input_refused`: the broker emits it for a frame that arrived a beat
-//     before the control grant or inside a resize cut, and `continue`s;
-//     retrying does NOT replay it. A current front door relays it in-band
-//     (unified_refusal_notice) and never closes on it; the member is kept for
-//     a front door that still closes, so the page cannot dead-end.
-//     `input_paused` (input from a page far behind the session) is the same
-//     kind of refusal: relayed in-band, never a close.
-//   * View-ending subscriber close reasons (internal/proto
-//     SubscriberCloseReason): `subscriber_lagged` ends a view the broker
-//     could not keep supplying (a slow view catches up from the journal
-//     instead), `generation_rotated` replaces a pressure-
-//     rotated generation, and `generation_refit` replaces one after an
-//     explicit capture-authoritative width refit. The session and control mode
-//     remain intact, so re-attach rebuilds the terminal from snapshot+tail.
-//     Those two stay out of UNIFIED_TERMINAL_REASONS. The broader subscriber
-//     protocol enumeration also includes `generation_failed` and
-//     `refit_faulted`: that exact successor was made ineligible, so each is terminal and stays out of
-//     UNIFIED_REATTACH_REASONS, and renders explicit retry/dashboard actions.
+//   loop forever. Its members are subscriber close reasons (internal/proto
+//   SubscriberCloseReason): `subscriber_lagged` ends a view the broker could
+//   not keep supplying, `generation_rotated` replaces a pressure-rotated
+//   generation, and `generation_refit` replaces one after an explicit width
+//   refit. The session and control mode remain intact, so re-attach rebuilds
+//   the terminal from snapshot+tail. `generation_failed` and `refit_faulted`
+//   instead make that exact successor ineligible; each is terminal.
 // - INTERNAL: closes the page inflicted on itself (navigation away, an
 //   explicit socket replacement). Nothing to render.
+// Broker operational refusals travel in-band (unified_refusal_notice), never
+// as close reasons. observe_mode is also a front-door protocol close.
 export type UnifiedCloseClass = "terminal" | "transient" | "reattach" | "internal";
 
 // Inventory details are presentation-only facts. Keep one closed vocabulary
@@ -80,8 +70,6 @@ export const UNIFIED_SUBSCRIBER_CLOSE_REASONS: ReadonlySet<string> = new Set([
 // The page holds the transport's bounded auto-retry for these and only its own
 // burst limiter promotes them to terminal.
 export const UNIFIED_REATTACH_REASONS: ReadonlySet<string> = new Set([
-  "input_refused",
-  "input_paused",
   "generation_rotated",
   "generation_refit",
   "subscriber_lagged",
@@ -123,12 +111,10 @@ export const UNIFIED_HANDOFF_REASONS: ReadonlySet<string> = new Set([
 // keep a private copy of it, because separate copies can omit close reasons.
 export const UNIFIED_TERMINAL_REASONS: ReadonlySet<string> = new Set([
   ...UNIFIED_TAKEOVER_REASONS,
-  // Broker-typed refusals forwarded verbatim by the front door. Every error
-  // control the broker emits on an attachment writer is a deterministic
-  // typed refusal: retrying replays it.
+  // Fatal broker-typed refusals forwarded verbatim by the front door.
   "unified_unavailable", "stale_target", "attach_failed", "bad_mode", "bad_history", "protocol",
   "bad_control", "bad_frame", "history_failed",
-  "resize_failed", "resize_rejected", "snapshot_failed",
+  "snapshot_failed",
   "generation_failed",
   "refit_faulted",
   // Front-door-typed refusals of this attachment, including the attachment
@@ -222,8 +208,6 @@ const NOTICES: Readonly<Record<string, UnifiedCloseNotice>> = Object.freeze({
   session_gone: Object.freeze({ headline: "This session has ended", detail: "The session is no longer running. Open another one from the dashboard." }),
   identity_ambiguous: Object.freeze({ headline: "This session is ambiguous", detail: "More than one session now matches this tab's identity. Pick the one you want from the dashboard." }),
   identity_invalid: Object.freeze({ headline: "This link is incomplete", detail: "This tab is missing the identity needed to reopen its session. Open it again from the dashboard." }),
-  // The reattach burst limiter's terminal outcome: input kept being refused.
-  input_refused: Object.freeze({ headline: "Input kept being refused", detail: "The session repeatedly refused input. Try again, or reopen it from the dashboard." }),
   // The terminal outcome of repeated subscriber_lagged closes: the server
   // could not keep this view supplied (reader capacity, or a journal that no
   // longer served it). The session is fine; this view is not being served.

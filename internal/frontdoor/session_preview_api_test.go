@@ -35,7 +35,7 @@ func previewTestServer(t *testing.T, socket string, now func() time.Time) *Serve
 
 func TestPreviewSessionForwardsIdentityAndRelaysRows(t *testing.T) {
 	socket, captured := stubCreateBroker(t, func(proto.Control) proto.Control {
-		return proto.Control{Type: "preview_ok", Width: 80, Height: 24, Pane: "%3", FrozenAt: 1_700_000_000_123, Truncated: true, Lines: []string{"alpha", "", "tab\there"}}
+		return proto.Control{Type: "preview_ok", Width: 80, Height: 24, Pane: "%3", FrozenAt: 1_700_000_000_123, Truncated: true, Lines: []string{"alpha", "", "tab\there"}, ANSILines: []string{"\x1b[31malpha\x1b[0m", "", "tab\there"}}
 	})
 	w := getPreview(createServer(t, socket), "realm=r&server=s&session_id=%2417")
 	if w.Code != http.StatusOK {
@@ -50,6 +50,7 @@ func TestPreviewSessionForwardsIdentityAndRelaysRows(t *testing.T) {
 		Server     string   `json:"server"`
 		SessionID  string   `json:"session_id"`
 		Rows       []string `json:"rows"`
+		ANSIRows   []string `json:"ansi_rows"`
 		Width      int      `json:"width"`
 		Height     int      `json:"height"`
 		CapturedAt int64    `json:"captured_at"`
@@ -64,18 +65,21 @@ func TestPreviewSessionForwardsIdentityAndRelaysRows(t *testing.T) {
 	if len(body.Rows) != 3 || body.Rows[0] != "alpha" || body.Rows[1] != "" || body.Rows[2] != "tab\there" {
 		t.Fatalf("preview rows changed in transit: %q", body.Rows)
 	}
+	if len(body.ANSIRows) != 3 || body.ANSIRows[0] != "\x1b[31malpha\x1b[0m" || body.ANSIRows[1] != "" || body.ANSIRows[2] != "tab\there" {
+		t.Fatalf("styled preview rows changed in transit: %q", body.ANSIRows)
+	}
 }
 
-func TestPreviewSessionRelaysEmptyRowsAsArray(t *testing.T) {
+func TestPreviewSessionRelaysBlankPane(t *testing.T) {
 	socket, _ := stubCreateBroker(t, func(proto.Control) proto.Control {
-		return proto.Control{Type: "preview_ok", Width: 80, Height: 24, FrozenAt: 1}
+		return proto.Control{Type: "preview_ok", Width: 80, Height: 24, FrozenAt: 1, Lines: []string{""}, ANSILines: []string{"\x1b[0m"}}
 	})
 	w := getPreview(createServer(t, socket), "realm=r&server=s&session_id=%2417")
 	if w.Code != http.StatusOK {
 		t.Fatalf("preview status = %d, body %q", w.Code, w.Body.String())
 	}
-	if !bytes.Contains(w.Body.Bytes(), []byte(`"rows":[]`)) {
-		t.Fatalf("empty preview did not serialize rows as an array: %q", w.Body.String())
+	if !bytes.Contains(w.Body.Bytes(), []byte(`"rows":[""]`)) || !bytes.Contains(w.Body.Bytes(), []byte(`"ansi_rows":["\u001b[0m"]`)) {
+		t.Fatalf("blank preview lost its plain or styled row: %q", w.Body.String())
 	}
 }
 
@@ -112,7 +116,7 @@ func TestPreviewSessionDoesNotEchoBrokerText(t *testing.T) {
 // rejected before any broker is consulted.
 func TestPreviewSessionRejectsMalformedRequests(t *testing.T) {
 	socket, captured := stubCreateBroker(t, func(proto.Control) proto.Control {
-		return proto.Control{Type: "preview_ok", Width: 1, Height: 1, FrozenAt: 1}
+		return proto.Control{Type: "preview_ok", Width: 1, Height: 1, FrozenAt: 1, Lines: []string{""}, ANSILines: []string{""}}
 	})
 	h := createServer(t, socket)
 	for name, query := range map[string]string{
@@ -150,9 +154,13 @@ func TestPreviewSessionRejectsUnexpectedBrokerReplies(t *testing.T) {
 		"wrong_type":      {Type: "inventory_ok"},
 		"refusal_no_code": {Type: "preview_refused"},
 		"adopt_response":  {Type: "adopt_ok"},
-		"zero_geometry":   {Type: "preview_ok", Width: 0, Height: 24, FrozenAt: 1},
-		"no_captured_at":  {Type: "preview_ok", Width: 80, Height: 24},
-		"row_overflow":    {Type: "preview_ok", Width: 80, Height: 24, FrozenAt: 1, Lines: tooManyRows},
+		"zero_geometry":   {Type: "preview_ok", Width: 0, Height: 24, FrozenAt: 1, Lines: []string{""}, ANSILines: []string{""}},
+		"no_captured_at":  {Type: "preview_ok", Width: 80, Height: 24, Lines: []string{""}, ANSILines: []string{""}},
+		"row_overflow":    {Type: "preview_ok", Width: 80, Height: 24, FrozenAt: 1, Lines: tooManyRows, ANSILines: tooManyRows},
+		"missing_rows":    {Type: "preview_ok", Width: 80, Height: 24, FrozenAt: 1},
+		"missing_styling": {Type: "preview_ok", Width: 80, Height: 24, FrozenAt: 1, Lines: []string{"alpha"}},
+		"missing_plain":   {Type: "preview_ok", Width: 80, Height: 24, FrozenAt: 1, ANSILines: []string{"alpha"}},
+		"styling_length":  {Type: "preview_ok", Width: 80, Height: 24, FrozenAt: 1, Lines: []string{"alpha"}, ANSILines: []string{"alpha", "beta"}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			socket, _ := stubCreateBroker(t, func(proto.Control) proto.Control { return reply })
@@ -170,7 +178,7 @@ func TestPreviewSessionCachesWithinTTL(t *testing.T) {
 	brokered := 0
 	socket, _ := stubCreateBroker(t, func(proto.Control) proto.Control {
 		brokered++
-		return proto.Control{Type: "preview_ok", Width: 80, Height: 24, FrozenAt: int64(brokered)}
+		return proto.Control{Type: "preview_ok", Width: 80, Height: 24, FrozenAt: int64(brokered), Lines: []string{""}, ANSILines: []string{""}}
 	})
 	current := time.Unix(1_700_000_000, 0)
 	s := previewTestServer(t, socket, func() time.Time { return current })
@@ -225,7 +233,7 @@ func TestPreviewSessionBudgetLimitsCacheMisses(t *testing.T) {
 	brokered := 0
 	socket, captured := stubCreateBroker(t, func(proto.Control) proto.Control {
 		brokered++
-		return proto.Control{Type: "preview_ok", Width: 80, Height: 24, FrozenAt: 1}
+		return proto.Control{Type: "preview_ok", Width: 80, Height: 24, FrozenAt: 1, Lines: []string{""}, ANSILines: []string{""}}
 	})
 	current := time.Unix(1_700_000_000, 0)
 	s := previewTestServer(t, socket, func() time.Time { return current })
