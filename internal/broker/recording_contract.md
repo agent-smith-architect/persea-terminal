@@ -276,12 +276,35 @@ bytes, covering its event, link, allocator header and size-class rounding;
 payload allocation is charged separately. There is no independent event-count
 limit: even zero-payload geometry costs a node, so at most 33,280 events can be
 owned. A maximal 64 KiB output costs 65,664 bytes, allowing 64 such events.
-Between PREPARE and COMMIT the writer does not drain the tail; thousands of
-small records can fit without a count-only eviction. No records are coalesced,
-so sequence-gap detection and geometry boundaries retain their exact order.
-Both `subscriber_closed` and `subscriber_close_cut` log the eviction limit.
-Publication reserves before
-copying; receipt transfers ownership to the writer without refund. The writer
+No records are coalesced in the queue, so sequence-gap detection and geometry
+boundaries retain their exact order. Publication reserves before
+copying; receipt transfers ownership to the writer without refund.
+
+A reader that falls behind is not evicted. When a queued event would exceed
+the per-reader limit, or the aggregate budget refuses it, publication marks
+the queue catching up and stops copying to it; it never waits for the reader.
+The writer drains what is queued, then reads the committed suffix after the
+last event it wrote from the journal (`ReadCommittedEventsAfter`, addressed by
+sequence and byte offset, walking only the suffix) in rounds of at most
+512 KiB of output and always at least one record. Each round's event index and
+payload slab are charged to the reader's lease before the copy and released
+after the round's last write returns; a parked write keeps its round charged
+through cancellation. Only one round is owned at a time. Under `journalMu` and
+`subscriberMu`, when the writer's position equals the committed frontier, the
+subscriber's cursor is set to it and it rejoins the queue: no commit can land
+and no publication can run in that interval, so every later event is copied
+in order and every earlier one, including a commit whose publication is still
+pending, has already been read. The attachment writer registers its tail
+already catching up at PREPARE, so output committed while PREPARE, the replay
+and the backlog are written is read from the journal instead of copied. How
+far a reader can fall behind is bounded by its generation: rotation closes it
+with the typed handoff, which the registry commit publishes before the journal
+commit can retire the predecessor. A round the aggregate budget cannot fund
+ends the reader with `subscriber_lagged` (`reader_bytes`); a journal that no
+longer serves the generation or cursor ends it with `subscriber_lagged`
+(`catch_up_read`). A sequence gap in publication, a detached lease and an
+invalid event still evict. Both `subscriber_closed` and `subscriber_close_cut`
+log the eviction limit. The writer
 releases the event only after its actual write returns. Eviction and cancellation
 close and drain buffered events, refunding only the events actually drained. A
 concurrently dequeued event remains charged, including during a blocked write.

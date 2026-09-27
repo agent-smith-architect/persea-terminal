@@ -116,8 +116,9 @@ inherit the production one-pending assumption.
 Retirement releases projection only after proven unlink. Snapshots are separate
 copies: one event array and one payload slab, both reserved before allocation.
 Readers can outlive the source generation and keep those copies charged through
-the last backlog or in-flight write. Cancel, eviction and map removal do not
-refund a held consumer. Snapshot copies therefore cannot be bounded by the
+the last backlog or in-flight write. A catching-up reader's journal read is the
+same kind of copy, at most one bounded round at a time, reserved before it is
+made. Cancel, eviction and map removal do not refund a held consumer. Snapshot copies therefore cannot be bounded by the
 currently visible journal files.
 
 Recovery marks clean surviving journals Legacy, not Continuous. A fresh broker

@@ -31,8 +31,9 @@
 //     (unified_refusal_notice) and never closes on it; the member is kept for
 //     a front door that still closes, so the page cannot dead-end.
 //   * View-ending subscriber close reasons (internal/proto
-//     SubscriberCloseReason): `subscriber_lagged` evicts a view that fell
-//     behind the committed stream, `generation_rotated` replaces a pressure-
+//     SubscriberCloseReason): `subscriber_lagged` ends a view the broker
+//     could not keep supplying (a slow view catches up from the journal
+//     instead), `generation_rotated` replaces a pressure-
 //     rotated generation, and `generation_refit` replaces one after an
 //     explicit capture-authoritative width refit. The session and control mode
 //     remain intact, so re-attach rebuilds the terminal from snapshot+tail.
@@ -218,10 +219,10 @@ const NOTICES: Readonly<Record<string, UnifiedCloseNotice>> = Object.freeze({
   identity_invalid: Object.freeze({ headline: "This link is incomplete", detail: "This tab is missing the identity needed to reopen its session. Open it again from the dashboard." }),
   // The reattach burst limiter's terminal outcome: input kept being refused.
   input_refused: Object.freeze({ headline: "Input kept being refused", detail: "The session repeatedly refused input. Try again, or reopen it from the dashboard." }),
-  // The reattach burst limiter's terminal outcome for a subscriber close: the
-  // page kept falling behind the session's output faster than it could be
-  // rebuilt. The session is fine; this page is not keeping up.
-  subscriber_lagged: Object.freeze({ headline: "This page kept falling behind", detail: "The session produced output faster than this page could receive it, repeatedly. The session is still running; try again to rebuild this view." }),
+  // The terminal outcome of repeated subscriber_lagged closes: the server
+  // could not keep this view supplied (reader capacity, or a journal that no
+  // longer served it). The session is fine; this view is not being served.
+  subscriber_lagged: Object.freeze({ headline: "This page kept falling behind", detail: "The server could not keep this page up to date with the session, repeatedly. The session is still running; try again to rebuild this view." }),
   generation_rotated: Object.freeze({ headline: "Refreshing terminal history", detail: "The terminal journal advanced to a new generation. This page is reconnecting from the authoritative snapshot." }),
   generation_refit: Object.freeze({ headline: "Refitting terminal width", detail: "The terminal width changed and this page is reconnecting from the authoritative post-width snapshot." }),
   generation_failed: Object.freeze({ headline: "Terminal history stopped", detail: "The new terminal journal could not be made durable. Reopen this session from the dashboard to start a fresh unified attachment." }),

@@ -25,8 +25,13 @@ const (
 	// capture and legacy LIVE JSON are absent on this explicit writer pairing.
 	recordingAttachmentBytes = 4 << 20
 	// The same byte ceiling covers queued nodes and payloads plus any event
-	// still in the writer. Output beyond it is rebuilt from the snapshot.
+	// still in the writer. Output beyond it is not copied: the subscriber
+	// catches up from the journal instead.
 	recordingTailBytes = 4<<20 + 64<<10
+	// A catch-up round copies at most this much committed output (and always
+	// at least one record) out of the journal. It is charged to the reader's
+	// lease before the copy and released after its last write returns.
+	recordingCatchUpReadBytes = 512 << 10
 )
 
 // recordingTailLimit names the bound that refused a tail event. The browser
@@ -40,6 +45,9 @@ const (
 	tailLimitReaderBytes recordingTailLimit = "reader_bytes"
 	tailLimitDetached    recordingTailLimit = "detached"
 	tailLimitInvalid     recordingTailLimit = "invalid_event"
+	// tailLimitCatchUpRead names a catch-up read the journal refused: the
+	// generation's projection is gone or the cursor no longer matches it.
+	tailLimitCatchUpRead recordingTailLimit = "catch_up_read"
 )
 
 var errRecordingReaders = errors.New("recording reader capacity exhausted")
@@ -67,6 +75,7 @@ type recordingReaderLease struct {
 	owners          int
 	attachmentBytes int64
 	transportBytes  int64
+	catchUpBytes    int64
 }
 
 type recordingReaderUsage struct {
@@ -178,7 +187,7 @@ func (lease *recordingReaderLease) detach() {
 }
 
 func (lease *recordingReaderLease) releaseLocked() {
-	if lease.released || !lease.detached || lease.snapshotBytes != 0 || lease.events != 0 || lease.owners != 0 || lease.transportBytes != 0 {
+	if lease.released || !lease.detached || lease.snapshotBytes != 0 || lease.events != 0 || lease.owners != 0 || lease.transportBytes != 0 || lease.catchUpBytes != 0 {
 		return
 	}
 	lease.released = true
@@ -246,6 +255,39 @@ func (lease *recordingReaderLease) reserveSnapshot(bytes int64) error {
 	budget.charge(delta)
 	lease.snapshotBytes = bytes
 	return nil
+}
+
+// reserveCatchUp charges one catch-up read before its copy exists. False
+// names the aggregate bound: the read must not happen.
+func (lease *recordingReaderLease) reserveCatchUp(bytes int64) bool {
+	if lease == nil {
+		return true
+	}
+	budget := lease.budget
+	budget.mutex().Lock()
+	defer budget.mutex().Unlock()
+	if lease.detached || bytes < 0 || bytes > budget.capacity()-budget.bytes || !budget.copies.available(bytes) {
+		return false
+	}
+	budget.charge(bytes)
+	lease.catchUpBytes += bytes
+	return true
+}
+
+// releaseCatchUp settles a catch-up read after the writer's last use of it.
+func (lease *recordingReaderLease) releaseCatchUp(bytes int64) {
+	if lease == nil {
+		return
+	}
+	budget := lease.budget
+	budget.mutex().Lock()
+	defer budget.mutex().Unlock()
+	if bytes < 0 || bytes > lease.catchUpBytes {
+		panic("recording: catch-up read released without ownership")
+	}
+	budget.charge(-bytes)
+	lease.catchUpBytes -= bytes
+	lease.releaseLocked()
 }
 
 func (lease *recordingReaderLease) reserveTransport(bytes int64) bool {

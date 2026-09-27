@@ -1135,6 +1135,40 @@ test("a_view_that_never_catches_up_keeps_its_episode_however_long_it_stays_up", 
   transport.detach();
 });
 
+test("a_takeover_is_judged_on_its_own_connection_not_the_displaced_one", async () => {
+  for (const displacedStable of [false, true]) {
+    const clock = new FakeReconnectClock();
+    const sockets: TransportFakeSocket[] = [];
+    const statuses: string[] = [];
+    const transport = recordingTransport(clock, sockets, statuses, freshEndpoint);
+    const attempt = () => statuses.at(-1)?.split(":").slice(0, 2).join(":");
+    const first = transport.connect();
+    bindTransportSource(transport, first);
+    transport.connectionCommitted(first);
+    transport.connectionCaughtUp(first);
+    await clock.advance(STABLE_CONNECTION_MS);
+    // One loss spends two fast attempts before a connection catches up.
+    sockets.at(-1)!.emit("close", { code: 1006, reason: "" });
+    await clock.advance(RECONNECT_TEST_MAX_FAST_DELAY_MS);
+    sockets.at(-1)!.emit("close", { code: 1006, reason: "" });
+    equal(attempt(), "WAITING:2", "fixture did not spend two attempts");
+    await clock.advance(RECONNECT_TEST_MAX_FAST_DELAY_MS);
+    transport.connectionCommitted(sockets.length);
+    transport.connectionCaughtUp(sockets.length);
+    await clock.advance(displacedStable ? STABLE_CONNECTION_MS : 5_000);
+    sockets.at(-1)!.emit("close", { code: 1000, reason: "control_displaced" });
+    equal(clock.pending(), 0, "control moving elsewhere still auto-retried");
+    // The operator claims control a minute later; the claim fails before COMMIT.
+    await clock.advance(60_000);
+    transport.takeControl(Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-handle.takeover"]) }));
+    sockets.at(-1)!.emit("close", { code: 1006, reason: "" });
+    equal(attempt(), displacedStable ? "WAITING:1" : "WAITING:3",
+      displacedStable ? "a claim after a stable connection kept the old episode"
+        : "a claim was judged stable on the displaced connection's old catch-up");
+    transport.detach();
+  }
+});
+
 test("connected_time_between_momentary_commits_does_not_spend_the_fast_phase", async () => {
   const clock = new FakeReconnectClock();
   const sockets: TransportFakeSocket[] = [];

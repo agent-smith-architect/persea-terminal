@@ -120,7 +120,7 @@ func TestRecordingAttachmentAndSnapshotUseOneAdmission(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	events, _, tail, cancel, err := effects.openSnapshotTailWithLease(key.Session, lease)
+	events, _, tail, cancel, err := effects.openSnapshotTailWithLease(key.Session, lease, true)
 	if err != nil {
 		t.Fatal(err)
 	}

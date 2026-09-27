@@ -61,6 +61,10 @@ type unifiedAttachmentFrameWriter struct {
 	backlog    []unifiedjournal.Event
 	tail       *unifiedDevSubscriber
 	cancel     func()
+	// delivered is the last committed event this writer has written, from the
+	// snapshot, the live queue or a catch-up read. Set at PREPARE and owned by
+	// streamTail afterwards; a catch-up read starts after it.
+	delivered unifiedjournal.CommittedCursor
 	// end unblocks the attachment loop after a typed subscriber close has
 	// been written, so the broker ends the attachment itself rather than
 	// waiting for the peer to hang up. Closing the connection is also what
@@ -299,9 +303,13 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 			}()
 			return nil
 		}
-		events, initial, tail, cancel, err := writer.provider.openSnapshotTailWithLease(writer.session, writer.lease)
+		events, initial, tail, cancel, err := writer.provider.openSnapshotTailWithLease(writer.session, writer.lease, true)
 		if err != nil {
 			return err
+		}
+		if len(events) != 0 {
+			last := events[len(events)-1]
+			writer.delivered = unifiedjournal.CommittedCursor{Sequence: last.Sequence, Offset: last.End}
 		}
 		writer.prepared, writer.tail, writer.cancel = true, tail, cancel
 		writer.ended = make(chan struct{})
@@ -383,16 +391,26 @@ func (writer *unifiedAttachmentFrameWriter) streamTail() {
 			return
 		default:
 		}
-		event, open := tail.receive()
-		if !open {
+		event, state := tail.data.next()
+		var err error
+		switch state {
+		case recordingTailClosed:
+		case recordingTailCatchUp:
+			err = writer.catchUp(tail)
+		case recordingTailEvent:
+			err = writer.writeTailEvent(tail, event)
+			if err == nil {
+				writer.delivered = unifiedjournal.CommittedCursor{Sequence: event.Sequence, Offset: event.End}
+			}
+			// Receiving transfers ownership to this writer. Cancellation and
+			// eviction cannot refund the event while the actual write is parked.
+			bytes := recordingEventBytes(event)
+			event = unifiedjournal.Event{}
+			tail.lease.releaseEvent(bytes)
+		}
+		if state == recordingTailClosed {
 			break
 		}
-		err := writer.writeTailEvent(tail, event)
-		// Receiving transfers ownership to this writer. Cancellation and
-		// eviction cannot refund the event while the actual write is parked.
-		bytes := recordingEventBytes(event)
-		event = unifiedjournal.Event{}
-		tail.lease.releaseEvent(bytes)
 		if err != nil {
 			select {
 			case <-tail.verdictSignal():
@@ -411,6 +429,87 @@ func (writer *unifiedAttachmentFrameWriter) streamTail() {
 	if reason := tail.closeReason(); reason != "" {
 		writer.terminate(reason, tail.closeLimit())
 	}
+}
+
+// catchUp brings a subscriber that publication stopped copying to — behind
+// since PREPARE, or since its queue reached its bound — up to the committed
+// frontier by reading the journal in bounded rounds, and returns once it has
+// rejoined the live queue there. A slow reader is therefore never cut off for
+// being slow: it costs one bounded read at a time instead of a copy of every
+// event it has not yet written, and the page keeps its terminal instead of
+// reloading the whole history. How far behind it can fall is bounded by the
+// generation: a rotation closes it with the typed handoff, as it does every
+// reader of the predecessor.
+func (writer *unifiedAttachmentFrameWriter) catchUp(tail *unifiedDevSubscriber) error {
+	for {
+		events, charge, rejoined, err := writer.provider.readCatchUp(tail, writer.delivered)
+		if err != nil || rejoined {
+			return err
+		}
+		err = writer.writeCatchUp(tail, events)
+		if err == nil {
+			last := events[len(events)-1]
+			writer.delivered = unifiedjournal.CommittedCursor{Sequence: last.Sequence, Offset: last.End}
+		}
+		events = nil
+		tail.lease.releaseCatchUp(charge)
+		if err != nil {
+			return err
+		}
+	}
+}
+
+// writeCatchUp writes one catch-up read in journal order. Like the backlog,
+// consecutive output shares LIVE frames up to unifiedLiveFrameBytes; a
+// geometry record ends the run before it and is written through the same
+// readiness fence as a live one. The lock is taken per frame, so MODE and
+// other attachment frames interleave between frames exactly as with the live
+// queue, and a typed verdict is checked before every frame.
+func (writer *unifiedAttachmentFrameWriter) writeCatchUp(tail *unifiedDevSubscriber, events []unifiedjournal.Event) error {
+	var run []byte
+	flush := func() error {
+		if len(run) == 0 {
+			return nil
+		}
+		select {
+		case <-tail.verdictSignal():
+			return terminal.ErrClosed
+		default:
+		}
+		writer.mu.Lock()
+		err := terminal.ErrClosed
+		if !writer.closing {
+			err = writer.writeLiveLocked(run)
+		}
+		writer.mu.Unlock()
+		run = run[:0]
+		return err
+	}
+	for _, event := range events {
+		if event.Kind != unifiedjournal.RecordOutput {
+			if err := flush(); err != nil {
+				return err
+			}
+			if err := writer.writeTailEvent(tail, event); err != nil {
+				return err
+			}
+			continue
+		}
+		for payload := event.Payload; len(payload) != 0; {
+			if run == nil {
+				run = make([]byte, 0, unifiedLiveFrameBytes)
+			}
+			take := min(unifiedLiveFrameBytes-len(run), len(payload))
+			run = append(run, payload[:take]...)
+			payload = payload[take:]
+			if len(run) == unifiedLiveFrameBytes {
+				if err := flush(); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return flush()
 }
 
 // watchVerdict is the bounded close path a typed subscriber verdict takes

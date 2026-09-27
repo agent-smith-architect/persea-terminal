@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -63,35 +64,102 @@ func admissionTypes(t *testing.T, wire *admissionWire) []terminal.FrameType {
 	return types
 }
 
-func TestUnifiedAdmissionEvictionPrecedesCommit(t *testing.T) {
-	effects, key := recordingReaderFixture(t, 0)
-	for attempt := 0; attempt < 3; attempt++ {
-		wire := &admissionWire{}
-		writer := &unifiedAttachmentFrameWriter{provider: effects, session: key.Session, downstream: &attachmentFrameWriter{wire: &lockedWriter{w: wire}}}
-		if err := admissionFrame(t, writer, terminal.FramePrepare); err != nil {
+// admissionOutput is the terminal output a wire carries, PREPARE's replay then
+// every LIVE frame, and the controls it carries. Caller holds the writer's lock.
+func admissionOutput(t *testing.T, wire *admissionWire) (output []byte, controls []proto.Control) {
+	t.Helper()
+	reader := bytes.NewReader(wire.Bytes())
+	for reader.Len() != 0 {
+		frame, err := proto.ReadFrame(reader)
+		if err != nil {
 			t.Fatal(err)
 		}
-		for i := 0; i <= recordingTailBytes/(64<<10); i++ {
-			b1Commit(t, effects, key, bytes.Repeat([]byte{'x'}, 64<<10))
+		if frame.Type == proto.FrameControl {
+			control, err := proto.DecodeControl(frame.Payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			controls = append(controls, control)
+			continue
 		}
-		if writer.tail.closeLimit() != tailLimitQueueBytes {
-			t.Fatal(writer.tail.closeLimit())
+		decoded, err := attachmentwire.Decode(frame.Payload, attachmentwire.ServerToBrowser)
+		if err != nil {
+			t.Fatal(err)
 		}
-		err := admissionFrame(t, writer, terminal.FrameCommit)
-		if !errors.Is(err, terminal.ErrClosed) {
-			t.Errorf("known eviction COMMIT returned %v", err)
+		switch decoded.Type {
+		case terminal.FramePrepare:
+			output = append(output, decoded.Replay...)
+		case terminal.FrameLive:
+			output = append(output, decoded.Data...)
 		}
-		select {
-		case <-writer.ended:
-		case <-time.After(5 * time.Second):
-			t.Fatal("verdict did not finish")
-		}
-		types := admissionTypes(t, wire)
-		if len(types) != 2 || types[0] != terminal.FramePrepare || types[1] != "verdict" {
-			t.Fatalf("known eviction published %v", types)
-		}
-		_ = writer.Close(context.Background())
 	}
+	return output, controls
+}
+
+// Output committed while the initial backlog is still being written — on a
+// slow link, while the history takes longer to send than the old tail could
+// hold new output — neither evicts the attachment nor is copied to its tail.
+// The attachment is admitted catching up: it writes the backlog, reads what
+// arrived meanwhile from the journal, and joins the live queue, delivering
+// every committed byte exactly once and in order.
+func TestUnifiedAdmissionOutputDuringBacklogIsCaughtUpNotEvicted(t *testing.T) {
+	effects, key := recordingReaderFixture(t, 512<<10)
+	expected := bytes.Repeat([]byte{'s'}, 512<<10)
+	wire := &admissionWire{park: terminal.FrameLive, entered: make(chan struct{}), release: make(chan struct{})}
+	locked := &lockedWriter{w: wire}
+	writer := &unifiedAttachmentFrameWriter{provider: effects, session: key.Session, downstream: &attachmentFrameWriter{wire: locked}}
+	var releaseOnce sync.Once
+	unblock := func() { releaseOnce.Do(func() { close(wire.release) }) }
+	// Deferred in this order so a failing assertion releases the parked write
+	// before Close waits for the writer.
+	defer writer.Close(context.Background())
+	defer unblock()
+	if err := admissionFrame(t, writer, terminal.FramePrepare); err != nil {
+		t.Fatal(err)
+	}
+	committed := make(chan error, 1)
+	go func() { committed <- admissionFrame(t, writer, terminal.FrameCommit) }()
+	select {
+	case <-wire.entered:
+	case <-time.After(5 * time.Second):
+		t.Fatal("backlog did not park")
+	}
+	// More than the tail's byte bound arrives while the backlog is parked.
+	for i := 0; i <= recordingTailBytes/(64<<10); i++ {
+		payload := bytes.Repeat([]byte(fmt.Sprintf("[%03d]", i)), (64<<10)/5+1)[:64<<10]
+		expected = append(expected, payload...)
+		b1Commit(t, effects, key, payload)
+	}
+	if reason := writer.tail.closeReason(); reason != "" {
+		t.Fatalf("output during the backlog evicted the attachment: reason=%q limit=%q", reason, writer.tail.closeLimit())
+	}
+	if got := effects.readers.snapshot(); got.Events != 0 {
+		t.Fatalf("output during the backlog was copied to the tail: %+v", got)
+	}
+	unblock()
+	select {
+	case err := <-committed:
+		if err != nil {
+			t.Fatalf("COMMIT: %v", err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("COMMIT did not finish its backlog")
+	}
+	pollUntil(t, 10*time.Second, "catch-up rejoining the live queue", func() bool { return !writer.tail.data.isCatchingUp() })
+	live := []byte("[live after catch-up]")
+	expected = append(expected, live...)
+	b1Commit(t, effects, key, live)
+	pollUntil(t, 10*time.Second, "every committed byte on the wire", func() bool {
+		locked.mu.Lock()
+		defer locked.mu.Unlock()
+		output, controls := admissionOutput(t, wire)
+		if len(controls) != 0 {
+			t.Fatalf("caught-up attachment received controls %+v", controls)
+		}
+		return bytes.Equal(output, expected)
+	})
+	_ = writer.Close(context.Background())
+	pollUntil(t, 5*time.Second, "reader settlement", func() bool { return effects.readers.snapshot().Bytes == 0 })
 }
 
 func TestUnifiedAdmissionVerdictCutsParkedWrites(t *testing.T) {
