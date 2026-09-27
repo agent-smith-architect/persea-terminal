@@ -5,7 +5,9 @@
 .persea-unified-terminal { position: relative; }
 .persea-unified-refusal {
   position: absolute;
-  top: 3.25rem;
+  /* The offset is the typing-paused notice's height while it is shown, so a
+     passing notice lands below it instead of covering its button. */
+  top: calc(3.25rem + var(--persea-unified-paused-offset, 0px));
   left: 50%;
   transform: translateX(-50%);
   z-index: 5;
@@ -23,6 +25,61 @@
   pointer-events: none;
 }
 .persea-unified-refusal[hidden] { display: none; }
+
+/* Typing paused: the one refusal that stays until the operator answers it.
+   Same slot, palette and posture as the strip, but it wraps instead of
+   truncating (what was lost must be readable on a phone) and its button is a
+   full touch target. It is a fixed pair like the strip, so it reads the same
+   on every theme. It stands aside while the reconnect strip or a failure
+   notice is up: both sit where it would, and typing is off then anyway. */
+.persea-unified-paused {
+  position: absolute;
+  top: 3.25rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  width: max-content;
+  max-width: calc(100% - 1.5rem);
+  box-sizing: border-box;
+  padding: 0.2rem 0.2rem 0.2rem 0.8rem;
+  border: 1px solid #5c4a1e;
+  border-radius: 0.4rem;
+  background: #3a2d12;
+  color: #ffd9a0;
+  font-size: 0.85rem;
+  line-height: 1.3;
+}
+.persea-unified-paused[hidden],
+.persea-unified-connection:not(:empty) ~ .persea-unified-paused,
+.persea-unified-notice:not([hidden]) ~ .persea-unified-paused { display: none; }
+.persea-unified-paused__message {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+/* On a narrow page the label wraps onto two lines inside the 44 px target,
+   leaving the message most of the width so the notice stays short. */
+.persea-unified-paused__resume {
+  flex: 0 1 auto;
+  min-width: 44px;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 0.15rem 0.8rem;
+  border: 1px solid #ffd9a0;
+  border-radius: 0.35rem;
+  background: #4d3c18;
+  color: #ffd9a0;
+  font: inherit;
+  font-weight: 600;
+  line-height: 1.15;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.persea-unified-paused__resume:hover { background: #5e4a1f; }
+.persea-unified-paused__resume:focus-visible { outline: 2px solid #ffd9a0; outline-offset: 2px; }
 
 /* --- Quick actions: the bottom sheet ---------------------------------------
    The sheet is the control surface both pointers share, opened by the one
@@ -488,10 +545,11 @@
 .persea-session-switcher__meta { font-size: .75rem; white-space: normal; overflow-wrap: anywhere; }
 .persea-session-switcher__row[data-current="true"]:disabled { opacity: 1; }
 
-/* Transient, non-blocking notices — same posture as the refusal strip. */
+/* Transient, non-blocking notices — same posture as the refusal strip,
+   including its place below a typing-paused notice. */
 .persea-unified-toast {
   position: absolute;
-  top: 3.25rem;
+  top: calc(3.25rem + var(--persea-unified-paused-offset, 0px));
   left: 50%;
   transform: translateX(-50%);
   z-index: 5;

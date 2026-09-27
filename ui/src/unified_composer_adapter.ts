@@ -15,6 +15,10 @@ export type UnifiedComposerGate = Readonly<{
   // round-trip completes, so an Insert before the grant would be dropped by
   // sendInput; the composer must refuse it here rather than swallow it.
   controlGranted: boolean;
+  // Typing paused after the broker's input_paused refusal. sendInput drops
+  // every byte until the operator presses Resume typing, so an Insert in that
+  // state would be swallowed; the composer must refuse it here instead.
+  typingPaused: boolean;
   fitPending: boolean;
   bracketedPasteMode: boolean;
 }>;
@@ -26,7 +30,8 @@ export type UnifiedComposerGate = Readonly<{
  * the input gate. fitPending is the unified page's input seal — sendInput
  * DROPS bytes while a committed geometry is in flight — so it must refuse
  * here rather than let a paste vanish into the seal's drop counter. The
- * reason strings reuse the legacy composer vocabulary.
+ * typing pause is the same kind of drop and refuses for the same reason. The
+ * reason strings reuse the legacy composer vocabulary where one exists.
  */
 export function unifiedComposerAvailability(gate: UnifiedComposerGate): ComposerAvailability {
   if (gate.closed) {
@@ -37,6 +42,9 @@ export function unifiedComposerAvailability(gate: UnifiedComposerGate): Composer
   }
   if (!gate.prepared || !gate.committed || !gate.controlGranted) {
     return Object.freeze({ canInject: false, reason: "No terminal is attached.", bracketedPasteMode: gate.bracketedPasteMode });
+  }
+  if (gate.typingPaused) {
+    return Object.freeze({ canInject: false, reason: "Typing is paused. Press Resume typing first.", bracketedPasteMode: gate.bracketedPasteMode });
   }
   if (gate.fitPending) {
     return Object.freeze({ canInject: false, reason: "Terminal typing is disabled locally.", bracketedPasteMode: gate.bracketedPasteMode });

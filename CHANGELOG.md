@@ -9,7 +9,7 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 - Each open terminal page now costs the server about 64 KiB of connection buffers instead of 32 MiB. With four pages open, the front door's memory high-water mark fell from about 80 MiB to about 22 MiB in testing.
 - When no terminal is open, the session host now checks its recording work once per second instead of 20 times per second, so an idle server stays idle.
 - The front door and the Tailscale sidecar now run with memory limits, so a fault in either cannot use up the host's memory. Normal use stays far below these limits.
-- When a page falls far behind the session, typing is paused instead of going to a screen that may be a minute or more old. Keys typed while the page is more than about 10 seconds behind are not sent, and the page shows "Catching up — what you typed was not sent". Typing works again once the page has caught up and you have paused for 2 seconds. The page keeps control of the session and keeps showing output while it catches up.
+- When a page falls far behind the session, typing is paused instead of going to a screen that may be a minute or more old. Keys typed while the page is more than about 10 seconds behind are not sent, and the page shows "Catching up — what you typed was not sent". The notice stays on screen with a Resume typing button, and until you press it nothing you type, paste or insert is sent. Press it once the page has caught up, then type the whole command again; nothing typed before the press is sent later. If the page is still behind, the next key you type is not sent and the notice comes back. The page keeps control of the session and keeps showing output while it catches up.
 
 ### Fixed
 

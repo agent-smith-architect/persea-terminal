@@ -1,4 +1,4 @@
-import { REFUSAL_NOTICE_MS, TRANSPORT_REFUSAL_PREFIX, UNIFIED_OPERATIONAL_CODES, decodeServerRefusalFrame, refusalReleasesFit, unifiedRefusalNotice } from "../src/unified_refusal_notice";
+import { REFUSAL_NOTICE_MS, TRANSPORT_REFUSAL_PREFIX, UNIFIED_OPERATIONAL_CODES, decodeServerRefusalFrame, refusalPausesTyping, refusalReleasesFit, unifiedRefusalNotice } from "../src/unified_refusal_notice";
 import { classifyUnifiedClose } from "../src/unified_close_policy";
 
 declare const require: (name: string) => unknown;
@@ -35,6 +35,13 @@ assert.ok(REFUSAL_NOTICE_MS >= 2_000 && REFUSAL_NOTICE_MS <= 8_000, "a refusal n
 // --- the Fit seal opens only for the answer to a Fit --------------------------
 assert.ok(refusalReleasesFit("resize_failed") && refusalReleasesFit("resize_rejected"));
 assert.ok(!refusalReleasesFit("input_refused") && !refusalReleasesFit("observe_mode"));
+
+// --- only input_paused pauses typing; every other code stays passing ---------
+assert.ok(refusalPausesTyping("input_paused"), "input_paused must pause typing");
+for (const code of [...UNIFIED_OPERATIONAL_CODES].filter((value) => value !== "input_paused")) {
+  assert.ok(!refusalPausesTyping(code), `${code} must stay a passing notice`);
+}
+assert.ok(!refusalPausesTyping("some_future_code"), "an unknown code must not pause typing");
 
 // --- belt and braces: every operational code is still classified for the
 // close path, so a front door that closes on one cannot dead-end the page.

@@ -26,7 +26,7 @@ import { actionGlyph, keyAction, keyEncodingNote, planKey, resolveAction, type K
 import { unifiedComposerAvailability, withCompactDensity, withStoredDensity } from "./unified_composer_adapter";
 import { syntheticCtrlReleaseEvent, syntheticKeydownEvent, unifiedKeyDescriptor, type UnifiedKeyDescriptor } from "./unified_key_bar";
 import { UNIFIED_HANDOFF_REASONS, UNIFIED_RECONNECTABLE_NOTICES, UNIFIED_TAKEOVER_REASONS, automaticClaimAllowed, boundedUnifiedReason, classifyUnifiedClose, unifiedCloseNotice } from "./unified_close_policy";
-import { REFUSAL_NOTICE_MS, refusalReleasesFit, unifiedRefusalNotice } from "./unified_refusal_notice";
+import { REFUSAL_NOTICE_MS, refusalPausesTyping, refusalReleasesFit, unifiedRefusalNotice } from "./unified_refusal_notice";
 import { UnifiedKeyboardBaseline } from "./unified_keyboard_baseline";
 import { SessionSwitcherView, type SessionSwitcherInventory } from "./session_switcher";
 import type { DashboardSession } from "./dashboard";
@@ -102,6 +102,8 @@ export type { CommitFocusContext } from "./unified_focus_claim";
 
 // How long the transient toast stays up.
 const TOAST_MS = 3_000;
+// The space between the typing-paused notice and a passing notice below it.
+const PAUSED_NOTICE_GAP_PX = 6;
 const UNIFIED_EXPLAINERS: ReadonlyArray<Readonly<{ topic: UnifiedExplainerTopic; title: string; detail: string }>> = Object.freeze([
   Object.freeze({ topic: "copy", title: "Copy", detail: "Copies the selection to this device and adds it to your shared Clipboard for 30 minutes. Copying selected Persea text with the device’s Copy command also shares it; copies made in other apps need Import from this device." }),
   Object.freeze({ topic: "select", title: "Select", detail: "Freezes a selectable copy of the terminal so you can select text with your finger (a long press on the terminal does the same). Tap blank terminal space to return to typing, or tap Select again or press Escape to leave without copying." }),
@@ -321,6 +323,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // pass through here and dismiss themselves; they are never a state.
   private readonly refusalStrip: HTMLElement;
   private refusalTimer?: ReturnType<typeof setTimeout>;
+  // The one refusal that is a state: typing paused after input_paused, until
+  // the operator presses Resume typing (see pauseTyping).
+  private typingPaused = false;
+  private readonly pausedNotice: HTMLElement;
+  private readonly pausedMessage: HTMLElement;
   private readonly noticePanel: HTMLElement;
   private readonly noticeHeadline: HTMLHeadingElement;
   private readonly noticeDetail: HTMLParagraphElement;
@@ -957,6 +964,32 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     refusal.setAttribute("role", "status");
     refusal.setAttribute("aria-live", "polite");
     refusal.hidden = true;
+    // Typing paused: it sits in the strip's slot, out of the grid flow for the
+    // same reason, but it stays until the operator answers it, so it holds the
+    // Resume typing button and takes pointer events. The message has its own
+    // element so what it says is exactly the refusal notice.
+    const paused = document.createElement("div");
+    paused.className = "persea-unified-paused";
+    paused.hidden = true;
+    const pausedMessage = document.createElement("span");
+    pausedMessage.className = "persea-unified-paused__message";
+    pausedMessage.setAttribute("role", "status");
+    pausedMessage.setAttribute("aria-live", "polite");
+    const resumeTypingButton = document.createElement("button");
+    resumeTypingButton.type = "button";
+    resumeTypingButton.className = "persea-unified-paused__resume";
+    resumeTypingButton.textContent = "Resume typing";
+    this.cleanupListeners.push(bindGenerationFencedClickActivation(
+      resumeTypingButton,
+      (event) => {
+        // The boundary is the operator's: only their own press marks it.
+        if (!event.isTrusted || !this.typingPaused) return;
+        this.resumeTyping();
+      },
+      () => !this.closed,
+      () => this.keyInteractionGeneration,
+    ));
+    paused.append(pausedMessage, resumeTypingButton);
     const notice = document.createElement("section");
     notice.className = "persea-unified-notice";
     notice.hidden = true;
@@ -1007,6 +1040,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     notice.append(noticeHeadline, noticeDetail, noticeCode, noticeActions);
     this.connectionStatus = connectionStatus;
     this.refusalStrip = refusal;
+    this.pausedNotice = paused;
+    this.pausedMessage = pausedMessage;
     this.noticePanel = notice;
     this.noticeHeadline = noticeHeadline;
     this.noticeDetail = noticeDetail;
@@ -1115,7 +1150,17 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     toast.hidden = true;
     this.toast = toast;
 
-    shell.append(toolbar, connectionStatus, notice, stage, composerDock, this.keysPanel.element, keyBar, refusal, toast, copyStatus);
+    shell.append(toolbar, connectionStatus, notice, stage, composerDock, this.keysPanel.element, keyBar, paused, refusal, toast, copyStatus);
+    // A passing notice shown while typing is paused goes below the paused
+    // notice instead of covering its button: the strip and the toast read
+    // this offset, which is zero while the paused notice is not shown.
+    const pausedResize = new ResizeObserver(() => {
+      if (this.closed) return;
+      const height = paused.getBoundingClientRect().height;
+      shell.style.setProperty("--persea-unified-paused-offset", height > 0 ? `${Math.ceil(height) + PAUSED_NOTICE_GAP_PX}px` : "0px");
+    });
+    pausedResize.observe(paused);
+    this.cleanupListeners.push(() => pausedResize.disconnect());
     const keysPointerDown = (event: PointerEvent): void => { this.keysPointers.add(event.pointerId); };
     const keysPointerEnd = (event: PointerEvent): void => {
       // Wait until the activation handler has completed before moving controls.
@@ -3016,14 +3061,53 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
 
   // An operational refusal relayed in-band by the front door. The transport
   // is still open and the attachment is still live: the only local state a
-  // refusal touches is the Fit seal it answers.
+  // refusal touches is the Fit seal it answers, and the typing pause.
   operationalRefusal(generation: number, code: string): void {
     if (this.closed || generation !== this.generation) return;
     if (refusalReleasesFit(code) && this.fitPending) {
       this.fitPending = false;
       this.updateGeometryControl();
     }
+    if (refusalPausesTyping(code)) {
+      this.pauseTyping();
+      return;
+    }
     this.showRefusalNotice(unifiedRefusalNotice(code));
+  }
+
+  // Typing paused. The broker refused a keystroke because this page was far
+  // behind the session, so whatever the operator types next would reach the
+  // shell without its beginning — and a pause in typing is not a command
+  // boundary. The page therefore drops every keystroke, paste and Insert
+  // (sendInput, and composerAvailability for the composer) until the operator
+  // marks the boundary by pressing Resume typing. Nothing typed before it is
+  // replayed; a page that is still behind has its next keystroke refused and
+  // pauses again. Refusals for keys already in flight land while paused and
+  // change nothing.
+  //
+  // The pause belongs to the session on screen, not to one socket. A
+  // reconnect of the same session keeps it, because the operator has not yet
+  // seen that their typing was lost and a new socket does not change that;
+  // its notice stands aside only while the reconnect or failure surface is up
+  // (see the stylesheet). Only Resume typing, a session switch
+  // (replaceSessionPresentation) or closing the page (destroy) clears it.
+  private pauseTyping(): void {
+    if (this.typingPaused) return;
+    this.setTypingPaused(true);
+    this.updateGeometryControl();
+  }
+
+  private resumeTyping(): void {
+    if (this.closed || !this.typingPaused) return;
+    this.setTypingPaused(false);
+    this.updateGeometryControl();
+    this.focusTerminalPreservingKeyboard();
+  }
+
+  private setTypingPaused(paused: boolean): void {
+    this.typingPaused = paused;
+    this.pausedMessage.textContent = paused ? unifiedRefusalNotice("input_paused") : "";
+    this.pausedNotice.hidden = !paused;
   }
 
   private showRefusalNotice(text: string): void {
@@ -3161,8 +3245,10 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.prepared = undefined;
     this.committed = false;
     this.controlGranted = false;
-    // Catch-up failures describe the previous session's history.
+    // Catch-up failures describe the previous session's history, and so does
+    // a typing pause: the typing it reported was lost in that session.
     this.catchUpFailures = 0;
+    this.setTypingPaused(false);
     this.fitPending = false;
     // A session identity commit is the terminal owner for a pending refit on
     // the previous incarnation. The replacement's later COMMIT must never
@@ -3277,6 +3363,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     // storage and detaches the composer's own observers and listeners.
     this.composer?.destroy();
     if (this.refusalTimer !== undefined) clearTimeout(this.refusalTimer);
+    this.setTypingPaused(false);
     if (this.toastTimer !== undefined) clearTimeout(this.toastTimer);
     if (this.reconcileFrame !== undefined) cancelAnimationFrame(this.reconcileFrame);
     this.resizeObserver.disconnect();
@@ -4433,6 +4520,9 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
 	  if (!this.modeReceived) this.showRefusalNotice(INPUT_CATCHING_UP_NOTICE);
 	  return;
 	}
+	// Typing paused (see pauseTyping): dropped, never queued, until the
+	// operator presses Resume typing. The paused notice is already showing.
+	if (this.typingPaused) return;
 	if (this.fitPending || this.refitPending) {
 	  this.sealedInputBytes += data.byteLength;
 	  return;
@@ -4692,11 +4782,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // --- composer ---------------------------------------------------------------
 
   // canInject mirrors sendInput's own gate exactly (prepared, committed,
-  // control capability, and NOT the Fit input seal), so an Insert the
-  // composer permits can never be dropped by the seal. bracketedPasteMode is
-  // xterm's tracked DEC 2004 state: this page's terminal replayed the full
-  // journal through the same parser, so the mode is already correct and
-  // tracks live writes.
+  // control capability, NOT the typing pause, and NOT the Fit input seal), so
+  // an Insert the composer permits can never be dropped by the pause or the
+  // seal. bracketedPasteMode is xterm's tracked DEC 2004 state: this page's
+  // terminal replayed the full journal through the same parser, so the mode is
+  // already correct and tracks live writes.
   private composerAvailability(): ComposerAvailability {
     return unifiedComposerAvailability({
       closed: this.closed,
@@ -4704,6 +4794,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       prepared: this.prepared !== undefined,
       committed: this.committed,
       controlGranted: this.controlGranted,
+      typingPaused: this.typingPaused,
       // Width refit and vertical Fit share one input floor: neither the
       // composer nor direct Paste may bypass the exact-operation seal.
       fitPending: this.fitPending || this.refitPending,
