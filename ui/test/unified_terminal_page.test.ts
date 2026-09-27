@@ -404,6 +404,12 @@ async function main(): Promise<void> {
     const HISTORY_BYTES = 1 << 20;
     const STEADY_MS = 30_000;
     const LINK_DELAY_MS = 150;
+    // The broker's resume rule (internal/broker/input_freshness.go): once it
+    // has refused input, it admits input again only when the page is current
+    // and has sent nothing for inputResumeQuiet.
+    const resumeQuiet = fs.readFileSync(path.join(repo, "internal", "broker", "input_freshness.go"), "utf8").match(/inputResumeQuiet\s*=\s*(\d+)\s*\*\s*time\.Second/);
+    assert(resumeQuiet, "the broker's input resume quiet period was not found");
+    const INPUT_RESUME_QUIET_MS = Number(resumeQuiet[1]) * 1000;
     const filler = "x".repeat(64);
     const xterm = page.locator(".persea-unified-xterm");
     const capture = () => command("tmux", ["-S", tmuxSocket, "capture-pane", "-p", "-S", "-200", "-t", target]);
@@ -418,19 +424,33 @@ async function main(): Promise<void> {
       opened: number; closed: number; commitAt: number; modeAt: number;
       bytesBeforeMode: number; framesBeforeMode: number; inputsBeforeMode: number; acks: number;
       pings: Map<string, number>; rtts: number[]; refusals: string[];
+      // Every INPUT frame the page sent, and when the last one left.
+      inputs: number; lastInputAt: number;
+      // Attachment frames received, numbered as the page's flow
+      // acknowledgements count them, and the highest count acknowledged.
+      frames: number; acknowledgedFrames: number;
+      // The frame that completed a watched output line, once seen.
+      watch: string; watchTail: string; watchFrame: number;
     };
     const attachments: Attachment[] = [];
     page.on("websocket", (socket: any) => {
       if (new URL(socket.url()).pathname !== "/ws") return;
-      const record: Attachment = { opened: Date.now(), closed: 0, commitAt: 0, modeAt: 0, bytesBeforeMode: 0, framesBeforeMode: 0, inputsBeforeMode: 0, acks: 0, pings: new Map(), rtts: [], refusals: [] };
+      const record: Attachment = {
+        opened: Date.now(), closed: 0, commitAt: 0, modeAt: 0, bytesBeforeMode: 0, framesBeforeMode: 0, inputsBeforeMode: 0, acks: 0, pings: new Map(), rtts: [], refusals: [],
+        inputs: 0, lastInputAt: 0, frames: 0, acknowledgedFrames: 0, watch: "", watchTail: "", watchFrame: 0,
+      };
       attachments.push(record);
       const text = (event: any) => typeof event.payload === "string" ? event.payload : Buffer.from(event.payload).toString("utf8");
       socket.on("close", () => { record.closed = Date.now(); });
       socket.on("framesent", (event: any) => {
         const payload = text(event);
         if (payload.startsWith("PERSEA-LIVENESS/1 PING ")) record.pings.set(payload.slice(23), Date.now());
-        else if (payload.startsWith("PERSEA-FLOW/1 ACK ")) record.acks += 1;
-        else if (!record.modeAt && payload.includes('"type":"INPUT"')) record.inputsBeforeMode += 1;
+        else if (payload.startsWith("PERSEA-FLOW/1 ACK ")) { record.acks += 1; record.acknowledgedFrames = Math.max(record.acknowledgedFrames, Number(payload.slice(18))); }
+        else if (payload.includes('"type":"INPUT"')) {
+          record.inputs += 1;
+          record.lastInputAt = Date.now();
+          if (!record.modeAt) record.inputsBeforeMode += 1;
+        }
       });
       socket.on("framereceived", (event: any) => {
         const payload = text(event);
@@ -442,7 +462,15 @@ async function main(): Promise<void> {
           return;
         }
         if (payload.startsWith("PERSEA-")) { record.refusals.push(payload.slice(0, 120)); return; }
+        record.frames += 1;
         const frame = JSON.parse(payload);
+        if (record.watch && !record.watchFrame && frame.type === "LIVE") {
+          // The line can straddle two frames, so the previous frame's tail is
+          // searched with this one.
+          const output = record.watchTail + Buffer.from(frame.data, "base64").toString("latin1");
+          if (output.includes(record.watch)) record.watchFrame = record.frames;
+          else record.watchTail = output.slice(-record.watch.length);
+        }
         if (!record.modeAt) {
           const encoded = frame.type === "PREPARE" ? frame.replay : frame.type === "LIVE" ? frame.data : "";
           record.bytesBeforeMode += encoded ? Buffer.from(encoded, "base64").length : 0;
@@ -465,6 +493,32 @@ async function main(): Promise<void> {
     await until("history recorded", async () => (await pageState()).rows.includes("HIST-DONE"), 60_000);
     command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, `(i=0; while :; do for j in 1 2 3 4 5; do i=$((i+1)); printf 'STEADY-%06d-%s\\n' "$i" ${filler}; done; sleep 0.2; done) &`, "Enter"]);
     await until("steady output", () => steadyIn(capture()) > 0);
+
+    // Typing paused: the page shows what happened and waits for the operator.
+    // The message has its own element, beside the Resume typing button.
+    const pausedNotice = () => page.evaluate(() => {
+      const notice = document.querySelector<HTMLElement>(".persea-unified-paused");
+      const resume = notice?.querySelector<HTMLElement>(".persea-unified-paused__resume");
+      return !!notice && !notice.hidden && getComputedStyle(notice).display !== "none" && !!resume && resume.getClientRects().length > 0
+        && notice.querySelector(".persea-unified-paused__message")?.textContent === "Catching up — what you typed was not sent (input_paused)";
+    });
+    const caughtUp = async () => steadyIn((await pageState()).rows) + 25 >= steadyIn(capture());
+    // Resume typing once the broker must admit the next key. Its quiet period
+    // is counted from the last key that left the page, and only then is the
+    // page asked to show current output: output newer than that key follows
+    // every refusal the broker wrote for it, so no refusal is still in flight
+    // to pause the page again, and the page is current by a wide margin. The
+    // notice must still be up — it waits for the operator, not for time.
+    const resumeWhenCurrent = async (stage: string, record: Attachment) => {
+      await until(`${stage}: quiet since the last key sent`, () => Date.now() - record.lastInputAt >= INPUT_RESUME_QUIET_MS, INPUT_RESUME_QUIET_MS + 1_000);
+      await until(`${stage}: caught up after the pause`, caughtUp, 180_000);
+      const caughtUpAt = Date.now();
+      assert(await pausedNotice(), `${stage}: the pause notice left before Resume typing was pressed`);
+      await page.getByRole("button", { name: "Resume typing", exact: true }).click();
+      await until(`${stage}: Resume typing cleared the pause`, async () => !(await pausedNotice()), 2_000);
+      assert(await page.evaluate(() => document.activeElement?.classList.contains("xterm-helper-textarea") === true), `${stage}: Resume typing did not return focus to the terminal`);
+      return { caughtUpAt, resumedAt: Date.now() };
+    };
 
     // Each stage waits for the attachment the page opens next, measured from
     // the moment its cause (navigation or link loss) happened.
@@ -494,9 +548,9 @@ async function main(): Promise<void> {
       await until(`${stage}: live`, async () => (await pageState()).phase === "live");
       // Input authority has arrived, but the page may still be catching up on
       // the output that ran while its history loaded. A command typed while
-      // it is far behind is refused, never sent, and the page says so; once
-      // it shows current output and typing has paused (the refusal notice
-      // outlasts the broker's quiet period), a retyped command runs.
+      // it is far behind is refused, never sent, and the page pauses typing
+      // and says so; once it shows current output, the operator presses
+      // Resume typing and a retyped command runs.
       // Control-U clears the probe key if the grant raced it.
       const marker = `${stage.replace(/[^a-z0-9]+/gi, "-")}-${rate}`;
       const typeMarker = async () => {
@@ -505,17 +559,15 @@ async function main(): Promise<void> {
         await page.keyboard.type(`printf 'MARK-%s\\n' ${marker}`);
         await page.keyboard.press("Enter");
       };
-      const pausedNotice = () => page.evaluate(() => document.querySelector(".persea-unified-refusal:not([hidden])")?.textContent === "Catching up — what you typed was not sent (input_paused)");
       await typeMarker();
       const outcome = await until(`${stage}: typed command ran or was paused`, async () => capture().includes(`MARK-${marker}`) ? "ran" : await pausedNotice() ? "paused" : undefined, 20_000);
       let inputPaused = false;
       if (outcome === "paused") {
         inputPaused = true;
-        await until(`${stage}: caught up after the pause`, async () => steadyIn((await pageState()).rows) + 25 >= steadyIn(capture()), 180_000);
-        await until(`${stage}: pause notice expired`, async () => !(await pausedNotice()), 20_000);
+        await resumeWhenCurrent(stage, record);
         assert(!capture().includes(`MARK-${marker}`), `${stage}: a command refused while the page was behind ran`);
         await typeMarker();
-        await until(`${stage}: typed command ran after catching up`, () => capture().includes(`MARK-${marker}`), 20_000);
+        await until(`${stage}: typed command ran after Resume typing`, () => capture().includes(`MARK-${marker}`), 20_000);
       }
       // The only in-band refusals so far are the keys typed while behind.
       assert(record.refusals.every((refusal) => refusal === "PERSEA-REFUSAL/1 input_paused") && (inputPaused || record.refusals.length === 0),
@@ -550,6 +602,89 @@ async function main(): Promise<void> {
       assert(record.refusals.length === refusals, `${stage}: refusals ${JSON.stringify(record.refusals.slice(refusals))}`);
     };
 
+    // A healthy page far behind. The shell prints about a MiB at once (typed
+    // through tmux, not the page); 11 s after it was published the page is
+    // still taking it in and acknowledging it, so it is more than the broker's
+    // 10 s window behind without being stuck. A command typed then must be
+    // refused whole; the page must pause typing and send nothing more, however
+    // much more is typed, until the operator presses Resume typing after it
+    // caught up; and only the command typed after that press may run.
+    const BURST_LAG_MS = 11_000;
+    const burstWhileBehind = async (stage: string, record: Attachment, rate: number) => {
+      const count = attachments.length;
+      const token = `NEG${crypto.randomBytes(6).toString("hex")}`;
+      const marker = `printf 'NMARK-%s\\n' ${token}`;
+      // The whole pane history, so a line cannot scroll out of view unseen.
+      const history = () => command("tmux", ["-S", tmuxSocket, "capture-pane", "-p", "-S", "-", "-t", target]);
+      record.watch = "BURST-DONE";
+      command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, `seq -w 1 12000 | sed 's/.*/BURST-&-${filler}/'; printf 'BURST-%s\\n' DONE`, "Enter"]);
+      const burstSentAt = Date.now();
+      await until(`${stage}: burst published`, () => capture().includes("BURST-DONE"), 30_000);
+      const publishedAt = Date.now();
+      const acksAtPublish = record.acks;
+      await until(`${stage}: ${BURST_LAG_MS} ms since the burst`, () => Date.now() - publishedAt >= BURST_LAG_MS, BURST_LAG_MS + 1_000);
+      const behind = await pageState();
+      assert(behind.phase === "live" && !behind.notice && behind.connection === "" && attachments.length === count && record.closed === 0,
+        `${stage}: the page was not healthy ${BURST_LAG_MS} ms behind: ${JSON.stringify({ ...behind, rows: undefined })}`);
+      assert(record.acks > acksAtPublish, `${stage}: the page stopped acknowledging output while behind`);
+      assert(!record.watchFrame || record.acknowledgedFrames < record.watchFrame, `${stage}: the page had consumed the burst within ${BURST_LAG_MS} ms`);
+
+      // The command typed while behind: every key is refused, none reaches
+      // the pane, and the page pauses typing. An acknowledgement sent after
+      // the keys orders every INPUT frame they caused before it.
+      const inputsBefore = record.inputs;
+      const refusalsBefore = record.refusals.length;
+      const typedAt = Date.now();
+      await xterm.focus();
+      await page.keyboard.type(marker);
+      await page.keyboard.press("Enter");
+      const acksAfterTyping = record.acks;
+      await until(`${stage}: acknowledgement after the typed command`, () => record.acks > acksAfterTyping, 20_000);
+      const typedFrames = record.inputs - inputsBefore;
+      assert(typedFrames === marker.length + 1, `${stage}: the typed command sent ${typedFrames} INPUT frames, expected ${marker.length + 1}`);
+      await until(`${stage}: typing paused`, pausedNotice, 60_000);
+      const pausedAt = Date.now();
+      assert(!history().includes(token), `${stage}: the command typed while behind reached the pane`);
+
+      // More typing while paused leaves nothing on the socket.
+      const inputsWhilePaused = record.inputs;
+      await xterm.focus();
+      await page.keyboard.type(`echo MORE-${token}`);
+      await page.keyboard.press("Enter");
+      const acksAfterMore = record.acks;
+      await until(`${stage}: acknowledgement after typing while paused`, () => record.acks > acksAfterMore, 20_000);
+      assert(record.inputs === inputsWhilePaused, `${stage}: ${record.inputs - inputsWhilePaused} INPUT frames left while typing was paused`);
+      assert(await pausedNotice(), `${stage}: typing while paused took the pause notice down`);
+
+      // The page catches up with the burst and then with current output; the
+      // operator presses Resume typing, and the command typed after it runs.
+      await until(`${stage}: the page consumed the burst`, () => record.watchFrame > 0 && record.acknowledgedFrames >= record.watchFrame, 180_000);
+      const burstConsumedAt = Date.now();
+      const resumed = await resumeWhenCurrent(stage, record);
+      // The broker keeps one refusal pending while output to the page is
+      // backed up, and it answers every key refused meanwhile: at least one,
+      // never more than one per key, all input_paused.
+      const answered = record.refusals.slice(refusalsBefore);
+      assert(answered.length >= 1 && answered.length <= typedFrames && answered.every((refusal) => refusal === "PERSEA-REFUSAL/1 input_paused"),
+        `${stage}: ${typedFrames} keys typed while behind drew refusals ${JSON.stringify(answered)}`);
+      const sentWhilePaused = record.inputs - inputsWhilePaused;
+      assert(sentWhilePaused === 0, `${stage}: ${sentWhilePaused} INPUT frames left the page while typing was paused`);
+      assert(!history().includes(token), `${stage}: input typed while behind or paused reached the pane`);
+      await page.keyboard.type(marker);
+      await page.keyboard.press("Enter");
+      await until(`${stage}: the command typed after Resume typing ran`, () => capture().includes(`NMARK-${token}`), 20_000);
+      assert(record.refusals.length === refusalsBefore + answered.length, `${stage}: the command typed after Resume typing was refused`);
+      assert(attachments.length === count && record.closed === 0, `${stage}: the page reconnected`);
+      const measured = {
+        stage, rate, linkDelayMs: LINK_DELAY_MS, burstLines: 12_000,
+        publishMs: publishedAt - burstSentAt, behindBeforeTypingMs: typedAt - publishedAt,
+        timeToPauseMs: pausedAt - typedAt, timeToConsumeBurstMs: burstConsumedAt - typedAt, timeToCatchUpMs: resumed.caughtUpAt - typedAt,
+        refusedKeys: typedFrames, refusals: answered.length, inputsSentWhilePaused: sentWhilePaused,
+      };
+      emit("slow-link-burst-while-behind", measured);
+      return measured;
+    };
+
     const measurements: unknown[] = [];
     for (const rate of [32 << 10, 256 << 10]) {
       // A fresh page load through the link. Cold dashboard and terminal loads
@@ -572,6 +707,7 @@ async function main(): Promise<void> {
       const opened = await attach("open", openIndex, navigatedAt, rate);
       await steady(`steady after open at ${rate}`, opened.record);
       measurements.push({ ...opened.measured, livenessRoundTripsMs: [...opened.record.rtts] });
+      if (rate === 32 << 10) measurements.push(await burstWhileBehind(`burst while behind at ${rate}`, opened.record, rate));
 
       // The link drops; the page reconnects by itself, once, through the same
       // slow link.

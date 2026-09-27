@@ -13,6 +13,7 @@ function gate(overrides: Partial<UnifiedComposerGate>): UnifiedComposerGate {
     prepared: true,
     committed: true,
     controlGranted: true,
+    typingPaused: false,
     fitPending: false,
     bracketedPasteMode: false,
     ...overrides,
@@ -80,12 +81,26 @@ function gate(overrides: Partial<UnifiedComposerGate>): UnifiedComposerGate {
   assert.equal(sealed.bracketedPasteMode, true, "the seal does not hide the paste mode");
 }
 
-// Refusal precedence: closed beats capability beats attachment beats the seal
-// — each reason is only ever shown when everything before it is fine.
+// THE TYPING PAUSE. After the broker's input_paused refusal the page drops
+// every keystroke until the operator presses Resume typing, so a composer
+// Insert must be refused too — with the reason saying how to continue — or it
+// would vanish into the same drop.
+{
+  const paused = unifiedComposerAvailability(gate({ typingPaused: true, bracketedPasteMode: true }));
+  assert.equal(paused.canInject, false, "the typing pause must refuse Insert");
+  assert.equal(paused.reason, "Typing is paused. Press Resume typing first.");
+  assert.equal(paused.bracketedPasteMode, true, "the pause does not hide the paste mode");
+}
+
+// Refusal precedence: closed beats capability beats attachment beats the
+// typing pause beats the seal — each reason is only ever shown when
+// everything before it is fine.
 {
   assert.equal(unifiedComposerAvailability(gate({ closed: true, capabilityMode: "observe", prepared: false, fitPending: true })).reason, "This page is closed.");
   assert.equal(unifiedComposerAvailability(gate({ capabilityMode: "observe", prepared: false, committed: false, fitPending: true })).reason, "This session is read-only.");
   assert.equal(unifiedComposerAvailability(gate({ prepared: false, committed: false, controlGranted: false, fitPending: true })).reason, "No terminal is attached.");
+  assert.equal(unifiedComposerAvailability(gate({ controlGranted: false, typingPaused: true })).reason, "No terminal is attached.");
+  assert.equal(unifiedComposerAvailability(gate({ typingPaused: true, fitPending: true })).reason, "Typing is paused. Press Resume typing first.");
 }
 
 // --- compact-density preference adapters -------------------------------------

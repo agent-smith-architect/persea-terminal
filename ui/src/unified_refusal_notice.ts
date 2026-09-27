@@ -3,11 +3,12 @@
 // A broker `error` whose code is OPERATIONAL is the outcome of ONE request —
 // a Fit that did not apply, a Fit outside policy, a keystroke that landed a
 // beat early, control traffic on an observe handle, or typing while this page
-// is far behind the session (input_paused: the keys were dropped, and input
-// resumes once the page has caught up and typing has paused briefly). The session, its journal
-// and the attachment are all still valid, so the front door relays the code
-// in-band as a reserved text frame instead of closing the socket, and the
-// page renders it as a passing notice: no reconnect, no dead end.
+// is far behind the session (input_paused: the keys were dropped). The
+// session, its journal and the attachment are all still valid, so the front
+// door relays the code in-band as a reserved text frame instead of closing the
+// socket, and the page renders it as a passing notice: no reconnect, no dead
+// end. input_paused alone is also a state on the page: typing stays paused
+// until the operator presses Resume typing (see refusalPausesTyping).
 //
 // The operational set here mirrors the Go authority (internal/proto
 // attachment_errors.go); the source-to-policy test holds the two equal.
@@ -39,6 +40,14 @@ export function decodeServerRefusalFrame(payload: string): ServerRefusalFrame {
 // that request is the answer, so the seal opens again.
 export function refusalReleasesFit(code: string): boolean {
   return code === "resize_failed" || code === "resize_rejected";
+}
+
+// A keystroke refused because the page is far behind means the operator's
+// command lost its beginning. Waiting is not a command boundary, so the page
+// stops sending until the operator marks one by pressing Resume typing; every
+// other code stays a passing notice.
+export function refusalPausesTyping(code: string): boolean {
+  return code === "input_paused";
 }
 
 const NOTICES: Readonly<Record<string, string>> = Object.freeze({
