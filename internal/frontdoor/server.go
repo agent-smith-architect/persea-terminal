@@ -2140,12 +2140,16 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 					_ = writeWSCloseReason(writes, writerDone, code)
 					return
 				}
+				// Arm the stall deadline before the writer can deliver the frame:
+				// writeWS returns only after the socket write, and by then the page
+				// may already have answered, so arming afterwards could start the
+				// clock late.
+				flow.record(len(result.frame.Payload))
+				stall.outstanding()
 				if writeWS(writes, writerDone, websocket.BinaryMessage, result.frame.Payload) != nil {
 					s.logTerminalFailure("websocket_write", &a)
 					return
 				}
-				flow.record(len(result.frame.Payload))
-				stall.outstanding()
 			default:
 				code := s.logTerminalFailure("broker_protocol", &a)
 				_ = writeWSCloseReason(writes, writerDone, code)

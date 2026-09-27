@@ -2,6 +2,12 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- Installing 0.1.10 could stop at random, because one of the server tests that the installer runs failed in about 3 % of runs. The server started the 30-second clock for output that a page has not taken in only after the output had reached the page. It now starts the clock before it sends the output. In 1,200 repeated runs the test did not fail.
+
 ## 0.1.10 — 2026-09-27
 
 ### Changed
