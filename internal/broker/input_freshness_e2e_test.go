@@ -2,6 +2,7 @@ package broker
 
 import (
 	"context"
+	"io"
 	"net"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"persea-terminal/internal/attachmentwire"
 	"persea-terminal/internal/proto"
 	"persea-terminal/internal/terminal"
+	"persea-terminal/internal/unifiedjournal"
 )
 
 type freshnessTestClock struct {
@@ -227,5 +229,101 @@ func TestUnifiedConsumptionReceiptOutOfRangeEndsTheAttachment(t *testing.T) {
 				t.Fatalf("error %q, want protocol", code)
 			}
 		})
+	}
+}
+
+// Rotation retires a generation while its attachment can stay open for the
+// close grace, parked behind output its page has stopped reading. That page is
+// far behind, and the generation's clock is gone: input must be refused, not
+// judged against a record that no longer exists.
+func TestUnifiedInputFromARetiredGenerationIsPaused(t *testing.T) {
+	// The refusal is observed at the gate, while the page is not reading:
+	// once the page reads again, the rotation verdict and the in-band refusal
+	// race for the socket, and the verdict ends the attachment.
+	refused := make(chan struct{}, 1)
+	clock := &freshnessTestClock{now: time.Now()}
+	f := newRecordingSettlementFixture(t, func(effects *UnifiedDevPaneEffects) {
+		effects.freshnessNow = clock.Now
+		effects.inputRefused = func() {
+			select {
+			case refused <- struct{}{}:
+			default:
+			}
+		}
+	})
+	session := f.startPaneCommand(t, "fresh-retired", "PS1='retired> ' exec /bin/sh")
+	client := openFreshnessClient(t, f, session)
+	client.receipt(client.frames)
+	f.effects.mu.Lock()
+	oldKey := f.effects.active[session]
+	f.effects.mu.Unlock()
+	// The page stops reading; its output writer parks on the full socket.
+	f.disposable.run("send-keys", "-t", session, "seq 1 16000 | sed 's/.*/FLOOD-&-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/'; printf 'FLOOD-%s\\n' DONE", "Enter")
+	pollUntil(t, 10*time.Second, "flood published", func() bool { return strings.Contains(f.capture(t, "fresh-retired"), "FLOOD-DONE") })
+	clock.advance(inputFreshnessWindow + time.Second)
+	if required, known := f.effects.requiredConsumption(oldKey); !known || required < 2 {
+		t.Fatalf("no old unconsumed output before rotation: required=%d known=%v", required, known)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := f.effects.rotateSession(ctx, session); err != nil {
+		t.Fatal(err)
+	}
+	client.input("printf 'RETIRED-%s\\n' EXECUTED\n")
+	select {
+	case <-refused:
+	case <-time.After(10 * time.Second):
+		t.Fatal("input on a retired generation was not refused")
+	}
+	if strings.Contains(f.capture(t, "fresh-retired"), "RETIRED-EXECUTED") {
+		t.Fatal("input refused on a retired generation reached the pane")
+	}
+}
+
+type signalledWriter struct {
+	io.Writer
+	once    sync.Once
+	entered chan struct{}
+}
+
+func (w *signalledWriter) Write(p []byte) (int, error) {
+	w.once.Do(func() { close(w.entered) })
+	return w.Writer.Write(p)
+}
+
+// The broker reads receipts, pings and input in one loop. A receipt must not
+// wait for an unrelated output write parked on a slow peer.
+func TestConsumptionReceiptDoesNotWaitBehindOutput(t *testing.T) {
+	live := func(text string) []byte {
+		encoded, err := attachmentwire.Encode(terminal.Frame{Version: terminal.ProtocolVersion, Type: terminal.FrameLive, Source: strings.Repeat("A", 43), Epoch: 1, Cut: 1, Data: []byte(text)}, attachmentwire.ServerToBrowser)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return encoded
+	}
+	wire := &lockedWriter{w: io.Discard}
+	writer := &unifiedAttachmentFrameWriter{downstream: &attachmentFrameWriter{wire: wire}}
+	writer.fresh.start(unifiedjournal.PaneKey{})
+	if err := wire.frame(proto.FrameAttachment, live("previous")); err != nil {
+		t.Fatal(err)
+	}
+	writer.recordDelivered(1)
+	sender, receiver := net.Pipe()
+	parked := &signalledWriter{Writer: sender, entered: make(chan struct{})}
+	wire.w = parked
+	outputDone := make(chan error, 1)
+	next := live("next")
+	go func() { outputDone <- wire.frame(proto.FrameAttachment, next) }()
+	<-parked.entered
+	receiptDone := make(chan bool, 1)
+	go func() { receiptDone <- writer.receipt(1) }()
+	defer func() { _ = sender.Close(); _ = receiver.Close(); <-outputDone }()
+	select {
+	case accepted := <-receiptDone:
+		if !accepted || writer.fresh.consumed != 1 {
+			t.Fatalf("receipt of the completed frame: accepted=%v consumed=%d", accepted, writer.fresh.consumed)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("a receipt waited behind a parked output write")
 	}
 }

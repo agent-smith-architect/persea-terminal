@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -1602,22 +1603,22 @@ type lockedWriter struct {
 	// attachments counts the attachment frames written. The front door relays
 	// each as one WebSocket message and the page's flow acknowledgement counts
 	// the same frames, so a forwarded acknowledgement is a count on this scale.
-	attachments uint64
+	// It is read without mu, which a write parked on a slow peer can hold for a
+	// long time; the count includes a frame whose write is still in progress.
+	attachments atomic.Uint64
 }
 
 func (w *lockedWriter) frame(t proto.FrameType, payload []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if t == proto.FrameAttachment {
-		w.attachments++
+		w.attachments.Add(1)
 	}
 	return proto.WriteFrame(w.w, t, payload)
 }
 
 func (w *lockedWriter) attachmentFrames() uint64 {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-	return w.attachments
+	return w.attachments.Load()
 }
 func (w *lockedWriter) control(c proto.Control) error {
 	p, e := proto.MarshalControl(c)
@@ -2233,22 +2234,26 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 			return
 		}
 	}()
-	// Pongs are written by their own goroutine. The output writer can stay
-	// parked on a full socket for as long as the front door's flow window is
-	// closed; a pong written from this loop would wait behind it, and so would
-	// every input frame after the ping. One pending pong answers every ping
-	// that arrives before it is written.
+	// Pongs and input_paused refusals are written by their own goroutine. The
+	// output writer can stay parked on a full socket for as long as the front
+	// door's flow window is closed; a pong or refusal written from this loop
+	// would wait behind it, and so would every input frame after it. One
+	// pending pong answers every ping that arrives before it is written, and
+	// one pending refusal tells the page about every input refused meanwhile.
 	pongs := make(chan struct{}, 1)
+	refusals := make(chan proto.Control, 1)
 	pongsDone := make(chan struct{})
 	defer close(pongsDone)
 	go func() {
 		for {
+			control := proto.Control{Type: "pong"}
 			select {
 			case <-pongs:
-				if writer.control(proto.Control{Type: "pong"}) != nil {
-					return
-				}
+			case control = <-refusals:
 			case <-pongsDone:
+				return
+			}
+			if writer.control(control) != nil {
 				return
 			}
 		}
@@ -2426,7 +2431,10 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 				brokerLogf("component=broker event=input_paused realm=%q server=%q session=%q epoch=%d", ctrl.Authority.Realm, ctrl.Authority.Server, ctrl.Authority.SessionID, epochID)
 			}
 			if !accepted {
-				_ = writer.control(proto.Control{Type: "error", Code: "input_paused"})
+				select {
+				case refusals <- proto.Control{Type: "error", Code: "input_paused"}:
+				default:
+				}
 				continue
 			}
 		}

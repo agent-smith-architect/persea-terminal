@@ -47,9 +47,10 @@ const BrokerPingInterval = 30 * time.Second
 // websocketBufferBytes sizes each browser WebSocket's read and write I/O
 // buffers. These are per-connection allocations, separate from the message
 // size limit (SetReadLimit), which stays proto.MaxAttachment: a larger message
-// is read through the buffer and written as several WebSocket frames. The flow
-// window keeps at most FlowWindowBytes plus one attachment frame in flight, so
-// a buffer the size of the largest message would only hold memory.
+// is read through the buffer, and written as one WebSocket frame whose first
+// buffer-full is copied and whose rest is written straight from the message.
+// The flow window keeps at most FlowWindowBytes plus one attachment frame in
+// flight, so a buffer the size of the largest message would only hold memory.
 const websocketBufferBytes = 32 << 10
 
 // AttachmentProtocol names the browser attachment protocol. Version 2 adds
@@ -1895,7 +1896,7 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 	if stallTimeout <= 0 {
 		stallTimeout = FlowStallTimeout
 	}
-	stall := newFlowStallClock(stallTimeout)
+	stall := newFlowStallClock(stallTimeout, s.browserProofNow)
 	defer stall.stop()
 	var receiptSent time.Time
 	// Every relay write to the broker is bounded; see BrokerWriteTimeout.
@@ -1942,6 +1943,11 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 			eventNow, validProof := requireBrowserProof()
 			if !validProof {
 				closeBrowserLiveness()
+				return
+			}
+			if stall.expired(eventNow) {
+				code := s.logTerminalFailure("flow_stalled", &a)
+				_ = writeWSCloseReason(writes, writerDone, code)
 				return
 			}
 			switch read.kind {

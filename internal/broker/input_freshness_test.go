@@ -41,6 +41,11 @@ func TestFrontierClockAnswersTheLastSequencePublishedByAnInstant(t *testing.T) {
 	if len(clock.marks) != 2 {
 		t.Fatalf("pruned clock holds %d marks, want 2", len(clock.marks))
 	}
+	// An instant older than every retained mark is answered with the oldest
+	// retained one, never with "nothing was published".
+	if got := clock.at(base.Add(10 * time.Millisecond)); got != 9 {
+		t.Fatalf("after pruning at(before the oldest mark)=%d, want 9", got)
+	}
 
 	// A long, dense run stays bounded and keeps answering one window back.
 	start := later.Add(time.Second)
@@ -92,6 +97,77 @@ func TestInputFreshnessMapsReceiptsToCompletedSequences(t *testing.T) {
 	}
 }
 
+// A page's receipt can arrive between a frame's write and the mark that frame
+// completes; the mark must still advance consumption when it lands, or a quiet
+// caught-up page stays paused with nothing left to acknowledge.
+func TestInputFreshnessAppliesAReceiptThatOvertakesItsMark(t *testing.T) {
+	var fresh inputFreshness
+	fresh.start(unifiedjournal.PaneKey{})
+	fresh.delivered(1, 3)
+	if !fresh.receipt(2, 2) || fresh.consumed != 3 {
+		t.Fatalf("consumed=%d after receipting past the only mark, want 3", fresh.consumed)
+	}
+	fresh.delivered(2, 7)
+	if fresh.consumed != 7 || fresh.count != 0 {
+		t.Fatalf("mark landing after its receipt: consumed=%d pending=%d, want 7 and 0", fresh.consumed, fresh.count)
+	}
+	// A mark beyond the receipt still waits for its own receipt.
+	fresh.delivered(3, 9)
+	if fresh.consumed != 7 || fresh.count != 1 {
+		t.Fatalf("unreceipted mark: consumed=%d pending=%d, want 7 and 1", fresh.consumed, fresh.count)
+	}
+}
+
+// A publication that prunes the clock between the gate's sampling of now and
+// its lookup must not turn an old debt into none. The provider samples under
+// the publication lock; the clock itself answers a pruned instant
+// conservatively.
+func TestInputFreshnessPruningCannotEraseAnOldDebt(t *testing.T) {
+	const window = 10 * time.Second
+	base := time.Unix(3_000_000, 0)
+	var clock frontierClock
+	clock.observe(base, 1, window)
+	clock.observe(base.Add(200*time.Millisecond), 2, window)
+	var fresh inputFreshness
+	fresh.start(unifiedjournal.PaneKey{})
+	cutoff := base.Add(100 * time.Millisecond)
+	accepted, _ := fresh.admit(base.Add(window+100*time.Millisecond), 2*time.Second, func(unifiedjournal.PaneKey) (int64, bool) {
+		clock.observe(base.Add(window+200*time.Millisecond), 3, window)
+		return clock.at(cutoff), true
+	})
+	if accepted {
+		t.Fatal("input admitted with nothing consumed after pruning dropped the mark its cutoff needed")
+	}
+}
+
+// Only a generation a view subscribed to, and that has not retired since,
+// has freshness authority: a subscribed generation with no publications owes
+// nothing, and a key with no clock is refused however little it owes.
+func TestInputFreshnessRequiresGenerationAuthority(t *testing.T) {
+	var effects UnifiedDevPaneEffects
+	key := unifiedjournal.PaneKey{ControlGeneration: 1}
+	writer := &unifiedAttachmentFrameWriter{provider: &effects}
+	writer.fresh.start(key)
+	if accepted, paused := writer.admitInput(); accepted || !paused {
+		t.Fatalf("unknown generation: accepted=%v paused=%v, want a pause", accepted, paused)
+	}
+	effects.subscriberMu.Lock()
+	effects.trackFrontierLocked(key)
+	effects.subscriberMu.Unlock()
+	effects.inputResumeQuiet = time.Nanosecond
+	current := time.Now().Add(time.Second)
+	effects.freshnessNow = func() time.Time { return current }
+	if accepted, _ := writer.admitInput(); !accepted {
+		t.Fatal("a subscribed generation with no publications paused input")
+	}
+	effects.subscriberMu.Lock()
+	effects.forgetPublishedLocked(key)
+	effects.subscriberMu.Unlock()
+	if accepted, _ := writer.admitInput(); accepted {
+		t.Fatal("a retired generation admitted input")
+	}
+}
+
 // With the mark ring full, the oldest mark is dropped: a receipt covering only
 // it under-reports consumption rather than over-reporting it.
 func TestInputFreshnessDropsTheOldestMarkConservatively(t *testing.T) {
@@ -123,7 +199,10 @@ func TestInputFreshnessPausesUntilCaughtUpAndQuiet(t *testing.T) {
 		return published
 	}
 	var fresh inputFreshness
-	admit := func(at time.Duration) (bool, bool) { return fresh.admit(base.Add(at), window, quiet, frontier) }
+	admit := func(at time.Duration) (bool, bool) {
+		now := base.Add(at)
+		return fresh.admit(now, quiet, func(key unifiedjournal.PaneKey) (int64, bool) { return frontier(key, now.Add(-window)), true })
+	}
 	if accepted, _ := admit(time.Hour); !accepted {
 		t.Fatal("input before the backlog completed was gated; the epoch owns that")
 	}

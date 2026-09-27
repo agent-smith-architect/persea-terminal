@@ -20,13 +20,17 @@ import (
 // maps frame counts to the journal sequence those frames completed. What was
 // committed when comes from a per-generation frontier clock kept at
 // publication. A quiet session whose output the page has consumed is always
-// fresh; a page that has not yet consumed an old snapshot is not.
+// fresh; a page that has not yet consumed an old snapshot is not. A page whose
+// generation was retired (rotation, refit, loss of the recording) is never
+// fresh: its attachment is ending, and its clock is gone with the generation.
 //
 // Refused input is dropped, never queued, and the page is told in-band
 // (input_paused). Once refused, input stays refused until the page is fresh
-// again and has sent no input for inputResumeQuiet, so a command typed while
-// the page was behind can never arrive with its beginning missing. The Control
-// lease is not touched: output keeps flowing and the page keeps catching up.
+// again and has sent no input for inputResumeQuiet, so keys still in flight
+// when the pause began are refused too. That is not a command boundary: the
+// page drops typing after input_paused until the operator explicitly resumes.
+// Input admitted before the pause began is not recalled. The Control lease is
+// not touched: output keeps flowing and the page keeps catching up.
 const (
 	inputFreshnessWindow = 10 * time.Second
 	inputResumeQuiet     = 2 * time.Second
@@ -49,9 +53,11 @@ type frontierMark struct {
 
 // frontierClock records which sequence of one generation had been published
 // by when, at window/frontierClockResolution resolution. It is guarded by the
-// provider's subscriberMu.
+// provider's subscriberMu. Its existence is the generation's authority: it is
+// made when a view subscribes and dropped when the generation retires.
 type frontierClock struct {
-	marks []frontierMark
+	marks  []frontierMark
+	pruned bool
 }
 
 func (clock *frontierClock) observe(now time.Time, sequence int64, window time.Duration) {
@@ -75,17 +81,24 @@ func (clock *frontierClock) observe(now time.Time, sequence int64, window time.D
 	}
 	if drop > 0 {
 		clock.marks = append(clock.marks[:0], clock.marks[drop:]...)
+		clock.pruned = true
 	}
 }
 
 // at returns the last sequence published by instant, rounded up to the clock's
 // resolution (which can only demand more consumption), or 0 when nothing had
-// been published by then.
+// been published by then. An instant older than every retained mark after
+// pruning is answered with the oldest retained mark, which was published no
+// earlier than anything dropped: the answer can demand more consumption, never
+// less. Queries sampled under subscriberMu never reach that case.
 func (clock *frontierClock) at(instant time.Time) int64 {
 	for index := len(clock.marks) - 1; index >= 0; index-- {
 		if !clock.marks[index].at.After(instant) {
 			return clock.marks[index].sequence
 		}
+	}
+	if clock.pruned && len(clock.marks) > 0 {
+		return clock.marks[0].sequence
 	}
 	return 0
 }
@@ -139,6 +152,9 @@ func (fresh *inputFreshness) delivered(frames uint64, sequence int64) {
 	}
 	fresh.marks[(fresh.head+fresh.count)%deliveredMarks] = deliveredMark{frames: frames, sequence: sequence}
 	fresh.count++
+	// A receipt can overtake its mark: the page's acknowledgement of a frame
+	// may arrive between the frame's write and this call.
+	fresh.applyReceiptedLocked()
 }
 
 // receipt applies a cumulative count of attachment frames the page consumed.
@@ -151,27 +167,36 @@ func (fresh *inputFreshness) receipt(frames, written uint64) bool {
 		return false
 	}
 	fresh.receipted = frames
-	for fresh.count > 0 && fresh.marks[fresh.head].frames <= frames {
+	fresh.applyReceiptedLocked()
+	return true
+}
+
+// applyReceiptedLocked advances consumption over every mark the receipted
+// frame count covers. Callers hold fresh.mu.
+func (fresh *inputFreshness) applyReceiptedLocked() {
+	for fresh.count > 0 && fresh.marks[fresh.head].frames <= fresh.receipted {
 		fresh.consumed = fresh.marks[fresh.head].sequence
 		fresh.head = (fresh.head + 1) % deliveredMarks
 		fresh.count--
 	}
-	return true
 }
 
-// admit decides one input frame. frontier returns the generation's last
-// sequence published by an instant. It reports whether the input is accepted
-// and whether this refusal started a pause.
-func (fresh *inputFreshness) admit(now time.Time, window, quiet time.Duration, frontier func(unifiedjournal.PaneKey, time.Time) int64) (accepted, paused bool) {
+// admit decides one input frame. required returns the sequence the page must
+// have consumed now, and false when the page's generation has no authority
+// left. It reports whether the input is accepted and whether this refusal
+// started a pause.
+func (fresh *inputFreshness) admit(now time.Time, quiet time.Duration, required func(unifiedjournal.PaneKey) (int64, bool)) (accepted, paused bool) {
 	fresh.mu.Lock()
-	live, key, consumed := fresh.live, fresh.key, fresh.consumed
+	live, key := fresh.live, fresh.key
 	fresh.mu.Unlock()
 	if !live {
 		return true, false
 	}
-	current := consumed >= frontier(key, now.Add(-window))
+	sequence, known := required(key)
 	fresh.mu.Lock()
 	defer fresh.mu.Unlock()
+	// consumed is read after required: a receipt applied meanwhile only helps.
+	current := known && fresh.consumed >= sequence
 	if fresh.paused {
 		if current && now.Sub(fresh.refusedAt) >= quiet {
 			fresh.paused = false
@@ -221,15 +246,33 @@ func (effects *UnifiedDevPaneEffects) observeFrontierLocked(key unifiedjournal.P
 	clock.observe(effects.freshnessClock(), sequence, effects.inputWindow())
 }
 
-// publishedBy returns the last sequence of key published by instant.
-func (effects *UnifiedDevPaneEffects) publishedBy(key unifiedjournal.PaneKey, instant time.Time) int64 {
+// trackFrontierLocked gives a generation a frontier clock when a view of it
+// subscribes, so a generation with no publications yet is known and owes
+// nothing. An admitted generation publishes its initial geometry before a view
+// can subscribe, so the clock normally exists already; this keeps a generation
+// that has not published from being refused input it is owed. Callers hold
+// subscriberMu and have checked that key is active.
+func (effects *UnifiedDevPaneEffects) trackFrontierLocked(key unifiedjournal.PaneKey) {
+	if effects.frontierClocks == nil {
+		effects.frontierClocks = make(map[unifiedjournal.PaneKey]*frontierClock)
+	}
+	if effects.frontierClocks[key] == nil {
+		effects.frontierClocks[key] = &frontierClock{}
+	}
+}
+
+// requiredConsumption returns the last sequence of key published one window
+// before now, and false when key has no clock because its generation retired.
+// now is sampled under subscriberMu, so no publication can prune the answer
+// between sampling and lookup.
+func (effects *UnifiedDevPaneEffects) requiredConsumption(key unifiedjournal.PaneKey) (int64, bool) {
 	effects.subscriberMu.Lock()
 	defer effects.subscriberMu.Unlock()
 	clock := effects.frontierClocks[key]
 	if clock == nil {
-		return 0
+		return 0, false
 	}
-	return clock.at(instant)
+	return clock.at(effects.freshnessClock().Add(-effects.inputWindow())), true
 }
 
 // forgetPublishedLocked drops a retired generation's publication record.
@@ -254,5 +297,9 @@ func (writer *unifiedAttachmentFrameWriter) receipt(frames uint64) bool {
 // admitInput gates one input frame on the page's freshness.
 func (writer *unifiedAttachmentFrameWriter) admitInput() (accepted, paused bool) {
 	provider := writer.provider
-	return writer.fresh.admit(provider.freshnessClock(), provider.inputWindow(), provider.inputQuiet(), provider.publishedBy)
+	accepted, paused = writer.fresh.admit(provider.freshnessClock(), provider.inputQuiet(), provider.requiredConsumption)
+	if !accepted && provider.inputRefused != nil {
+		provider.inputRefused()
+	}
+	return accepted, paused
 }
