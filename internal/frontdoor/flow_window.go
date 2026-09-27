@@ -13,10 +13,12 @@ package frontdoor
 // WebSocket ping cycle, with room for link overhead and delay. On a fast
 // link the window caps output at one window per round trip, far above what
 // an interactive terminal needs. When the browser falls behind, the front
-// door stops reading the broker, and the broker's byte-bounded subscriber
-// tail ends the view with its typed lag verdict rather than buffering without
-// end. That verdict queues behind the window too; the broker's close grace
-// (unifiedSubscriberCloseGrace) is sized so it still gets through at 32 KiB/s.
+// door stops reading the broker; the broker's writer then parks, and the view
+// catches up from the journal once the browser consumes again rather than
+// buffering without end. A typed close verdict queues behind the window too;
+// the broker's close grace (unifiedSubscriberCloseGrace) is sized so it still
+// gets through at 32 KiB/s. A page that stops acknowledging altogether is
+// ended by FlowStallTimeout.
 const FlowWindowBytes = 128 << 10
 
 // flowWindow tracks the attachment frames written to one WebSocket that the

@@ -581,6 +581,10 @@ def front_unit(manifest: dict[str, Any], broker_units: list[str]) -> bytes:
     # requires the parent to have mode exactly 0700; image staging lives in
     # its own root (front.staging_root, default DEFAULT_IMAGE_STAGING_ROOT)
     # precisely so this mode never varies.
+    # The memory limits contain a runaway front door rather than budget normal
+    # use, which stays far below them: per-connection buffers are small and the
+    # flow window bounds relayed output per page. GOMEMLIMIT makes the
+    # collector work harder before the cgroup pressure threshold is reached.
     return f"""[Unit]
 Description=Persea Terminal trusted AF_UNIX front door
 Wants={dependencies}
@@ -600,6 +604,9 @@ StateDirectory=persea-terminal
 StateDirectoryMode=0700
 UMask=0077
 ReadWritePaths={read_write_paths}
+MemoryHigh=768M
+MemoryMax=1G
+Environment=GOMEMLIMIT=512MiB
 {hardening()}
 
 [Install]
@@ -626,6 +633,9 @@ StateDirectoryMode=0700
 RuntimeDirectory=persea-terminal-tailscale
 RuntimeDirectoryMode=0700
 UMask=0077
+# Contains a runaway sidecar; a pressure threshold is deliberately not set,
+# because throttling the network daemon would only add latency.
+MemoryMax=512M
 NoNewPrivileges=yes
 CapabilityBoundingSet=CAP_DAC_OVERRIDE CAP_NET_ADMIN CAP_NET_RAW
 AmbientCapabilities=

@@ -20,7 +20,7 @@ the kernel, or a soft memory setting into hard allocation limits.
 | Reader / observer sublimits | 128 MiB / 128 MiB; full readers leave 96 MiB for observers |
 | Founding/live/retiring observer units | 18, each with a 1536 KiB fixed allowance |
 | Readers / public unified attachments | 64 / at most 27 after snapshot settlement |
-| Reader tail | 64 buffered plus one in-flight event, at most 64 KiB per event |
+| Reader tail | 4 MiB + 64 KiB of charged queued and in-flight events (128 B plus the payload allocation each); a reader over it catches up from the journal in charged rounds of at most 512 KiB |
 | Journal logical / physical | 64 MiB / 72 MiB per realm, 8 MiB / 24 MiB per pane in the 96 MiB tmpfs profile |
 | Service MemoryHigh / MemoryMax | 850 MiB / 1 GiB |
 

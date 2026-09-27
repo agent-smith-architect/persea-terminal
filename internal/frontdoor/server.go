@@ -44,6 +44,14 @@ const WSWriteTimeout = 10 * time.Second
 const WSReadTimeout = 40 * time.Second
 const BrokerPingInterval = 30 * time.Second
 
+// websocketBufferBytes sizes each browser WebSocket's read and write I/O
+// buffers. These are per-connection allocations, separate from the message
+// size limit (SetReadLimit), which stays proto.MaxAttachment: a larger message
+// is read through the buffer and written as several WebSocket frames. The flow
+// window keeps at most FlowWindowBytes plus one attachment frame in flight, so
+// a buffer the size of the largest message would only hold memory.
+const websocketBufferBytes = 32 << 10
+
 // AttachmentProtocol names the browser attachment protocol. Version 2 adds
 // flow acknowledgements (PERSEA-FLOW/1): a page that does not acknowledge
 // the attachment frames it consumes would stall at the first window, so a
@@ -110,6 +118,7 @@ type Server struct {
 	diagnosticErr           error
 	browserProofTimeout     time.Duration
 	browserProofNow         func() time.Time
+	flowStallTimeout        time.Duration
 	upgrader                websocket.Upgrader
 	limiter                 operatorLimiter
 	previews                *previewStore
@@ -399,8 +408,8 @@ func newServer(cfg config.Front, staticDir, listen string) *Server {
 		diagnostic, diagnosticErr = newDiagnosticTraceStore(cfg.DiagnosticTraceDir)
 	}
 	bindingTTL := time.Duration(cfg.HandleTTLSeconds) * time.Second
-	s := &Server{cfg: cfg, listen: listen, staticDir: staticDir, handles: newHandleStore(bindingTTL, cfg.HandleCapacity), bindings: newSourceBindingStore(bindingTTL, cfg.HandleCapacity), leases: newLeaseStore(LeaseTTL), takeovers: newControlTakeoverStore(LeaseTTL, cfg.HandleCapacity), aliases: aliases, aliasErr: aliasErr, preferences: preferences, preferencesErr: preferencesErr, snippets: snippets, snippetErr: snippetErr, workspaces: workspaces, workspaceErr: workspaceErr, diagnostic: diagnostic, diagnosticErr: diagnosticErr, browserProofTimeout: BrowserProofTimeout, browserProofNow: time.Now, previews: newPreviewStore(time.Now)}
-	s.upgrader = websocket.Upgrader{ReadBufferSize: proto.MaxAttachment, WriteBufferSize: proto.MaxAttachment, Subprotocols: []string{AttachmentProtocol}, CheckOrigin: func(*http.Request) bool { return true }}
+	s := &Server{cfg: cfg, listen: listen, staticDir: staticDir, handles: newHandleStore(bindingTTL, cfg.HandleCapacity), bindings: newSourceBindingStore(bindingTTL, cfg.HandleCapacity), leases: newLeaseStore(LeaseTTL), takeovers: newControlTakeoverStore(LeaseTTL, cfg.HandleCapacity), aliases: aliases, aliasErr: aliasErr, preferences: preferences, preferencesErr: preferencesErr, snippets: snippets, snippetErr: snippetErr, workspaces: workspaces, workspaceErr: workspaceErr, diagnostic: diagnostic, diagnosticErr: diagnosticErr, browserProofTimeout: BrowserProofTimeout, browserProofNow: time.Now, flowStallTimeout: FlowStallTimeout, previews: newPreviewStore(time.Now)}
+	s.upgrader = websocket.Upgrader{ReadBufferSize: websocketBufferBytes, WriteBufferSize: websocketBufferBytes, Subprotocols: []string{AttachmentProtocol}, CheckOrigin: func(*http.Request) bool { return true }}
 	s.keyboardPreferences, s.keyboardPreferencesErr = keyboardPreferences, keyboardPreferencesErr
 	s.dashboardPreferences, s.dashboardPreferencesErr = openDashboardPreferencesStore(cfg.PreferencesStorePath)
 	s.clipboardImages, s.clipboardImageErr = openClipboardImageStore(cfg.SnippetStorePath, cfg.ImageUploadMaxBytes)
@@ -1882,6 +1891,12 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 	brokerPing := time.NewTicker(BrokerPingInterval)
 	defer brokerPing.Stop()
 	var flow flowWindow
+	stallTimeout := s.flowStallTimeout
+	if stallTimeout <= 0 {
+		stallTimeout = FlowStallTimeout
+	}
+	stall := newFlowStallClock(stallTimeout)
+	defer stall.stop()
 	// Every relay write to the broker is bounded; see BrokerWriteTimeout.
 	boundBrokerWrite := func() bool {
 		return c.SetWriteDeadline(time.Now().Add(BrokerWriteTimeout)) == nil
@@ -1908,6 +1923,10 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 		case <-browserProofTimer.C:
 			closeBrowserLiveness()
 			return
+		case <-stall.timer.C:
+			code := s.logTerminalFailure("flow_stalled", &a)
+			_ = writeWSCloseReason(writes, writerDone, code)
+			return
 		case read := <-reads:
 			if read.err != nil {
 				if orderlyWebSocketClose(read.err) {
@@ -1933,6 +1952,7 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 						_ = writeWSCloseReason(writes, writerDone, code)
 						return
 					}
+					stall.progressed(flow.inflight > 0)
 					continue
 				}
 				liveness, recognized, livenessErr := attachmentwire.DecodeTransportLiveness(read.payload, attachmentwire.BrowserToServer)
@@ -2091,6 +2111,7 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 					return
 				}
 				flow.record(len(result.frame.Payload))
+				stall.outstanding()
 			default:
 				code := s.logTerminalFailure("broker_protocol", &a)
 				_ = writeWSCloseReason(writes, writerDone, code)

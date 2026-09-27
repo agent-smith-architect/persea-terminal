@@ -63,6 +63,9 @@ for (const reason of [
   // The front door expiring application proof: what a stalled or suspended
   // connection looks like from the server. Loss, not a verdict.
   "browser_liveness",
+  // The front door ending a page that proves liveness but stopped
+  // acknowledging output: a page that consumes again recovers.
+  "flow_stalled",
 ]) {
   assert.equal(classifyUnifiedClose(reason), "transient", `network-layer loss must stay retryable: ${reason}`);
 }
@@ -162,7 +165,7 @@ for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose
     // Front-door typed refusals of this attachment.
     bad_liveness: "terminal", bad_attachment: "terminal", bad_flow: "terminal", observe_mode: "terminal",
     websocket_message_type: "terminal", broker_protocol: "terminal",
-    browser_liveness: "transient", stale_snapshot: "terminal",
+    browser_liveness: "transient", flow_stalled: "transient", stale_snapshot: "terminal",
     lease_held: "terminal", lease_lost: "terminal", lease_unavailable: "terminal",
     control_displaced: "terminal", takeover_superseded: "terminal",
     attachment_failed: "terminal",

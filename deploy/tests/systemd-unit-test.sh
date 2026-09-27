@@ -58,6 +58,11 @@ grep -Fxq 'ReadWritePaths=/var/lib/persea-terminal-staging/desk-a7' "$guarded"
 # unit keeps the alias store's exact-0700 state directory and never gains
 # image directives.
 grep -Fxq 'StateDirectoryMode=0700' "$candidate/units/persea-terminal-front.service"
+grep -Fxq 'MemoryHigh=768M' "$candidate/units/persea-terminal-front.service"
+grep -Fxq 'MemoryMax=1G' "$candidate/units/persea-terminal-front.service"
+grep -Fxq 'Environment=GOMEMLIMIT=512MiB' "$candidate/units/persea-terminal-front.service"
+grep -Fxq 'MemoryMax=512M' "$candidate/units/persea-terminal-tailscaled.service"
+! grep -Eq '^MemoryHigh=' "$candidate/units/persea-terminal-tailscaled.service"
 ! grep -q 'persea-terminal-staging' "$candidate/units/persea-terminal-front.service"
 for unit in "$candidate"/units/*.service; do
   report="$TMP/$(basename "$unit").security"

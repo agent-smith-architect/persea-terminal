@@ -186,6 +186,12 @@ memory are accounted separately. The cgroup limits remain 850 MiB High and 1 GiB
 Max. See the [recording memory worksheet](../internal/broker/recording_memory.md)
 for the capacities, measurement method and end-to-end verification requirements.
 
+The front door unit sets `MemoryHigh=768M`, `MemoryMax=1G` and
+`GOMEMLIMIT=512MiB`, and the Tailscale sidecar unit sets `MemoryMax=512M`. These
+contain a runaway process; they are not a budget for normal use, which stays
+far below them. The sidecar has no pressure threshold, because throttling the
+network daemon would only add latency.
+
 The installer resolves external Node/npm and Go toolchains from its `PATH`.
 For nonstandard locations, pass absolute trusted paths as `PERSEA_NODE_BIN`,
 `PERSEA_NPM_BIN`, and `PERSEA_GO_BIN` through the root environment. Candidates
