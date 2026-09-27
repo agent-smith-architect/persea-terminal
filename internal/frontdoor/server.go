@@ -120,6 +120,7 @@ type Server struct {
 	browserProofTimeout     time.Duration
 	browserProofNow         func() time.Time
 	flowStallTimeout        time.Duration
+	receiptInterval         time.Duration
 	upgrader                websocket.Upgrader
 	limiter                 operatorLimiter
 	previews                *previewStore
@@ -409,7 +410,7 @@ func newServer(cfg config.Front, staticDir, listen string) *Server {
 		diagnostic, diagnosticErr = newDiagnosticTraceStore(cfg.DiagnosticTraceDir)
 	}
 	bindingTTL := time.Duration(cfg.HandleTTLSeconds) * time.Second
-	s := &Server{cfg: cfg, listen: listen, staticDir: staticDir, handles: newHandleStore(bindingTTL, cfg.HandleCapacity), bindings: newSourceBindingStore(bindingTTL, cfg.HandleCapacity), leases: newLeaseStore(LeaseTTL), takeovers: newControlTakeoverStore(LeaseTTL, cfg.HandleCapacity), aliases: aliases, aliasErr: aliasErr, preferences: preferences, preferencesErr: preferencesErr, snippets: snippets, snippetErr: snippetErr, workspaces: workspaces, workspaceErr: workspaceErr, diagnostic: diagnostic, diagnosticErr: diagnosticErr, browserProofTimeout: BrowserProofTimeout, browserProofNow: time.Now, flowStallTimeout: FlowStallTimeout, previews: newPreviewStore(time.Now)}
+	s := &Server{cfg: cfg, listen: listen, staticDir: staticDir, handles: newHandleStore(bindingTTL, cfg.HandleCapacity), bindings: newSourceBindingStore(bindingTTL, cfg.HandleCapacity), leases: newLeaseStore(LeaseTTL), takeovers: newControlTakeoverStore(LeaseTTL, cfg.HandleCapacity), aliases: aliases, aliasErr: aliasErr, preferences: preferences, preferencesErr: preferencesErr, snippets: snippets, snippetErr: snippetErr, workspaces: workspaces, workspaceErr: workspaceErr, diagnostic: diagnostic, diagnosticErr: diagnosticErr, browserProofTimeout: BrowserProofTimeout, browserProofNow: time.Now, flowStallTimeout: FlowStallTimeout, receiptInterval: ConsumptionReceiptInterval, previews: newPreviewStore(time.Now)}
 	s.upgrader = websocket.Upgrader{ReadBufferSize: websocketBufferBytes, WriteBufferSize: websocketBufferBytes, Subprotocols: []string{AttachmentProtocol}, CheckOrigin: func(*http.Request) bool { return true }}
 	s.keyboardPreferences, s.keyboardPreferencesErr = keyboardPreferences, keyboardPreferencesErr
 	s.dashboardPreferences, s.dashboardPreferencesErr = openDashboardPreferencesStore(cfg.PreferencesStorePath)
@@ -1898,10 +1899,24 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 	}
 	stall := newFlowStallClock(stallTimeout, s.browserProofNow)
 	defer stall.stop()
-	var receiptSent time.Time
 	// Every relay write to the broker is bounded; see BrokerWriteTimeout.
 	boundBrokerWrite := func() bool {
 		return c.SetWriteDeadline(time.Now().Add(BrokerWriteTimeout)) == nil
+	}
+	receiptInterval := s.receiptInterval
+	if receiptInterval <= 0 {
+		receiptInterval = ConsumptionReceiptInterval
+	}
+	// acknowledged is the page's latest valid flow acknowledgement, receipted
+	// the latest forwarded to the broker as a consumption receipt.
+	var acknowledged, receipted uint64
+	var receiptSent time.Time
+	sendReceipt := func() bool {
+		if !boundBrokerWrite() || writeControl(c, proto.Control{Type: "consumed", Frames: acknowledged}) != nil {
+			return false
+		}
+		receipted, receiptSent = acknowledged, time.Now()
+		return true
 	}
 
 	for {
@@ -1960,13 +1975,11 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 					stall.progressed(flow.inflight > 0)
-					if mode == "control" && (flow.inflight == 0 || time.Since(receiptSent) >= ConsumptionReceiptInterval) {
-						if !boundBrokerWrite() || writeControl(c, proto.Control{Type: "consumed", Frames: count}) != nil {
-							code := s.logTerminalFailure("broker_write", &a)
-							_ = writeWSCloseReason(writes, writerDone, code)
-							return
-						}
-						receiptSent = time.Now()
+					acknowledged = count
+					if mode == "control" && (flow.inflight == 0 || time.Since(receiptSent) >= receiptInterval) && !sendReceipt() {
+						code := s.logTerminalFailure("broker_write", &a)
+						_ = writeWSCloseReason(writes, writerDone, code)
+						return
 					}
 					continue
 				}
@@ -2004,6 +2017,14 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 				}
 				if mode == "observe" && (typed.Type == terminal.FrameInput || typed.Type == terminal.FrameResize || (typed.Type == terminal.FrameModeRequest && typed.Mode == terminal.ModeControl)) {
 					code := s.logTerminalFailure("observe_mode", &a)
+					_ = writeWSCloseReason(writes, writerDone, code)
+					return
+				}
+				// Input is judged on what the page had consumed when it typed: an
+				// acknowledgement held back by the receipt interval, which the
+				// page sent before this input, goes to the broker first.
+				if mode == "control" && typed.Type == terminal.FrameInput && acknowledged > receipted && !sendReceipt() {
+					code := s.logTerminalFailure("broker_write", &a)
 					_ = writeWSCloseReason(writes, writerDone, code)
 					return
 				}
