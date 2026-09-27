@@ -345,6 +345,9 @@ func TestRecordingReaderLiveWriteCannotRefundAtDequeue(t *testing.T) {
 		t.Fatal(err)
 	}
 	tail, cancel := writer.tail, writer.cancel
+	// The tail starts catching up; the event must reach it through the live
+	// queue, so publish only once the writer has rejoined it.
+	pollUntil(t, 5*time.Second, "tail joining the live queue", func() bool { return !tail.data.isCatchingUp() })
 	b1Commit(t, effects, key, bytes.Repeat([]byte{'w'}, 64<<10))
 	select {
 	case <-wire.entered:

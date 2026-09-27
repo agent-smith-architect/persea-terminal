@@ -57,14 +57,16 @@ func TestCommittedSuffixMatchesTheProjectionFromEveryCursor(t *testing.T) {
 	realm, key, all := suffixFixture(t)
 	for after := int64(0); after <= int64(len(all)); after++ {
 		cursor := cursorAfter(all, after)
-		for _, maxBytes := range []int64{0, 1, 5, 299, 300, 305, 1000, 1 << 20} {
+		for _, maxBytes := range []int64{0, 1, 5, 80, 160, 299, 300, 305, 460, 1000, 1500, 1 << 20} {
 			got, err := realm.ReadCommittedEventsAfter(key, cursor, maxBytes)
 			if err != nil {
 				t.Fatalf("after=%d max=%d: %v", after, maxBytes, err)
 			}
+			// The bound counts payload and event index alike.
 			want := int64(0)
 			for last := after + 1; last <= int64(len(all)); last++ {
-				if last > after+1 && all[last-1].End-cursor.Offset > maxBytes {
+				cost := all[last-1].End - cursor.Offset + (last-after)*int64(unsafe.Sizeof(Event{}))
+				if last > after+1 && cost > maxBytes {
 					break
 				}
 				want = last - after
@@ -94,6 +96,32 @@ func TestCommittedSuffixMatchesTheProjectionFromEveryCursor(t *testing.T) {
 				t.Fatalf("after=%d max=%d allocation charge=%d, want %d", after, maxBytes, charge, wantCharge)
 			}
 		}
+	}
+}
+
+// A run of records without payload is bounded by its event index: geometry
+// alone cannot make one round copy an arbitrarily large index.
+func TestCommittedSuffixBoundsARunOfGeometryByItsIndex(t *testing.T) {
+	realm, err := OpenRealm(rotationOptions(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer realm.Close()
+	key := rotationKey("$suffix-geometry", 1)
+	if err := realm.AdmitPane(key, Geometry{Columns: 80, Rows: 24}); err != nil {
+		t.Fatal(err)
+	}
+	for rows := 25; rows < 25+64; rows++ {
+		record, err := realm.AppendGeometry(key, Geometry{Columns: 80, Rows: rows})
+		if err != nil {
+			t.Fatal(err)
+		}
+		commitLast(t, realm, key, record)
+	}
+	index := int64(unsafe.Sizeof(Event{}))
+	got, err := realm.ReadCommittedEventsAfter(key, CommittedCursor{}, 10*index)
+	if err != nil || len(got) != 10 {
+		t.Fatalf("a %d-byte bound read %d geometry records (err=%v), want 10", 10*index, len(got), err)
 	}
 }
 

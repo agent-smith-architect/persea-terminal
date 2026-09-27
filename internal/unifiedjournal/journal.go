@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"syscall"
+	"unsafe"
 )
 
 const (
@@ -1942,10 +1943,11 @@ type CommittedCursor struct {
 var ErrCursorMismatch = errors.New("journal cursor is not a committed record boundary")
 
 // committedSuffix selects the records one bounded read after cursor returns:
-// every record through the last one ending within maxBytes of the cursor, and
-// always at least the first, however large. It walks only the suffix, from the
-// newest page back to the record after cursor. An empty selection (nil last)
-// means cursor is the committed frontier.
+// the longest run whose payload plus event index stays within maxBytes, and
+// always at least the first record, however large. Counting the index keeps a
+// run of tiny or zero-payload records (geometry) bounded too. It walks only
+// the suffix, from the newest page back to the record after cursor. An empty
+// selection (nil last) means cursor is the committed frontier.
 func committedSuffix(pane *paneJournal, after CommittedCursor, maxBytes int64) (last *eventPage, records, bytes int64, err error) {
 	if after.Sequence < 0 || after.Sequence > pane.committedSequence {
 		return nil, 0, 0, ErrCursorMismatch
@@ -1961,7 +1963,8 @@ func committedSuffix(pane *paneJournal, after CommittedCursor, maxBytes int64) (
 		if page.event.Sequence > pane.committedSequence {
 			continue
 		}
-		if last == nil && (page.event.End-after.Offset <= maxBytes || page.event.Sequence == after.Sequence+1) {
+		cost := page.event.End - after.Offset + (page.event.Sequence-after.Sequence)*int64(unsafe.Sizeof(Event{}))
+		if last == nil && (cost <= maxBytes || page.event.Sequence == after.Sequence+1) {
 			last = page
 		}
 		first = page
