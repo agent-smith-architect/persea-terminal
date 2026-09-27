@@ -2,7 +2,7 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.1.10 — 2026-09-27
 
 ### Changed
 
@@ -11,6 +11,10 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 ### Fixed
 
 - Right after a page caught up, a command could still be refused as typed while behind, because the server's record of what the page had shown could lag by up to a tenth of a second. The server now updates that record before it judges each key.
+
+### Testing notes
+
+- Measured on recorded output, the new format sends about 23–24 % fewer bytes for the same terminal output, and the server spends much less time checking it. Tested on a local stack in Chromium and WebKit at desktop and phone sizes, and in desktop Chromium through a link limited to 32 KiB/s with 150 ms of delay in each direction. Real mobile networks and iPhone keyboards were not tested.
 
 ## 0.1.9 — 2026-09-27
 
