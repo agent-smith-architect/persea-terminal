@@ -4,6 +4,10 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+### Fixed
+
+- Right after a page caught up, a command could still be refused as typed while behind, because the server's record of what the page had shown could lag by up to a tenth of a second. The server now updates that record before it judges each key.
+
 ## 0.1.9 — 2026-09-27
 
 ### Changed

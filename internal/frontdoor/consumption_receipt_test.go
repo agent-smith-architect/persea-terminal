@@ -4,6 +4,10 @@ import (
 	"bytes"
 	"testing"
 	"time"
+
+	"github.com/gorilla/websocket"
+	"persea-terminal/internal/attachmentwire"
+	"persea-terminal/internal/terminal"
 )
 
 func nextReceipt(t *testing.T, broker *fakeAttachBroker) uint64 {
@@ -80,5 +84,58 @@ func TestWebSocketFlowForwardsNoReceiptsForObservers(t *testing.T) {
 	case frames := <-broker.receipts:
 		t.Fatalf("an observer's acknowledgement was forwarded as receipt %d", frames)
 	default:
+	}
+}
+
+// An acknowledgement the receipt interval held back goes to the broker before
+// the page's next input, so the input is judged on everything the page had
+// consumed when it typed rather than on an older receipt.
+func TestWebSocketFlowForwardsAHeldBackReceiptBeforeInput(t *testing.T) {
+	broker := startFakeAttachBroker(t, false)
+	front, addr := startFrontHTTP(t, broker.listener.Addr().String())
+	front.receiptInterval = time.Hour
+	handle, err := front.handles.mint(flowAuthority("receipts-before-input"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &flowClient{t: t, ws: dialTerminalWS(t, front, addr, handle, "control")}
+	defer client.ws.Close()
+	for !bytes.Equal(client.data, []byte("ready")) {
+		client.next()
+	}
+	client.ack(client.frames)
+	if got := nextReceipt(t, broker); got != client.frames {
+		t.Fatalf("window-emptying receipt=%d, want %d", got, client.frames)
+	}
+	flowOutput(t, broker, 0, 1<<10)
+	flowOutput(t, broker, 1, 1<<10)
+	client.next()
+	client.next()
+	held := client.frames - 1
+	client.ack(held)
+	requireFlowPaused(t, client, "0123456789abcdef0123456789abcdef")
+	select {
+	case got := <-broker.receipts:
+		t.Fatalf("receipt %d was forwarded inside the receipt interval", got)
+	default:
+	}
+	input, err := attachmentwire.Encode(terminal.Frame{Version: terminal.ProtocolVersion, Type: terminal.FrameInput, Source: integrationSource, Epoch: 1, Data: []byte("typed")}, attachmentwire.BrowserToServer)
+	if err != nil || client.ws.WriteMessage(websocket.TextMessage, input) != nil {
+		t.Fatalf("send input: %v", err)
+	}
+	select {
+	case <-broker.inputs:
+	case <-time.After(3 * time.Second):
+		t.Fatal("the input did not reach the broker")
+	}
+	// The fake broker reads frames in order, so a receipt forwarded before
+	// the input is already queued when the input arrives.
+	select {
+	case got := <-broker.receipts:
+		if got != held {
+			t.Fatalf("receipt before input=%d, want %d", got, held)
+		}
+	default:
+		t.Fatal("the input reached the broker before the held-back receipt")
 	}
 }
