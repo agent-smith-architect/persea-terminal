@@ -33,7 +33,7 @@ async function start() {
       if (req.method === 'DELETE') { state.workspace = null; res.writeHead(204); res.end(); return true; }
       if (req.method === 'PUT') { let body = ''; for await(const chunk of req) body += chunk; const update = JSON.parse(body); state.workspace = { ...state.workspace, ...update, normalized_name: update.name.toUpperCase(), revision: state.workspace.revision + 1 }; json(res, 200, state.workspace); return true; }
     }
-    if (url.pathname.startsWith('/api/session-preview')) { json(res, 200, { rows: ['Synthetic terminal preview.'], captured_at: Date.now(), width: 127, height: 30, truncated: false }); return true; }
+    if (url.pathname.startsWith('/api/session-preview')) { json(res, 200, { rows: ['Synthetic terminal preview.'], ansi_rows: ['Synthetic terminal preview.'], captured_at: Date.now(), width: 127, height: 30, truncated: false }); return true; }
     if (url.pathname.startsWith('/api/aliases')) { json(res, 409, { error: 'revision_conflict' }); return true; }
     return false;
   } });

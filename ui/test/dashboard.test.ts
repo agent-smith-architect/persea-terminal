@@ -318,28 +318,34 @@ const gate = new RefreshGate(); assert.equal(gate.permitsBackgroundRefresh(), tr
 // as an error state, never as partially-trusted content), identity-only
 // request path, and closed-set failure wording.
 {
-  const preview = parsePreview({ rows: ["alpha", "", "  spaced tail  ", "<img src=x onerror=alert(1)>"], width: 120, height: 40, captured_at: 1_700_000_000_123, truncated: false });
+  const rows = ["alpha", "", "  spaced tail  ", "<img src=x onerror=alert(1)>"];
+  const ansiRows = ["\x1b[31malpha\x1b[0m", ...rows.slice(1)];
+  const preview = parsePreview({ rows, ansi_rows: ansiRows, width: 120, height: 40, captured_at: 1_700_000_000_123, truncated: false });
   assert.deepEqual([...preview.rows], ["alpha", "", "  spaced tail  ", "<img src=x onerror=alert(1)>"], "rows must survive verbatim, empty and HTML-looking rows included");
   assert.equal(preview.width, 120);
   assert.equal(preview.height, 40);
   assert.equal(preview.capturedAt, 1_700_000_000_123);
   assert.equal(preview.truncated, false);
-  assert.equal(parsePreview({ rows: [], width: 1, height: 1, captured_at: 1 }).truncated, false, "absent truncated must mean false, like can_create");
-  assert.equal(parsePreview({ rows: [], width: 1, height: 1, captured_at: 1, truncated: true }).truncated, true);
+  assert.deepEqual([...preview.ansiRows], ansiRows, "styled rows must survive verbatim");
+  assert.equal(parsePreview({ rows: [], ansi_rows: [], width: 1, height: 1, captured_at: 1 }).truncated, false, "absent truncated must mean false, like can_create");
+  assert.equal(parsePreview({ rows: [], ansi_rows: [], width: 1, height: 1, captured_at: 1, truncated: true }).truncated, true);
   for (const malformed of [
     null,
     {},
-    { rows: "text", width: 1, height: 1, captured_at: 1 },
-    { rows: [1], width: 1, height: 1, captured_at: 1 },
-    { rows: [null], width: 1, height: 1, captured_at: 1 },
-    { rows: [], width: 0, height: 1, captured_at: 1 },
-    { rows: [], width: "80", height: 1, captured_at: 1 },
-    { rows: [], width: 1, captured_at: 1 },
-    { rows: [], width: 1, height: 1, captured_at: 0 },
-    { rows: [], width: 1, height: 1, captured_at: 1.5 },
-    { rows: [], width: 1, height: 1, captured_at: 1, truncated: "no" },
+    { rows: "text", ansi_rows: [], width: 1, height: 1, captured_at: 1 },
+    { rows: [1], ansi_rows: [""], width: 1, height: 1, captured_at: 1 },
+    { rows: [null], ansi_rows: [""], width: 1, height: 1, captured_at: 1 },
+    { rows: [], ansi_rows: [], width: 0, height: 1, captured_at: 1 },
+    { rows: [], ansi_rows: [], width: "80", height: 1, captured_at: 1 },
+    { rows: [], ansi_rows: [], width: 1, captured_at: 1 },
+    { rows: [], ansi_rows: [], width: 1, height: 1, captured_at: 0 },
+    { rows: [], ansi_rows: [], width: 1, height: 1, captured_at: 1.5 },
+    { rows: [], ansi_rows: [], width: 1, height: 1, captured_at: 1, truncated: "no" },
   ]) {
     assert.throws(() => parsePreview(malformed));
+  }
+  for (const ansi_rows of [undefined, null, "text", [1], [null], [], ["a", "b"], ["a".repeat(8193)]]) {
+    assert.throws(() => parsePreview({ rows: ["alpha"], ansi_rows, width: 80, height: 24, captured_at: 1 }));
   }
 
   assert.equal(previewRequestPath({ realm: "lo cal", server: "pri&vate", sessionId: "$1" }),

@@ -381,6 +381,7 @@ async function main() {
           "",
           "PREVIEW_MARKER_TWO",
         ],
+        ansi_rows: ["PREVIEW_MARKER_ONE", "<img src=x onerror=window.__previewInjected=1>", "", "PREVIEW_MARKER_TWO"],
         width: 120,
         height: 40,
         captured_at: 1_700_000_100_000,

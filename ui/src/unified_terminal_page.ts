@@ -44,9 +44,8 @@ const REATTACH_BURST_LIMIT = 3;
 // A current broker does not evict a view for being slow: the view catches up
 // from the journal on the same attachment. A subscriber_lagged close before
 // the first MODE therefore means the broker could not serve that catch-up —
-// reader capacity was exhausted, or the journal no longer served the view —
-// or comes from an older broker that still evicted slow views. After the
-// third such close in a row on one history, the page stops and offers
+// reader capacity was exhausted, or the journal no longer served the view.
+// After the third such close in a row on one history, the page stops and offers
 // Reconnect rather than download that history again and again. A handoff
 // (a rotation or refit replacing the history) starts the count again. This is
 // a retry cutoff, not proof that the view can never catch up: Reconnect
