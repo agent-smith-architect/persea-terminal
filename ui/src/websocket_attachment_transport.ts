@@ -90,7 +90,7 @@ export const browserReconnectRuntime: ReconnectRuntime = Object.freeze({
 });
 
 export type AttachmentWebSocket = Pick<WebSocket,
-  "readyState" | "bufferedAmount" | "send" | "close" | "addEventListener"
+  "readyState" | "bufferedAmount" | "binaryType" | "send" | "close" | "addEventListener"
 >;
 
 export type AttachmentWebSocketFactory = (url: string, protocols?: string[]) => AttachmentWebSocket;
@@ -173,7 +173,7 @@ function withHistoryProtocol(protocols: readonly string[], desired?: HistoryChoi
 const protocolFaults = new Set<FinalizeCause>([
   "MALFORMED_FRAME", "OUT_OF_STATE", "ACTIVE_TUPLE_MISMATCH", "ADMISSION_INVARIANT",
 ]);
-const protocolFaultReasons = new Set(["malformed_frame", "non_text_frame", "liveness_protocol", "refusal_protocol"]);
+const protocolFaultReasons = new Set(["malformed_frame", "liveness_protocol", "refusal_protocol"]);
 
 function closeSocket(socket: AttachmentWebSocket, code: number, reason: string): void {
   // Every code used here is one the browser accepts; a throw can only mean
@@ -475,6 +475,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     const attachDepth = historyProtocolValue(protocols);
     if (attachDepth !== undefined) this.attachDepthByGeneration.set(generation, attachDepth);
     const socket = this.createSocket(url, protocols ? [...protocols] : undefined);
+    socket.binaryType = "arraybuffer";
     this.socket = socket;
     if (attempt) {
       attempt.socket = socket;
@@ -516,28 +517,25 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
 
   private onMessage(socket: AttachmentWebSocket, generation: number, event: MessageEvent<unknown>): void {
     if (this.socket !== socket || generation !== this.generation || this.closedGeneration === generation) return;
-    if (typeof event.data !== "string") {
-      this.closeCurrent(socket, generation, "non_text_frame", false);
-      return;
-    }
-    const liveness = this.activeLiveness;
-    if (liveness && liveness.socket === socket && liveness.generation === generation) {
-      const result = liveness.heartbeat.receive(event.data);
-      if (result !== "ORDINARY") return;
-    } else if (decodeServerLivenessFrame(event.data).type !== "ORDINARY") {
-      this.closeCurrent(socket, generation, "liveness_protocol", true);
-      return;
-    }
-    const refusal = decodeServerRefusalFrame(event.data);
-    if (refusal.type === "REFUSAL") {
-      this.sink?.operationalRefusal?.(generation, refusal.code);
-      return;
-    }
-    if (refusal.type === "VIOLATION") {
-      // The reserved namespace with an unreadable code: a peer protocol
-      // violation, judged the same way a malformed liveness pong is.
-      this.closeCurrent(socket, generation, "refusal_protocol", true);
-      return;
+    if (typeof event.data === "string") {
+      const liveness = this.activeLiveness;
+      if (liveness && liveness.socket === socket && liveness.generation === generation) {
+        const result = liveness.heartbeat.receive(event.data);
+        if (result !== "ORDINARY") return;
+      } else if (decodeServerLivenessFrame(event.data).type !== "ORDINARY") {
+        this.closeCurrent(socket, generation, "liveness_protocol", true);
+        return;
+      }
+      const refusal = decodeServerRefusalFrame(event.data);
+      if (refusal.type === "REFUSAL") {
+        this.sink?.operationalRefusal?.(generation, refusal.code);
+        return;
+      }
+      if (refusal.type === "VIOLATION") {
+        // An unreadable reserved code is a peer protocol violation.
+        this.closeCurrent(socket, generation, "refusal_protocol", true);
+        return;
+      }
     }
     const flow = this.activeFlow?.socket === socket && this.activeFlow.generation === generation ? this.activeFlow.acks : undefined;
     const sequence = flow?.receive();

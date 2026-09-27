@@ -417,7 +417,7 @@ func readWSAttachment(t *testing.T, ws *websocket.Conn) terminal.Frame {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if kind != websocket.TextMessage {
+		if kind != websocket.BinaryMessage {
 			t.Fatalf("attachment websocket kind=%d", kind)
 		}
 		typed, err := attachmentwire.Decode(payload, attachmentwire.ServerToBrowser)

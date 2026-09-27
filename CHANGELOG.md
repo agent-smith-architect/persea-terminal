@@ -4,6 +4,10 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+### Changed
+
+- Terminal output uses fewer bytes, helping it arrive sooner on slow connections. Pages open during this upgrade must be reloaded once to reconnect.
+
 ### Fixed
 
 - Right after a page caught up, a command could still be refused as typed while behind, because the server's record of what the page had shown could lag by up to a tenth of a second. The server now updates that record before it judges each key.

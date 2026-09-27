@@ -53,12 +53,10 @@ const BrokerPingInterval = 30 * time.Second
 // flight, so a buffer the size of the largest message would only hold memory.
 const websocketBufferBytes = 32 << 10
 
-// AttachmentProtocol names the browser attachment protocol. Version 2 adds
-// flow acknowledgements (PERSEA-FLOW/1): a page that does not acknowledge
-// the attachment frames it consumes would stall at the first window, so a
-// version 1 page, one loaded before an upgrade, is refused at the upgrade
-// and recovers when reloaded.
-const AttachmentProtocol = "persea-terminal.v2"
+// AttachmentProtocol names the browser attachment protocol. Version 3 uses
+// binary server attachment frames with raw terminal bytes. Older pages are
+// refused at the upgrade and recover when reloaded.
+const AttachmentProtocol = "persea-terminal.v3"
 
 // BrokerWriteTimeout bounds each write the relay loop makes to the broker.
 // The broker reads input without blocking, but it answers some requests,
@@ -2142,7 +2140,7 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 					_ = writeWSCloseReason(writes, writerDone, code)
 					return
 				}
-				if writeWS(writes, writerDone, websocket.TextMessage, result.frame.Payload) != nil {
+				if writeWS(writes, writerDone, websocket.BinaryMessage, result.frame.Payload) != nil {
 					s.logTerminalFailure("websocket_write", &a)
 					return
 				}

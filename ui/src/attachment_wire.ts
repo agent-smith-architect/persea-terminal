@@ -1,5 +1,8 @@
 import {
   MAX_UINT64,
+  MAX_HISTORY_UTF8_BYTES,
+  MAX_LIVE_BYTES,
+  MAX_REPLAY_BYTES,
   cloneBrowserFrame,
   validateServerFrame,
   type BrowserFrame,
@@ -8,8 +11,10 @@ import {
 } from "./attachment_protocol";
 
 export const MAX_ATTACHMENT_WIRE_BYTES = 16_777_216;
+export const MAX_ATTACHMENT_HEADER_BYTES = 6 * MAX_HISTORY_UTF8_BYTES + 4096;
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder("utf-8", { fatal: true, ignoreBOM: true });
 
 function fail(message: string): never { throw new Error(`attachment wire: ${message}`); }
 
@@ -46,7 +51,7 @@ function toWire(frame: DecodedAttachmentFrame): Record<string, unknown> {
   const value: Record<string, unknown> = { ...frame, epoch: frame.epoch.toString(10) };
   if ("cut" in frame) value.cut = frame.cut.toString(10);
   if ("request" in frame) value.request = frame.request.toString(10);
-  if (frame.type === "PREPARE") value.replay = encodeBase64(frame.replay);
+  if (frame.type === "PREPARE") value.replay = frame.replay.byteLength;
   if (frame.type === "PREPARE" && frame.kind === "HISTORY") {
     delete value.effectiveHistoryRows;
     value.effective_history_rows = frame.effectiveHistoryRows;
@@ -55,7 +60,8 @@ function toWire(frame: DecodedAttachmentFrame): Record<string, unknown> {
     delete value.historyRows;
     value.history_rows = frame.historyRows;
   }
-  if (frame.type === "LIVE" || frame.type === "INPUT") value.data = encodeBase64(frame.data);
+  if (frame.type === "LIVE") value.data = frame.data.byteLength;
+  if (frame.type === "INPUT") value.data = encodeBase64(frame.data);
   return value;
 }
 
@@ -65,7 +71,12 @@ function encode(frame: DecodedAttachmentFrame): string {
   return payload;
 }
 
-function rejectDuplicateTopLevelFields(payload: string): void {
+// Numbers on the wire are plain integers, as the Go decoder requires. JSON.parse
+// would accept 1.0, 1e0 or 1e-999 and turn them into integers, so the spelling
+// is checked here, before parsing.
+const plainInteger = /^-?(0|[1-9][0-9]*)$/;
+
+function rejectNoncanonicalFields(payload: string): void {
   const keys = new Set<string>();
   let depth = 0;
   let expectingKey = false;
@@ -87,6 +98,7 @@ function rejectDuplicateTopLevelFields(payload: string): void {
           if (typeof key !== "string") fail("object key is not a string");
           if (keys.has(key)) fail(`duplicate field ${key}`);
           keys.add(key);
+          if (keys.size > 13) fail("too many wire fields");
           capturingKey = false;
           expectingKey = false;
         }
@@ -104,21 +116,37 @@ function rejectDuplicateTopLevelFields(payload: string): void {
       depth -= 1;
     } else if (character === "," && depth === 1) {
       expectingKey = true;
+    } else if (character === "-" || (character >= "0" && character <= "9")) {
+      let end = index + 1;
+      while (end < payload.length && "0123456789+-.eE".includes(payload[end])) end += 1;
+      if (!plainInteger.test(payload.slice(index, end))) fail("number is not a plain integer");
+      index = end - 1;
     }
   }
 }
 
-function decode(payload: string): Record<string, unknown> {
-  if (encoder.encode(payload).byteLength > MAX_ATTACHMENT_WIRE_BYTES) fail("encoded frame exceeds the wire bound");
+function decode(payload: string, bytes?: Uint8Array): Record<string, unknown> {
+  if (bytes === undefined && (payload.length > MAX_ATTACHMENT_WIRE_BYTES || encoder.encode(payload).byteLength > MAX_ATTACHMENT_WIRE_BYTES)) fail("encoded frame exceeds the wire bound");
+  rejectNoncanonicalFields(payload);
   let parsed: unknown;
   try { parsed = JSON.parse(payload); } catch { fail("payload is not valid JSON"); }
-  rejectDuplicateTopLevelFields(payload);
   const source = record(parsed);
+  if (Object.hasOwn(source, "effectiveHistoryRows") || Object.hasOwn(source, "historyRows")) fail("noncanonical history field");
   const value: Record<string, unknown> = { ...source, epoch: uint64(source.epoch, "epoch") };
   if (Object.hasOwn(source, "cut")) value.cut = uint64(source.cut, "cut");
   if (Object.hasOwn(source, "request")) value.request = uint64(source.request, "request");
-  if (Object.hasOwn(source, "replay")) value.replay = decodeBase64(source.replay, "replay");
-  if (Object.hasOwn(source, "data")) value.data = decodeBase64(source.data, "data");
+  if (bytes !== undefined) {
+    if (source.type === "LIVE" || source.type === "PREPARE") {
+      const field = source.type === "LIVE" ? "data" : "replay";
+      const length = source[field];
+      const minimum = source.type === "LIVE" ? 1 : 0;
+      const maximum = source.type === "LIVE" ? MAX_LIVE_BYTES : MAX_REPLAY_BYTES;
+      if (typeof length !== "number" || !Number.isSafeInteger(length) || length < minimum || length > maximum || length !== bytes.byteLength) fail(`invalid ${field} byte length`);
+      value[field] = bytes;
+    } else if (bytes.byteLength !== 0) fail("unexpected byte payload");
+  } else {
+    if (Object.hasOwn(source, "data")) value.data = decodeBase64(source.data, "data");
+  }
   if (Object.hasOwn(source, "effective_history_rows")) {
     value.effectiveHistoryRows = source.effective_history_rows;
     delete value.effective_history_rows;
@@ -134,14 +162,29 @@ export function encodeBrowserFrame(frame: BrowserFrame): string {
   return encode(cloneBrowserFrame(frame));
 }
 
-export function encodeServerFrame(frame: ServerFrame): string {
-  return encode(validateServerFrame(frame));
+export function encodeServerFrame(frame: ServerFrame): ArrayBuffer {
+  const valid = validateServerFrame(frame);
+  const header = encoder.encode(JSON.stringify(toWire(valid)));
+  const bytes = valid.type === "LIVE" ? valid.data : valid.type === "PREPARE" ? valid.replay : new Uint8Array();
+  if (header.byteLength > MAX_ATTACHMENT_HEADER_BYTES || 4 + header.byteLength + bytes.byteLength > MAX_ATTACHMENT_WIRE_BYTES) fail("encoded frame exceeds the wire bound");
+  const payload = new ArrayBuffer(4 + header.byteLength + bytes.byteLength);
+  new DataView(payload).setUint32(0, header.byteLength, false);
+  new Uint8Array(payload, 4, header.byteLength).set(header);
+  new Uint8Array(payload, 4 + header.byteLength).set(bytes);
+  return payload;
 }
 
 export function decodeBrowserFrame(payload: string): BrowserFrame {
   return cloneBrowserFrame(decode(payload) as BrowserFrame);
 }
 
-export function decodeServerFrame(payload: string): ServerFrame {
-  return validateServerFrame(decode(payload));
+export function decodeServerFrame(payload: unknown): ServerFrame {
+  if (!(payload instanceof ArrayBuffer)) fail("server attachment must be binary");
+  if (payload.byteLength < 4 || payload.byteLength > MAX_ATTACHMENT_WIRE_BYTES) fail("invalid wire length");
+  const headerLength = new DataView(payload).getUint32(0, false);
+  if (headerLength === 0 || headerLength > MAX_ATTACHMENT_HEADER_BYTES || headerLength > payload.byteLength - 4) fail("invalid header length");
+  const bytes = new Uint8Array(payload, 4 + headerLength);
+  if (bytes.byteLength > Math.max(MAX_REPLAY_BYTES, MAX_LIVE_BYTES)) fail("oversized byte payload");
+  const header = decoder.decode(new Uint8Array(payload, 4, headerLength));
+  return validateServerFrame(decode(header, bytes));
 }

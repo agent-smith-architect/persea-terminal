@@ -7,8 +7,8 @@ package frontdoor
 // so without a bound a slow link queues everything the broker has sent ahead
 // of the next liveness PONG and WebSocket ping, and a browser that is merely
 // slow is declared dead. With the window, a control frame waits behind at
-// most this window plus one attachment frame (a LIVE frame carries at most
-// 16 KiB of output, about 22 KiB encoded): at 32 KiB/s that is about 4.7 s,
+// most this window plus one attachment frame. Ordinary LIVE output is chunked
+// at 16 KiB plus its small binary header: at 32 KiB/s that is about 4.5 s,
 // inside the browser's 10 s liveness challenge and the front door's 20 s
 // WebSocket ping cycle, with room for link overhead and delay. On a fast
 // link the window caps output at one window per round trip, far above what

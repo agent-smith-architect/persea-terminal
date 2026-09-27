@@ -13,8 +13,8 @@ const (
 	FrameControl FrameType = 0x01
 	FrameData    FrameType = 0x02
 	FrameInput   FrameType = 0x03
-	// FrameAttachment carries exactly one attachmentwire JSON object.  It is
-	// deliberately the only broker framing class for the Epoch protocol.
+	// FrameAttachment carries one attachmentwire frame: binary toward the
+	// browser, JSON toward the broker. It carries no internal cursor metadata.
 	FrameAttachment FrameType = 0x04
 	// FrameImage carries exactly one staged-image payload: raw bytes, with no
 	// framing of its own.

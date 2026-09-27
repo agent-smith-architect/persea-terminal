@@ -13,6 +13,7 @@ import (
 	"github.com/gorilla/websocket"
 
 	"persea-terminal/internal/attachmentwire"
+	"persea-terminal/internal/terminal"
 )
 
 func TestProbeAdoptsExactSourceBeforeUnifiedAttachAndRejectsReplay(t *testing.T) {
@@ -57,7 +58,7 @@ func TestProbeAdoptsExactSourceBeforeUnifiedAttachAndRejectsReplay(t *testing.T)
 							t.Error("query authority")
 						}
 						protocols := websocket.Subprotocols(r)
-						for _, want := range []string{"persea-engine.unified-dev", "persea-history.5000", "persea-terminal.v2", "persea-handle." + mode, "persea-mode." + mode, "persea-csrf." + csrf} {
+						for _, want := range []string{"persea-engine.unified-dev", "persea-history.5000", "persea-terminal.v3", "persea-handle." + mode, "persea-mode." + mode, "persea-csrf." + csrf} {
 							n := 0
 							for _, got := range protocols {
 								if got == want {
@@ -72,7 +73,7 @@ func TestProbeAdoptsExactSourceBeforeUnifiedAttachAndRejectsReplay(t *testing.T)
 							w.WriteHeader(http.StatusGone)
 							return
 						}
-						upgrader := websocket.Upgrader{Subprotocols: []string{"persea-terminal.v2"}}
+						upgrader := websocket.Upgrader{Subprotocols: []string{"persea-terminal.v3"}}
 						conn, err := upgrader.Upgrade(w, r, nil)
 						if err != nil {
 							t.Error(err)
@@ -98,19 +99,30 @@ func TestProbeAdoptsExactSourceBeforeUnifiedAttachAndRejectsReplay(t *testing.T)
 								acknowledged = count
 							}
 						}
-						_ = conn.WriteJSON(map[string]any{"type": "PREPARE", "source": "source-id", "epoch": "1", "cut": "1"})
+						send := func(frame terminal.Frame) {
+							frame.Version, frame.Source, frame.Epoch = 1, "source-id", 1
+							raw, err := attachmentwire.Encode(frame, attachmentwire.ServerToBrowser)
+							if err != nil {
+								t.Error(err)
+								return
+							}
+							if err := conn.WriteMessage(websocket.BinaryMessage, raw); err != nil {
+								t.Error(err)
+							}
+						}
+						send(terminal.Frame{Type: terminal.FramePrepare, Cut: 1, Kind: terminal.CutInitial, Columns: 80, Rows: 24})
 						var message map[string]any
 						if err := readBrowser(&message); err != nil || message["type"] != "READY" {
 							t.Errorf("READY: %v %v", message, err)
 							return
 						}
-						_ = conn.WriteJSON(map[string]any{"type": "COMMIT", "source": "source-id", "epoch": "1"})
+						send(terminal.Frame{Type: terminal.FrameCommit, Cut: 1})
 						if mode == "control" {
 							if err := readBrowser(&message); err != nil || message["type"] != "MODE_REQUEST" {
 								t.Error("missing control request")
 								return
 							}
-							_ = conn.WriteJSON(map[string]any{"type": "MODE", "source": "source-id", "epoch": "1", "mode": "CONTROL"})
+							send(terminal.Frame{Type: terminal.FrameMode, Mode: terminal.ModeControl})
 							if err := readBrowser(&message); err != nil || message["type"] != "INPUT" {
 								t.Error("missing input")
 								return
@@ -125,7 +137,7 @@ func TestProbeAdoptsExactSourceBeforeUnifiedAttachAndRejectsReplay(t *testing.T)
 							if !strings.Contains(string(data), "sentinel") {
 								t.Error("input changed")
 							}
-							_ = conn.WriteJSON(map[string]any{"type": "LIVE", "data": base64.StdEncoding.EncodeToString([]byte("sentinel"))})
+							send(terminal.Frame{Type: terminal.FrameLive, Cut: 1, Data: []byte("sentinel")})
 						}
 						_, _, _ = conn.ReadMessage()
 					default:

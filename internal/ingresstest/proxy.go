@@ -18,6 +18,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -233,7 +234,7 @@ func Probe(base, realm, session, mode, sentinel string, mutateAlias bool) error 
 	if wsURL.RawQuery != "" {
 		return fmt.Errorf("capability leaked into WebSocket query")
 	}
-	protocols := []string{"persea-engine.unified-dev", "persea-history.5000", "persea-terminal.v2", "persea-handle." + wsHandle, "persea-mode." + mode, "persea-csrf." + csrf}
+	protocols := []string{"persea-engine.unified-dev", "persea-history.5000", "persea-terminal.v3", "persea-handle." + wsHandle, "persea-mode." + mode, "persea-csrf." + csrf}
 	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second, Subprotocols: protocols, TLSClientConfig: probeTLS}
 	headers := http.Header{"Cookie": []string{cookieHeader}, "Origin": []string{base}}
 	ws, wsResponse, err := dialer.Dial(wsURL.String(), headers)
@@ -243,7 +244,7 @@ func Probe(base, realm, session, mode, sentinel string, mutateAlias bool) error 
 		}
 		return fmt.Errorf("WebSocket upgrade: %w", err)
 	}
-	if ws.Subprotocol() != "persea-terminal.v2" {
+	if ws.Subprotocol() != "persea-terminal.v3" {
 		_ = ws.Close()
 		return fmt.Errorf("unexpected echoed subprotocol")
 	}
@@ -252,13 +253,17 @@ func Probe(base, realm, session, mode, sentinel string, mutateAlias bool) error 
 	live := ""
 	var consumed uint64
 	for {
-		_, payload, e := ws.ReadMessage()
+		kind, payload, e := ws.ReadMessage()
 		if e != nil {
 			_ = ws.Close()
 			return e
 		}
-		var frame map[string]any
-		if e := json.Unmarshal(payload, &frame); e != nil {
+		if kind != websocket.BinaryMessage {
+			_ = ws.Close()
+			return fmt.Errorf("unexpected attachment message type %d", kind)
+		}
+		frame, e := attachmentwire.Decode(payload, attachmentwire.ServerToBrowser)
+		if e != nil {
 			_ = ws.Close()
 			return e
 		}
@@ -273,12 +278,12 @@ func Probe(base, realm, session, mode, sentinel string, mutateAlias bool) error 
 			_ = ws.Close()
 			return e
 		}
-		typeName, _ := frame["type"].(string)
-		source, _ := frame["source"].(string)
-		epoch, _ := frame["epoch"].(string)
+		typeName := string(frame.Type)
+		source := frame.Source
+		epoch := strconv.FormatUint(frame.Epoch, 10)
 		switch typeName {
 		case "PREPARE":
-			ready := map[string]any{"type": "READY", "version": 1, "source": source, "epoch": epoch, "cut": frame["cut"]}
+			ready := map[string]any{"type": "READY", "version": 1, "source": source, "epoch": epoch, "cut": strconv.FormatUint(frame.Cut, 10)}
 			if e := ws.WriteJSON(ready); e != nil {
 				return e
 			}
@@ -295,7 +300,7 @@ func Probe(base, realm, session, mode, sentinel string, mutateAlias bool) error 
 				}
 			}
 		case "MODE":
-			controlled = frame["mode"] == "CONTROL"
+			controlled = frame.Mode == "CONTROL"
 			if controlled && !sent {
 				sent = true
 				command := "printf '" + strings.ReplaceAll(sentinel, "'", "") + "\\n'\n"
@@ -304,9 +309,7 @@ func Probe(base, realm, session, mode, sentinel string, mutateAlias bool) error 
 				}
 			}
 		case "LIVE":
-			encoded, _ := frame["data"].(string)
-			decoded, _ := base64.StdEncoding.DecodeString(encoded)
-			live += string(decoded)
+			live += string(frame.Data)
 			if controlled && strings.Contains(live, sentinel) {
 				_ = ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "probe_complete"), time.Now().Add(time.Second))
 				_ = ws.Close()

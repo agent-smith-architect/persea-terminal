@@ -2,6 +2,7 @@ package attachmentwire
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"strings"
 	"testing"
@@ -70,22 +71,30 @@ func TestWorstCaseValidPrepareFitsDocumentedFiniteWireBound(t *testing.T) {
 	if len(raw) >= MaxWireBytes {
 		t.Fatalf("worst-case wire=%d bound=%d", len(raw), MaxWireBytes)
 	}
+	got, err := Decode(raw, ServerToBrowser)
+	if err != nil || !bytes.Equal(got.Replay, frame.Replay) || strings.Join(got.History, "\n") != strings.Join(frame.History, "\n") {
+		t.Fatalf("worst-case PREPARE round trip changed: %v", err)
+	}
 	if _, err := Decode(bytes.Repeat([]byte{'x'}, MaxWireBytes+1), ServerToBrowser); !errors.Is(err, terminal.ErrMalformed) {
 		t.Fatalf("oversized wire did not fail closed: %v", err)
 	}
 }
 
-func TestWireUsesDecimalUint64AndCanonicalBase64(t *testing.T) {
+func TestWireUsesDecimalUint64AndRawServerBytes(t *testing.T) {
 	frame := terminal.Frame{Version: 1, Type: terminal.FrameLive, Source: "source", Epoch: ^uint64(0), Cut: 7, Data: []byte{0, 1, 2, 255}}
 	raw, err := Encode(frame, ServerToBrowser)
 	if err != nil {
 		t.Fatal(err)
 	}
-	text := string(raw)
-	for _, want := range []string{`"epoch":"18446744073709551615"`, `"cut":"7"`, `"data":"AAEC/w=="`} {
+	headerLength := int(binary.BigEndian.Uint32(raw))
+	text := string(raw[4 : 4+headerLength])
+	for _, want := range []string{`"epoch":"18446744073709551615"`, `"cut":"7"`, `"data":4`} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("wire payload lacks %s: %s", want, text)
 		}
+	}
+	if !bytes.Equal(raw[4+headerLength:], frame.Data) {
+		t.Fatal("server bytes changed")
 	}
 }
 
@@ -139,8 +148,9 @@ func TestEncodeCoreJSONReusesTerminalFrameValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(wire) != `{"cut":"3","data":"AQI=","epoch":"2","source":"source","type":"LIVE","version":1}` {
-		t.Fatalf("unexpected canonical translation: %s", wire)
+	want := binaryTestFrame(`{"cut":"3","data":2,"epoch":"2","source":"source","type":"LIVE","version":1}`, []byte{1, 2})
+	if !bytes.Equal(wire, want) {
+		t.Fatalf("unexpected canonical translation: %x", wire)
 	}
 	if _, err := EncodeCoreJSON([]byte(`{"version":1,"type":"LIVE","source":"source","epoch":2,"cut":3,"data":""}`), ServerToBrowser); err == nil {
 		t.Fatal("invalid core frame bypassed terminal validation")

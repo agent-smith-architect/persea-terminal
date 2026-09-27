@@ -270,7 +270,7 @@ async function startStack({ tls }) {
     entry.consumed = true;
     const accept = crypto.createHash("sha1").update(request.headers["sec-websocket-key"] + WS_GUID).digest("base64");
     raw.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-      + `Sec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: persea-terminal.v2\r\n\r\n`);
+      + `Sec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: persea-terminal.v3\r\n\r\n`);
     const attachment = { id: state.attachments.length + 1, frames: [], closeReason: null, socket: null };
     state.attachments.push(attachment);
     const socket = new Socket(raw, (text) => onText(text), (reason) => { attachment.closeReason = attachment.closeReason || reason; });
@@ -285,8 +285,8 @@ async function startStack({ tls }) {
     if (state.attachmentFailure === "lease_held") { closeWith(1011, "lease_held"); return; }
     const epoch = "17";
     const cut = "1";
-    const frame = (value) => JSON.stringify({ version: 1, source: SOURCE, epoch, ...value });
-    socket.sendText(frame({ type: "PREPARE", cut, kind: "INITIAL", columns: 80, rows: 24, history: [], truncated: false, replay: Buffer.from("session_memory-replay\r\n", "binary").toString("base64") }));
+    const frame = (value) => ({ version: 1, source: SOURCE, epoch, ...value });
+    socket.sendAttachment(frame({ type: "PREPARE", cut, kind: "INITIAL", columns: 80, rows: 24, history: [], truncated: false, replay: Buffer.from("session_memory-replay\r\n", "binary") }));
     if (state.attachmentFailure === "after_prepare") setTimeout(() => { if (!socket.closed) closeWith(1011, "stale_target"); }, 500);
     function onText(text) {
       if (flowFrame(text)) return;
@@ -303,11 +303,11 @@ async function startStack({ tls }) {
         if (state.attachmentFailure === "after_prepare") { closeWith(1011, "stale_target"); return; }
         if (live || value.cut !== cut) { closeWith(1011, "attachment_failed"); return; }
         live = true;
-        socket.sendText(frame({ type: "COMMIT", cut }));
+        socket.sendAttachment(frame({ type: "COMMIT", cut }));
         return;
       }
       if (!live) { closeWith(1011, "attachment_failed"); return; }
-      if (value.type === "MODE_REQUEST") { socket.sendText(frame({ type: "MODE", mode: value.mode })); return; }
+      if (value.type === "MODE_REQUEST") { socket.sendAttachment(frame({ type: "MODE", mode: value.mode })); return; }
     }
   });
 

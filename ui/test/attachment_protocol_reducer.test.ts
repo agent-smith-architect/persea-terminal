@@ -1,4 +1,5 @@
 import { validateComposerStorageScope } from "../src/composer_storage_scope";
+import { binaryTestFrame, binaryHeader } from "./attachment_wire_binary.test";
 // @ts-expect-error The unit bundle runs on Node; this project intentionally omits Node types from its browser tsconfig.
 import { readFileSync } from "node:fs";
 import {
@@ -70,6 +71,7 @@ const assertBrowserCloseCode = (code?: number): void => {
 };
 
 class TransportFakeSocket {
+  binaryType: BinaryType = "blob";
   bufferedAmount = 0;
   failSend = false;
   readonly sent: string[] = [];
@@ -207,11 +209,11 @@ const ready = (cut = 1n): BrowserFrame => ({ type: "READY", version: 1, source: 
 const commit = (cut = 1n) => ({ type: "COMMIT" as const, version: 1 as const, source: "source", epoch: 1n, cut });
 const live = (cut = 1n) => ({ type: "LIVE" as const, version: 1 as const, source: "source", epoch: 1n, cut, data: new Uint8Array([65]) });
 
-test("attachment_wire_uses_decimal_uint64_and_canonical_padded_base64_in_both_directions", () => {
+test("attachment_wire_uses_decimal_uint64_raw_server_bytes_and_base64_input", () => {
   const initial = prepare({ epoch: MAX_UINT64, cut: MAX_UINT64, replay: new Uint8Array([0, 1, 2, 255]) });
   const encodedInitial = encodeServerFrame(initial);
-  assert(encodedInitial.includes(`"epoch":"${MAX_UINT64.toString(10)}"`), "epoch was not encoded as a decimal string");
-  assert(encodedInitial.includes('"replay":"AAEC/w=="'), "replay was not encoded as padded standard base64");
+  assert(binaryHeader(encodedInitial).includes(`"epoch":"${MAX_UINT64.toString(10)}"`), "epoch was not encoded as a decimal string");
+  assert(binaryHeader(encodedInitial).includes('"replay":4'), "replay length was not encoded");
   const decodedInitial = decodeServerFrame(encodedInitial);
   equal(decodedInitial.type, "PREPARE");
   assert(decodedInitial.type === "PREPARE");
@@ -240,17 +242,17 @@ test("attachment_wire_uses_decimal_uint64_and_canonical_padded_base64_in_both_di
 
   const historyPrepare = prepare({ kind: "HISTORY", request: MAX_UINT64, effectiveHistoryRows: 1_000 });
   const encodedHistoryPrepare = encodeServerFrame(historyPrepare);
-  assert(encodedHistoryPrepare.includes(`"request":"${MAX_UINT64.toString(10)}"`));
-  assert(encodedHistoryPrepare.includes('"effective_history_rows":1000'));
+  assert(binaryHeader(encodedHistoryPrepare).includes(`"request":"${MAX_UINT64.toString(10)}"`));
+  assert(binaryHeader(encodedHistoryPrepare).includes('"effective_history_rows":1000'));
   const decodedHistoryPrepare = decodeServerFrame(encodedHistoryPrepare);
   assert(decodedHistoryPrepare.type === "PREPARE" && decodedHistoryPrepare.kind === "HISTORY");
   equal(decodedHistoryPrepare.request, MAX_UINT64);
   equal(decodedHistoryPrepare.effectiveHistoryRows, 1_000);
 
-  throws(() => decodeServerFrame('{"type":"COMMIT","version":1,"source":"source","epoch":1,"cut":"1"}'), "numeric uint64 was accepted");
-  throws(() => decodeServerFrame('{"type":"LIVE","version":1,"source":"source","epoch":"1","cut":"1","data":"AAE"}'), "unpadded base64 was accepted");
-  throws(() => decodeServerFrame('{"type":"COMMIT","version":1,"source":"source","epoch":"1","cut":"1","extra":true}'), "unknown field was accepted");
-  throws(() => decodeServerFrame('{"type":"LIVE","version":1,"source":"source","epoch":"1","cut":"1","data":"QQ==","data":"Qg=="}'), "duplicate field was accepted");
+  throws(() => decodeServerFrame(binaryTestFrame('{"type":"COMMIT","version":1,"source":"source","epoch":1,"cut":"1"}')), "numeric uint64 was accepted");
+  throws(() => decodeBrowserFrame('{"type":"INPUT","version":1,"source":"source","epoch":"1","data":"AAE"}'), "unpadded base64 was accepted");
+  throws(() => decodeServerFrame(binaryTestFrame('{"type":"COMMIT","version":1,"source":"source","epoch":"1","cut":"1","extra":true}')), "unknown field was accepted");
+  throws(() => decodeServerFrame(binaryTestFrame('{"type":"LIVE","version":1,"source":"source","epoch":"1","cut":"1","data":1,"data":2}', new Uint8Array([1, 2]))), "duplicate field was accepted");
   throws(() => decodeServerFrame(encodeBrowserFrame(ready())), "browser frame was accepted from the server");
 });
 
@@ -286,8 +288,8 @@ test("history_depth_desired_survives_one_class2_reconnect_then_falls_back_after_
       sockets.push(socket);
       return socket as unknown as AttachmentWebSocket;
     },
-    ["persea-terminal.v2", "persea-history.5000"],
-    async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-terminal.v2", "persea-history.5000"]) }),
+    ["persea-terminal.v3", "persea-history.5000"],
+    async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-terminal.v3", "persea-history.5000"]) }),
     () => 0.5,
     clock.runtime,
   );
@@ -329,7 +331,7 @@ test("history_depth_defer_is_pending_not_class2_and_times_out_visibly", async ()
   const transport = new WebSocketAttachmentTransport(
     "ws://example.test/ws",
     () => socket as unknown as AttachmentWebSocket,
-    ["persea-terminal.v2", "persea-history.5000"],
+    ["persea-terminal.v3", "persea-history.5000"],
     undefined,
     () => 0.5,
     clock.runtime,
@@ -381,8 +383,8 @@ test("history_depth_defer_does_not_spend_the_ambiguous_cut_retry", async () => {
       sockets.push(socket);
       return socket as unknown as AttachmentWebSocket;
     },
-    ["persea-terminal.v2", "persea-history.5000"],
-    async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-terminal.v2", "persea-history.5000"]) }),
+    ["persea-terminal.v3", "persea-history.5000"],
+    async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-terminal.v3", "persea-history.5000"]) }),
     () => 0.5,
     clock.runtime,
   );
@@ -415,7 +417,7 @@ test("history_depth_terminal_retirement_clears_the_reader_hold_timer", async () 
     const transport = new WebSocketAttachmentTransport(
       "ws://example.test/ws",
       () => socket as unknown as AttachmentWebSocket,
-      ["persea-terminal.v2", "persea-history.5000"],
+      ["persea-terminal.v3", "persea-history.5000"],
       undefined,
       () => 0.5,
       clock.runtime,
@@ -452,7 +454,7 @@ test("same_depth_reader_retry_replaces_the_old_timeout_generation", async () => 
   const transport = new WebSocketAttachmentTransport(
     "ws://example.test/ws",
     () => socket as unknown as AttachmentWebSocket,
-    ["persea-terminal.v2", "persea-history.5000"],
+    ["persea-terminal.v3", "persea-history.5000"],
     undefined,
     () => 0.5,
     clock.runtime,
@@ -1260,7 +1262,7 @@ const flowTransport = (sockets: TransportFakeSocket[], held: Array<() => void> |
       const socket = new TransportFakeSocket(1);
       sockets.push(socket);
       return socket as unknown as AttachmentWebSocket;
-    }, ["persea-terminal.v2"], undefined, () => 0.5, new FakeReconnectClock().runtime,
+    }, ["persea-terminal.v3"], undefined, () => 0.5, new FakeReconnectClock().runtime,
     new FakeLivenessClock().runtime, () => livenessNonce,
   );
   transport.bind({
@@ -1271,6 +1273,41 @@ const flowTransport = (sockets: TransportFakeSocket[], held: Array<() => void> |
 };
 const flowAcks = (socket: TransportFakeSocket) => socket.sent.filter((value) => value.startsWith(TRANSPORT_FLOW_PREFIX));
 const settleFlow = () => Promise.resolve();
+
+test("binary_transport_sets_arraybuffer_preserves_bytes_and_rejects_other_attachment_forms", async () => {
+  for (const malformed of [
+    '{"version":1,"type":"COMMIT","source":"source","epoch":"1","cut":"1"}',
+    new Blob(), new Uint8Array([1]), new ArrayBuffer(3),
+    binaryTestFrame('{"version":1,"type":"LIVE","source":"source","epoch":"1","cut":"1","data":1}', new Uint8Array([1, 2])),
+  ]) {
+    const socket = new TransportFakeSocket(1);
+    const received: Uint8Array[] = [];
+    const closed: string[] = [];
+    const transport = new WebSocketAttachmentTransport(
+      "ws://example.test/ws", () => socket as unknown as AttachmentWebSocket, undefined, undefined,
+      () => 0.5, new FakeReconnectClock().runtime, new FakeLivenessClock().runtime, () => livenessNonce,
+    );
+    transport.bind({
+      openTransport: () => {}, transportClosed: (_generation, reason) => { closed.push(reason); },
+      receiveDecoded: (_generation, value) => { const frame = validateServerFrame(value); if (frame.type === "LIVE") received.push(frame.data); return "ENQUEUED"; },
+    });
+    transport.connect();
+    equal(socket.binaryType, "arraybuffer", "real WebSockets would deliver Blobs");
+    socket.emit("open", {});
+    socket.emit("message", { data: encodeServerFrame({ ...live(), data: new Uint8Array([255, 0, 27, 226]) }) });
+    await settleFlow();
+    equal(received[0]?.join(","), "255,0,27,226", "transport changed bytes");
+    equal(flowAcks(socket).at(-1), `${TRANSPORT_FLOW_PREFIX}ACK 1`);
+    const acksBefore = flowAcks(socket).length;
+    socket.emit("message", { data: malformed });
+    await settleFlow();
+    equal(received.length, 1, "malformed frame reached the sink");
+    equal(closed.join(","), "malformed_frame");
+    equal(flowAcks(socket).length, acksBefore, "malformed frame was acknowledged");
+    equal(socket.closes[0]?.code, CLOSE_CLIENT_PROTOCOL_FAULT);
+    transport.destroy();
+  }
+});
 
 test("flow_acknowledges_a_contiguous_prefix_only_after_consumption", async () => {
   const sockets: TransportFakeSocket[] = [];

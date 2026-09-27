@@ -25,7 +25,7 @@ for (const reason of [
   "resize_failed", "resize_rejected", "snapshot_failed",
   "lease_unavailable", "lease_lost", "broker_protocol", "stale_snapshot",
   "bad_liveness", "bad_attachment", "bad_flow", "observe_mode", "websocket_message_type",
-  "liveness_protocol", "refusal_protocol", "malformed_frame", "non_text_frame", "attachment_fault",
+  "liveness_protocol", "refusal_protocol", "malformed_frame", "attachment_fault",
   "attachment_failed",
 ]) {
   assert.equal(classifyUnifiedClose(reason), "terminal", `broker-typed refusal must be terminal: ${reason}`);
@@ -190,7 +190,7 @@ for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose
     // Client transport self-closes.
     liveness_protocol: "terminal", refusal_protocol: "terminal",
     // The transport stops retrying on these, so the page must render them.
-    malformed_frame: "terminal", non_text_frame: "terminal", attachment_fault: "terminal",
+    malformed_frame: "terminal", attachment_fault: "terminal",
     transport_error: "transient", transport_send_failed: "transient",
     transport_send_unavailable: "transient",
     reconnect_attempt_failed: "transient", reconnect_attempt_timeout: "transient",
@@ -260,7 +260,7 @@ assert.equal(unifiedCloseNotice("generation_rotated").headline, "Refreshing term
 // the offline state, every page-limited reattach stop, and the peer protocol
 // faults the transport stopped on. Refusals a retry would replay get none.
 for (const reason of ["reconnect_offline", "reconnect_exhausted", "subscriber_lagged", "input_refused", "generation_rotated", "generation_refit",
-  "malformed_frame", "non_text_frame", "liveness_protocol", "refusal_protocol", "attachment_fault"]) {
+  "malformed_frame", "liveness_protocol", "refusal_protocol", "attachment_fault"]) {
   assert.ok(UNIFIED_RECONNECTABLE_NOTICES.has(reason), `a fresh attachment can clear ${reason}; it must offer Reconnect`);
   assert.ok(unifiedCloseNotice(reason).headline !== "This terminal is unavailable", `${reason} must carry reviewed copy`);
 }
@@ -270,7 +270,7 @@ for (const reason of ["session_gone", "identity_ambiguous", "identity_invalid", 
 }
 // Every terminal reason the transport stops on by itself must be renderable
 // with a way out, never a silent dead end.
-for (const reason of ["malformed_frame", "non_text_frame", "attachment_fault"]) {
+for (const reason of ["malformed_frame", "attachment_fault"]) {
   assert.equal(classifyUnifiedClose(reason), "terminal", `${reason} stops retries, so the page must render it`);
 }
 assert.equal(unifiedCloseNotice("generation_failed").headline, "Terminal history stopped");

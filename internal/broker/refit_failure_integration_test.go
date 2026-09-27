@@ -155,7 +155,7 @@ func refit_failureWriteAndObserve(t *testing.T, ws *frontdoorRotationClient, pre
 		if err != nil {
 			t.Fatalf("input %q was not live: visible=%q err=%v", marker, visible, err)
 		}
-		if kind != websocket.TextMessage {
+		if kind != websocket.BinaryMessage {
 			continue
 		}
 		frame, err := attachmentwire.Decode(payload, attachmentwire.ServerToBrowser)
