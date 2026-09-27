@@ -469,7 +469,7 @@ func (effects *UnifiedDevPaneEffects) reapFaultedUnitOnceWithReason(unit *unifie
 		if effects.panes[witness.Pane] == unit.holder {
 			delete(effects.panes, witness.Pane)
 		}
-		delete(effects.publishedSequence, journalKey(witness))
+		effects.forgetPublishedLocked(journalKey(witness))
 	}
 	if active {
 		effects.closeSubscribersLocked(activeKey, reason)
@@ -690,7 +690,7 @@ func (effects *UnifiedDevPaneEffects) settleOwnerGone(unit *unifiedDevUnit, witn
 	delete(effects.active, unit.sessionID)
 	delete(effects.adopting, unit.sessionID)
 	delete(effects.rotationStates, unit.sessionID)
-	delete(effects.publishedSequence, key)
+	effects.forgetPublishedLocked(key)
 	for _, current := range unit.witnesses {
 		if effects.panes[current.Pane] == unit.holder {
 			delete(effects.panes, current.Pane)
@@ -792,7 +792,7 @@ func (effects *UnifiedDevPaneEffects) reapUnitOnceContext(ctx context.Context, u
 	}
 	if decision.disposition != observerSourceTransportLost || recoveryFailed {
 		delete(effects.active, unit.sessionID)
-		delete(effects.publishedSequence, activeKey)
+		effects.forgetPublishedLocked(activeKey)
 	}
 	effects.mu.Unlock()
 	effects.subscriberMu.Unlock()
@@ -809,7 +809,7 @@ func (effects *UnifiedDevPaneEffects) reapUnitOnceContext(ctx context.Context, u
 			effects.mu.Lock()
 			if effects.active[unit.sessionID] == activeKey && effects.units[unit.sessionID] == nil {
 				delete(effects.active, unit.sessionID)
-				delete(effects.publishedSequence, activeKey)
+				effects.forgetPublishedLocked(activeKey)
 			}
 			effects.mu.Unlock()
 			effects.subscriberMu.Unlock()

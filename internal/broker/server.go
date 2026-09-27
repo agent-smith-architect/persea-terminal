@@ -85,6 +85,9 @@ type unifiedAttachmentFrameWriter struct {
 	handleReady     func(terminal.Frame) error
 	geometryWaiting func()
 	geometryReady   func()
+	// fresh gates Control input on what the page has consumed; see
+	// input_freshness.go.
+	fresh inputFreshness
 }
 
 // A committed journal geometry is not yet proof that this attachment's resize
@@ -366,6 +369,8 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 		if err := writer.writeBacklogLocked(checkVerdict); err != nil {
 			return err
 		}
+		writer.recordDelivered(writer.delivered.Sequence)
+		writer.fresh.start(writer.tail.key)
 		writer.releaseSnapshotLocked()
 		go writer.streamTail()
 		return nil
@@ -401,6 +406,7 @@ func (writer *unifiedAttachmentFrameWriter) streamTail() {
 			err = writer.writeTailEvent(tail, event)
 			if err == nil {
 				writer.delivered = unifiedjournal.CommittedCursor{Sequence: event.Sequence, Offset: event.End}
+				writer.recordDelivered(event.Sequence)
 			}
 			// Receiving transfers ownership to this writer. Cancellation and
 			// eviction cannot refund the event while the actual write is parked.
@@ -450,6 +456,7 @@ func (writer *unifiedAttachmentFrameWriter) catchUp(tail *unifiedDevSubscriber) 
 		if err == nil {
 			last := events[len(events)-1]
 			writer.delivered = unifiedjournal.CommittedCursor{Sequence: last.Sequence, Offset: last.End}
+			writer.recordDelivered(last.Sequence)
 		}
 		events = nil
 		tail.lease.releaseCatchUp(charge)
@@ -1592,12 +1599,25 @@ func (s *Server) accept(listener net.Listener) error {
 type lockedWriter struct {
 	mu sync.Mutex
 	w  io.Writer
+	// attachments counts the attachment frames written. The front door relays
+	// each as one WebSocket message and the page's flow acknowledgement counts
+	// the same frames, so a forwarded acknowledgement is a count on this scale.
+	attachments uint64
 }
 
 func (w *lockedWriter) frame(t proto.FrameType, payload []byte) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
+	if t == proto.FrameAttachment {
+		w.attachments++
+	}
 	return proto.WriteFrame(w.w, t, payload)
+}
+
+func (w *lockedWriter) attachmentFrames() uint64 {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.attachments
 }
 func (w *lockedWriter) control(c proto.Control) error {
 	p, e := proto.MarshalControl(c)
@@ -2274,6 +2294,14 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 				}
 				continue
 			}
+			if e == nil && m.Type == "consumed" {
+				if unifiedWriter != nil && !unifiedWriter.receipt(m.Frames) {
+					logAttachment("protocol", ctrl.Authority, epochID)
+					_ = writer.control(proto.Control{Type: "error", Code: "protocol", Msg: "consumption receipt out of range"})
+					return
+				}
+				continue
+			}
 			_ = writer.control(proto.Control{Type: "error", Code: "protocol", Msg: "attachment frame required"})
 			logAttachment("protocol", ctrl.Authority, epochID)
 			return
@@ -2391,6 +2419,16 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 				return
 			}
 			continue
+		}
+		if typed.Type == terminal.FrameInput && unifiedWriter != nil {
+			accepted, paused := unifiedWriter.admitInput()
+			if paused {
+				brokerLogf("component=broker event=input_paused realm=%q server=%q session=%q epoch=%d", ctrl.Authority.Realm, ctrl.Authority.Server, ctrl.Authority.SessionID, epochID)
+			}
+			if !accepted {
+				_ = writer.control(proto.Control{Type: "error", Code: "input_paused"})
+				continue
+			}
 		}
 		if err := epoch.HandleFrame(typed); err != nil {
 			// ErrObserveOnly means "not right now", not "this attachment is

@@ -642,7 +642,7 @@ func (stage *unifiedDevRotationWitnessStage) commit(txn *paneRotationTxn) paneRo
 			edge("after_install_before_close")
 		}
 		stage.effects.closeSubscribersLocked(stage.oldKey, txn.closeReason)
-		delete(stage.effects.publishedSequence, stage.oldKey)
+		stage.effects.forgetPublishedLocked(stage.oldKey)
 		if edge := stage.effects.rotationCommitEdge; edge != nil {
 			edge("after_close_before_unlock")
 		}

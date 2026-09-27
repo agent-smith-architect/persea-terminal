@@ -24,6 +24,8 @@ for (const bad of ["", "Resize_Failed", "a b", "<img src=x>", "x".repeat(65)]) {
 assert.equal(unifiedRefusalNotice("resize_failed"), "Fit didn't apply (resize_failed)");
 assert.equal(unifiedRefusalNotice("resize_rejected"), "Fit was refused (resize_rejected)");
 assert.equal(unifiedRefusalNotice("input_refused"), "Input was refused — try again (input_refused)");
+assert.equal(unifiedRefusalNotice("input_paused"), "Catching up — what you typed was not sent (input_paused)");
+assert.ok(!refusalReleasesFit("input_paused"));
 assert.equal(unifiedRefusalNotice("observe_mode"), "This view is read-only (observe_mode)");
 assert.equal(unifiedRefusalNotice("some_future_code"), "Request refused (some_future_code)");
 assert.equal(unifiedRefusalNotice("<script>"), "Request refused (refused)");

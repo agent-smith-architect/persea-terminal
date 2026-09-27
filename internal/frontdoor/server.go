@@ -1897,6 +1897,7 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 	}
 	stall := newFlowStallClock(stallTimeout)
 	defer stall.stop()
+	var receiptSent time.Time
 	// Every relay write to the broker is bounded; see BrokerWriteTimeout.
 	boundBrokerWrite := func() bool {
 		return c.SetWriteDeadline(time.Now().Add(BrokerWriteTimeout)) == nil
@@ -1953,6 +1954,14 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 						return
 					}
 					stall.progressed(flow.inflight > 0)
+					if mode == "control" && (flow.inflight == 0 || time.Since(receiptSent) >= ConsumptionReceiptInterval) {
+						if !boundBrokerWrite() || writeControl(c, proto.Control{Type: "consumed", Frames: count}) != nil {
+							code := s.logTerminalFailure("broker_write", &a)
+							_ = writeWSCloseReason(writes, writerDone, code)
+							return
+						}
+						receiptSent = time.Now()
+					}
 					continue
 				}
 				liveness, recognized, livenessErr := attachmentwire.DecodeTransportLiveness(read.payload, attachmentwire.BrowserToServer)

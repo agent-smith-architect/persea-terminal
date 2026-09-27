@@ -179,6 +179,9 @@ for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose
     attach_failed: "terminal", bad_control: "terminal", bad_frame: "terminal",
     bad_history: "terminal", bad_mode: "terminal", history_failed: "terminal",
     input_refused: "reattach", protocol: "terminal", resize_failed: "terminal",
+    // Operational, relayed in-band like input_refused and never a close; kept
+    // re-attachable so a front door that closed on it cannot dead-end the page.
+    input_paused: "reattach",
     resize_rejected: "terminal", snapshot_failed: "terminal",
     stale_target: "terminal", unified_unavailable: "terminal",
     // Broker typed subscriber closes (internal/proto SubscriberCloseReason):

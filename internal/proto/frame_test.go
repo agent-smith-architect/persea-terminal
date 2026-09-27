@@ -168,3 +168,21 @@ func TestAttachOKInputMaxUsesStrictControlDecoding(t *testing.T) {
 		}
 	}
 }
+
+func TestClientControlAcceptsOnlyAPositiveConsumptionReceipt(t *testing.T) {
+	good, err := DecodeClientControl([]byte(`{"type":"consumed","frames":7}`))
+	if err != nil || good.Frames != 7 {
+		t.Fatalf("receipt decoded as %+v, %v", good, err)
+	}
+	for _, bad := range []string{
+		`{"type":"consumed"}`,
+		`{"type":"consumed","frames":0}`,
+		`{"type":"consumed","frames":-1}`,
+		`{"type":"consumed","frames":7,"mode":"control"}`,
+		`{"type":"ping","frames":7}`,
+	} {
+		if _, err := DecodeClientControl([]byte(bad)); err == nil {
+			t.Fatalf("accepted %s", bad)
+		}
+	}
+}

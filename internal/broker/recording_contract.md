@@ -314,6 +314,26 @@ Reader count and fixed allowances release after detach, snapshot settlement and
 the last event release. Closing a socket or removing a map entry is not used as
 an allocation-settlement proof.
 
+Because a slow reader keeps its attachment, a Control page can keep Control
+while what it shows is far behind the session. Input is therefore accepted only
+from a page that has consumed every event committed at least 10 s ago
+(`input_freshness.go`). The front door forwards the page's cumulative flow
+acknowledgement to the broker as a consumption receipt (a `consumed` control
+carrying the count of attachment frames the page wrote into its terminal),
+coalesced to at most one per 100 ms but always including the one that empties
+its window. The broker counts the same attachment frames, and the writer
+records after the backlog, each live event and each catch-up round which
+journal sequence the frames so far complete, in a bounded ring that can only
+under-report consumption when full. What was committed when comes from a
+per-generation frontier clock updated at publication, pruned to one window.
+A receipt that does not advance or exceeds the frames written ends the
+attachment as a protocol violation. Input from a page that is not fresh is
+dropped, never queued, with the operational refusal `input_paused`; from then
+on input stays refused until the page is fresh again and has sent no input for
+2 s, so a command typed while behind can never arrive with its beginning
+missing. The Control lease and the output stream are untouched. The input path
+takes its own lock, never `writer.mu`, which a parked output write may hold.
+
 The public unified attachment acquires this same lease before constructing its
 Epoch or reading its outer frame body. Its additional 4 MiB allowance covers
 the existing attachment work and transport owners; this permits at most 27 such
