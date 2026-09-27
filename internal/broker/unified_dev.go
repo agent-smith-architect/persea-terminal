@@ -48,12 +48,14 @@ type UnifiedDevPaneEffects struct {
 	supervisionTick         func()
 
 	// frontierClocks records per generation which sequence was published by
-	// when, for input freshness; guarded by subscriberMu. inputFreshnessWindow
-	// and inputResumeQuiet are test seams; production leaves them zero.
+	// when, for input freshness; guarded by subscriberMu. inputFreshnessWindow,
+	// inputResumeQuiet, freshnessNow and inputRefused are test seams;
+	// production leaves them zero.
 	frontierClocks       map[unifiedjournal.PaneKey]*frontierClock
 	inputFreshnessWindow time.Duration
 	inputResumeQuiet     time.Duration
 	freshnessNow         func() time.Time
+	inputRefused         func()
 
 	// generationSequence backs mintControlGeneration for units that need a
 	// generation no earlier unit of this broker run has stamped.

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gorilla/websocket"
 	"persea-terminal/internal/attachmentwire"
+	"persea-terminal/internal/terminal"
 )
 
 // stallClient opens a control attachment and consumes its initial frames, so
@@ -135,5 +136,69 @@ func TestWebSocketFlowStallIsNotArmedWithNothingOutstanding(t *testing.T) {
 	_, _, client := stallClient(t, "flow-stall-idle", timeout)
 	if reason, _ := proveLivenessUntil(t, client, 5*timeout); reason != "" {
 		t.Fatalf("an idle page with nothing outstanding was closed with %q", reason)
+	}
+}
+
+// The stall deadline is absolute. A browser message the relay handles after
+// the deadline has passed, before the timer was serviced, is not forwarded and
+// cannot restart the clock: the attachment ends with flow_stalled.
+func TestFlowStallDeadlineIsCheckedBeforeBrowserMessages(t *testing.T) {
+	for name, send := range map[string]func(*flowClient){
+		"input": func(client *flowClient) {
+			input, err := attachmentwire.Encode(terminal.Frame{Version: terminal.ProtocolVersion, Type: terminal.FrameInput, Source: integrationSource, Epoch: 1, Data: []byte("past-deadline")}, attachmentwire.BrowserToServer)
+			if err != nil || client.ws.WriteMessage(websocket.TextMessage, input) != nil {
+				t.Fatalf("send input: %v", err)
+			}
+		},
+		"acknowledgement": func(client *flowClient) { client.ack(client.frames) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			broker := startFakeAttachBroker(t, false)
+			front, addr := startFrontHTTP(t, broker.listener.Addr().String())
+			// The timers stay far away; only the relay's clock moves.
+			front.flowStallTimeout = time.Minute
+			front.browserProofTimeout = time.Hour
+			clock := &browserProofTestClock{base: time.Now()}
+			front.browserProofNow = clock.now
+			handle, err := front.handles.mint(flowAuthority("stall-deadline-" + name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			client := &flowClient{t: t, ws: dialTerminalWS(t, front, addr, handle, "control")}
+			defer client.ws.Close()
+			for !bytes.Equal(client.data, []byte("ready")) {
+				client.next()
+			}
+			client.ack(client.frames)
+			requireFlowPaused(t, client, "0123456789abcdef0123456789abcdef")
+			flowOutput(t, broker, 0, 1024)
+			client.next()
+			clock.offset.Add(int64(2 * time.Minute))
+			send(client)
+			_ = client.ws.SetReadDeadline(time.Now().Add(3 * time.Second))
+			for {
+				_, _, err := client.ws.ReadMessage()
+				var closeErr *websocket.CloseError
+				if errors.As(err, &closeErr) {
+					if closeErr.Text != "flow_stalled" {
+						t.Fatalf("closed with %q, want flow_stalled", closeErr.Text)
+					}
+					break
+				}
+				if err != nil {
+					t.Fatalf("no close after the deadline: %v", err)
+				}
+			}
+			select {
+			case <-broker.served:
+			case <-time.After(5 * time.Second):
+				t.Fatal("the relay did not end its broker connection")
+			}
+			select {
+			case got := <-broker.inputs:
+				t.Fatalf("forwarded %q after the stall deadline", got)
+			default:
+			}
+		})
 	}
 }

@@ -33,6 +33,9 @@ type fakeAttachBroker struct {
 	controls    chan proto.Control
 	// receipts carries every consumption receipt the relay forwarded.
 	receipts chan uint64
+	// served is signalled when an attachment connection ends, after every
+	// frame the relay wrote to it has been read.
+	served chan struct{}
 }
 
 type browserProofTestClock struct {
@@ -51,7 +54,7 @@ func startFakeAttachBroker(t *testing.T, failFirst bool) *fakeAttachBroker {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &fakeAttachBroker{listener: listener, failFirst: failFirst, inputs: make(chan []byte, 8), attachments: make(chan []byte, 8), outbound: make(chan []byte, 32), controls: make(chan proto.Control, 8), receipts: make(chan uint64, 256)}
+	b := &fakeAttachBroker{listener: listener, failFirst: failFirst, inputs: make(chan []byte, 8), attachments: make(chan []byte, 8), outbound: make(chan []byte, 32), controls: make(chan proto.Control, 8), receipts: make(chan uint64, 256), served: make(chan struct{}, 8)}
 	t.Cleanup(func() { _ = listener.Close() })
 	go func() {
 		for {
@@ -67,6 +70,12 @@ func startFakeAttachBroker(t *testing.T, failFirst bool) *fakeAttachBroker {
 
 func (b *fakeAttachBroker) serve(conn net.Conn) {
 	defer conn.Close()
+	defer func() {
+		select {
+		case b.served <- struct{}{}:
+		default:
+		}
+	}()
 	_ = conn.SetDeadline(time.Now().Add(10 * time.Second))
 	frame, err := proto.ReadFrame(conn)
 	if err != nil {

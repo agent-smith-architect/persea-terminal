@@ -17,21 +17,25 @@ import "time"
 // (a LIVE frame is at most 16 KiB of output, a few seconds even at a few KiB/s),
 // and a link too slow for that already fails the liveness bound. The close is
 // transient: a page that is consuming again reconnects. The close code is
-// flow_stalled.
+// flow_stalled. The deadline is absolute: a browser message the relay handles
+// after it has passed is not forwarded, and an acknowledgement arriving after
+// it cannot restart the clock, even if the timer has not yet been serviced.
 const FlowStallTimeout = 30 * time.Second
 
 // flowStallClock arms the stall deadline while attachment output is
 // outstanding. It is owned by the relay loop and needs no lock.
 type flowStallClock struct {
-	timer   *time.Timer
-	timeout time.Duration
-	armed   bool
+	timer    *time.Timer
+	timeout  time.Duration
+	now      func() time.Time
+	deadline time.Time
+	armed    bool
 }
 
-func newFlowStallClock(timeout time.Duration) *flowStallClock {
+func newFlowStallClock(timeout time.Duration, now func() time.Time) *flowStallClock {
 	timer := time.NewTimer(timeout)
 	stopTimer(timer)
-	return &flowStallClock{timer: timer, timeout: timeout}
+	return &flowStallClock{timer: timer, timeout: timeout, now: now}
 }
 
 // outstanding starts the clock when output becomes outstanding; while it runs,
@@ -39,8 +43,15 @@ func newFlowStallClock(timeout time.Duration) *flowStallClock {
 func (c *flowStallClock) outstanding() {
 	if !c.armed {
 		c.timer.Reset(c.timeout)
+		c.deadline = c.now().Add(c.timeout)
 		c.armed = true
 	}
+}
+
+// expired reports whether the running deadline had passed at instant, which
+// the caller read from the same clock.
+func (c *flowStallClock) expired(instant time.Time) bool {
+	return c.armed && !instant.Before(c.deadline)
 }
 
 // progressed restarts the clock after an acknowledgement advanced, or stops it

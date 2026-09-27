@@ -325,14 +325,21 @@ its window. The broker counts the same attachment frames, and the writer
 records after the backlog, each live event and each catch-up round which
 journal sequence the frames so far complete, in a bounded ring that can only
 under-report consumption when full. What was committed when comes from a
-per-generation frontier clock updated at publication, pruned to one window.
-A receipt that does not advance or exceeds the frames written ends the
+per-generation frontier clock updated at publication, pruned to one window,
+and read with the current time sampled under the publication lock. The clock is
+made when a view subscribes and dropped when its generation retires, so a page
+on a retired generation (still open for its close grace) is never fresh. A
+receipt may overtake the mark its frames complete; the mark is applied when it
+lands. A receipt that does not advance or exceeds the frames written ends the
 attachment as a protocol violation. Input from a page that is not fresh is
 dropped, never queued, with the operational refusal `input_paused`; from then
 on input stays refused until the page is fresh again and has sent no input for
-2 s, so a command typed while behind can never arrive with its beginning
-missing. The Control lease and the output stream are untouched. The input path
-takes its own lock, never `writer.mu`, which a parked output write may hold.
+2 s, which catches keys already in flight. The command boundary is the page's:
+after `input_paused` it sends nothing until the operator resumes typing. Input
+admitted before the pause began is not recalled. The Control lease and the
+output stream are untouched. Neither receipts nor refusals wait behind output:
+the frame count is read without the socket-write lock, and refusals are written
+by the same side goroutine as pongs.
 
 The public unified attachment acquires this same lease before constructing its
 Epoch or reading its outer frame body. Its additional 4 MiB allowance covers

@@ -371,6 +371,7 @@ func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string
 		}
 		subscriber := &unifiedDevSubscriber{lease: lease, key: key, cursor: cursor, data: newRecordingTailQueue(), done: make(chan struct{}), verdict: make(chan struct{})}
 		subscriber.data.catchingUp = catchUp
+		effects.trackFrontierLocked(key)
 		if effects.subscribers[key] == nil {
 			effects.subscribers[key] = make(map[*unifiedDevSubscriber]struct{})
 		}
