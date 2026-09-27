@@ -2,7 +2,9 @@
 //
 // A broker `error` whose code is OPERATIONAL is the outcome of ONE request —
 // a Fit that did not apply, a Fit outside policy, a keystroke that landed a
-// beat early, control traffic on an observe handle. The session, its journal
+// beat early, control traffic on an observe handle, or typing while this page
+// is far behind the session (input_paused: the keys were dropped, and input
+// resumes once the page has caught up and typing has paused briefly). The session, its journal
 // and the attachment are all still valid, so the front door relays the code
 // in-band as a reserved text frame instead of closing the socket, and the
 // page renders it as a passing notice: no reconnect, no dead end.
@@ -12,7 +14,7 @@
 export const TRANSPORT_REFUSAL_PREFIX = "PERSEA-REFUSAL/1 ";
 
 export const UNIFIED_OPERATIONAL_CODES: ReadonlySet<string> = new Set([
-  "resize_failed", "resize_rejected", "input_refused", "observe_mode",
+  "resize_failed", "resize_rejected", "input_refused", "observe_mode", "input_paused",
 ]);
 
 // How long a refusal stays on screen. Long enough to read on a phone, short
@@ -44,6 +46,7 @@ const NOTICES: Readonly<Record<string, string>> = Object.freeze({
   resize_rejected: "Fit was refused",
   input_refused: "Input was refused — try again",
   observe_mode: "This view is read-only",
+  input_paused: "Catching up — what you typed was not sent",
 });
 
 // One sentence with the code beside it, so a report stays diagnosable. A

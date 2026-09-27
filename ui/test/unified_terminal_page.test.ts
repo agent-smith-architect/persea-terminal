@@ -492,16 +492,36 @@ async function main(): Promise<void> {
       const linkMs = record.bytesBeforeMode * 4 / 3 / rate * 1000;
       assert(backlogMs <= 2 * linkMs + 5_000, `${stage}: the backlog took ${backlogMs} ms where the link needs ${Math.round(linkMs)} ms`);
       await until(`${stage}: live`, async () => (await pageState()).phase === "live");
-      // Input authority arrived with the browser caught up: a command typed
-      // now runs. Control-U clears the probe key if the grant raced it.
+      // Input authority has arrived, but the page may still be catching up on
+      // the output that ran while its history loaded. A command typed while
+      // it is far behind is refused, never sent, and the page says so; once
+      // it shows current output and typing has paused (the refusal notice
+      // outlasts the broker's quiet period), a retyped command runs.
+      // Control-U clears the probe key if the grant raced it.
       const marker = `${stage.replace(/[^a-z0-9]+/gi, "-")}-${rate}`;
-      await xterm.focus();
-      await page.keyboard.press("Control+U");
-      await page.keyboard.type(`printf 'MARK-%s\\n' ${marker}`);
-      await page.keyboard.press("Enter");
-      await until(`${stage}: typed command ran`, () => capture().includes(`MARK-${marker}`), 20_000);
+      const typeMarker = async () => {
+        await xterm.focus();
+        await page.keyboard.press("Control+U");
+        await page.keyboard.type(`printf 'MARK-%s\\n' ${marker}`);
+        await page.keyboard.press("Enter");
+      };
+      const pausedNotice = () => page.evaluate(() => document.querySelector(".persea-unified-refusal:not([hidden])")?.textContent === "Catching up — what you typed was not sent (input_paused)");
+      await typeMarker();
+      const outcome = await until(`${stage}: typed command ran or was paused`, async () => capture().includes(`MARK-${marker}`) ? "ran" : await pausedNotice() ? "paused" : undefined, 20_000);
+      let inputPaused = false;
+      if (outcome === "paused") {
+        inputPaused = true;
+        await until(`${stage}: caught up after the pause`, async () => steadyIn((await pageState()).rows) + 25 >= steadyIn(capture()), 180_000);
+        await until(`${stage}: pause notice expired`, async () => !(await pausedNotice()), 20_000);
+        assert(!capture().includes(`MARK-${marker}`), `${stage}: a command refused while the page was behind ran`);
+        await typeMarker();
+        await until(`${stage}: typed command ran after catching up`, () => capture().includes(`MARK-${marker}`), 20_000);
+      }
+      // The only in-band refusals so far are the keys typed while behind.
+      assert(record.refusals.every((refusal) => refusal === "PERSEA-REFUSAL/1 input_paused") && (inputPaused || record.refusals.length === 0),
+        `${stage}: refusals ${JSON.stringify(record.refusals)}`);
       const measured = {
-        stage, rate, linkDelayMs: LINK_DELAY_MS,
+        stage, rate, linkDelayMs: LINK_DELAY_MS, inputPaused,
         toCommitMs: record.commitAt - causedAt, toControlMs: record.modeAt - causedAt, admissionMs: record.commitAt - record.opened, backlogMs,
         bytesBeforeControl: record.bytesBeforeMode, framesBeforeControl: record.framesBeforeMode, acknowledgements: record.acks,
         livenessRoundTripsMs: [...record.rtts],
@@ -516,6 +536,7 @@ async function main(): Promise<void> {
     // hold an open socket.
     const steady = async (stage: string, record: Attachment) => {
       const count = attachments.length;
+      const refusals = record.refusals.length;
       const startedAt = Date.now();
       while (Date.now() - startedAt < STEADY_MS) {
         const state = await pageState();
@@ -526,7 +547,7 @@ async function main(): Promise<void> {
       const produced = steadyIn(capture());
       await until(`${stage}: page shows current output`, async () => steadyIn((await pageState()).rows) >= produced, 5_000);
       liveness(stage, record);
-      assert(record.refusals.length === 0, `${stage}: refusals ${JSON.stringify(record.refusals)}`);
+      assert(record.refusals.length === refusals, `${stage}: refusals ${JSON.stringify(record.refusals.slice(refusals))}`);
     };
 
     const measurements: unknown[] = [];

@@ -131,6 +131,7 @@ func (effects *UnifiedDevPaneEffects) publishEvent(key unifiedjournal.PaneKey, e
 	}
 	if event.Sequence > effects.publishedSequence[key] {
 		effects.publishedSequence[key] = event.Sequence
+		effects.observeFrontierLocked(key, event.Sequence)
 	}
 	for subscriber := range effects.subscribers[key] {
 		if subscriber.data.isCatchingUp() {

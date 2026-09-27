@@ -31,6 +31,8 @@ type fakeAttachBroker struct {
 	attachments chan []byte
 	outbound    chan []byte
 	controls    chan proto.Control
+	// receipts carries every consumption receipt the relay forwarded.
+	receipts chan uint64
 }
 
 type browserProofTestClock struct {
@@ -49,7 +51,7 @@ func startFakeAttachBroker(t *testing.T, failFirst bool) *fakeAttachBroker {
 	if err != nil {
 		t.Fatal(err)
 	}
-	b := &fakeAttachBroker{listener: listener, failFirst: failFirst, inputs: make(chan []byte, 8), attachments: make(chan []byte, 8), outbound: make(chan []byte, 32), controls: make(chan proto.Control, 8)}
+	b := &fakeAttachBroker{listener: listener, failFirst: failFirst, inputs: make(chan []byte, 8), attachments: make(chan []byte, 8), outbound: make(chan []byte, 32), controls: make(chan proto.Control, 8), receipts: make(chan uint64, 256)}
 	t.Cleanup(func() { _ = listener.Close() })
 	go func() {
 		for {
@@ -138,6 +140,9 @@ func (b *fakeAttachBroker) serve(conn net.Conn) {
 			control, _ := proto.DecodeControl(frame.Payload)
 			if control.Type == "ping" {
 				_ = writeControl(conn, proto.Control{Type: "pong"})
+			}
+			if control.Type == "consumed" {
+				b.receipts <- control.Frames
 			}
 		}
 	}

@@ -57,3 +57,12 @@ func (c *flowStallClock) stop() {
 	stopTimer(c.timer)
 	c.armed = false
 }
+
+// ConsumptionReceiptInterval bounds how often a Control page's flow
+// acknowledgements are forwarded to the broker as consumption receipts, which
+// the broker uses to refuse input from a page far behind the session. An
+// acknowledgement that empties the window is always forwarded, so the broker's
+// view never stays behind a page that has consumed everything relayed; one
+// skipped while output is outstanding is covered by a later one, or the page
+// is ended by FlowStallTimeout.
+const ConsumptionReceiptInterval = 100 * time.Millisecond

@@ -30,6 +30,8 @@
 //     retrying does NOT replay it. A current front door relays it in-band
 //     (unified_refusal_notice) and never closes on it; the member is kept for
 //     a front door that still closes, so the page cannot dead-end.
+//     `input_paused` (input from a page far behind the session) is the same
+//     kind of refusal: relayed in-band, never a close.
 //   * View-ending subscriber close reasons (internal/proto
 //     SubscriberCloseReason): `subscriber_lagged` ends a view the broker
 //     could not keep supplying (a slow view catches up from the journal
@@ -79,6 +81,7 @@ export const UNIFIED_SUBSCRIBER_CLOSE_REASONS: ReadonlySet<string> = new Set([
 // burst limiter promotes them to terminal.
 export const UNIFIED_REATTACH_REASONS: ReadonlySet<string> = new Set([
   "input_refused",
+  "input_paused",
   "generation_rotated",
   "generation_refit",
   "subscriber_lagged",

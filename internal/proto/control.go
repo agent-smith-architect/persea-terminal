@@ -170,10 +170,13 @@ type Control struct {
 	Truncated    bool              `json:"truncated,omitempty"`
 	Alternate    bool              `json:"alternate_on,omitempty"`
 	Code         string            `json:"code,omitempty"`
-	Msg          string            `json:"msg,omitempty"`
-	Reason       string            `json:"reason,omitempty"`
-	RefitStage   RefitFailureStage `json:"refit_stage,omitempty"`
-	RefitClass   RefitFailureClass `json:"refit_class,omitempty"`
+	// Frames is a consumption receipt's cumulative count of the attachment
+	// frames the page has written into its terminal.
+	Frames     uint64            `json:"frames,omitempty"`
+	Msg        string            `json:"msg,omitempty"`
+	Reason     string            `json:"reason,omitempty"`
+	RefitStage RefitFailureStage `json:"refit_stage,omitempty"`
+	RefitClass RefitFailureClass `json:"refit_class,omitempty"`
 	// Session creation. ServerLabel and Name are the only client-supplied inputs;
 	// the working directory and geometry come from broker configuration so that no
 	// browser can choose what a new shell runs or where.
@@ -253,6 +256,11 @@ func DecodeClientControl(payload []byte) (Control, error) {
 			return Control{}, fmt.Errorf("invalid hello")
 		}
 	case "inventory", "detach", "ping":
+	case "consumed":
+		allowed["frames"] = true
+		if c.Frames == 0 {
+			return Control{}, fmt.Errorf("invalid consumption receipt")
+		}
 	case "attach":
 		allowed["authority"], allowed["mode"], allowed["history_limit"], allowed["engine"] = true, true, true, true
 		if c.Authority == nil || !c.Authority.Valid() || (c.Mode != "observe" && c.Mode != "control") || c.HistoryLimit == nil || !validHistoryLimit(*c.HistoryLimit) || (c.Engine != "" && c.Engine != "unified-dev") {

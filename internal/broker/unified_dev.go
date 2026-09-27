@@ -47,6 +47,14 @@ type UnifiedDevPaneEffects struct {
 	supervisionIdleInterval time.Duration
 	supervisionTick         func()
 
+	// frontierClocks records per generation which sequence was published by
+	// when, for input freshness; guarded by subscriberMu. inputFreshnessWindow
+	// and inputResumeQuiet are test seams; production leaves them zero.
+	frontierClocks       map[unifiedjournal.PaneKey]*frontierClock
+	inputFreshnessWindow time.Duration
+	inputResumeQuiet     time.Duration
+	freshnessNow         func() time.Time
+
 	// generationSequence backs mintControlGeneration for units that need a
 	// generation no earlier unit of this broker run has stamped.
 	generationSequence atomic.Uint64

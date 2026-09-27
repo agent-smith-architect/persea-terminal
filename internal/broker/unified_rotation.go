@@ -1546,7 +1546,7 @@ func (rotation *unifiedDevRotation) retainUncertainRefitFailure(cause error) {
 		if effects.panes[witness.Pane] == rotation.unit.holder {
 			delete(effects.panes, witness.Pane)
 		}
-		delete(effects.publishedSequence, journalKey(witness))
+		effects.forgetPublishedLocked(journalKey(witness))
 	}
 	effects.closeSubscribersLocked(rotation.oldKey, proto.SubscriberClosedRefitFaulted)
 	if rotation.newKey != (unifiedjournal.PaneKey{}) {

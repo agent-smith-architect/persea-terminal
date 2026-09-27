@@ -35,6 +35,9 @@ var operationalAttachmentCodes = map[string]struct{}{
 	"resize_rejected": {},
 	"input_refused":   {},
 	"observe_mode":    {},
+	// Input from a Control page that has not consumed the session's recent
+	// output was dropped; the page keeps its attachment and catches up.
+	"input_paused": {},
 }
 
 var fatalAttachmentCodes = map[string]struct{}{
