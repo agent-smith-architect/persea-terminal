@@ -4,6 +4,22 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+## 0.1.8 — 2026-09-27
+
+### Changed
+
+- A view that falls behind is no longer disconnected. Before, when 4 MiB of output waited for a view, the server ended it and the page reloaded the whole history; on a slow connection with busy output, it could keep doing so until the server shortened the history. Now the server stops buffering output for that view, and the view reads what it missed from the server's saved history on the same connection, then continues live. How far a view can fall behind is still limited: when the server shortens the history, the page reconnects to the short version as before.
+- When output is faster than the connection, the page now keeps control and keeps catching up, instead of reconnecting and reloading the history about every two minutes. What it shows can fall behind the session until the server next shortens the history.
+- "This page kept falling behind" now appears only when the server cannot keep sending a view its output, for example when it runs out of memory for readers. A slow connection alone no longer causes it.
+
+### Fixed
+
+- After another window took control, a "Take control here" that failed to connect could get a new round of quick retries based on the old connection. The old connection is now judged when it ends.
+
+### Testing notes
+
+- Tested on a local stack in desktop Chromium through a link limited to 32 KiB/s, with 150 ms of delay in each direction and 3.5 MiB of history, for 10 minutes each. With about 20 KB/s of new output, the page got control after about 2.5 minutes, as before, and no view was ended for falling behind. With about 41 KB/s of new output, faster than the link, no view was ended for falling behind, and the page had control on every connection after the first; it reconnected only when the server shortened the history. Real mobile networks were not tested.
+
 ## 0.1.7 — 2026-09-26
 
 ### Fixed
