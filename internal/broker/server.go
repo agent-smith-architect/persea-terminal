@@ -230,7 +230,7 @@ const unifiedSubscriberCloseGrace = 15 * time.Second
 // PREPARE must reach the browser, be written into its terminal and be
 // answered with READY inside the epoch's 5 s cut timer and the page's 5 s
 // attempt deadline, and on a slow link every replay byte spends that
-// deadline: 16 KiB is about 22 KiB of base64, 0.7 s at 32 KiB/s, which
+// deadline: 16 KiB of raw replay takes 0.5 s at 32 KiB/s, which
 // leaves the rest for connection setup and the READY round trip. Everything
 // past it streams after COMMIT as ordinary backlog, so the cost of admission
 // no longer grows with the size of the history.
@@ -238,8 +238,8 @@ const unifiedAdmissionReplayBytes = 16 << 10
 
 // unifiedLiveFrameBytes is the most output one LIVE frame carries. The front
 // door admits one frame past its flow window, and the next liveness PONG
-// waits behind that frame, so frames stay small: 16 KiB is about 22 KiB
-// encoded, 0.7 s at 32 KiB/s. The frame envelope costs under 1 % of that.
+// waits behind that frame, so frames stay small: 16 KiB of raw output takes
+// 0.5 s at 32 KiB/s, plus a small metadata header.
 const unifiedLiveFrameBytes = 16 << 10
 
 func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw []byte) (resultErr error) {

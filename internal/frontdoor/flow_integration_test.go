@@ -27,7 +27,7 @@ type flowClient struct {
 	data   []byte
 }
 
-// next returns the next text message, counting it when it is an attachment
+// next returns the next message, counting it when it is an attachment
 // frame and answering PREPARE as a page does.
 func (c *flowClient) next() []byte {
 	c.t.Helper()
@@ -36,11 +36,11 @@ func (c *flowClient) next() []byte {
 	if err != nil {
 		c.t.Fatal(err)
 	}
-	if kind != websocket.TextMessage {
-		c.t.Fatalf("websocket message kind=%d", kind)
-	}
-	if bytes.HasPrefix(payload, []byte(attachmentwire.TransportLivenessPrefix)) {
+	if kind == websocket.TextMessage && bytes.HasPrefix(payload, []byte(attachmentwire.TransportLivenessPrefix)) {
 		return payload
+	}
+	if kind != websocket.BinaryMessage {
+		c.t.Fatalf("attachment websocket kind=%d", kind)
 	}
 	frame, err := attachmentwire.Decode(payload, attachmentwire.ServerToBrowser)
 	if err != nil {

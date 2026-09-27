@@ -150,11 +150,11 @@ export const UNIFIED_TERMINAL_REASONS: ReadonlySet<string> = new Set([
   // violation, not infrastructure loss.
   "liveness_protocol",
   // The transport's judgement of an in-band refusal frame whose code it could
-  // not read, of an unreadable or non-text server frame, and the page's own
+  // not read, of an unreadable server attachment frame, and the page's own
   // judgement of a frame that broke the attachment protocol: the same class
   // of peer protocol violation. The transport has already stopped retrying,
   // so the page must show it.
-  "refusal_protocol", "malformed_frame", "non_text_frame", "attachment_fault",
+  "refusal_protocol", "malformed_frame", "attachment_fault",
   // canonicalFailureCode's fallback for an unrepresentable code.
   "attachment_failed",
 ]);
@@ -170,7 +170,7 @@ export function classifyUnifiedClose(reason: string): UnifiedCloseClass {
   if (UNIFIED_INTERNAL_REASONS.has(reason)) return "internal";
   // Everything else — websocket_<code>, transport_error, transport_send_*,
   // liveness timeouts/unavailability, reconnect_attempt_*,
-  // broker_unavailable, broker_deadline, malformed_frame, non_text_frame —
+  // broker_unavailable, broker_deadline —
   // is a transient transport-layer loss. This fallback is fenced by the
   // source-to-policy enumeration test: every reason the front, broker, or
   // client transport actually emits must be classified explicitly, so a NEW
@@ -209,7 +209,6 @@ const NOTICES: Readonly<Record<string, UnifiedCloseNotice>> = Object.freeze({
   liveness_protocol: Object.freeze({ headline: "The connection broke protocol", detail: "The session host answered liveness with an invalid message. Try again to reconnect." }),
   refusal_protocol: Object.freeze({ headline: "The connection broke protocol", detail: "The session host sent a refusal this page could not read. Try again to reconnect." }),
   malformed_frame: Object.freeze({ headline: "The connection broke protocol", detail: "The session host sent a message this page could not read. Try again to reconnect." }),
-  non_text_frame: Object.freeze({ headline: "The connection broke protocol", detail: "The session host sent a message this page could not read. Try again to reconnect." }),
   attachment_fault: Object.freeze({ headline: "The terminal stopped", detail: "This page received terminal data it could not use and stopped showing it. The session is still running; try again to reconnect." }),
   reconnect_exhausted: Object.freeze({ headline: "Connection lost", detail: "The connection could not be re-established." }),
   // The fast retry phase is spent; slower automatic attempts continue and
@@ -246,7 +245,7 @@ const NOTICES: Readonly<Record<string, UnifiedCloseNotice>> = Object.freeze({
 export const UNIFIED_RECONNECTABLE_NOTICES: ReadonlySet<string> = new Set([
   "reconnect_offline", "reconnect_exhausted",
   ...UNIFIED_REATTACH_REASONS,
-  "malformed_frame", "non_text_frame", "liveness_protocol", "refusal_protocol", "attachment_fault",
+  "malformed_frame", "liveness_protocol", "refusal_protocol", "attachment_fault",
 ]);
 
 export function unifiedCloseNotice(reason: string): UnifiedCloseNotice {

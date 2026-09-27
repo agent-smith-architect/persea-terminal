@@ -89,10 +89,10 @@ const FLOW_PREFIX = "PERSEA-FLOW/1 ";
 function attachFlow(attachment, socket, violation) {
   attachment.flowSent = 0;
   attachment.flowAcked = 0;
-  const send = socket.sendText.bind(socket);
-  socket.sendText = (text) => {
-    send(text);
-    if (!text.startsWith(LIVENESS_PREFIX) && !text.startsWith(REFUSAL_PREFIX)) attachment.flowSent += 1;
+  const send = socket.sendAttachment.bind(socket);
+  socket.sendAttachment = (frame) => {
+    send(frame);
+    attachment.flowSent += 1;
   };
   return (text) => {
     if (!text.startsWith(FLOW_PREFIX)) return false;
@@ -236,6 +236,17 @@ class Socket {
 
   sendText(text) {
     this.write(0x1, Buffer.from(text, "utf8"));
+  }
+
+  sendAttachment(frame) {
+    const header = { ...frame };
+    const field = frame.type === "LIVE" ? "data" : frame.type === "PREPARE" ? "replay" : undefined;
+    const bytes = field ? Buffer.from(frame[field]) : Buffer.alloc(0);
+    if (field) header[field] = bytes.length;
+    const json = Buffer.from(JSON.stringify(header), "utf8");
+    const prefix = Buffer.alloc(4);
+    prefix.writeUInt32BE(json.length);
+    this.write(0x2, Buffer.concat([prefix, json, bytes]));
   }
 
   // The real front door closes with 1011 + the canonical reason (1000 for
@@ -1384,7 +1395,7 @@ function startFixture(ui, options = {}) {
     };
     if (url.pathname !== "/ws" || url.search !== "") { refuse(400, "invalid mode"); return; }
     const offered = subprotocols(request);
-    if (!offered.values.includes("persea-terminal.v2") || !offered.handle || (offered.mode !== "control" && offered.mode !== "observe")) {
+    if (!offered.values.includes("persea-terminal.v3") || !offered.handle || (offered.mode !== "control" && offered.mode !== "observe")) {
       refuse(400, "invalid mode"); return;
     }
     if (offered.csrf !== CSRF_TOKEN || offered.csrf !== cookieCSRF(request)) { refuse(403, "csrf"); return; }
@@ -1405,7 +1416,7 @@ function startFixture(ui, options = {}) {
     const setLease = (value) => { if (sessionKey === "B") state.leaseB = value; else state.lease = value; };
     const accept = crypto.createHash("sha1").update(request.headers["sec-websocket-key"] + WS_GUID).digest("base64");
     raw.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-      + `Sec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: persea-terminal.v2\r\n\r\n`);
+      + `Sec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: persea-terminal.v3\r\n\r\n`);
     const attachment = {
       id: state.attachments.length + 1,
       session: sessionKey,
@@ -1479,13 +1490,13 @@ function startFixture(ui, options = {}) {
     state.bindingSessions.set(attachmentSource, sessionKey);
     const epoch = "17";
     const cut = "1";
-    const frame = (value) => JSON.stringify({ version: 1, source: attachmentSource, epoch, ...value });
+    const frame = (value) => ({ version: 1, source: attachmentSource, epoch, ...value });
     state.counters.replays += 1;
-    const replay = Buffer.from((state.replayFocusReporting ? "\x1b[?1004h" : "") + (options.initialReplay ?? (sessionKey === "B" ? "beta-replay\r\n" : "fixture-replay\r\n")), "binary").toString("base64");
+    const replay = Buffer.from((state.replayFocusReporting ? "\x1b[?1004h" : "") + (options.initialReplay ?? (sessionKey === "B" ? "beta-replay\r\n" : "fixture-replay\r\n")), "binary");
     const geometry = sessionKey === "B" ? state.geometryB : state.geometryA;
-    const sendPrepare = () => socket.sendText(frame({ type: "PREPARE", cut, kind: "INITIAL", columns: geometry.columns, rows: geometry.rows, history: [], truncated: false, replay }));
+    const sendPrepare = () => socket.sendAttachment(frame({ type: "PREPARE", cut, kind: "INITIAL", columns: geometry.columns, rows: geometry.rows, history: [], truncated: false, replay }));
     attachment.sendPrepare = sendPrepare;
-    attachment.sendCommit = () => socket.sendText(frame({ type: "COMMIT", cut }));
+    attachment.sendCommit = () => socket.sendAttachment(frame({ type: "COMMIT", cut }));
     if (state.holdPrepareMs > 0) {
       const hold = state.holdPrepareMs;
       state.holdPrepareMs = 0;
@@ -1507,10 +1518,10 @@ function startFixture(ui, options = {}) {
       if (value.type === "READY") {
         if (live || value.cut !== cut) { closeWith(1011, "attachment_failed"); return; }
         live = true;
-        socket.sendText(frame({ type: "COMMIT", cut }));
-        socket.sendText(frame({ type: "LIVE", cut, data: Buffer.from("fixture-live\r\n", "binary").toString("base64") }));
+        socket.sendAttachment(frame({ type: "COMMIT", cut }));
+        socket.sendAttachment(frame({ type: "LIVE", cut, data: Buffer.from("fixture-live\r\n", "binary") }));
         attachment.writeLive = (data) => {
-          if (!socket.closed) socket.sendText(frame({ type: "LIVE", cut, data: Buffer.from(data, liveEncoding).toString("base64") }));
+          if (!socket.closed) socket.sendAttachment(frame({ type: "LIVE", cut, data: Buffer.from(data, liveEncoding) }));
         };
         return;
       }
@@ -1520,7 +1531,7 @@ function startFixture(ui, options = {}) {
         const grant = () => {
           if (socket.closed) return;
           attachment.mode = value.mode;
-          socket.sendText(frame({ type: "MODE", mode: value.mode }));
+          socket.sendAttachment(frame({ type: "MODE", mode: value.mode }));
         };
         // Holding the grant models the real window between COMMIT and the
         // control grant, during which any INPUT the page emits (a keystroke or
@@ -1574,10 +1585,10 @@ function startFixture(ui, options = {}) {
           // A slow tmux mutation: the page's Fit seal stays up until this lands.
           const hold = state.holdResizeMs;
           state.holdResizeMs = 0;
-          setTimeout(() => { if (!socket.closed) socket.sendText(committedResize); }, hold);
+          setTimeout(() => { if (!socket.closed) socket.sendAttachment(committedResize); }, hold);
           return;
         }
-        socket.sendText(committedResize);
+        socket.sendAttachment(committedResize);
         return;
       }
       if (value.type === "HISTORY_REQUEST" || value.type === "DEFER") return;

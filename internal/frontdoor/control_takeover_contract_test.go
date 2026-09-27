@@ -48,7 +48,7 @@ func f3AuthorizeTakeover(t *testing.T, addr, offer, requestID, prefix, mutant st
 func f3DialTakeover(addr, handle string) (*websocket.Conn, *http.Response, error) {
 	dialer := websocket.Dialer{Subprotocols: []string{
 		"persea-engine.unified-dev",
-		"persea-terminal.v2",
+		"persea-terminal.v3",
 		"persea-handle." + handle,
 		"persea-mode.control",
 		"persea-csrf." + testCSRF,
@@ -199,7 +199,7 @@ func f3ReadRawAttachmentMessage(ws *websocket.Conn) (f3RawAttachmentMessage, err
 func f3ReadSemanticAttachment(ws *websocket.Conn, first f3RawAttachmentMessage) (terminal.Frame, error) {
 	next := first
 	for {
-		if next.kind != websocket.TextMessage {
+		if next.kind != websocket.BinaryMessage {
 			return terminal.Frame{}, fmt.Errorf("attachment websocket kind=%d", next.kind)
 		}
 		typed, err := attachmentwire.Decode(next.payload, attachmentwire.ServerToBrowser)
@@ -240,7 +240,7 @@ func f3ObserveCandidateAttachment(ws *websocket.Conn, first f3RawAttachmentMessa
 	}
 	next := first
 	for {
-		if next.kind != websocket.TextMessage {
+		if next.kind != websocket.BinaryMessage {
 			return f3CandidateAttachmentObservation{err: fmt.Errorf("attachment websocket kind=%d", next.kind)}
 		}
 		typed, err := attachmentwire.Decode(next.payload, attachmentwire.ServerToBrowser)

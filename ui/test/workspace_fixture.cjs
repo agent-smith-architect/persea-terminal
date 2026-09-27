@@ -568,7 +568,7 @@ function startWorkspaceFixture(ui, options = {}) {
     };
     if (url.pathname !== "/ws" || url.search !== "") { refuse(400, "invalid mode"); return; }
     const offered = subprotocols(request);
-    if (!offered.values.includes("persea-terminal.v2") || !offered.handle || (offered.mode !== "control" && offered.mode !== "observe")) {
+    if (!offered.values.includes("persea-terminal.v3") || !offered.handle || (offered.mode !== "control" && offered.mode !== "observe")) {
       refuse(400, "invalid mode"); return;
     }
     if (offered.csrf !== CSRF_TOKEN || offered.csrf !== cookieCSRF(request)) { refuse(403, "csrf"); return; }
@@ -582,7 +582,7 @@ function startWorkspaceFixture(ui, options = {}) {
     entry.consumed = true;
     const accept = crypto.createHash("sha1").update(request.headers["sec-websocket-key"] + WS_GUID).digest("base64");
     raw.write("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
-      + `Sec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: persea-terminal.v2\r\n\r\n`);
+      + `Sec-WebSocket-Accept: ${accept}\r\nSec-WebSocket-Protocol: persea-terminal.v3\r\n\r\n`);
     nextAttachmentId += 1;
     const attachment = {
       id: nextAttachmentId,
@@ -665,14 +665,14 @@ function startWorkspaceFixture(ui, options = {}) {
     session.bindings.add(session.source);
     const epoch = "17";
     const cut = "1";
-    const frame = (value) => JSON.stringify({ version: 1, source: session.source, epoch, ...value });
+    const frame = (value) => ({ version: 1, source: session.source, epoch, ...value });
     state.counters.replays += 1;
     // Snapshot+tail: the whole journal so far, so a reattach after a typed
     // subscriber close carries the event that triggered it.
     const replayText = (session.replayFocusReporting ? "\x1b[?1004h" : "") + `fixture-replay ${session.name}\r\n` + session.output.map((line) => `${line}\r\n`).join("");
     attachment.replayLines = session.output.length;
-    const replay = Buffer.from(replayText, "binary").toString("base64");
-    const sendPrepare = () => socket.sendText(frame({ type: "PREPARE", cut, kind: "INITIAL", columns: session.columns, rows: session.rows, history: [], truncated: false, replay }));
+    const replay = Buffer.from(replayText, "binary");
+    const sendPrepare = () => socket.sendAttachment(frame({ type: "PREPARE", cut, kind: "INITIAL", columns: session.columns, rows: session.rows, history: [], truncated: false, replay }));
     if (session.holdPrepareMs > 0) {
       const hold = session.holdPrepareMs;
       setTimeout(() => { if (!socket.closed) sendPrepare(); }, hold);
@@ -694,20 +694,20 @@ function startWorkspaceFixture(ui, options = {}) {
         if (live || value.cut !== cut) { closeWith(1011, "attachment_failed"); return; }
         live = true;
         attachment.committed = true;
-        socket.sendText(frame({ type: "COMMIT", cut }));
-        socket.sendText(frame({ type: "LIVE", cut, data: Buffer.from(`fixture-live ${session.name}\r\n`, "binary").toString("base64") }));
+        socket.sendAttachment(frame({ type: "COMMIT", cut }));
+        socket.sendAttachment(frame({ type: "LIVE", cut, data: Buffer.from(`fixture-live ${session.name}\r\n`, "binary") }));
         attachment.writeLive = (data) => {
-          if (!socket.closed) socket.sendText(frame({ type: "LIVE", cut, data: Buffer.from(`${data}\r\n`, "binary").toString("base64") }));
+          if (!socket.closed) socket.sendAttachment(frame({ type: "LIVE", cut, data: Buffer.from(`${data}\r\n`, "binary") }));
         };
         // The front's in-band END: the epoch ended; the socket stays open.
-        attachment.endLive = (reason) => { if (!socket.closed) socket.sendText(frame({ type: "END", reason })); };
+        attachment.endLive = (reason) => { if (!socket.closed) socket.sendAttachment(frame({ type: "END", reason })); };
         return;
       }
       if (!live) { closeWith(1011, "attachment_failed"); return; }
       if (value.type === "MODE_REQUEST") {
         if (offered.mode === "observe" && value.mode === "CONTROL") { closeWith(1011, "observe_mode"); return; }
         attachment.mode = value.mode;
-        socket.sendText(frame({ type: "MODE", mode: value.mode }));
+        socket.sendAttachment(frame({ type: "MODE", mode: value.mode }));
         return;
       }
       if (value.type === "INPUT") {
@@ -721,7 +721,7 @@ function startWorkspaceFixture(ui, options = {}) {
         // A committed geometry event on the ordered tail: same cut, new rows,
         // columns unchanged (a vertical fit never changes columns).
         session.rows = value.rows;
-        socket.sendText(frame({ type: "PREPARE", cut, kind: "RESIZE", columns: session.columns, rows: value.rows, history: [], truncated: false, replay: "" }));
+        socket.sendAttachment(frame({ type: "PREPARE", cut, kind: "RESIZE", columns: session.columns, rows: value.rows, history: [], truncated: false, replay: "" }));
         return;
       }
       if (value.type === "HISTORY_REQUEST" || value.type === "DEFER") return;

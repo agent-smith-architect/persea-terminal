@@ -140,8 +140,11 @@ an important overlap; independent maxima still must not be added as if every
 possible dense/current partition and source transition held at once.
 
 The real PREPARE measurement parks `unifiedAttachmentFrameWriter.WriteFrame` at
-its final downstream write. Maximum replay is 262144 bytes; the measured encoded
-payload is 349686 bytes with capacity 352256. Framing writes a five-byte header
+its final downstream write. Maximum replay is 262144 bytes; in the text transport
+used for this calibration, the encoded payload was 349686 bytes with capacity
+352256. The current binary transport sends replay bytes without base64 expansion;
+these historical measurements remain a conservative planning reference.
+Framing writes a five-byte header
 and the same payload, with no second full copy. Snapshot/backlog and encoder result
 remain owned by their real call frames. Temporary strings, serializer buffers and
 encoder-pool storage follow their actual Go lifetimes and remain in RSS until

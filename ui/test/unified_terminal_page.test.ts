@@ -266,12 +266,18 @@ async function main(): Promise<void> {
     window.WebSocket = class extends NativeWebSocket {
       constructor(url: string | URL, protocols?: string | string[]) {
         super(url, protocols);
-        const held: string[] = [];
+        const held: Array<string | ArrayBuffer> = [];
         let released = false;
         this.addEventListener("message", (event) => {
           if (released) return;
           let resize = false;
-          try { const frame = JSON.parse(String(event.data)); resize = frame.type === "PREPARE" && frame.kind === "RESIZE"; } catch { /* Other wire messages pass through. */ }
+          try {
+            if (event.data instanceof ArrayBuffer) {
+              const length = new DataView(event.data).getUint32(0, false);
+              const frame = JSON.parse(new TextDecoder().decode(new Uint8Array(event.data, 4, length)));
+              resize = frame.type === "PREPARE" && frame.kind === "RESIZE";
+            }
+          } catch { /* Other wire messages pass through. */ }
           if (!resize && held.length === 0) return;
           event.stopImmediatePropagation();
           held.push(event.data);
@@ -305,8 +311,9 @@ async function main(): Promise<void> {
       socketEvents.push({ direction: "sent", bytes: Buffer.byteLength(payload), payload: payload.slice(0, 500) });
     });
     socket.on("framereceived", (event: any) => {
-      const payload = typeof event.payload === "string" ? event.payload : Buffer.from(event.payload).toString("utf8");
-      socketEvents.push({ direction: "received", bytes: Buffer.byteLength(payload), payload: payload.slice(0, 500) });
+      const bytes = Buffer.from(event.payload);
+      const payload = typeof event.payload === "string" ? event.payload : bytes.subarray(4, 4 + bytes.readUInt32BE(0)).toString("utf8");
+      socketEvents.push({ direction: "received", bytes: bytes.length, payload: payload.slice(0, 500) });
     });
   });
   const cdp = browserEngine === "chromium" ? await context.newCDPSession(page) : null;
@@ -463,17 +470,21 @@ async function main(): Promise<void> {
         }
         if (payload.startsWith("PERSEA-")) { record.refusals.push(payload.slice(0, 120)); return; }
         record.frames += 1;
-        const frame = JSON.parse(payload);
+        assert(typeof event.payload !== "string", "attachment frame arrived as text");
+        const bytes = Buffer.from(event.payload);
+        const headerLength = bytes.readUInt32BE(0);
+        const frame = JSON.parse(bytes.subarray(4, 4 + headerLength).toString("utf8"));
         if (record.watch && !record.watchFrame && frame.type === "LIVE") {
           // The line can straddle two frames, so the previous frame's tail is
           // searched with this one.
-          const output = record.watchTail + Buffer.from(frame.data, "base64").toString("latin1");
+          const output = record.watchTail + bytes.subarray(4 + headerLength).toString("latin1");
           if (output.includes(record.watch)) record.watchFrame = record.frames;
           else record.watchTail = output.slice(-record.watch.length);
         }
         if (!record.modeAt) {
-          const encoded = frame.type === "PREPARE" ? frame.replay : frame.type === "LIVE" ? frame.data : "";
-          record.bytesBeforeMode += encoded ? Buffer.from(encoded, "base64").length : 0;
+          const length = frame.type === "PREPARE" ? frame.replay : frame.type === "LIVE" ? frame.data : 0;
+          assert(length === bytes.length - 4 - headerLength, "attachment payload length changed");
+          record.bytesBeforeMode += length;
           record.framesBeforeMode += 1;
         }
         if (frame.type === "COMMIT" && !record.commitAt) record.commitAt = now;
@@ -537,13 +548,13 @@ async function main(): Promise<void> {
           await until(`${stage}: dropped key explained`, () => page.evaluate(() => document.querySelector(".persea-unified-refusal:not([hidden])")?.textContent === "Input not sent — history is still loading"), 2_000);
         }
       }
-      await until(`${stage}: control grant`, () => record.modeAt, Math.ceil(2 * (HISTORY_BYTES * 4 / 3) / rate * 1000) + 60_000);
+      await until(`${stage}: control grant`, () => record.modeAt, Math.ceil(2 * HISTORY_BYTES / rate * 1000) + 60_000);
       assert(record.bytesBeforeMode >= HISTORY_BYTES, `${stage}: only ${record.bytesBeforeMode} bytes of history preceded the control grant`);
       assert(record.inputsBeforeMode === 0, `${stage}: ${record.inputsBeforeMode} input frames left before the control grant`);
-      // Flow control must not starve the link: the base64 backlog moves at no
+      // Flow control must not starve the link: the raw backlog moves at no
       // less than half the link rate.
       const backlogMs = record.modeAt - record.commitAt;
-      const linkMs = record.bytesBeforeMode * 4 / 3 / rate * 1000;
+      const linkMs = record.bytesBeforeMode / rate * 1000;
       assert(backlogMs <= 2 * linkMs + 5_000, `${stage}: the backlog took ${backlogMs} ms where the link needs ${Math.round(linkMs)} ms`);
       await until(`${stage}: live`, async () => (await pageState()).phase === "live");
       // Input authority has arrived, but the page may still be catching up on

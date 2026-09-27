@@ -211,9 +211,7 @@ type frontdoorRotationClient struct {
 // reports with its real cause.
 func (c *frontdoorRotationClient) ReadMessage() (int, []byte, error) {
 	kind, payload, err := c.Conn.ReadMessage()
-	if err != nil || kind != websocket.TextMessage ||
-		bytes.HasPrefix(payload, []byte(attachmentwire.TransportLivenessPrefix)) ||
-		bytes.HasPrefix(payload, []byte(attachmentwire.TransportRefusalPrefix)) {
+	if err != nil || kind != websocket.BinaryMessage {
 		return kind, payload, err
 	}
 	c.consumed++
@@ -234,7 +232,7 @@ func frontdoorRotationDialController(t *testing.T, frontSocket, handle string) *
 	dialer := websocket.Dialer{
 		NetDial: func(_, _ string) (net.Conn, error) { return net.Dial("unix", frontSocket) },
 		Subprotocols: []string{
-			"persea-terminal.v2", "persea-handle." + handle, "persea-mode.control",
+			"persea-terminal.v3", "persea-handle." + handle, "persea-mode.control",
 			"persea-csrf." + frontdoorRotationCSRF, "persea-history.5000", "persea-engine.unified-dev",
 		},
 	}
@@ -280,7 +278,7 @@ func frontdoorRotationCommitControllerWithMarker(t *testing.T, ws *frontdoorRota
 		if err != nil {
 			t.Fatalf("controller before COMMIT: %v", err)
 		}
-		if kind != websocket.TextMessage {
+		if kind != websocket.BinaryMessage {
 			t.Fatalf("controller message kind=%d", kind)
 		}
 		frame, err := attachmentwire.Decode(payload, attachmentwire.ServerToBrowser)
@@ -318,7 +316,7 @@ func frontdoorRotationCommitControllerWithMarker(t *testing.T, ws *frontdoorRota
 				if err != nil {
 					t.Fatalf("controller before CONTROL and recorded marker (marker seen=%v): %v", markerSeen, err)
 				}
-				if kind != websocket.TextMessage {
+				if kind != websocket.BinaryMessage {
 					continue
 				}
 				mode, err := attachmentwire.Decode(payload, attachmentwire.ServerToBrowser)
@@ -609,7 +607,7 @@ func TestSourceAutomaticRotationFreshFrontdoorController(t *testing.T) {
 		if err != nil {
 			t.Fatalf("fresh input was not live: visible=%q err=%v", visible, err)
 		}
-		if kind != websocket.TextMessage {
+		if kind != websocket.BinaryMessage {
 			continue
 		}
 		frame, err := attachmentwire.Decode(payload, attachmentwire.ServerToBrowser)

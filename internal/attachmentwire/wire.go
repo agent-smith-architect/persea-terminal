@@ -1,12 +1,14 @@
 // Package attachmentwire is the single translation boundary between the
-// browser-safe attachment JSON and terminal.Frame. The terminal package keeps
-// its native Go JSON representation; only this package turns uint64 values into
-// decimal strings and byte slices into canonical padded base64 for JavaScript.
+// browser attachment transport and terminal.Frame. Server frames use a bounded
+// JSON header followed by raw bytes; browser frames remain JSON with base64 input.
+// The terminal package keeps its native Go JSON representation. Both wire
+// directions represent uint64 values as decimal strings for JavaScript.
 package attachmentwire
 
 import (
 	"bytes"
 	"encoding/base64"
+	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -18,8 +20,12 @@ import (
 
 // MaxWireBytes is the smallest power-of-two envelope that carries a valid
 // 2 MiB history even when every byte needs six-byte JSON escaping, plus the
-// existing 256 KiB replay after base64 expansion and bounded frame metadata.
+// existing 256 KiB raw replay, the length prefix, and bounded frame metadata.
 const MaxWireBytes = 16 << 20
+
+// MaxHeaderBytes allows worst-case history escaping plus scalar metadata.
+// The four-byte big-endian header length is checked before JSON is decoded.
+const MaxHeaderBytes = 6*terminal.HistoryByteCap + 4096
 
 type Direction uint8
 
@@ -81,6 +87,7 @@ func Encode(frame terminal.Frame, direction Direction) ([]byte, error) {
 	if frame.Cut != 0 {
 		value["cut"] = strconv.FormatUint(frame.Cut, 10)
 	}
+	var payload []byte
 	switch frame.Type {
 	case terminal.FramePrepare:
 		value["kind"] = frame.Kind
@@ -88,7 +95,8 @@ func Encode(frame terminal.Frame, direction Direction) ([]byte, error) {
 		value["rows"] = frame.Rows
 		value["history"] = append([]string{}, frame.History...)
 		value["truncated"] = frame.Truncated
-		value["replay"] = base64.StdEncoding.EncodeToString(frame.Replay)
+		value["replay"] = len(frame.Replay)
+		payload = frame.Replay
 		if frame.Kind == terminal.CutHistory {
 			value["request"] = strconv.FormatUint(frame.Request, 10)
 			value["effective_history_rows"] = frame.EffectiveHistoryRows
@@ -99,7 +107,10 @@ func Encode(frame terminal.Frame, direction Direction) ([]byte, error) {
 	case terminal.FrameHistory:
 		value["request"] = strconv.FormatUint(frame.Request, 10)
 		value["history_rows"] = frame.HistoryRows
-	case terminal.FrameLive, terminal.FrameInput:
+	case terminal.FrameLive:
+		value["data"] = len(frame.Data)
+		payload = frame.Data
+	case terminal.FrameInput:
 		value["data"] = base64.StdEncoding.EncodeToString(frame.Data)
 	case terminal.FrameMode, terminal.FrameModeRequest:
 		value["mode"] = frame.Mode
@@ -113,6 +124,16 @@ func Encode(frame terminal.Frame, direction Direction) ([]byte, error) {
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return nil, malformed("encode: %v", err)
+	}
+	if direction == ServerToBrowser {
+		if len(raw) > MaxHeaderBytes || 4+len(raw)+len(payload) > MaxWireBytes {
+			return nil, terminal.ErrSaturated
+		}
+		wire := make([]byte, 4+len(raw)+len(payload))
+		binary.BigEndian.PutUint32(wire, uint32(len(raw)))
+		copy(wire[4:], raw)
+		copy(wire[4+len(raw):], payload)
+		return wire, nil
 	}
 	if len(raw) > MaxWireBytes {
 		return nil, terminal.ErrSaturated
@@ -130,10 +151,29 @@ func EncodeCoreJSON(raw []byte, direction Direction) ([]byte, error) {
 }
 
 // Decode validates one browser wire frame and returns the canonical typed
-// representation consumed by terminal.Epoch.HandleFrame.
+// representation consumed by terminal.Epoch.HandleFrame. Server byte payloads
+// borrow raw's storage; callers must not change raw while using the frame.
 func Decode(raw []byte, direction Direction) (terminal.Frame, error) {
-	if len(raw) == 0 || len(raw) > MaxWireBytes || !utf8.Valid(raw) {
-		return terminal.Frame{}, malformed("wire payload is empty, oversized, or invalid UTF-8")
+	if len(raw) == 0 || len(raw) > MaxWireBytes {
+		return terminal.Frame{}, malformed("wire payload is empty or oversized")
+	}
+	var payload []byte
+	if direction == ServerToBrowser {
+		if len(raw) < 4 {
+			return terminal.Frame{}, malformed("truncated header length")
+		}
+		headerLength := binary.BigEndian.Uint32(raw[:4])
+		if headerLength == 0 || headerLength > MaxHeaderBytes || uint64(headerLength) > uint64(len(raw)-4) {
+			return terminal.Frame{}, malformed("invalid header length")
+		}
+		payload = raw[4+int(headerLength):]
+		raw = raw[4 : 4+int(headerLength)]
+		if len(payload) > max(terminal.ReplayByteCap, terminal.MaxEgressBytes) {
+			return terminal.Frame{}, malformed("oversized byte payload")
+		}
+	}
+	if !utf8.Valid(raw) {
+		return terminal.Frame{}, malformed("header is not valid UTF-8")
 	}
 	object, err := decodeObject(raw)
 	if err != nil {
@@ -150,6 +190,9 @@ func Decode(raw []byte, direction Direction) (terminal.Frame, error) {
 	}
 	if err := validateKeys(object, frameType); err != nil {
 		return terminal.Frame{}, err
+	}
+	if direction == ServerToBrowser && frameType != terminal.FrameLive && frameType != terminal.FramePrepare && len(payload) != 0 {
+		return terminal.Frame{}, malformed("unexpected byte payload")
 	}
 
 	version, err := requiredInt(object, "version")
@@ -203,17 +246,13 @@ func Decode(raw []byte, direction Direction) (terminal.Frame, error) {
 		if frame.Rows, err = requiredInt(object, "rows"); err != nil {
 			return terminal.Frame{}, err
 		}
-		if err = decodeField(object, "history", &frame.History); err != nil || frame.History == nil {
-			return terminal.Frame{}, malformed("history must be an array")
+		if frame.History, err = decodeHistory(object["history"]); err != nil {
+			return terminal.Frame{}, err
 		}
 		if err = decodeField(object, "truncated", &frame.Truncated); err != nil {
 			return terminal.Frame{}, err
 		}
-		encoded, err := requiredString(object, "replay")
-		if err != nil {
-			return terminal.Frame{}, err
-		}
-		if frame.Replay, err = decodeBase64(encoded, "replay"); err != nil {
+		if frame.Replay, err = binaryPayload(object, "replay", payload, 0, terminal.ReplayByteCap); err != nil {
 			return terminal.Frame{}, err
 		}
 		if frame.Kind == terminal.CutHistory {
@@ -232,7 +271,11 @@ func Decode(raw []byte, direction Direction) (terminal.Frame, error) {
 		if frame.HistoryRows, err = requiredInt(object, "history_rows"); err != nil {
 			return terminal.Frame{}, err
 		}
-	case terminal.FrameLive, terminal.FrameInput:
+	case terminal.FrameLive:
+		if frame.Data, err = binaryPayload(object, "data", payload, 1, terminal.MaxEgressBytes); err != nil {
+			return terminal.Frame{}, err
+		}
+	case terminal.FrameInput:
 		encoded, err := requiredString(object, "data")
 		if err != nil {
 			return terminal.Frame{}, err
@@ -274,6 +317,35 @@ func validDeferReason(reason string) bool {
 	default:
 		return false
 	}
+}
+
+func decodeHistory(raw json.RawMessage) ([]string, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	token, err := decoder.Token()
+	if err != nil || token != json.Delim('[') {
+		return nil, malformed("history must be an array")
+	}
+	rows := []string{}
+	total := 0
+	for decoder.More() {
+		if len(rows) == terminal.HistoryRowCap {
+			return nil, terminal.ErrSaturated
+		}
+		token, err := decoder.Token()
+		row, ok := token.(string)
+		if err != nil || !ok || len(row) > terminal.HistoryRowByteCap {
+			return nil, malformed("invalid history row")
+		}
+		total += len(row) + 1
+		if total > terminal.HistoryByteCap {
+			return nil, terminal.ErrSaturated
+		}
+		rows = append(rows, row)
+	}
+	if token, err = decoder.Token(); err != nil || token != json.Delim(']') {
+		return nil, malformed("unterminated history")
+	}
+	return rows, nil
 }
 
 func decodeObject(raw []byte) (map[string]json.RawMessage, error) {
@@ -368,10 +440,21 @@ func validateKeys(object map[string]json.RawMessage, frameType terminal.FrameTyp
 }
 
 func decodeField(object map[string]json.RawMessage, key string, target any) error {
+	if bytes.Equal(bytes.TrimSpace(object[key]), []byte("null")) {
+		return malformed("null field %q", key)
+	}
 	if err := json.Unmarshal(object[key], target); err != nil {
 		return malformed("invalid field %q: %v", key, err)
 	}
 	return nil
+}
+
+func binaryPayload(object map[string]json.RawMessage, key string, payload []byte, minimum, maximum int) ([]byte, error) {
+	length, err := requiredInt(object, key)
+	if err != nil || length < minimum || length > maximum || length != len(payload) {
+		return nil, malformed("invalid %s byte length", key)
+	}
+	return payload, nil
 }
 
 func requiredString(object map[string]json.RawMessage, key string) (string, error) {
