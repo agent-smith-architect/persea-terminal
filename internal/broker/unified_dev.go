@@ -41,6 +41,12 @@ type UnifiedDevPaneEffects struct {
 	spawns                chan unifiedDevCommand
 	exits                 chan *unifiedDevUnit
 
+	// supervisionInterval, supervisionIdleInterval and supervisionTick are
+	// test seams for the supervision cadence; production leaves them zero.
+	supervisionInterval     time.Duration
+	supervisionIdleInterval time.Duration
+	supervisionTick         func()
+
 	// generationSequence backs mintControlGeneration for units that need a
 	// generation no earlier unit of this broker run has stamped.
 	generationSequence atomic.Uint64

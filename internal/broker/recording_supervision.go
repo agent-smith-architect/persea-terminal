@@ -10,6 +10,15 @@ import (
 )
 
 const recordingSupervisionInterval = 50 * time.Millisecond
+
+// recordingIdleSupervisionInterval is the tick while the provider holds no
+// recording state at all (supervisionIdle). Nothing then needs a deadline
+// checked, and some work (a terminal retirement's retry timer) is noticed only
+// by the tick rather than by a wake, so the tick slows down instead of
+// stopping: anything that appears unannounced is picked up within this
+// interval, well inside recordingStallLimit, and the supervisor returns to
+// recordingSupervisionInterval at once.
+const recordingIdleSupervisionInterval = time.Second
 const recordingStallLimit = 2 * time.Second
 
 var errRecordingStalled = fmt.Errorf("%w: recording work stalled", ErrUnifiedRotateFatal)
@@ -247,7 +256,15 @@ func (effects *UnifiedDevPaneEffects) runSupervisedObserver(ctx context.Context)
 			}
 		}
 	}()
-	ticker := time.NewTicker(recordingSupervisionInterval)
+	fast, idle := recordingSupervisionInterval, recordingIdleSupervisionInterval
+	if effects.supervisionInterval > 0 {
+		fast = effects.supervisionInterval
+	}
+	if effects.supervisionIdleInterval > 0 {
+		idle = effects.supervisionIdleInterval
+	}
+	interval := fast
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	busy := false
 	rotationPending := false
@@ -284,6 +301,14 @@ func (effects *UnifiedDevPaneEffects) runSupervisedObserver(ctx context.Context)
 				})
 			}
 		}
+		next := fast
+		if !busy && len(spawns) == 0 && len(reaps) == 0 && !rotationPending && effects.supervisionIdle() {
+			next = idle
+		}
+		if next != interval {
+			interval = next
+			ticker.Reset(interval)
+		}
 		select {
 		case <-ctx.Done():
 			for _, request := range spawns {
@@ -307,6 +332,9 @@ func (effects *UnifiedDevPaneEffects) runSupervisedObserver(ctx context.Context)
 			clear(spawns[len(kept):])
 			spawns = kept
 			effects.superviseRecording()
+			if effects.supervisionTick != nil {
+				effects.supervisionTick()
+			}
 		case <-completed:
 			busy = false
 		case <-effects.rotationWake:
@@ -331,6 +359,27 @@ func (effects *UnifiedDevPaneEffects) runSupervisedObserver(ctx context.Context)
 			reaps = append(reaps, unit)
 		}
 	}
+}
+
+// supervisionIdle reports that nothing the supervision tick watches or polls
+// exists: no observer unit, birth, adoption, active pane or terminal
+// retirement, and no retention generation or pending journal work. The locks
+// are taken one at a time; a stale answer costs at most one tick either way.
+func (effects *UnifiedDevPaneEffects) supervisionIdle() bool {
+	effects.mu.Lock()
+	idle := len(effects.supervised) == 0 && len(effects.units) == 0 && len(effects.panes) == 0 &&
+		len(effects.active) == 0 && len(effects.adopting) == 0 && len(effects.terminalRetires) == 0
+	registry, _ := effects.observer.(*paneRegistry)
+	effects.mu.Unlock()
+	if !idle || registry == nil || registry.retention == nil {
+		return idle
+	}
+	if len(registry.retention.pendingSamples()) > 0 {
+		return false
+	}
+	registry.retention.mu.Lock()
+	defer registry.retention.mu.Unlock()
+	return len(registry.retention.generations) == 0
 }
 
 func (effects *UnifiedDevPaneEffects) takeTerminalRetry() (unifiedjournal.PaneKey, bool) {

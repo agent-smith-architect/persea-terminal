@@ -137,6 +137,9 @@ export const UNIFIED_TERMINAL_REASONS: ReadonlySet<string> = new Set([
   // browser_liveness is deliberately absent: the front door closes with it
   // when application proof stops arriving, which is what a stalled or
   // suspended connection looks like. It is loss, not a verdict — transient.
+  // flow_stalled is absent for the same reason: the page kept proving
+  // liveness but stopped acknowledging output, and a page that consumes
+  // again recovers by reconnecting.
   "lease_unavailable", "lease_lost", "broker_protocol", "stale_snapshot",
   "bad_liveness", "bad_attachment", "bad_flow", "observe_mode", "websocket_message_type",
   // The client-side liveness engine's own protocol judgement: the server
