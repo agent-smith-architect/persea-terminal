@@ -378,6 +378,7 @@ def validate_manifest(value: Any) -> dict[str, Any]:
     if not isinstance(realms_value, list) or not 1 <= len(realms_value) <= 32:
         fail("realms must contain 1 to 32 entries")
     realm_ids: set[str] = set()
+    realm_uids: set[int] = set()
     normalized_displays: set[str] = set()
     global_socket_paths: set[str] = set()
     global_named_selectors: set[tuple[int, str]] = set()
@@ -396,6 +397,11 @@ def validate_manifest(value: Any) -> dict[str, Any]:
         normalized_displays.add(normalized)
         user = account_name(realm["user"], f"{where}.user")
         uid = exact_int(realm["uid"], f"{where}.uid", 1, 2**32 - 2)
+        # Socket names, absolute paths and symlinks can alias one server. Keep
+        # every account's servers under one broker so shadow births stay local.
+        if uid in realm_uids:
+            fail(f"{where}.uid is shared by another realm; combine this account's servers in one realm")
+        realm_uids.add(uid)
         if user == "root":
             fail(f"{where}.user must be unprivileged")
         servers_value = realm["servers"]

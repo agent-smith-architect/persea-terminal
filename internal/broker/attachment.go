@@ -177,6 +177,36 @@ type attachmentClient struct {
 const attachmentShadowPrefix = "persea-attach-"
 const attachmentClientPrefix = "client-"
 
+// Names cover selector aliases too. A failed birth can leave an unmarked
+// session, but inventory must not remove it while its command is still running.
+var attachmentShadowBirths = struct {
+	sync.Mutex
+	names map[string]int
+}{names: make(map[string]int)}
+
+func trackAttachmentShadow(name string) func() {
+	attachmentShadowBirths.Lock()
+	attachmentShadowBirths.names[name]++
+	attachmentShadowBirths.Unlock()
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			attachmentShadowBirths.Lock()
+			defer attachmentShadowBirths.Unlock()
+			attachmentShadowBirths.names[name]--
+			if attachmentShadowBirths.names[name] == 0 {
+				delete(attachmentShadowBirths.names, name)
+			}
+		})
+	}
+}
+
+func attachmentShadowPending(name string) bool {
+	attachmentShadowBirths.Lock()
+	defer attachmentShadowBirths.Unlock()
+	return attachmentShadowBirths.names[name] != 0
+}
+
 func removeOrphanShadow(server config.TmuxServer, shadow orphanShadow) error {
 	guard := "#{&&:#{==:#{session_id}," + shadow.sessionID + "}," +
 		"#{&&:#{==:#{session_name}," + shadow.name + "}," +
@@ -348,6 +378,8 @@ func (t *tmuxPinnedTransaction) bind(ctx context.Context, req terminal.Transacti
 		return terminal.TransactionResult{}, err
 	}
 	name := fmt.Sprintf("%s%x", attachmentShadowPrefix, nonce[:])
+	finishBirth := trackAttachmentShadow(name)
+	defer finishBirth()
 	clientID := fmt.Sprintf("%s%x", attachmentClientPrefix, nonce[:])
 	lookupShadowID := func() string {
 		out, err := tmuxOutput(t.server, "list-sessions", "-f", "#{==:#{session_name},"+name+"}", "-F", "#{session_id}")
@@ -377,6 +409,7 @@ func (t *tmuxPinnedTransaction) bind(ctx context.Context, req terminal.Transacti
 	var bindStderr strings.Builder
 	cmd.Stderr = &bindStderr
 	out, bindErr := cmd.Output()
+	finishBirth()
 	ids := terminal.AttachmentIDs{ClientID: clientID}
 	for _, line := range strings.Fields(string(out)) {
 		if validSessionID(line) {

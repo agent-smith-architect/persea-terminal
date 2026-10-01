@@ -46,9 +46,22 @@ func TestCreateRefusesReservedShadowNames(t *testing.T) {
 }
 
 func TestRestoredShadowRequiresAbsentOptionsDetachedSingleWindow(t *testing.T) {
+	for _, inventory := range []bool{false, true} {
+		t.Run(fmt.Sprintf("inventory=%t", inventory), func(t *testing.T) {
+			testRestoredShadowPreservation(t, inventory)
+		})
+	}
+}
+
+func testRestoredShadowPreservation(t *testing.T, inventory bool) {
 	for _, mutation := range []string{"none", "client", "pid", "start", "empty-client", "empty-pid", "empty-start", "inherited", "windows", "attached", "ordinary-name"} {
 		t.Run(mutation, func(t *testing.T) {
 			d := newDisposable(t)
+			if inventory {
+				if _, err := incarnation(d.tmux); err != nil {
+					t.Fatal(err)
+				}
+			}
 			name := attachmentShadowPrefix + strings.Repeat("a", 32)
 			if mutation == "ordinary-name" {
 				name = "operator-work"
@@ -75,7 +88,12 @@ func TestRestoredShadowRequiresAbsentOptionsDetachedSingleWindow(t *testing.T) {
 				}
 				w.roundtrip(t, "ATTACHED")
 			}
-			if _, err := incarnation(d.tmux); err != nil {
+			if inventory {
+				s := &Server{config: bootCreationConfig(t, d.tmux)}
+				if got := s.inventoryServer(d.tmux, 10); got.Status != "ok" {
+					t.Fatalf("restored inventory: %+v", got)
+				}
+			} else if _, err := incarnation(d.tmux); err != nil {
 				t.Fatal(err)
 			}
 			present, err := tmuxSessionPresent(d.tmux, id)

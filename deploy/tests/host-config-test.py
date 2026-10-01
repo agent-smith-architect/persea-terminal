@@ -583,6 +583,26 @@ class HostConfigTest(unittest.TestCase):
         self.assert_invalid(lambda value: value["realms"][1]["servers"][0].update({"socket_path": "/srv/../tmp/main.sock"}))
         self.assert_invalid(lambda value: value["realms"][1]["servers"][0].update({"socket_path": "//srv/tmux-k4/main.sock"}))
 
+    def test_one_realm_per_uid_prevents_selector_aliases(self) -> None:
+        for selector in (
+            {"socket_path": "/tmp/tmux-42001/main-a7"},
+            {"socket_path": "/srv/alias-a7/main.sock"},
+            {"socket_name": "different-a7"},
+        ):
+            with self.subTest(selector=selector):
+                value = fixture()
+                value["realms"][1]["user"] = value["realms"][0]["user"]
+                value["realms"][1]["uid"] = value["realms"][0]["uid"]
+                value["realms"][1]["servers"] = [{"label": "primary", **selector}]
+                result = self.run_helper("validate", self.write(value), success=False)
+                self.assertIn(b"uid is shared by another realm", result.stderr)
+
+        value = fixture()
+        value["realms"][0]["servers"].append(
+            {"label": "secondary", "socket_path": "/tmp/tmux-42001/main-a7"}
+        )
+        self.run_helper("validate", self.write(value))
+
     def test_identity_and_tailscale_cross_binding_mutants_fail(self) -> None:
         self.assert_invalid(lambda value: value["front"].update({"user": "Bad User"}))
         self.assert_invalid(lambda value: value["front"].update({"user": "root"}))

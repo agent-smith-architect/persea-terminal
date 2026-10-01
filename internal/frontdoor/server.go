@@ -875,7 +875,7 @@ func createSessionStatus(code string) int {
 		return http.StatusForbidden
 	case "name_taken", "at_capacity":
 		return http.StatusConflict
-case "no_server", "server_unavailable":
+	case "no_server", "server_unavailable":
 		return http.StatusServiceUnavailable
 	default:
 		return http.StatusBadGateway
