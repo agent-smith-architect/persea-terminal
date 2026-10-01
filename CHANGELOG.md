@@ -2,6 +2,17 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- The service no longer restarts repeatedly at boot while waiting for a user's tmux server to start.
+- Stray hidden sessions restored after a reboot are cleaned up when the tmux server becomes available.
+
+### Changed
+
+- "New session" is available only when that account's tmux server is running. Start tmux on the host first; Persea Terminal never starts a tmux server itself.
+
 ## 0.1.11 — 2026-09-27
 
 ### Fixed

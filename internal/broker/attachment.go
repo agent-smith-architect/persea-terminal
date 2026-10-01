@@ -186,7 +186,20 @@ func removeOrphanShadow(server config.TmuxServer, shadow orphanShadow) error {
 		"#{&&:#{==:#{" + attachmentOwnerPIDOption + "}," + strconv.Itoa(shadow.ownerPID) + "}," +
 		"#{==:#{" + attachmentOwnerStartOption + "}," + strconv.FormatUint(shadow.ownerStart, 10) + "}}}}}}}"
 	success := "kill-session -t " + shellQuote("="+shadow.sessionID)
-	if _, guardErr := tmuxOutput(server, "if-shell", "-F", "-t", "="+shadow.sessionID+":", guard, success, "run-shell 'exit 78'"); guardErr != nil {
+	args := []string{"if-shell", "-F", "-t", "=" + shadow.sessionID + ":", guard, success, "run-shell 'exit 78'"}
+	if shadow.restored {
+		guard = "#{&&:#{==:#{session_id}," + shadow.sessionID + "}," +
+			"#{&&:#{==:#{session_name}," + shadow.name + "}," +
+			"#{&&:#{==:#{session_attached},0}," +
+			"#{&&:#{==:#{session_windows},1}," +
+			"#{&&:#{==:#{@persea_client_id},}," +
+			"#{&&:#{==:#{" + attachmentOwnerPIDOption + "},}," +
+			"#{==:#{" + attachmentOwnerStartOption + "},}}}}}}}"
+		// Pin the server as well as the session: IDs can be reused on restart.
+		guarded := "if-shell -F -t " + shellQuote("="+shadow.sessionID+":") + " " + shellQuote(guard) + " " + shellQuote(success)
+		args = []string{"if-shell", "-t", "=" + shadow.sessionID + ":", incarnationCondition(shadow.authority), guarded, "run-shell 'exit 78'"}
+	}
+	if _, guardErr := tmuxOutput(server, args...); guardErr != nil {
 		present, verifyErr := tmuxSessionPresent(server, shadow.sessionID)
 		if verifyErr == nil && !present {
 			return nil

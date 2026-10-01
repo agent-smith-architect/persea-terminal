@@ -28,7 +28,7 @@ func TestSnapshotExecutionFailureWithLiveTargetIsSnapshotFailed(t *testing.T) {
 
 	fakeDir := shortTempDir(t)
 	fakeTmux := filepath.Join(fakeDir, "tmux")
-	script := "#!/bin/sh\nif [ \"$4\" = \"if-shell\" ]; then\n  exit 1\nfi\nexec " + shellQuote(tmuxPath) + " \"$@\"\n"
+	script := "#!/bin/sh\nif [ \"$5\" = \"if-shell\" ]; then\n  exit 1\nfi\nexec " + shellQuote(tmuxPath) + " \"$@\"\n"
 	if err := os.WriteFile(fakeTmux, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestSnapshotTimeoutWithLiveTargetIsSnapshotFailed(t *testing.T) {
 
 	fakeDir := shortTempDir(t)
 	fakeTmux := filepath.Join(fakeDir, "tmux")
-	script := "#!/bin/sh\nif [ \"$4\" = \"if-shell\" ]; then\n  exec sleep 10\nfi\nexec " + shellQuote(tmuxPath) + " \"$@\"\n"
+	script := "#!/bin/sh\nif [ \"$5\" = \"if-shell\" ]; then\n  exec sleep 10\nfi\nexec " + shellQuote(tmuxPath) + " \"$@\"\n"
 	if err := os.WriteFile(fakeTmux, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestSnapshotConfirmedVanishedPaneIsStaleTarget(t *testing.T) {
 	paneID := d.run("display-message", "-p", "-t", "=alpha:", "#{pane_id}")
 	fakeDir := shortTempDir(t)
 	fakeTmux := filepath.Join(fakeDir, "tmux")
-	script := "#!/bin/sh\nif [ \"$4\" = \"if-shell\" ]; then\n  exec " + shellQuote(tmuxPath) + " -S " + shellQuote(d.path) + " kill-pane -t " + shellQuote(paneID) + "\nfi\nexec " + shellQuote(tmuxPath) + " \"$@\"\n"
+	script := "#!/bin/sh\nif [ \"$5\" = \"if-shell\" ]; then\n  exec " + shellQuote(tmuxPath) + " -S " + shellQuote(d.path) + " kill-pane -t " + shellQuote(paneID) + "\nfi\nexec " + shellQuote(tmuxPath) + " \"$@\"\n"
 	if err := os.WriteFile(fakeTmux, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -134,7 +134,7 @@ func TestSnapshotConfirmedVanishedServerIsStaleTarget(t *testing.T) {
 
 	fakeDir := shortTempDir(t)
 	fakeTmux := filepath.Join(fakeDir, "tmux")
-	script := "#!/bin/sh\nif [ \"$4\" = \"if-shell\" ]; then\n  exec " + shellQuote(tmuxPath) + " -S " + shellQuote(d.path) + " kill-server\nfi\nexec " + shellQuote(tmuxPath) + " \"$@\"\n"
+	script := "#!/bin/sh\nif [ \"$5\" = \"if-shell\" ]; then\n  exec " + shellQuote(tmuxPath) + " -S " + shellQuote(d.path) + " kill-server\nfi\nexec " + shellQuote(tmuxPath) + " \"$@\"\n"
 	if err := os.WriteFile(fakeTmux, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestSnapshotServerVanishingDuringPaneRevalidationIsStaleTarget(t *testing.T
 
 	fakeDir := shortTempDir(t)
 	fakeTmux := filepath.Join(fakeDir, "tmux")
-	script := "#!/bin/sh\nif [ \"$4\" = \"if-shell\" ]; then\n  exit 1\nfi\nif [ \"$4\" = \"list-panes\" ]; then\n  " + shellQuote(tmuxPath) + " -S " + shellQuote(d.path) + " kill-server\nfi\nexec " + shellQuote(tmuxPath) + " \"$@\"\n"
+	script := "#!/bin/sh\nif [ \"$5\" = \"if-shell\" ]; then\n  exit 1\nfi\nif [ \"$5\" = \"list-panes\" ]; then\n  " + shellQuote(tmuxPath) + " -S " + shellQuote(d.path) + " kill-server\nfi\nexec " + shellQuote(tmuxPath) + " \"$@\"\n"
 	if err := os.WriteFile(fakeTmux, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}

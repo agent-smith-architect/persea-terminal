@@ -68,7 +68,7 @@ func (s *Server) create(writer *lockedWriter, ctrl proto.Control) {
 		refuse("not_permitted", "session creation is not enabled for this server")
 		return
 	}
-	if !policy.AllowsName(ctrl.Name) {
+	if !policy.AllowsName(ctrl.Name) || attachmentShadowName(ctrl.Name) {
 		refuse("invalid_name", "the name does not match the permitted pattern for this realm")
 		return
 	}
@@ -87,12 +87,12 @@ func (s *Server) create(writer *lockedWriter, ctrl proto.Control) {
 	// The cap is enforced here rather than in the UI so a looping or hostile client
 	// cannot fork an unbounded number of shells.
 	if existing, err := sessionCount(server); err != nil {
-		if !errors.Is(err, errNoServer) {
+		if errors.Is(err, errNoServer) {
+			refuse("no_server", "no tmux server is running for this account; start tmux on the host, then try again")
+		} else {
 			refuse("server_unavailable", "the tmux server could not be inspected")
-			return
 		}
-		// No server yet: tmux will start one for this session, which is the normal
-		// first-session path and is within the cap by definition.
+		return
 	} else if existing >= policy.MaxSessions {
 		refuse("at_capacity", fmt.Sprintf("this realm already holds its maximum of %d sessions", policy.MaxSessions))
 		return
@@ -139,6 +139,11 @@ func (s *Server) create(writer *lockedWriter, ctrl proto.Control) {
 			refuse("name_taken", "a session with that name already exists")
 			return
 		}
+		_, serverErr := incarnation(server)
+		if errors.Is(err, errNoServer) || errors.Is(serverErr, errNoServer) {
+			refuse("no_server", "no tmux server is running for this account; start tmux on the host, then try again")
+			return
+		}
 		refuse("create_failed", "tmux refused to create the session")
 		return
 	}
@@ -163,6 +168,9 @@ func (s *Server) create(writer *lockedWriter, ctrl proto.Control) {
 }
 
 func sessionCount(server config.TmuxServer) (int, error) {
+	if _, err := incarnation(server); err != nil {
+		return 0, err
+	}
 	out, err := tmuxOutput(server, "list-sessions", "-F", "#{session_id}")
 	if err != nil {
 		return 0, err

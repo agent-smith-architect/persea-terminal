@@ -99,6 +99,13 @@ agent to work through it with you:
 
 Keep your host manifest and credentials outside the repository.
 
+Each configured Unix user needs a running tmux server at the configured socket.
+Start it on the host as that user, or arrange for that user's service to restore
+it at boot. Persea Terminal waits for tmux and never starts a server itself: a
+server started by the broker would inherit its restricted filesystem, lack of
+network access, and lifetime, so restarting the broker would end its shells.
+"New session" is available only while the configured tmux server is running.
+
 ### Try it locally
 
 Clone or download this repository to your Linux devbox, then run from the
