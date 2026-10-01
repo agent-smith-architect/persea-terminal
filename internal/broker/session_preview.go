@@ -52,6 +52,11 @@ func (s *Server) preview(writer *lockedWriter, ctrl proto.Control) {
 		refuse("session_gone")
 		return
 	}
+	inc, err := incarnation(server)
+	if err != nil {
+		refuse("server_unavailable")
+		return
+	}
 	// details() resolves the session's ACTIVE pane and its geometry in one
 	// display-message call. Measured on tmux 3.4: pane formats under a session
 	// target expand against the session's active window and pane.
@@ -75,6 +80,15 @@ func (s *Server) preview(writer *lockedWriter, ctrl proto.Control) {
 			return
 		}
 		refuse("preview_failed")
+		return
+	}
+	after, err := incarnation(server)
+	if err != nil {
+		refuse("server_unavailable")
+		return
+	}
+	if !sameIncarnation(inc, after) {
+		refuse("session_gone")
 		return
 	}
 	// Plain rows let the page verify that styling cannot change the text.

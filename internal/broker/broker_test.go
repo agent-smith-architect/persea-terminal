@@ -91,14 +91,14 @@ func TestGuardedAttachArgvUsesOneClientExactIDAndReadonly(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if len(got) != 10 || strings.Join(got[:7], "\x00") != strings.Join([]string{"tmux", "-u", "-S", "/tmp/example.sock", "if-shell", "-t", "=$7:"}, "\x00") || got[8] != "attach-session -r -f ignore-size -t =$7" || got[9] != "display-message -p PERSEA_nonce_STALE" {
+	if len(got) != 11 || strings.Join(got[:8], "\x00") != strings.Join([]string{"tmux", "-u", "-N", "-S", "/tmp/example.sock", "if-shell", "-t", "=$7:"}, "\x00") || got[9] != "attach-session -r -f ignore-size -t =$7" || got[10] != "display-message -p PERSEA_nonce_STALE" {
 		t.Fatalf("%q", got)
 	}
-	if !strings.Contains(got[7], "#{pid}") || !strings.Contains(got[7], "${stat##*) }") || !strings.Contains(got[7], "${20}") {
-		t.Fatalf("incarnation condition does not parse the final proc-stat suffix: %q", got[7])
+	if !strings.Contains(got[8], "#{pid}") || !strings.Contains(got[8], "${stat##*) }") || !strings.Contains(got[8], "${20}") {
+		t.Fatalf("incarnation condition does not parse the final proc-stat suffix: %q", got[8])
 	}
 	control, e := guardedAttachArgv(s, a, "control", "PERSEA_nonce_STALE")
-	if e != nil || control[8] != "attach-session -f ignore-size -t =$7" {
+	if e != nil || control[9] != "attach-session -f ignore-size -t =$7" {
 		t.Fatalf("control attach is not writable: %q %v", control, e)
 	}
 	a.SessionID = "alpha"

@@ -189,6 +189,34 @@ async function main() {
       await page.getByRole('button', { name: 'Close new session form', exact: true }).click();
     });
 
+    await check('stopped tmux servers have no creation choice and explain a shutdown race', async () => {
+      const form = page.locator('.session-create');
+      try {
+        for (const [width, height] of [[320, 568], [390, 844], [430, 932], [844, 390]]) {
+          await page.setViewportSize({ width, height });
+          fixture.state.stoppedRealms = ['local']; await refresh();
+          await page.getByRole('button', { name: 'New session', exact: true }).click();
+          assert(await form.locator('option').filter({ hasText: 'local_operator' }).count() === 0, 'Stopped server is offered for creation');
+          assert(await form.locator('option').filter({ hasText: 'other_operator' }).count() === 1, 'Running server lost its creation choice');
+          await page.getByRole('button', { name: 'Close new session form', exact: true }).click();
+          fixture.state.stoppedRealms = ['local', 'smith']; await refresh();
+          assert(await page.getByRole('button', { name: 'New session', exact: true }).count() === 0, 'Creation is offered with no running server');
+        }
+        fixture.state.stoppedRealms = []; await refresh();
+        await page.getByRole('button', { name: 'New session', exact: true }).click();
+        await form.locator('select').selectOption(JSON.stringify(['local', 'default']));
+        await form.locator('input[name="name"]').fill('shutdown_race');
+        fixture.state.createRefusal = 'no_server';
+        await form.getByRole('button', { name: 'Create session', exact: true }).click();
+        await page.waitForFunction(() => document.querySelector('.session-create-status').textContent === 'No tmux server is running for this account. Start tmux on the host, then try again.');
+      } finally {
+        fixture.state.stoppedRealms = []; fixture.state.createRefusal = '';
+        const close = page.getByRole('button', { name: 'Close new session form', exact: true });
+        if (await close.isVisible()) await close.click();
+        await page.setViewportSize({ width: 1280, height: 960 }); await refresh();
+      }
+    });
+
     await check('alias recovery never repeats creation or binds a replacement session', async () => {
       const form = page.locator('.session-create');
       for (const recovery of ['retry', 'lost-reply', 'replacement']) {
@@ -276,7 +304,7 @@ async function main() {
       await page.evaluate(() => { document.documentElement.style.fontSize = ''; });
     });
   } finally {
-    evidence.unexpectedConsole = evidence.console.filter(item => !(item.phase.startsWith('shared favorites') && /\b412\b/.test(item.text)) && !(/^(alias recovery|preview failure)/.test(item.phase) && /\b503\b/.test(item.text)) && !(item.phase === 'screenshot' && /Refused to apply a stylesheet.*style-src/.test(item.text)));
+    evidence.unexpectedConsole = evidence.console.filter(item => !(item.phase.startsWith('shared favorites') && /\b412\b/.test(item.text)) && !(/^(alias recovery|preview failure|stopped tmux servers)/.test(item.phase) && /\b503\b/.test(item.text)) && !(item.phase === 'screenshot' && /Refused to apply a stylesheet.*style-src/.test(item.text)));
     evidence.finished = true; evidence.pass = evidence.checks.length > 0 && evidence.checks.every(check => check.pass) && evidence.errors.length === 0 && evidence.unexpectedConsole.length === 0;
     evidence.requestCounts = Object.fromEntries([...new Set(fixture.state.requests.map(request => request.path))].map(route => [route, count(route)]));
     fs.writeFileSync(path.join(OUT, 'result.json'), JSON.stringify(evidence, null, 2));

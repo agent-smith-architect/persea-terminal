@@ -222,6 +222,7 @@ export function createFailureMessage(code: string, status: number): string {
     case "not_permitted": return "This realm does not allow creating sessions here.";
     case "name_taken": return "A session with that name already exists.";
     case "at_capacity": return "This realm is already at its session limit.";
+    case "no_server": return "No tmux server is running for this account. Start tmux on the host, then try again.";
     case "server_unavailable": return "The tmux server is unavailable.";
     default: return status === 503 ? "The realm is unreachable." : "The session could not be created.";
   }

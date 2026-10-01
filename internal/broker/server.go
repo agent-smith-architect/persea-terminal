@@ -1748,7 +1748,7 @@ func (s *Server) inventory(writer *lockedWriter) {
 }
 
 func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.ServerInventory {
-	r := proto.ServerInventory{Label: server.Label, Status: "ok", CanCreate: s.config.SessionCreate.AllowsServer(server.Label), CanStageImages: s.images != nil}
+	r := proto.ServerInventory{Label: server.Label, Status: "ok", CanStageImages: s.images != nil}
 	inc, err := incarnation(server)
 	if err != nil {
 		r.Error = err.Error()
@@ -1777,6 +1777,15 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 	if err != nil {
 		r.Status = "error"
 		r.Error = err.Error()
+		return r
+	}
+	after, err := incarnation(server)
+	if err != nil || !sameIncarnation(inc, after) {
+		r.Status = "error"
+		r.Error = errStaleTarget.Error()
+		if errors.Is(err, errNoServer) {
+			r.Status = "no_server"
+		}
 		return r
 	}
 	for _, line := range strings.Split(strings.TrimRight(out, "\r\n"), "\n") {
@@ -1817,6 +1826,7 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 	if s.unified != nil {
 		r.UnifiedDev = s.unified.dashboardLaunch(server.Label, r.Sessions)
 	}
+	r.CanCreate = s.config.SessionCreate.AllowsServer(server.Label)
 	return r
 }
 

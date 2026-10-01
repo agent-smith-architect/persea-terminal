@@ -64,7 +64,7 @@ func TestCreateSerialisesCountThenCreate(t *testing.T) {
 // unreviewed addition here silently becomes a 502 to the operator.
 func TestCreateRefusalCodesAreTheDocumentedSet(t *testing.T) {
 	source := readBrokerSource(t, "session_create.go")
-	for _, code := range []string{"not_permitted", "invalid_name", "at_capacity", "name_taken", "server_unavailable", "create_failed"} {
+	for _, code := range []string{"not_permitted", "invalid_name", "at_capacity", "name_taken", "no_server", "server_unavailable", "create_failed"} {
 		if !strings.Contains(source, `refuse("`+code+`"`) && !strings.Contains(source, `"`+code+`"`) {
 			t.Fatalf("documented refusal code %q is no longer emitted", code)
 		}

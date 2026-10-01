@@ -175,6 +175,7 @@ func TestCreateSessionMapsRefusalCodes(t *testing.T) {
 		"name_taken":         http.StatusConflict,
 		"at_capacity":        http.StatusConflict,
 		"server_unavailable": http.StatusServiceUnavailable,
+		"no_server":          http.StatusServiceUnavailable,
 		"create_failed":      http.StatusBadGateway,
 		"something_new":      http.StatusBadGateway,
 	} {

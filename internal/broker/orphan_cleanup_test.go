@@ -27,14 +27,14 @@ func TestCleanupOrphanedShadowsRequiresExactDeadOwner(t *testing.T) {
 	ownedNonce := strings.Repeat("a", attachmentNonceHexLength)
 	owned := attachmentShadowPrefix + ownedNonce
 	ownedClient := attachmentClientPrefix + ownedNonce
-	missingMarker := attachmentShadowPrefix + strings.Repeat("b", attachmentNonceHexLength)
+	restored := attachmentShadowPrefix + strings.Repeat("b", attachmentNonceHexLength)
 	mismatchedMarker := attachmentShadowPrefix + strings.Repeat("c", attachmentNonceHexLength)
 	extraWindow := attachmentShadowPrefix + strings.Repeat("d", attachmentNonceHexLength)
 	legacyNoOwner := attachmentShadowPrefix + strings.Repeat("e", attachmentNonceHexLength)
 	liveOwner := attachmentShadowPrefix + strings.Repeat("f", attachmentNonceHexLength)
 	metadataNoise := "synthetic-metadata"
 
-	for _, name := range []string{owned, missingMarker, mismatchedMarker, extraWindow, legacyNoOwner, liveOwner, metadataNoise, "synthetic-work"} {
+	for _, name := range []string{owned, restored, mismatchedMarker, extraWindow, legacyNoOwner, liveOwner, metadataNoise, "synthetic-work"} {
 		d.run("new-session", "-d", "-s", name, "sleep", "600")
 	}
 	setShadowOwner(t, d, owned, ownedClient, testDeadOwnerPID, testDeadOwnerStart)
@@ -56,7 +56,10 @@ func TestCleanupOrphanedShadowsRequiresExactDeadOwner(t *testing.T) {
 	if strings.Contains(sessions, "\n"+owned+"\n") {
 		t.Fatal("exact detached shadow with a dead owner survived cleanup")
 	}
-	for _, preserved := range []string{"alpha", missingMarker, mismatchedMarker, extraWindow, legacyNoOwner, liveOwner, metadataNoise, "synthetic-work"} {
+	if strings.Contains(sessions, "\n"+restored+"\n") {
+		t.Fatal("restored shadow without owner options survived cleanup")
+	}
+	for _, preserved := range []string{"alpha", mismatchedMarker, extraWindow, legacyNoOwner, liveOwner, metadataNoise, "synthetic-work"} {
 		if !strings.Contains(sessions, "\n"+preserved+"\n") {
 			t.Fatalf("non-orphan session %q was removed", preserved)
 		}
@@ -156,6 +159,8 @@ func TestRunReapsDeadOwnerBeforeOpeningBrokerSocket(t *testing.T) {
 	name := attachmentShadowPrefix + nonce
 	d.run("new-session", "-d", "-s", name, "sleep", "600")
 	setShadowOwner(t, d, name, attachmentClientPrefix+nonce, testDeadOwnerPID, testDeadOwnerStart)
+	restored := attachmentShadowPrefix + strings.Repeat("a", attachmentNonceHexLength)
+	d.run("new-session", "-d", "-s", restored, "sleep 600")
 
 	runtimeDir := shortTempDir(t)
 	blockedSocket := filepath.Join(runtimeDir, "blocked.sock")
@@ -171,5 +176,8 @@ func TestRunReapsDeadOwnerBeforeOpeningBrokerSocket(t *testing.T) {
 	}
 	if sessions := "\n" + d.run("list-sessions", "-F", "#{session_name}") + "\n"; strings.Contains(sessions, "\n"+name+"\n") {
 		t.Fatal("Run did not reap the exact dead-owner shadow before opening its listener")
+	}
+	if sessions := "\n" + d.run("list-sessions", "-F", "#{session_name}") + "\n"; strings.Contains(sessions, "\n"+restored+"\n") {
+		t.Fatal("Run did not reap the restored shadow before opening its listener")
 	}
 }

@@ -195,6 +195,9 @@ func (effects *UnifiedDevPaneEffects) spawnUnit(ctx context.Context, request uni
 	if request.server.Label != effects.server.Label {
 		return errors.New("foreign unified server")
 	}
+	if _, err := incarnation(request.server); err != nil {
+		return err
+	}
 	if request.adoption != nil {
 		if err := effects.admitAdoptionSpawn(request); err != nil {
 			if errors.Is(err, errUnifiedAdoptAnswered) {

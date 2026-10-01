@@ -17,6 +17,7 @@ async function startCohesionFixture(ui = path.resolve(__dirname, '..')) {
     others: [session('smith', 1, { name: 'automation', unified: { state: 'adoptable' } }), session('smith', 2, { name: 'notes' })],
     aliases: [], favorites: { version: 1, favorites: [], revision: 0, available: true },
     inventoryStatus: 200, favoritesStatus: 200, previewStatus: 200, aliasStatus: 200,
+    stoppedRealms: [], createRefusal: '',
     previewDelay: 0, inventoryDelay: 0, favoriteDelay: 0, previewVersion: 1, nextID: 100, aliasCommitThenFail: false,
     preferences: { version: 1, theme: 'default', font_size: null, composer_font_size: 11, default_session: null, revision: 1, stored: true, available: true },
   };
@@ -30,8 +31,8 @@ async function startCohesionFixture(ui = path.resolve(__dirname, '..')) {
       if (state.inventoryDelay) await wait(state.inventoryDelay);
       for (const row of [...state.sessions, ...state.others]) row.handles = { alias: token(), observe: token(), control: token() };
       json(res, state.inventoryStatus, state.inventoryStatus === 200 ? { realms: [
-        { name: 'local', display_name: 'local_operator', servers: [{ label: 'default', status: 'ok', can_create: true, unified_dev: { state: 'create', name: 'dev_launch' }, sessions: state.sessions }] },
-        { name: 'smith', display_name: 'other_operator', servers: [{ label: 'default', status: 'ok', can_create: true, sessions: state.others }] },
+        { name: 'local', display_name: 'local_operator', servers: [{ label: 'default', status: state.stoppedRealms.includes('local') ? 'no_server' : 'ok', can_create: !state.stoppedRealms.includes('local'), unified_dev: { state: 'create', name: 'dev_launch' }, sessions: state.stoppedRealms.includes('local') ? [] : state.sessions }] },
+        { name: 'smith', display_name: 'other_operator', servers: [{ label: 'default', status: state.stoppedRealms.includes('smith') ? 'no_server' : 'ok', can_create: !state.stoppedRealms.includes('smith'), sessions: state.stoppedRealms.includes('smith') ? [] : state.others }] },
       ], aliases: state.aliases } : {}); return true;
     }
     if (url.pathname === '/api/dashboard-preferences') {
@@ -57,6 +58,7 @@ async function startCohesionFixture(ui = path.resolve(__dirname, '..')) {
     }
     if (url.pathname === '/api/sessions') {
       const body = await read(req); request.body = body;
+      if (state.createRefusal) { res.writeHead(503); res.end(state.createRefusal); return true; }
       const group = body.realm === 'local' ? state.sessions : body.realm === 'smith' ? state.others : undefined;
       if (!group || body.server !== 'default') { json(res, 400, {}); return true; }
       if (group.some(row => row.name === body.name)) { res.writeHead(409); res.end('name_taken'); return true; }

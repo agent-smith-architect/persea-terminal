@@ -258,6 +258,7 @@ const gate = new RefreshGate(); assert.equal(gate.permitsBackgroundRefresh(), tr
   assert.equal(createFailureMessage("at_capacity", 409), "This realm is already at its session limit.");
   assert.equal(createFailureMessage("not_permitted", 403), "This realm does not allow creating sessions here.");
   assert.equal(createFailureMessage("server_unavailable", 503), "The tmux server is unavailable.");
+  assert.equal(createFailureMessage("no_server", 503), "No tmux server is running for this account. Start tmux on the host, then try again.");
   assert.equal(createFailureMessage("  name_taken  ", 409), "A session with that name already exists.", "surrounding whitespace must not defeat the mapping");
   const injected = createFailureMessage("<img src=x onerror=alert(1)>", 400);
   assert.ok(!injected.includes("onerror"));

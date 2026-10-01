@@ -47,6 +47,20 @@ Each realm produces `broker-<id>.json`,
 `socket_path` means tmux `-S`. Exactly one is required per server. There is no
 socket-directory scan and no fallback to a default tmux server.
 
+Start each configured tmux server as its realm's Unix user, outside the broker
+service. Use that user's normal host shell or a separate user service that
+restores sessions at boot. The broker can start before tmux; the dashboard
+reports no server until tmux is running and then enables "New session" if the
+realm's policy permits it. The broker never starts tmux servers, because their
+shells would inherit its read-only filesystem, blocked network, and service
+lifetime, and would end whenever the broker restarts.
+
+Session names matching `persea-attach-` followed by exactly 32 hexadecimal
+characters are reserved for internal attachments. The dashboard hides them
+and session creation refuses them. At startup and when a tmux server first
+appears, the broker removes detached, single-window copies restored without
+attachment owner options. Ordinary sessions and live attachments are preserved.
+
 Each serving realm requires the Unified terminal's
 closed manifest block `unified_terminal_dev`. Its required fields are
 `enabled: true`, `server`, `session`, and `observer_session`; the selected

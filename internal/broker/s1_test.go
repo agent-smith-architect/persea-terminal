@@ -16,7 +16,7 @@ func TestGuardedSnapshotArgvUsesEscapesDepthAndExactID(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(argv) != 10 || argv[1] != "-u" || argv[2] != "-L" || argv[3] != "disposable" || argv[6] != "%9" || !strings.Contains(argv[8], "capture-pane -p -e -S -5000 -t %9") || strings.Contains(argv[8], "=$7:") {
+	if len(argv) != 11 || argv[1] != "-u" || argv[2] != "-N" || argv[3] != "-L" || argv[4] != "disposable" || argv[7] != "%9" || !strings.Contains(argv[9], "capture-pane -p -e -S -5000 -t %9") || strings.Contains(argv[9], "=$7:") {
 		t.Fatalf("unexpected guarded snapshot argv: %q", argv)
 	}
 	for _, depth := range []int{0, SnapshotLineLimit + 1} {

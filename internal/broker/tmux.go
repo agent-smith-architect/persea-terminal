@@ -41,7 +41,8 @@ func selectorIdentity(s config.TmuxServer) (string, string, error) {
 func tmuxArgv(s config.TmuxServer, args ...string) []string {
 	// Structured responses use tabs and UTF-8 text regardless of the service
 	// locale. Without -u, tmux replaces tab delimiters with underscores in C.
-	return append([]string{"tmux", "-u"}, append(selector(s), args...)...)
+	// A server started here would inherit the broker's sandbox and lifetime.
+	return append([]string{"tmux", "-u", "-N"}, append(selector(s), args...)...)
 }
 
 func shellQuote(s string) string {
@@ -130,7 +131,7 @@ func tmuxOutput(s config.TmuxServer, args ...string) (string, error) {
 	err := cmd.Run()
 	if err != nil {
 		msg := strings.TrimSpace(stderr.String())
-		if strings.Contains(msg, "no server running") || strings.Contains(msg, "failed to connect") || strings.Contains(msg, "No such file") {
+		if tmuxNoServer(msg) {
 			return "", fmt.Errorf("%w: %s", errNoServer, msg)
 		}
 		return "", fmt.Errorf("tmux %s failed: %s", args[0], msg)
@@ -139,6 +140,16 @@ func tmuxOutput(s config.TmuxServer, args ...string) (string, error) {
 		return "", fmt.Errorf("tmux output exceeds limit")
 	}
 	return out.String(), nil
+}
+
+func tmuxNoServer(msg string) bool {
+	// Failure to create the socket directory means no server can be reached.
+	// Reading or validating an existing directory must still fail closed.
+	return strings.HasPrefix(msg, "couldn't create directory ") ||
+		strings.HasPrefix(msg, "no server running on ") ||
+		strings.HasPrefix(msg, "failed to connect to server: ") ||
+		(strings.HasPrefix(msg, "error connecting to ") &&
+			(strings.HasSuffix(msg, " (No such file or directory)") || strings.HasSuffix(msg, " (Connection refused)")))
 }
 
 type snapshotCapture struct {
@@ -315,7 +326,7 @@ func (b *limitedBuffer) Write(p []byte) (int, error) {
 	return n, nil
 }
 
-func incarnation(s config.TmuxServer) (proto.Authority, error) {
+func readIncarnation(s config.TmuxServer) (proto.Authority, error) {
 	out, err := tmuxOutput(s, "display-message", "-p", "#{pid}")
 	if err != nil {
 		return proto.Authority{}, err
