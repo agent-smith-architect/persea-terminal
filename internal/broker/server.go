@@ -1772,7 +1772,7 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 	// expand against each session's active window and pane, which is exactly
 	// sufficient for the closed eligibility class (single window, single pane,
 	// primary screen).
-	format := "#{session_id}\t#{session_name}\t#{window_width}\t#{window_height}\t#{session_attached}\t#{session_activity}\t#{session_created}\t#{alternate_on}\t#{window_panes}\t#{session_windows}\t#{window_activity}"
+	format := "#{session_id}\t#{session_name}\t#{window_width}\t#{window_height}\t#{session_attached}\t#{session_activity}\t#{session_created}\t#{alternate_on}\t#{window_panes}\t#{session_windows}\t#{window_activity}\t#{@persea_client_id}"
 	out, err := tmuxOutput(server, "list-sessions", "-F", format)
 	if err != nil {
 		r.Status = "error"
@@ -1789,15 +1789,11 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 		return r
 	}
 	for _, line := range strings.Split(strings.TrimRight(out, "\r\n"), "\n") {
-		if len(r.Sessions) >= limit {
-			r.Error = "inventory session limit reached"
-			break
-		}
 		if line == "" {
 			continue
 		}
 		p := strings.Split(line, "\t")
-		if len(p) != 11 {
+		if len(p) != 12 {
 			r.Status = "error"
 			r.Error = "invalid inventory row"
 			return r
@@ -1807,6 +1803,22 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 			r.Status = "error"
 			r.Error = e.Error()
 			return r
+		}
+		// Restore can continue after admission. Live shadows need no additional
+		// calls; only unmarked reserved names need the exact presence checks.
+		if attachmentShadowName(d.Name) && p[11] == "" {
+			if shadow, ok := inspectRestoredShadow(server, d.ID, inc); ok {
+				if err := removeOrphanShadow(server, shadow); err != nil {
+					r.Status, r.Error = "error", err.Error()
+					r.Sessions = nil
+					return r
+				}
+				continue
+			}
+		}
+		if len(r.Sessions) >= limit {
+			r.Error = "inventory session limit reached"
+			continue
 		}
 		a := inc
 		a.Realm = s.config.Realm

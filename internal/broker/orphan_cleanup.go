@@ -45,13 +45,16 @@ type tmuxProcessIdentity struct {
 }
 
 func incarnation(server config.TmuxServer) (proto.Authority, error) {
+	inc, err := readIncarnation(server)
+	if err != nil {
+		return inc, err
+	}
 	shadowAdmission.Lock()
 	defer shadowAdmission.Unlock()
-	inc, err := readIncarnation(server)
 	// Different configured selectors can reach the same running server.
 	identity := tmuxProcessIdentity{inc.UID, inc.BootID, inc.ServerPID, inc.ServerStart}
-	if err != nil || shadowAdmission.ready[identity] {
-		return inc, err
+	if shadowAdmission.ready[identity] {
+		return inc, nil
 	}
 	if err := cleanupServerOrphanedShadows(server, inc); err != nil {
 		return proto.Authority{}, err
@@ -169,6 +172,9 @@ func inspectRestoredShadow(server config.TmuxServer, sessionID string, inc proto
 	row, ok := sessionField(server, sessionID, "#{session_name}\t#{session_attached}\t#{session_windows}\t#{session_created}")
 	fields := strings.Split(row, "\t")
 	if !ok || len(fields) != 4 || !attachmentShadowName(fields[0]) || fields[1] != "0" || fields[2] != "1" {
+		return orphanShadow{}, false
+	}
+	if attachmentShadowPending(fields[0]) {
 		return orphanShadow{}, false
 	}
 	created, err := strconv.ParseInt(fields[3], 10, 64)
