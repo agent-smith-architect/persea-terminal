@@ -70,6 +70,11 @@ another broker reaches the server through a different socket selector. Restored
 copies need no waiting period: the first sweep removes them, and inventory catches
 copies restored later. Ordinary sessions and live attachments are preserved.
 
+An open page treats an unavailable or truncated inventory as temporary. It reports
+that a session ended only when a complete inventory from its healthy server omits
+the pinned identity. After its fast retries, a visible page continues slower
+Offline probes; there is no finite total retry count.
+
 Each serving realm requires the Unified terminal's
 closed manifest block `unified_terminal_dev`. Its required fields are
 `enabled: true`, `server`, `session`, and `observer_session`; the selected

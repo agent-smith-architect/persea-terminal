@@ -796,8 +796,8 @@ export class UnifiedPaneController {
       const identity = sessionScopeIdentity(key);
       const realm = snapshot.inventory.realms.find((realm) => realm.name === identity?.realm);
       const server = realm?.servers.find((server) => server.label === identity?.server);
-      // Only a healthy server can establish that the pinned session is gone.
-      if (!realm || realm.error || server?.status !== "ok") throw new Error("session inventory unavailable");
+      // Only a complete inventory from a healthy server establishes absence.
+      if (!realm || realm.error || server?.status !== "ok" || server.error) throw new Error("session inventory unavailable");
       observer?.identityResolve?.("session_gone");
       throw new ReconnectRefusal("session_gone");
     }

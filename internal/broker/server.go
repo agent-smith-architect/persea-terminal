@@ -1741,7 +1741,11 @@ func (s *Server) inventory(writer *lockedWriter) {
 	remaining := InventorySessionLimit
 	for _, server := range s.config.Servers {
 		r := s.inventoryServer(server, remaining)
-		remaining -= len(r.Sessions)
+		for _, session := range r.Sessions {
+			if !attachmentShadowName(session.Name) {
+				remaining--
+			}
+		}
 		result = append(result, r)
 	}
 	_ = writer.control(proto.Control{Type: "inventory_ok", Servers: result})
@@ -1788,6 +1792,7 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 		}
 		return r
 	}
+	visible := 0
 	for _, line := range strings.Split(strings.TrimRight(out, "\r\n"), "\n") {
 		if line == "" {
 			continue
@@ -1795,7 +1800,8 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 		p := strings.Split(line, "\t")
 		// Restore can continue after admission, including beyond the display
 		// limit. Marker flags keep arbitrary option text out of the row format.
-		if len(p) == 14 && attachmentShadowName(p[1]) {
+		internal := len(p) >= 2 && attachmentShadowName(p[1])
+		if len(p) == 14 && internal {
 			fields := []string{p[0], p[1], p[4], p[9], p[6], p[11], p[12], p[13]}
 			shadow, ok, err := restoredShadowCandidate(server, fields, inc)
 			if err != nil {
@@ -1815,7 +1821,7 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 				}
 			}
 		}
-		if len(r.Sessions) >= limit {
+		if !internal && visible >= limit {
 			r.Error = "inventory session limit reached"
 			continue
 		}
@@ -1844,6 +1850,9 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 			row.Unified = s.unified.projectSession(server.Label, d.ID, parseUnifiedSessionFacts(p[7], p[8], p[9]))
 		}
 		r.Sessions = append(r.Sessions, row)
+		if !internal {
+			visible++
+		}
 	}
 	if s.unified != nil {
 		r.UnifiedDev = s.unified.dashboardLaunch(server.Label, r.Sessions)
