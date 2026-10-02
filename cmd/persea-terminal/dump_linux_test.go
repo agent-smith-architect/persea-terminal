@@ -10,6 +10,8 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+
+	"persea-terminal/internal/processprivacy"
 )
 
 func TestUnifiedBrokerDumpabilityFailurePrecedesJournalOpen(t *testing.T) {
@@ -49,10 +51,10 @@ func TestUnifiedBrokerDumpabilityFailurePrecedesJournalOpen(t *testing.T) {
 
 func TestDisableProcessDumpabilityInChild(t *testing.T) {
 	if os.Getenv("PERSEA_DUMPABILITY_CHILD") == "1" {
-		if err := disableProcessDumpability(); err != nil {
+		if err := processprivacy.DisableDumpability(); err != nil {
 			t.Fatal(err)
 		}
-		value, err := processDumpability()
+		value, err := processprivacy.Dumpability()
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -385,7 +385,7 @@ func (t *tmuxPinnedTransaction) bind(ctx context.Context, req terminal.Transacti
 		"; [ " + shellQuote("#{pane_height}") + " = " + shellQuote(strconv.Itoa(req.Witness.Rows)) + " ] || exit 1" +
 		"; stat=$(cat /proc/" + strconv.Itoa(req.Witness.Pane.PID) + "/stat) || exit 1; suffix=${stat##*) }; set -- $suffix; [ \"$#\" -ge 20 ] && [ \"${20}\" = " + shellQuote(strconv.FormatUint(req.Witness.Pane.StartTime, 10)) + " ]"
 	ownerEnvironment := fmt.Sprintf("%s=%s:%d:%d", attachmentOwnerEnvironment, t.authority.BootID, owner.PID, owner.StartTime)
-	success := fmt.Sprintf("new-session -d -P -F '#{session_id}' -x %d -y %d -s %s -e %s ; link-window -s %s -t %s:1 ; kill-window -t %s:0 ; move-window -s %s:1 -t %s:0 ; set-option -t %s status off ; set-option -t %s prefix None ; set-option -t %s prefix2 None ; set-option -t %s @persea_client_id %s ; set-option -t %s %s %d ; set-option -t %s %s %d", req.Witness.Columns, req.Witness.Rows, shellQuote(name), shellQuote(ownerEnvironment), req.Witness.WindowID, name, name, name, name, name, name, name, name, shellQuote(clientID), name, attachmentOwnerPIDOption, owner.PID, name, attachmentOwnerStartOption, owner.StartTime)
+	success := fmt.Sprintf("new-session -d -P -F '#{session_id}' -x %d -y %d -s %s -e %s ; link-window -s %s -t %s:1 ; kill-window -t %s:0 ; move-window -s %s:1 -t %s:0 ; set-option -t %s status off ; set-option -t %s prefix None ; set-option -t %s prefix2 None ; set-option -t %s @persea_client_id %s ; set-option -t %s %s %d ; set-option -t %s %s %d ; set-environment -u -t %s %s", req.Witness.Columns, req.Witness.Rows, shellQuote(name), shellQuote(ownerEnvironment), req.Witness.WindowID, name, name, name, name, name, name, name, name, shellQuote(clientID), name, attachmentOwnerPIDOption, owner.PID, name, attachmentOwnerStartOption, owner.StartTime, name, attachmentOwnerEnvironment)
 	argv := tmuxArgv(t.server, "if-shell", "-t", pinnedTmuxTarget(req.Witness), condition, success, "run-shell 'exit 77'")
 	birthCtx, cancelBirth := context.WithTimeout(ctx, shadowBirthTimeout)
 	defer cancelBirth()
@@ -409,6 +409,9 @@ func (t *tmuxPinnedTransaction) bind(ctx context.Context, req terminal.Transacti
 		t.mu.Lock()
 		t.client = client
 		t.mu.Unlock()
+	}
+	if !validSessionID(ids.ShadowSessionID) {
+		brokerLogf("component=broker event=attachment_shadow_unresolved server=%q shadow=%q", t.server.Label, name)
 	}
 	if bindErr != nil {
 		return terminal.TransactionResult{Witness: req.Witness, Attachment: ids}, fmt.Errorf("guarded BIND: %w: %s", bindErr, strings.TrimSpace(bindStderr.String()))

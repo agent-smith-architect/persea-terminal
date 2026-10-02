@@ -9,6 +9,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"persea-terminal/internal/config"
@@ -116,7 +117,11 @@ func cleanupServerOrphanedShadows(server config.TmuxServer, inc proto.Authority)
 				continue
 			}
 			alive, err := orphanOwnerAlive(shadow)
-			if err != nil || alive {
+			if err != nil {
+				logShadowOwnerSkip(server, shadow.sessionID, err)
+				continue
+			}
+			if alive {
 				continue
 			}
 		}
@@ -199,6 +204,10 @@ func restoredShadowCandidate(server config.TmuxServer, fields []string, inc prot
 		return orphanShadow{}, false, nil
 	}
 	alive, err := restoredShadowOwnerAlive(server, fields[0], inc.BootID)
+	if errors.Is(err, errShadowOwnerUncertain) {
+		logShadowOwnerSkip(server, fields[0], err)
+		return orphanShadow{}, false, nil
+	}
 	if err != nil || alive {
 		return orphanShadow{}, false, err
 	}
@@ -213,6 +222,9 @@ func restoredShadowOwnerAlive(server config.TmuxServer, sessionID, bootID string
 		if errors.As(err, &failure) && (failure.message == "unknown variable: "+attachmentOwnerEnvironment || failure.message == "no such session: ="+sessionID+":") {
 			return false, nil
 		}
+		if failure != nil && strings.HasPrefix(failure.message, "unknown variable:") {
+			return false, fmt.Errorf("%w: unexpected environment diagnostic", errShadowOwnerUncertain)
+		}
 		return false, err
 	}
 	if out == "-"+attachmentOwnerEnvironment+"\n" {
@@ -220,23 +232,45 @@ func restoredShadowOwnerAlive(server config.TmuxServer, sessionID, bootID string
 	}
 	value, ok := strings.CutPrefix(out, attachmentOwnerEnvironment+"=")
 	if !ok || !strings.HasSuffix(value, "\n") {
-		return false, errors.New("invalid attachment owner environment")
+		return false, fmt.Errorf("%w: invalid environment output", errShadowOwnerUncertain)
 	}
 	parts := strings.Split(strings.TrimSuffix(value, "\n"), ":")
-	if len(parts) != 3 || parts[0] == "" {
-		return false, errors.New("invalid attachment owner witness")
+	if len(parts) != 3 || !canonicalBootID(parts[0]) {
+		return false, fmt.Errorf("%w: invalid witness", errShadowOwnerUncertain)
 	}
 	pid, pidErr := strconv.Atoi(parts[1])
 	start, startErr := strconv.ParseUint(parts[2], 10, 64)
 	if pidErr != nil || pid <= 0 || strconv.Itoa(pid) != parts[1] || startErr != nil || start == 0 || strconv.FormatUint(start, 10) != parts[2] {
-		return false, errors.New("invalid attachment owner witness")
+		return false, fmt.Errorf("%w: invalid witness", errShadowOwnerUncertain)
 	}
 	if parts[0] != bootID {
 		return false, nil
 	}
-	// The product writes this witness only at birth. A dead exact owner cannot
-	// become live again; the destruction guard pins the session and incarnation.
+	// The witness is unchanged until all markers are set. Inspection reads
+	// markers first, and the destruction guard rechecks them before removal.
 	return orphanOwnerAlive(orphanShadow{ownerPID: pid, ownerStart: start})
+}
+
+func canonicalBootID(value string) bool {
+	if len(value) != 36 {
+		return false
+	}
+	for i, c := range value {
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' {
+				return false
+			}
+		} else if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+var errShadowOwnerUncertain = errors.New("attachment owner is uncertain")
+
+func logShadowOwnerSkip(server config.TmuxServer, sessionID string, err error) {
+	brokerLogf("component=broker event=orphan_shadow_skipped server=%q session=%q reason=%q", server.Label, sessionID, err)
 }
 
 var errShadowProtected = errors.New("attachment shadow became protected")
@@ -288,12 +322,25 @@ func sessionField(server config.TmuxServer, sessionID, format string) (string, b
 func orphanOwnerAlive(shadow orphanShadow) (bool, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
-	witness, err := (procProbe{}).Witness(ctx, shadow.ownerPID)
+	witness, err := readOwnerProcess(ctx, shadow.ownerPID)
 	if errors.Is(err, os.ErrNotExist) {
-		return false, nil
+		// Proc visibility can hide a living, non-dumpable process. Only the
+		// kernel's absence result proves death when its identity is unreadable.
+		err = signalOwnerProcess(shadow.ownerPID, 0)
+		switch {
+		case errors.Is(err, syscall.ESRCH):
+			return false, nil
+		case err == nil || errors.Is(err, syscall.EPERM):
+			return true, nil
+		default:
+			return false, fmt.Errorf("%w: probe process: %v", errShadowOwnerUncertain, err)
+		}
 	}
 	if err != nil {
-		return false, err
+		return false, fmt.Errorf("%w: inspect process: %v", errShadowOwnerUncertain, err)
 	}
 	return witness.StartTime == shadow.ownerStart, nil
 }
+
+var readOwnerProcess = (procProbe{}).Witness
+var signalOwnerProcess = syscall.Kill
