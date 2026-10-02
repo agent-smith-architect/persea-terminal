@@ -70,7 +70,10 @@ another broker reaches the server through a different socket selector. Restored
 copies need no waiting period: the first sweep removes them, and inventory catches
 copies restored later. Ordinary sessions and live attachments are preserved.
 If a dead owner's process ID is reused by a process the broker cannot inspect,
-its leftovers remain until that process ID ends. Uncertain ownership is logged
+its leftovers are kept. After that process ends, the next inventory removes a
+leftover without owner options. A leftover with owner options is checked only
+when a broker first connects to that tmux server, so it is removed after the
+next broker restart. Uncertain ownership is logged
 and preserves that session without blocking the rest of the server's inventory.
 The creation witness is removed from the session environment once its ownership
 options are set, so later panes do not inherit it.
