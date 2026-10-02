@@ -132,12 +132,17 @@ func TestObserverWaitersRetainReadFailure(t *testing.T) {
 }
 
 func TestRecordingSettlementRetainsReadyReadFailure(t *testing.T) {
-	cause := errors.New("reader failed before dependency")
+	cause := errors.New("reader failed as dependency returned")
 	for _, dependency := range []string{"done", "result"} {
 		t.Run(dependency, func(t *testing.T) {
 			readResult := newObserverReadResult()
-			readResult.finish(cause)
 			stream := &recordingSettlementStream{readResult: readResult}
+			// Only the dependency can win the select. Publish failure after it
+			// returns, before the deferred reader check, without another waiter.
+			stream.dependencyReturned = func() {
+				stream.dependencyReturned = nil
+				readResult.finish(cause)
+			}
 			done, result := make(chan struct{}), make(chan error, 1)
 			if dependency == "done" {
 				close(done)
