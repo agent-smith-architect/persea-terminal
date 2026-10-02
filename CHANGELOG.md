@@ -10,6 +10,8 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 - The service no longer restarts repeatedly at boot while waiting for a user's tmux server to start.
 - Stray hidden sessions restored after a reboot are cleaned up as soon as the broker sees them, while attachments owned by a running or suspended broker are preserved.
 - Hidden attachment sessions no longer displace regular sessions from a large session list.
+- Large session lists still load when hidden attachments or long session names would make the reply too large.
+- Unreadable or malformed attachment ownership records preserve the affected session without blocking the account's session list.
 
 ### Changed
 

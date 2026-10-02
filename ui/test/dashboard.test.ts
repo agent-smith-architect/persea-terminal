@@ -1,5 +1,4 @@
-import { sessionSwitcherRows, switcherInventory } from "../src/session_switcher";
-import { COLLAPSE_STORAGE_KEY, HISTORY_CHOICES, adoptFailureMessage, brokerInternalSessionName, defaultCardLabel, defaultUnavailableMessage, landingAmbiguousMessage, landingBlockedMessage, landingEndedMessage, resumeCardDetail, resumeCardLabel, aliasRequest, assignText, collapseGroupKey, createFailureMessage, effectiveCollapse, formatPreviewMeta, mutationStatus, parseHistoryChoice, parseInventory, parsePreview, previewFailureMessage, previewRequestPath, readCollapsedGroups, RefreshGate, sessionMatchesFilter, terminalURL, unifiedBlockedMessage, unifiedTerminalURL, writeCollapsedGroups } from "../src/dashboard";
+import { COLLAPSE_STORAGE_KEY, HISTORY_CHOICES, adoptFailureMessage, defaultCardLabel, defaultUnavailableMessage, landingAmbiguousMessage, landingBlockedMessage, landingEndedMessage, resumeCardDetail, resumeCardLabel, aliasRequest, assignText, collapseGroupKey, createFailureMessage, effectiveCollapse, formatPreviewMeta, mutationStatus, parseHistoryChoice, parseInventory, parsePreview, previewFailureMessage, previewRequestPath, readCollapsedGroups, RefreshGate, sessionMatchesFilter, terminalURL, unifiedBlockedMessage, unifiedTerminalURL, writeCollapsedGroups } from "../src/dashboard";
 import { WorkspaceAPI, WorkspaceAPIError, parseWorkspaceList } from "../src/workspace_api";
 import { leaf } from "../src/workspace_model";
 
@@ -49,58 +48,6 @@ assert.equal(secondLiveRequest.url, "/api/aliases/alias%2F2"); assert.equal(seco
 for (const malformed of [null, {}, { realms: [], aliases: null }, { realms: [{ name: "x", servers: "bad" }], aliases: [] }, { realms: [{ name: "x", servers: [{ label: "s", status: "ok", sessions: [{ ...session("x", "s", 1, "n", "$1", ""), handles: { alias: "", observe: "o", control: "c" } }] }] }], aliases: [] }]) {
   assert.throws(() => parseInventory(malformed));
 }
-
-// the broker's internal attachment wrapper is not an operator
-// session. While an attachment is live the broker owns one extra tmux session
-// named `persea-attach-<32 hex>`; the smoke of release 1e8f171 saw it listed
-// as a normal selectable row in the in-terminal switcher and counted in the
-// dashboard list. Every operator-visible list is derived from parseInventory,
-// so the rule is pinned there — and the near misses prove it is the exact
-// documented shape, not a loose "starts with" match that could hide a real
-// operator session.
-{
-  const wrapperName = "persea-attach-ef231fe23ba62a2c8c1f731746c9667f";
-  const wrapperAuthority = authority("local", "private", 1000, "$99");
-  const withWrapper = parseInventory({
-    realms: [{
-      name: "local", display_name: "Local", servers: [{
-        label: "private", status: "ok", can_create: true, sessions: [
-          { ...session("local", "private", 1000, "operator-one", "$1", "h1"), unified: { state: "open", origin: "birth" } },
-          { ...session("local", "private", 1000, wrapperName, "$99", "h99"), unified: { state: "open", origin: "birth" } },
-          session("local", "private", 1000, "persea-attach-ef231fe23ba62a2c8c1f731746c9667", "$2", "h2"),
-          session("local", "private", 1000, "persea-attach-ef231fe23ba62a2c8c1f731746c9667ff", "$3", "h3"),
-          session("local", "private", 1000, "persea-attach-", "$4", "h4"),
-          session("local", "private", 1000, "persea-attach-zf231fe23ba62a2c8c1f731746c9667f", "$5", "h5"),
-          session("local", "private", 1000, "not-persea-attach-ef231fe23ba62a2c8c1f731746c9667f", "$6", "h6"),
-        ],
-      }],
-    }],
-    aliases: [
-      { alias_id: "alias/wrapper", display_alias: "Bound to a wrapper", normalized_alias: "bound to a wrapper", session_incarnation: wrapperAuthority, revision: 2, created_at: "ignored", updated_at: "ignored", state: "bound" },
-    ],
-  });
-  const listed = withWrapper.realms[0].servers[0].sessions;
-  assert.deepEqual(listed.map((item) => item.name), [
-    "operator-one",
-    "persea-attach-ef231fe23ba62a2c8c1f731746c9667",
-    "persea-attach-ef231fe23ba62a2c8c1f731746c9667ff",
-    "persea-attach-",
-    "persea-attach-zf231fe23ba62a2c8c1f731746c9667f",
-    "not-persea-attach-ef231fe23ba62a2c8c1f731746c9667f",
-  ], "only the exact broker wrapper shape may be dropped from the inventory");
-  const counted = withWrapper.realms.reduce((sum, realm) => sum + realm.servers.reduce((n, server) => n + server.sessions.length, 0), 0);
-  assert.equal(counted, 6, "the dashboard session count must not include the broker wrapper");
-  const rows = sessionSwitcherRows(switcherInventory(withWrapper), null, "", () => "blocked");
-  assert.equal(rows.some((row) => row.session.name === wrapperName), false, "the switcher must not render the broker wrapper");
-  assert.equal(rows.filter((row) => row.selectable).some((row) => row.session.name === wrapperName), false, "the broker wrapper must not be selectable");
-  assert.equal(rows.find((row) => row.selectable)?.session.name, "operator-one", "the first explicit choice must never be the broker wrapper");
-  assert.deepEqual(withWrapper.detachedAliases.map((item) => item.aliasId), ["alias/wrapper"], "an alias bound to a dropped wrapper must stay visible as detached, not vanish with the row");
-  assert.equal(brokerInternalSessionName(wrapperName), true);
-  for (const near of ["persea-attach-ef231fe23ba62a2c8c1f731746c9667", "persea-attach-ef231fe23ba62a2c8c1f731746c9667ff", "persea-attach-", "persea-attach-zf231fe23ba62a2c8c1f731746c9667f", "not-persea-attach-ef231fe23ba62a2c8c1f731746c9667f", ""]) {
-    assert.equal(brokerInternalSessionName(near), false, `near miss must not be treated as internal: ${near}`);
-  }
-}
-
 const malicious = "<img src=x onerror=alert(1)>";
 const parsedMalicious = parseInventory({ realms: [{ name: malicious, display_name: malicious, error: malicious, servers: [] }], aliases: [] });
 assert.equal(parsedMalicious.realms[0].name, malicious);

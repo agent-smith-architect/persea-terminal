@@ -1741,14 +1741,47 @@ func (s *Server) inventory(writer *lockedWriter) {
 	remaining := InventorySessionLimit
 	for _, server := range s.config.Servers {
 		r := s.inventoryServer(server, remaining)
-		for _, session := range r.Sessions {
-			if !attachmentShadowName(session.Name) {
-				remaining--
-			}
-		}
+		remaining -= len(r.Sessions)
 		result = append(result, r)
 	}
-	_ = writer.control(proto.Control{Type: "inventory_ok", Servers: result})
+	payload, err := inventoryPayload(result)
+	if err == nil {
+		err = writer.frame(proto.FrameControl, payload)
+	}
+	if err != nil {
+		brokerLogf("component=broker event=inventory_write_failed reason=%q", err)
+	}
+}
+
+func inventoryPayload(servers []proto.ServerInventory) ([]byte, error) {
+	for {
+		payload, err := proto.MarshalControl(proto.Control{Type: "inventory_ok", Servers: servers})
+		if err != nil || len(payload) <= proto.MaxControl {
+			return payload, err
+		}
+		trimmed := false
+		for i := len(servers) - 1; i >= 0; i-- {
+			if n := len(servers[i].Sessions); n > 0 {
+				servers[i].Sessions = servers[i].Sessions[:n-1]
+				servers[i].Error = "inventory session limit reached"
+				trimmed = true
+				break
+			}
+		}
+		if !trimmed {
+			// Configuration bounds labels and server count, but tmux diagnostics
+			// and launch metadata can be arbitrarily long. Preserve availability
+			// information even when those alone cannot fit.
+			for i := range servers {
+				message := "inventory metadata exceeds control frame"
+				if servers[i].Error == "inventory session limit reached" {
+					message = servers[i].Error
+				}
+				servers[i] = proto.ServerInventory{Label: servers[i].Label, Status: "error", Error: message}
+			}
+			return proto.MarshalControl(proto.Control{Type: "inventory_ok", Servers: servers})
+		}
+	}
 }
 
 func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.ServerInventory {
@@ -1821,7 +1854,10 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 				}
 			}
 		}
-		if !internal && visible >= limit {
+		if internal {
+			continue
+		}
+		if visible >= limit {
 			r.Error = "inventory session limit reached"
 			continue
 		}
@@ -1850,9 +1886,7 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 			row.Unified = s.unified.projectSession(server.Label, d.ID, parseUnifiedSessionFacts(p[7], p[8], p[9]))
 		}
 		r.Sessions = append(r.Sessions, row)
-		if !internal {
-			visible++
-		}
+		visible++
 	}
 	if s.unified != nil {
 		r.UnifiedDev = s.unified.dashboardLaunch(server.Label, r.Sessions)

@@ -38,15 +38,11 @@ func TestInternalShadowsDoNotConsumeInventoryLimit(t *testing.T) {
 				}
 				found = found || row.Name == "zz-live"
 			}
-			wantHidden := 0
-			if liveOwner {
-				wantHidden = InventorySessionLimit
-			}
-			if got.Status != "ok" || got.Error != "" || !found || hidden != wantHidden {
+			if got.Status != "ok" || got.Error != "" || !found || hidden != 0 {
 				t.Fatalf("internal rows consumed visible budget: status=%q error=%q hidden=%d found=%t", got.Status, got.Error, hidden, found)
 			}
 			zero := s.inventoryServer(d.tmux, 0)
-			if zero.Status != "ok" || zero.Error != "inventory session limit reached" || len(zero.Sessions) != wantHidden {
+			if zero.Status != "ok" || zero.Error != "inventory session limit reached" || len(zero.Sessions) != 0 {
 				t.Fatalf("zero visible budget changed internal rows: %+v", zero)
 			}
 			other := newDisposable(t)

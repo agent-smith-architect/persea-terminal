@@ -59,7 +59,7 @@ shells would inherit its read-only filesystem, blocked network, and service
 lifetime, and would end whenever the broker restarts.
 
 Session names matching `persea-attach-` followed by exactly 32 hexadecimal
-characters are reserved for internal attachments. The dashboard hides them
+characters are reserved for internal attachments. The broker omits them from inventory
 and session creation refuses them. At startup, when a tmux server first
 appears, and during inventory, the broker removes detached, single-window
 copies whose attachment owner options are all empty or absent and whose session
@@ -69,6 +69,15 @@ protects attachments still being created, even if their broker is suspended or
 another broker reaches the server through a different socket selector. Restored
 copies need no waiting period: the first sweep removes them, and inventory catches
 copies restored later. Ordinary sessions and live attachments are preserved.
+If a dead owner's process ID is reused by a process the broker cannot inspect,
+its leftovers remain until that process ID ends. Uncertain ownership is logged
+and preserves that session without blocking the rest of the server's inventory.
+The creation witness is removed from the session environment once its ownership
+options are set, so later panes do not inherit it.
+
+Inventory replies also have a byte limit. If session names or other row data make
+the reply too large, the broker returns fewer sessions and marks every affected
+server's list incomplete.
 
 An open page treats an unavailable or truncated inventory as temporary. It reports
 that a session ended only when a complete inventory from its healthy server omits
