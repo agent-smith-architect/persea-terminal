@@ -1,9 +1,9 @@
 //go:build !linux
 
-package main
+package processprivacy
 
 import "fmt"
 
-func disableProcessDumpability() error {
+func DisableDumpability() error {
 	return fmt.Errorf("unified terminal development mode requires Linux PR_SET_DUMPABLE")
 }

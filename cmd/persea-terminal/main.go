@@ -8,9 +8,10 @@ import (
 	"persea-terminal/internal/broker"
 	"persea-terminal/internal/config"
 	"persea-terminal/internal/frontdoor"
+	"persea-terminal/internal/processprivacy"
 )
 
-var setBrokerDumpability = disableProcessDumpability
+var setBrokerDumpability = processprivacy.DisableDumpability
 
 func main() {
 	if err := run(os.Args[1:]); err != nil {

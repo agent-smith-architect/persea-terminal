@@ -1,6 +1,6 @@
 //go:build linux
 
-package main
+package processprivacy
 
 import (
 	"fmt"
@@ -12,7 +12,7 @@ const (
 	prSetDumpable = 4
 )
 
-func processDumpability() (uintptr, error) {
+func Dumpability() (uintptr, error) {
 	value, _, errno := syscall.RawSyscall6(syscall.SYS_PRCTL, prGetDumpable, 0, 0, 0, 0, 0)
 	if errno != 0 {
 		return 0, errno
@@ -20,11 +20,11 @@ func processDumpability() (uintptr, error) {
 	return value, nil
 }
 
-func disableProcessDumpability() error {
+func DisableDumpability() error {
 	if _, _, errno := syscall.RawSyscall6(syscall.SYS_PRCTL, prSetDumpable, 0, 0, 0, 0, 0); errno != 0 {
 		return errno
 	}
-	value, err := processDumpability()
+	value, err := Dumpability()
 	if err != nil {
 		return err
 	}

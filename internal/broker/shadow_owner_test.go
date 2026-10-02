@@ -18,7 +18,7 @@ import (
 
 func TestRestoredShadowOwnerWitness(t *testing.T) {
 	for _, inventory := range []bool{false, true} {
-		for _, state := range []string{"absent", "removed", "live", "dead", "old-boot", "reused-pid", "empty", "extra-field", "newline"} {
+		for _, state := range []string{"absent", "removed", "live", "dead", "old-boot", "reused-pid", "empty", "extra-field", "newline", "invalid-boot", "uppercase-boot", "newline-boot", "leading-pid"} {
 			t.Run(fmt.Sprintf("inventory=%t/%s", inventory, state), func(t *testing.T) {
 				d := newDisposable(t)
 				inc, err := readIncarnation(d.tmux)
@@ -65,6 +65,14 @@ func TestRestoredShadowOwnerWitness(t *testing.T) {
 					value += ":extra"
 				case "newline":
 					value += "\n"
+				case "invalid-boot":
+					value = fmt.Sprintf("not-a-boot:%d:%d", owner.PID, owner.StartTime)
+				case "uppercase-boot":
+					value = fmt.Sprintf("AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA:%d:%d", owner.PID, owner.StartTime)
+				case "newline-boot":
+					value = fmt.Sprintf("%s\nextra:%d:%d", boot, owner.PID, owner.StartTime)
+				case "leading-pid":
+					value = fmt.Sprintf("%s:0%d:%d", boot, owner.PID, owner.StartTime)
 				}
 				name := attachmentShadowPrefix + strings.Repeat("9", 32)
 				args := []string{"new-session", "-d", "-s", name}
@@ -76,18 +84,22 @@ func TestRestoredShadowOwnerWitness(t *testing.T) {
 				if state == "removed" {
 					d.run("set-environment", "-r", "-t", "="+id+":", attachmentOwnerEnvironment)
 				}
-				malformed := state == "empty" || state == "extra-field" || state == "newline"
+				malformed := state == "empty" || state == "extra-field" || state == "newline" || state == "invalid-boot" || state == "uppercase-boot" || state == "newline-boot" || state == "leading-pid"
+				logs := captureBrokerLogs(t)
 				if inventory {
 					got := (&Server{config: bootCreationConfig(t, d.tmux)}).inventoryServer(d.tmux, 10)
-					if (got.Status == "error") != malformed {
+					if got.Status != "ok" || got.Error != "" {
 						t.Fatalf("owner inspection inventory: %+v", got)
 					}
-				} else if _, err := incarnation(d.tmux); (err != nil) != malformed {
+				} else if _, err := incarnation(d.tmux); err != nil {
 					t.Fatalf("owner inspection admission: %v", err)
 				}
 				wantPresent := state == "live" || malformed
 				if present, err := tmuxSessionPresent(d.tmux, id); err != nil || present != wantPresent {
 					t.Fatalf("owner %s: present=%t want=%t err=%v", state, present, wantPresent, err)
+				}
+				if malformed && (!strings.Contains(logs.String(), "event=orphan_shadow_skipped") || !strings.Contains(logs.String(), "invalid witness")) {
+					t.Fatalf("uncertain owner skip was not explained: %q", logs.String())
 				}
 			})
 		}
@@ -118,17 +130,21 @@ func TestShadowOwnerEnvironmentReadFailures(t *testing.T) {
 				body += fmt.Sprintf("    sys.stderr.write(%q)\n    sys.exit(1)\n", message+"\n")
 			}
 			installShadowTmuxWrapper(t, body)
+			logs := captureBrokerLogs(t)
 			got := (&Server{config: bootCreationConfig(t, d.tmux)}).inventoryServer(d.tmux, 10)
 			if failure == "missing" {
 				if got.Status != "ok" || len(got.Sessions) != 1 || got.Sessions[0].Name != "alpha" {
 					t.Fatalf("disappeared owner inspection hid healthy inventory: %+v", got)
 				}
 			} else {
-				if got.Status != "error" {
-					t.Fatalf("owner inspection failure was suppressed: %+v", got)
+				if (got.Status == "error") != (failure == "transport") {
+					t.Fatalf("owner inspection failure policy: %+v", got)
 				}
 				if present, err := tmuxSessionPresent(d.tmux, id); err != nil || !present {
 					t.Fatalf("uncertain owner was removed: present=%t err=%v", present, err)
+				}
+				if failure != "transport" && !strings.Contains(logs.String(), "event=orphan_shadow_skipped") {
+					t.Fatalf("environment uncertainty was not logged: %q", logs.String())
 				}
 			}
 		})
