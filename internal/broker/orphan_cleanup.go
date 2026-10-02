@@ -18,33 +18,13 @@ import (
 const attachmentNonceHexLength = 32
 const attachmentOwnerPIDOption = "@persea_broker_pid"
 const attachmentOwnerStartOption = "@persea_broker_start"
+const attachmentOwnerEnvironment = "PERSEA_SHADOW_OWNER"
 
+// Bound the client's normal wait; ownership does not depend on cancellation.
 const shadowBirthTimeout = 3 * time.Second
-const restoredShadowGrace = 4 * shadowBirthTimeout
 
 const shadowMarkerFlags = "#{!=:#{@persea_client_id},}\t#{!=:#{@persea_broker_pid},}\t#{!=:#{@persea_broker_start},}"
 const shadowSessionFormat = "#{session_id}\t#{session_name}\t#{session_attached}\t#{session_windows}\t#{session_created}\t" + shadowMarkerFlags
-
-var shadowClockStart = time.Now()
-
-func shadowClock() (int64, time.Duration) {
-	now := time.Now()
-	return now.Unix(), now.Sub(shadowClockStart)
-}
-
-type restoredShadowKey struct {
-	process tmuxProcessIdentity
-	id      string
-	created int64
-}
-
-// A wall-clock step must not age another broker's unfinished birth. Require
-// a full grace period since this process first observed the session as well.
-var restoredShadowObservations = struct {
-	sync.Mutex
-	first map[restoredShadowKey]time.Duration
-	now   func() (int64, time.Duration)
-}{first: make(map[restoredShadowKey]time.Duration), now: shadowClock}
 
 type orphanShadow struct {
 	sessionID  string
@@ -122,7 +102,10 @@ func cleanupServerOrphanedShadows(server config.TmuxServer, inc proto.Authority)
 		if len(fields) < 2 || !attachmentShadowName(fields[1]) {
 			continue
 		}
-		shadow, restored := restoredShadowCandidate(fields, inc)
+		shadow, restored, err := restoredShadowCandidate(server, fields, inc)
+		if err != nil {
+			return err
+		}
 		if !restored {
 			if len(fields) != 8 || fields[5] != "1" || fields[6] != "1" || fields[7] != "1" {
 				continue
@@ -203,31 +186,57 @@ func inspectRestoredShadow(server config.TmuxServer, sessionID string, inc proto
 	if !ok {
 		return orphanShadow{}, false
 	}
-	return restoredShadowCandidate(strings.Split(row, "\t"), inc)
+	shadow, candidate, err := restoredShadowCandidate(server, strings.Split(row, "\t"), inc)
+	return shadow, candidate && err == nil
 }
 
-func restoredShadowCandidate(fields []string, inc proto.Authority) (orphanShadow, bool) {
+func restoredShadowCandidate(server config.TmuxServer, fields []string, inc proto.Authority) (orphanShadow, bool, error) {
 	if len(fields) != 8 || !validSessionID(fields[0]) || !attachmentShadowName(fields[1]) || fields[2] != "0" || fields[3] != "1" || fields[5] != "0" || fields[6] != "0" || fields[7] != "0" {
-		return orphanShadow{}, false
+		return orphanShadow{}, false, nil
 	}
 	created, err := strconv.ParseInt(fields[4], 10, 64)
 	if err != nil || created <= 0 {
-		return orphanShadow{}, false
+		return orphanShadow{}, false, nil
 	}
-	key := restoredShadowKey{tmuxProcessIdentity{inc.UID, inc.BootID, inc.ServerPID, inc.ServerStart}, fields[0], created}
-	restoredShadowObservations.Lock()
-	wall, elapsed := restoredShadowObservations.now()
-	first, seen := restoredShadowObservations.first[key]
-	if !seen {
-		first = elapsed
-		restoredShadowObservations.first[key] = first
-	}
-	restoredShadowObservations.Unlock()
-	if elapsed-first < restoredShadowGrace || wall-created < int64(restoredShadowGrace/time.Second) || attachmentShadowPending(fields[1]) {
-		return orphanShadow{}, false
+	alive, err := restoredShadowOwnerAlive(server, fields[0], inc.BootID)
+	if err != nil || alive {
+		return orphanShadow{}, false, err
 	}
 	inc.SessionCreated = created
-	return orphanShadow{sessionID: fields[0], name: fields[1], restored: true, authority: inc}, true
+	return orphanShadow{sessionID: fields[0], name: fields[1], restored: true, authority: inc}, true, nil
+}
+
+func restoredShadowOwnerAlive(server config.TmuxServer, sessionID, bootID string) (bool, error) {
+	out, err := tmuxOutput(server, "show-environment", "-t", "="+sessionID+":", attachmentOwnerEnvironment)
+	if err != nil {
+		var failure *tmuxCommandError
+		if errors.As(err, &failure) && (failure.message == "unknown variable: "+attachmentOwnerEnvironment || failure.message == "no such session: ="+sessionID+":") {
+			return false, nil
+		}
+		return false, err
+	}
+	if out == "-"+attachmentOwnerEnvironment+"\n" {
+		return false, nil
+	}
+	value, ok := strings.CutPrefix(out, attachmentOwnerEnvironment+"=")
+	if !ok || !strings.HasSuffix(value, "\n") {
+		return false, errors.New("invalid attachment owner environment")
+	}
+	parts := strings.Split(strings.TrimSuffix(value, "\n"), ":")
+	if len(parts) != 3 || parts[0] == "" {
+		return false, errors.New("invalid attachment owner witness")
+	}
+	pid, pidErr := strconv.Atoi(parts[1])
+	start, startErr := strconv.ParseUint(parts[2], 10, 64)
+	if pidErr != nil || pid <= 0 || strconv.Itoa(pid) != parts[1] || startErr != nil || start == 0 || strconv.FormatUint(start, 10) != parts[2] {
+		return false, errors.New("invalid attachment owner witness")
+	}
+	if parts[0] != bootID {
+		return false, nil
+	}
+	// The product writes this witness only at birth. A dead exact owner cannot
+	// become live again; the destruction guard pins the session and incarnation.
+	return orphanOwnerAlive(orphanShadow{ownerPID: pid, ownerStart: start})
 }
 
 var errShadowProtected = errors.New("attachment shadow became protected")
@@ -257,13 +266,6 @@ func shadowCleanupRefusal(server config.TmuxServer, shadow orphanShadow, refusal
 
 func reapOrphanShadow(server config.TmuxServer, shadow orphanShadow) (bool, error) {
 	err := removeOrphanShadow(server, shadow)
-	if shadow.restored && (err == nil || errors.Is(err, errShadowMissing)) {
-		inc := shadow.authority
-		key := restoredShadowKey{tmuxProcessIdentity{inc.UID, inc.BootID, inc.ServerPID, inc.ServerStart}, shadow.sessionID, inc.SessionCreated}
-		restoredShadowObservations.Lock()
-		delete(restoredShadowObservations.first, key)
-		restoredShadowObservations.Unlock()
-	}
 	if errors.Is(err, errShadowProtected) || errors.Is(err, errShadowMissing) {
 		brokerLogf("component=broker event=orphan_shadow_skipped server=%q session=%q reason=%q", server.Label, shadow.sessionID, err)
 		return errors.Is(err, errShadowMissing), nil

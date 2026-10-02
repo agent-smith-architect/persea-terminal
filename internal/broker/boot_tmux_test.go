@@ -216,7 +216,6 @@ func TestObserverSpawnGatesIncarnation(t *testing.T) {
 				name := attachmentShadowPrefix + strings.Repeat("f", 32)
 				d.run("new-session", "-d", "-s", name, "sleep 600")
 				id = d.run("display-message", "-p", "-t", name, "#{session_id}")
-				ageRestoredShadow(t, d.tmux, id)
 			}
 			ctx, cancel := context.WithCancel(context.Background())
 			defer func() {

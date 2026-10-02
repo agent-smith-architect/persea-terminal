@@ -1797,7 +1797,13 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 		// limit. Marker flags keep arbitrary option text out of the row format.
 		if len(p) == 14 && attachmentShadowName(p[1]) {
 			fields := []string{p[0], p[1], p[4], p[9], p[6], p[11], p[12], p[13]}
-			if shadow, ok := restoredShadowCandidate(fields, inc); ok {
+			shadow, ok, err := restoredShadowCandidate(server, fields, inc)
+			if err != nil {
+				r.Status, r.Error = "error", err.Error()
+				r.Sessions = nil
+				return r
+			}
+			if ok {
 				removed, err := reapOrphanShadow(server, shadow)
 				if err != nil {
 					r.Status, r.Error = "error", err.Error()

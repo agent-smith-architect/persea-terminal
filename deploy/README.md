@@ -62,12 +62,13 @@ Session names matching `persea-attach-` followed by exactly 32 hexadecimal
 characters are reserved for internal attachments. The dashboard hides them
 and session creation refuses them. At startup, when a tmux server first
 appears, and during inventory, the broker removes detached, single-window
-copies whose attachment owner options are all empty or absent. Each copy must
-be at least 12 seconds old and have been observed for at least 12 seconds before
-it can be removed. Inventory catches copies restored after the server became
-available. Ordinary sessions, live attachments, and attachments still being
-created are preserved, including when brokers reach the same server through
-different socket selectors.
+copies whose attachment owner options are all empty or absent and whose session
+environment has no living broker owner. Each attachment records its owner's boot
+ID, process ID and process start time as part of creating the session. This
+protects attachments still being created, even if their broker is suspended or
+another broker reaches the server through a different socket selector. Restored
+copies need no waiting period: the first sweep removes them, and inventory catches
+copies restored later. Ordinary sessions and live attachments are preserved.
 
 Each serving realm requires the Unified terminal's
 closed manifest block `unified_terminal_dev`. Its required fields are
