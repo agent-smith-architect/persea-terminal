@@ -69,17 +69,19 @@ protects attachments still being created, even if their broker is suspended or
 another broker reaches the server through a different socket selector. Restored
 copies need no waiting period: the first sweep removes them, and inventory catches
 copies restored later. Ordinary sessions and live attachments are preserved.
-An interrupted attachment with only some ownership options can remain hidden.
+An interrupted attachment with only some ownership options matches neither rule
+and remains hidden, also after a broker restart.
 If a dead owner's process ID is reused by a process the broker cannot inspect,
 its leftovers are kept. After that process ends, a later inventory removes a
-leftover without owner options. A leftover with owner options is checked only
-when a broker first connects to that tmux server, so it is removed after the
-next broker restart. Uncertain ownership is logged
+leftover without owner options. A leftover with all three owner options is
+checked only when a broker first connects to that tmux server, so it is removed
+after the next broker restart. Uncertain ownership is logged
 and preserves that session without blocking the rest of the server's inventory.
 The creation witness is removed from the session environment once its ownership
 options are set, so later panes do not inherit it.
 
-Later inventories take turns among configured servers and inspect at most four
+The first sweep of a newly started tmux server inspects every hidden copy. After
+it, inventories take turns among configured servers and inspect at most four
 eligible hidden copies per reply. A cursor walks each server's copies in finite
 rounds, so live owners do not prevent later copies from being checked. Copies
 waiting for inspection remain hidden and do not make the visible list incomplete.
