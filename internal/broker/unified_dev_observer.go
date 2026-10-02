@@ -141,21 +141,25 @@ func (unit *unifiedDevUnit) run(ctx context.Context) {
 func (unit *unifiedDevUnit) serve(ctx context.Context) error {
 	defer unit.ptmx.Close()
 	read := make(chan []byte, 16)
-	readErr := make(chan error, 1)
+	readResult := newObserverReadResult()
 	unit.memory.hold()
 	go func() {
 		defer unit.memory.done()
-		unifiedDevReadLoop(unit.ptmx, read, readErr, unit.done, &unit.readFailed)
+		if readLoop := unit.owner.observerReadLoop; readLoop != nil {
+			readLoop(unit, read, readResult)
+			return
+		}
+		unifiedDevReadLoop(unit.ptmx, read, readResult, unit.done, &unit.readFailed)
 	}()
 	decoder := controlmode.NewBudgetedDecoder(unit.memory)
 	defer decoder.Release()
 	if unit.birth.adoption != nil {
 		unit.progress.setStage(observerStageAttach)
-		if err := unit.finishAdoptionAttach(ctx, decoder, read, readErr); err != nil {
+		if err := unit.finishAdoptionAttach(ctx, decoder, read, readResult); err != nil {
 			return err
 		}
 		unit.progress.setStage(observerStageReady)
-		if err := unit.awaitReady(ctx, decoder, read, readErr); err != nil {
+		if err := unit.awaitReady(ctx, decoder, read, readResult); err != nil {
 			return err
 		}
 		if edge := unit.owner.observerReadinessEdge; edge != nil {
@@ -164,12 +168,12 @@ func (unit *unifiedDevUnit) serve(ctx context.Context) error {
 			}
 		}
 		unit.progress.setStage(observerStageFlags)
-		if err := unit.verifyObserverClientFlags(ctx, decoder, read, readErr); err != nil {
+		if err := unit.verifyObserverClientFlags(ctx, decoder, read, readResult); err != nil {
 			return err
 		}
 		if recovery := unit.birth.adoption.recovery; recovery != nil {
 			unit.progress.setStage(observerStageRotation)
-			if err := unit.runRotation(ctx, decoder, read, readErr, recovery); err != nil {
+			if err := unit.runRotation(ctx, decoder, read, readResult, recovery); err != nil {
 				return err
 			}
 			unit.delivered = true
@@ -178,17 +182,17 @@ func (unit *unifiedDevUnit) serve(ctx context.Context) error {
 			unit.owner.mu.Unlock()
 		} else {
 			unit.progress.setStage(observerStageAdoption)
-			if err := unit.runAdoption(ctx, decoder, read, readErr); err != nil {
+			if err := unit.runAdoption(ctx, decoder, read, readResult); err != nil {
 				return err
 			}
 		}
 	} else {
 		unit.progress.setStage(observerStageBirth)
-		if err := unit.finishBirth(ctx, decoder, read, readErr); err != nil {
+		if err := unit.finishBirth(ctx, decoder, read, readResult); err != nil {
 			return err
 		}
 		unit.progress.setStage(observerStageReady)
-		if err := unit.awaitReady(ctx, decoder, read, readErr); err != nil {
+		if err := unit.awaitReady(ctx, decoder, read, readResult); err != nil {
 			return err
 		}
 		if edge := unit.owner.observerReadinessEdge; edge != nil {
@@ -197,7 +201,7 @@ func (unit *unifiedDevUnit) serve(ctx context.Context) error {
 			}
 		}
 		unit.progress.setStage(observerStageFlags)
-		if err := unit.verifyObserverClientFlags(ctx, decoder, read, readErr); err != nil {
+		if err := unit.verifyObserverClientFlags(ctx, decoder, read, readResult); err != nil {
 			return err
 		}
 	}
@@ -213,7 +217,8 @@ func (unit *unifiedDevUnit) serve(ctx context.Context) error {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case err := <-readErr:
+		case <-readResult.done():
+			err := readResult.err
 			unit.progress.setStage(observerStageRead)
 			if ctx.Err() != nil || errors.Is(err, io.EOF) {
 				return ctx.Err()
@@ -226,7 +231,7 @@ func (unit *unifiedDevUnit) serve(ctx context.Context) error {
 				continue
 			}
 			if request.birthCapture != nil {
-				err := unit.captureBirthInitial(ctx, decoder, read, readErr, request)
+				err := unit.captureBirthInitial(ctx, decoder, read, readResult, request)
 				request.done <- unifiedDevCommandResult{err: err}
 				if err != nil {
 					return err
@@ -235,7 +240,7 @@ func (unit *unifiedDevUnit) serve(ctx context.Context) error {
 			}
 			if request.rotation != nil {
 				unit.progress.setStage(observerStageRotation)
-				err := unit.runRotation(ctx, decoder, read, readErr, request.rotation)
+				err := unit.runRotation(ctx, decoder, read, readResult, request.rotation)
 				request.done <- unifiedDevCommandResult{err: err}
 				if errors.Is(err, ErrUnifiedRotateFatal) || errors.Is(err, ErrUnifiedObserverFlowControl) {
 					return err
@@ -250,7 +255,7 @@ func (unit *unifiedDevUnit) serve(ctx context.Context) error {
 				request.done <- unifiedDevCommandResult{err: err}
 				continue
 			}
-			if err := unit.finishCommand(ctx, decoder, read, readErr, request); err != nil {
+			if err := unit.finishCommand(ctx, decoder, read, readResult, request); err != nil {
 				request.done <- unifiedDevCommandResult{err: err}
 			}
 		case chunk := <-read:
@@ -262,16 +267,40 @@ func (unit *unifiedDevUnit) serve(ctx context.Context) error {
 	}
 }
 
+// A terminal read result belongs to every waiter on this observer, including
+// waiters entered after a command has already observed the failure.
+type observerReadResult struct {
+	finished chan struct{}
+	err      error
+}
+
+func newObserverReadResult() *observerReadResult {
+	return &observerReadResult{finished: make(chan struct{})}
+}
+
+func (result *observerReadResult) done() <-chan struct{} {
+	if result == nil {
+		return nil
+	}
+	return result.finished
+}
+
+// Only the reader publishes; closing finished makes err visible to all waiters.
+func (result *observerReadResult) finish(err error) {
+	result.err = err
+	close(result.finished)
+}
+
 // unifiedDevReadLoop normalizes the control PTY's CR-LF line endings into the
 // byte stream the decoder consumes. It stops feeding once the unit is done, so
 // a dead unit cannot strand this goroutine on a full channel.
-func unifiedDevReadLoop(ptmx *os.File, read chan<- []byte, readErr chan<- error, done <-chan struct{}, failed *atomic.Bool) {
+func unifiedDevReadLoop(ptmx *os.File, read chan<- []byte, readResult *observerReadResult, done <-chan struct{}, failed *atomic.Bool) {
 	buffer := make([]byte, 64<<10)
 	pendingCR := false
 	for {
 		n, err := ptmx.Read(buffer)
 		if err != nil {
-			// Transport health is independent of consuming the error channel.
+			// Publish transport health before delivering any final bytes.
 			// A ready manager result cannot outrun a known observer read failure.
 			failed.Store(true)
 		}
@@ -302,7 +331,7 @@ func unifiedDevReadLoop(ptmx *os.File, read chan<- []byte, readErr chan<- error,
 			}
 		}
 		if err != nil {
-			readErr <- err
+			readResult.finish(err)
 			return
 		}
 	}
@@ -326,7 +355,7 @@ func unifiedDevDisableEcho(file *os.File) error {
 // command IS the session creation, tmux wraps the printed session identity in
 // the connection's first %begin/%end block (measured: n3_born.txt), and any
 // pane output can only follow that block on this same stream.
-func (unit *unifiedDevUnit) finishBirth(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error) error {
+func (unit *unifiedDevUnit) finishBirth(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult) error {
 	var batch controlmode.EventBatch
 	defer batch.Release()
 	effects := unit.owner
@@ -337,7 +366,8 @@ func (unit *unifiedDevUnit) finishBirth(ctx context.Context, decoder *controlmod
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case err := <-readErr:
+		case <-readResult.done():
+			err := readResult.err
 			return err
 		case chunk := <-read:
 			events, err := batch.Feed(decoder, chunk)
@@ -444,7 +474,7 @@ func (unit *unifiedDevUnit) consumeReadyEvent(event controlmode.Event) error {
 // awaitReady blocks until the readiness watch has seen the observed session's
 // own %session-changed, which may already have arrived inside the creation
 // chunk consumed by finishBirth.
-func (unit *unifiedDevUnit) awaitReady(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error) error {
+func (unit *unifiedDevUnit) awaitReady(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult) error {
 	var batch controlmode.EventBatch
 	defer batch.Release()
 	for {
@@ -454,7 +484,8 @@ func (unit *unifiedDevUnit) awaitReady(ctx context.Context, decoder *controlmode
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case err := <-readErr:
+		case <-readResult.done():
+			err := readResult.err
 			return err
 		case chunk := <-read:
 			events, err := batch.Feed(decoder, chunk)
@@ -475,7 +506,7 @@ func (unit *unifiedDevUnit) awaitReady(ctx context.Context, decoder *controlmode
 // pause-after and no-output flags are additive and another same-server client
 // may set them at any time, so this is an early rejection gate rather than a
 // lasting proof. The adoption composite repeats the check at its boundary.
-func (unit *unifiedDevUnit) verifyObserverClientFlags(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error) error {
+func (unit *unifiedDevUnit) verifyObserverClientFlags(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult) error {
 	request := unifiedDevCommand{
 		args:            []string{"list-clients", "-F", "#{client_pid}|#{client_flags}"},
 		consumeResponse: func(raw string) error { return rejectObserverClientInventory(raw, unit.process.Process.Pid) },
@@ -489,7 +520,7 @@ func (unit *unifiedDevUnit) verifyObserverClientFlags(ctx context.Context, decod
 	if _, err := io.WriteString(unit.ptmx, strings.Join(line, " ")+"\n"); err != nil {
 		return err
 	}
-	if err := unit.finishCommand(ctx, decoder, read, readErr, request); err != nil {
+	if err := unit.finishCommand(ctx, decoder, read, readResult, request); err != nil {
 		return err
 	}
 	return (<-request.done).err
@@ -541,7 +572,7 @@ func rejectObserverClientFlags(raw string) error {
 // this returns success and the caller's exact witness recheck is the only
 // rejection detector. That is a property of tmux, established by the Phase-1
 // proof, not an assumption.
-func (unit *unifiedDevUnit) finishCommand(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error, request unifiedDevCommand) error {
+func (unit *unifiedDevUnit) finishCommand(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult, request unifiedDevCommand) error {
 	var batch controlmode.EventBatch
 	defer batch.Release()
 	remaining := request.blocks
@@ -554,7 +585,8 @@ func (unit *unifiedDevUnit) finishCommand(ctx context.Context, decoder *controlm
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case err := <-readErr:
+		case <-readResult.done():
+			err := readResult.err
 			return err
 		case chunk := <-read:
 			events, err := batch.Feed(decoder, chunk)

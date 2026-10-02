@@ -88,14 +88,15 @@ type UnifiedAdoption struct {
 // block (measured: the message text arrives as the block's response line), and
 // the attach is the block's only command, so %error here IS the typed
 // missing-session refusal — no message parsing is needed or wanted.
-func (unit *unifiedDevUnit) finishAdoptionAttach(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error) error {
+func (unit *unifiedDevUnit) finishAdoptionAttach(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult) error {
 	var batch controlmode.EventBatch
 	defer batch.Release()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case err := <-readErr:
+		case <-readResult.done():
+			err := readResult.err
 			return err
 		case chunk := <-read:
 			events, err := batch.Feed(decoder, chunk)
@@ -140,7 +141,7 @@ func (unit *unifiedDevUnit) finishAdoptionAttach(ctx context.Context, decoder *c
 // synthesized bootstrap, and registration. It answers the founding request
 // itself only on success; every failure propagates so the unit's death
 // protocol delivers it exactly once.
-func (unit *unifiedDevUnit) runAdoption(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error) error {
+func (unit *unifiedDevUnit) runAdoption(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult) error {
 	effects := unit.owner
 	sessionID := unit.birth.adoption.sessionID
 	source, err := buildSourceWitness(ctx, effects.server, "", sessionID)
@@ -161,14 +162,14 @@ func (unit *unifiedDevUnit) runAdoption(ctx context.Context, decoder *controlmod
 				return ctx.Err()
 			}
 		}
-		reservation, key, trimmed, err := unit.submitAdoptionComposite(ctx, decoder, read, readErr, holder, &witness, attempt)
+		reservation, key, trimmed, err := unit.submitAdoptionComposite(ctx, decoder, read, readResult, holder, &witness, attempt)
 		if errors.Is(err, errUnifiedAdoptDrift) {
 			continue
 		}
 		if err != nil {
 			return err
 		}
-		return unit.finishAdoption(ctx, decoder, read, readErr, holder, reservation, key, trimmed)
+		return unit.finishAdoption(ctx, decoder, read, readResult, holder, reservation, key, trimmed)
 	}
 	return ErrUnifiedAdoptUnstable
 }
@@ -176,9 +177,9 @@ func (unit *unifiedDevUnit) runAdoption(ctx context.Context, decoder *controlmod
 // The accepted adoption has one failure owner across receipt, source recheck,
 // authority validation and publication. Every unsuccessful exit drains its
 // stream through settlement before the provisional journal can be removed.
-func (unit *unifiedDevUnit) finishAdoption(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error, holder *unifiedDevBirth, reservation *unifiedjournal.AdoptionReservation, key unifiedjournal.PaneKey, trimmed bool) (err error) {
+func (unit *unifiedDevUnit) finishAdoption(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult, holder *unifiedDevBirth, reservation *unifiedjournal.AdoptionReservation, key unifiedjournal.PaneKey, trimmed bool) (err error) {
 	effects := unit.owner
-	stream := &recordingSettlementStream{unit: unit, decoder: decoder, read: read, readErr: readErr}
+	stream := &recordingSettlementStream{unit: unit, decoder: decoder, read: read, readResult: readResult}
 	published := false
 	defer func() {
 		if !published {
@@ -253,7 +254,7 @@ func (stream *recordingSettlementStream) abortAdoption(holder *unifiedDevBirth, 
 // separately waits for the exact operation receipt. On any failure
 // the holder is released and its buffer discarded before the decoded remainder
 // is routed onward.
-func (unit *unifiedDevUnit) submitAdoptionComposite(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error, holder *unifiedDevBirth, witness *controlmode.PaneWitness, attempt int) (*unifiedjournal.AdoptionReservation, unifiedjournal.PaneKey, bool, error) {
+func (unit *unifiedDevUnit) submitAdoptionComposite(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult, holder *unifiedDevBirth, witness *controlmode.PaneWitness, attempt int) (*unifiedjournal.AdoptionReservation, unifiedjournal.PaneKey, bool, error) {
 	var batch controlmode.EventBatch
 	defer batch.Release()
 	effects := unit.owner
@@ -293,7 +294,8 @@ func (unit *unifiedDevUnit) submitAdoptionComposite(ctx context.Context, decoder
 		case <-ctx.Done():
 			release()
 			return nil, unifiedjournal.PaneKey{}, false, ctx.Err()
-		case err := <-readErr:
+		case <-readResult.done():
+			err := readResult.err
 			release()
 			return nil, unifiedjournal.PaneKey{}, false, err
 		case chunk := <-read:
@@ -348,7 +350,7 @@ func (unit *unifiedDevUnit) submitAdoptionComposite(ctx context.Context, decoder
 							// this unit dies before registration, so the
 							// provisional charge is released with it.
 							if reservation != nil {
-								stream := &recordingSettlementStream{unit: unit, decoder: decoder, read: read, readErr: readErr}
+								stream := &recordingSettlementStream{unit: unit, decoder: decoder, read: read, readResult: readResult}
 								consumeErr = stream.abortAdoption(holder, reservation, consumeErr)
 								release()
 							}

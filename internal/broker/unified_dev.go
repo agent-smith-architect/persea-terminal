@@ -129,6 +129,9 @@ type UnifiedDevPaneEffects struct {
 	// tmux client deterministically race the exact production boundary without
 	// replacing any product decision or data path.
 	observerReadinessEdge func(session string) error
+	// observerReadLoop lets tests order transport failure before a command
+	// returns to the ordinary loop, without changing recovery decisions.
+	observerReadLoop func(*unifiedDevUnit, chan []byte, *observerReadResult)
 	// geometryRefusal is a test seam: it may refuse a guarded resize before any
 	// mutation, the way a not-yet-journal-ready target or an exhausted command
 	// budget does, so the operational (non-closing) resize_failed path is
