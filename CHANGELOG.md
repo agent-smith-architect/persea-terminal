@@ -2,11 +2,16 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.1.13 — 2026-10-02
 
 ### Fixed
 
-- A terminal page no longer stays frozen until the broker restarts when its connection to tmux fails during recording.
+- A terminal no longer stops updating until the service restarts when the recorder of its output loses its connection to tmux while it starts a new recording file.
+- The session list no longer misses its reply deadline when many hidden attachment sessions wait for cleanup. Each reply checks at most four of them, in turn.
+
+### Testing notes
+
+- The recorder fix was tested with a forced order of events and with real tmux output bursts: none of 48 bursts on 4 CPUs and on 1 CPU left a recorder stuck (before the fix, 14 did). The session-list fix was tested with 600 hidden sessions over the real broker protocol: each reply took well under 0.1 s. The first cleanup of a newly started tmux server still checks every hidden session, and one tmux call that hangs can still delay a reply, as before.
 
 ## 0.1.12 — 2026-10-02
 
