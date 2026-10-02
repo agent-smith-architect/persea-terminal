@@ -686,6 +686,9 @@ type recordingSettlementStream struct {
 	read       <-chan []byte
 	readResult *observerReadResult
 	err        error
+
+	// dependencyReturned is a test seam before the final reader check.
+	dependencyReturned func()
 }
 
 func (stream *recordingSettlementStream) fail(err error) {
@@ -706,6 +709,9 @@ func (stream *recordingSettlementStream) wait(done <-chan struct{}, result <-cha
 		default:
 		}
 	}()
+	if returned := stream.dependencyReturned; returned != nil {
+		defer returned()
+	}
 	for {
 		select {
 		case <-done:
