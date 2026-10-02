@@ -40,10 +40,12 @@ type orphanShadow struct {
 // Incarnations are published only after their first sweep. Keep every admitted
 // identity for the process lifetime: revisiting a socket must never sweep an
 // incarnation on which this broker could already have created a shadow.
-var shadowAdmission = struct {
+var shadowAdmission sync.Map // tmuxProcessIdentity -> *tmuxShadowAdmission
+
+type tmuxShadowAdmission struct {
 	sync.Mutex
-	ready map[tmuxProcessIdentity]bool
-}{ready: make(map[tmuxProcessIdentity]bool)}
+	ready bool
+}
 
 type tmuxProcessIdentity struct {
 	uid   uint32
@@ -57,11 +59,13 @@ func incarnation(server config.TmuxServer) (proto.Authority, error) {
 	if err != nil {
 		return inc, err
 	}
-	shadowAdmission.Lock()
-	defer shadowAdmission.Unlock()
 	// Different configured selectors can reach the same running server.
 	identity := tmuxProcessIdentity{inc.UID, inc.BootID, inc.ServerPID, inc.ServerStart}
-	if shadowAdmission.ready[identity] {
+	value, _ := shadowAdmission.LoadOrStore(identity, &tmuxShadowAdmission{})
+	admission := value.(*tmuxShadowAdmission)
+	admission.Lock()
+	defer admission.Unlock()
+	if admission.ready {
 		return inc, nil
 	}
 	if err := cleanupServerOrphanedShadows(server, inc); err != nil {
@@ -74,7 +78,7 @@ func incarnation(server config.TmuxServer) (proto.Authority, error) {
 	if !sameIncarnation(inc, after) {
 		return proto.Authority{}, errStaleTarget
 	}
-	shadowAdmission.ready[identity] = true
+	admission.ready = true
 	return inc, nil
 }
 
