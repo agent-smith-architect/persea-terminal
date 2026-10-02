@@ -61,30 +61,6 @@ function integer(value: unknown, label: string, minimum = 0): number { if (typeo
 function boolean(value: unknown, label: string): boolean { if (value === undefined || value === null) return false; if (typeof value !== "boolean") throw new Error(`${label} must be a boolean`); return value; }
 function optionalString(value: unknown, label: string): string | undefined {return value === undefined ? undefined : string(value, label); }
 
-// Broker-internal attachment wrapper sessions.
-//
-// While an attachment is live the broker owns one extra tmux session named
-// `persea-attach-<32 hex nonce>` (`internal/broker/attachment.go`
-// attachmentShadowPrefix; `internal/broker/session_create.go` describes it as
-// "an internal wrapper with witness and cleanup invariants", as opposed to an
-// ordinary operator session). It is not something an operator created, may
-// attach to, or should be counted among their sessions, and it disappears when
-// the attachment ends.
-//
-// There is no typed marker to prefer: the inventory wire record
-// (`proto.Session` / `proto.ServerInventory` in internal/proto/control.go)
-// carries no "internal" flag, so the exact documented name shape is the only
-// witness the browser has. It is matched exactly — the literal prefix plus the
-// nonce the broker mints — so an operator session merely *starting* with those
-// characters is still shown. The nonce shape is the broker's own recognizer
-// (`inspectOrphanShadow`: the prefix, then exactly attachmentNonceHexLength
-// characters that hex-decode, which accepts either case; minting is `%x` of 16
-// random bytes, so 32 lowercase hex in practice). This is deliberately the
-// single place the rule lives: every operator-visible list (dashboard rows,
-// dashboard counts, the in-terminal switcher, workspace pickers) is derived
-// from parseInventory.
-const BROKER_INTERNAL_SESSION = /^persea-attach-[0-9a-fA-F]{32}$/;
-export function brokerInternalSessionName(name: string): boolean { return BROKER_INTERNAL_SESSION.test(name); }
 type ParsedAlias = DashboardAlias & { incarnationKey: string };
 
 function authorityKey(value: unknown, label: string): { key: string; uid: number } {
@@ -162,15 +138,9 @@ export function parseInventory(value: unknown): DashboardInventory {
         if (sessionRealm !== name || sessionServer !== label) throw new Error(`${path} identity does not match its group`);
         if (realmUID !== undefined && realmUID !== authority.uid) throw new Error(`realm ${name} contains inconsistent UIDs`); realmUID = authority.uid;
         const sessionName = string(session.name, `${path}.name`);
-        // A wrapper is not an operator session, so an alias bound to its
-        // incarnation is not "projected" by any row the operator can see: it
-        // must keep surfacing as a detached alias rather than disappearing
-        // behind a row this parser is about to drop.
-        const matchingAliases = brokerInternalSessionName(sessionName) ? [] : aliasesByAuthority.get(authority.key) ?? []; for (const alias of matchingAliases) projected.add(alias.aliasId);
+        const matchingAliases = aliasesByAuthority.get(authority.key) ?? []; for (const alias of matchingAliases) projected.add(alias.aliasId);
         const handles=object(session.handles,`${path}.handles`); const unified = parseUnifiedSession(session.unified, `${path}.unified`); return { handles:{alias:string(handles.alias,`${path}.handles.alias`),observe:string(handles.observe,`${path}.handles.observe`),control:string(handles.control,`${path}.handles.control`)}, realm: sessionRealm, uid: authority.uid, server: sessionServer, serverStatus: string(session.server_status, `${path}.server_status`), sessionId: string(session.session_id, `${path}.session_id`), name: sessionName, width: integer(session.width, `${path}.width`, 1), height: integer(session.height, `${path}.height`, 1), attached: integer(session.attached, `${path}.attached`), activity: integer(session.activity, `${path}.activity`), ...(session.output_activity === undefined ? {} : { outputActivity: integer(session.output_activity, `${path}.output_activity`) }), aliases: matchingAliases.map(({ incarnationKey: _key, ...alias }) => alias), draftScope: authority.key, ...(unified ? { unified } : {}), ...(canStageImages ? { canStageImages: true as const } : {}) };
-      // Validation stays total: every row is parsed (and rejected on shape)
-      // before any is dropped, so a malformed wrapper is still an error.
-      }).filter((session) => !brokerInternalSessionName(session.name));
+      });
       const unifiedDev = parseUnifiedDev(server.unified_dev, `${sp}.unified_dev`);
       return { realm: name, label, status, ...(serverError ? { error: serverError } : {}), canCreate: boolean(server.can_create, `${sp}.can_create`), sessions, ...(unifiedDev ? { unifiedDev } : {}) };
     });

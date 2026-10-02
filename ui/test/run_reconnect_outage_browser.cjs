@@ -57,7 +57,7 @@ async function main() {
                 realm.servers.push({ label: "private", status: "ok", sessions: [] });
               }
               if (unavailable === "healthy_absent") realm.servers.push({ label: "private", status: "ok", sessions: [] });
-              if (unavailable === "truncated") realm.servers.push({ label: "private", status: "ok", error: "inventory session limit reached", sessions: [] });
+              if (unavailable === "truncated") realm.servers.push({ label: "private", status: "ok", error: "inventory session limit reached", sessions: [{ ...session, name: "long-visible-".repeat(9), session_id: "$99", authority: { ...session.authority, session_id: "$99" } }] });
               realm.servers.push({ label: "other", status: "ok", sessions: [] });
               let body = { realms: unavailable === "realm_missing" ? [] : [realm], aliases: [] };
               body.realms.push({ name: "other", display_name: "Other realm", servers: [{ label: "private", status: "ok", sessions: [] }] });

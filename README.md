@@ -71,6 +71,8 @@ servers are available. See the [security model](SECURITY.md).
 Hidden attachment copies restored after a reboot are removed when the broker
 first sees them. Copies restored later are removed during inventory. A living
 broker's attachment remains protected even while that broker is suspended.
+Internal attachments are omitted from inventory. Large session lists are bounded
+by both session count and reply size, with incomplete lists marked as such.
 An open page keeps trying when its server is unavailable or its session list is
 incomplete; after fast retries, it checks more slowly while the page is visible.
 
