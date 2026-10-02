@@ -4,11 +4,15 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
+	"os"
 	"reflect"
+	"runtime/pprof"
 	"sync"
 	"testing"
 	"time"
 
+	"persea-terminal/internal/controlmode"
 	"persea-terminal/internal/proto"
 	"persea-terminal/internal/unifiedjournal"
 )
@@ -530,9 +534,15 @@ func TestUnifiedRotationAutomaticRealTmuxTriggerToSealAndForcedReopen(t *testing
 	var measuredKey unifiedjournal.PaneKey
 	edges := make(map[string]edgeMeasurement)
 	var attemptErr error
+	var observerExits []string
 	attemptDone := make(chan struct{})
 	var attemptDoneOnce sync.Once
 	fixture.effects.mu.Lock()
+	fixture.effects.unitReapEdge = func(unit *unifiedDevUnit, _ []controlmode.PaneWitness) {
+		measureMu.Lock()
+		observerExits = append(observerExits, fmt.Sprintf("generation=%d error=%v progress=%+v", unit.generation, unit.exitErr, unit.progress.snapshot()))
+		measureMu.Unlock()
+	}
 	fixture.effects.rotationAttempt = func(ctx context.Context, session string) error {
 		err := fixture.effects.rotateSession(ctx, session)
 		measureMu.Lock()
@@ -628,8 +638,10 @@ func TestUnifiedRotationAutomaticRealTmuxTriggerToSealAndForcedReopen(t *testing
 			seen[edge] = measurement
 		}
 		observedErr := attemptErr
+		exits := append([]string(nil), observerExits...)
 		measureMu.Unlock()
-		t.Fatalf("automatic successor absent: logical=%d/%d err=%v edges=%v capture_tail=%q", charge, cap, observedErr, seen, fixture.capture(t, "automatic"))
+		_ = pprof.Lookup("goroutine").WriteTo(os.Stdout, 2)
+		t.Fatalf("automatic successor absent: logical=%d/%d err=%v edges=%v observer_exits=%v exit_records=%+v capture_tail=%q", charge, cap, observedErr, seen, exits, fixture.effects.recordingExitRecords(), fixture.capture(t, "automatic"))
 	}
 	if reason := waitRotationSubscriberClose(t, predecessor); reason != proto.SubscriberClosedGenerationRotated {
 		t.Fatalf("predecessor close=%q want %q", reason, proto.SubscriberClosedGenerationRotated)
