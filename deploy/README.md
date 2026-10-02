@@ -47,9 +47,8 @@ Each realm produces `broker-<id>.json`,
 `socket_path` means tmux `-S`. Exactly one is required per server. There is no
 socket-directory scan and no fallback to a default tmux server.
 
-Each Unix UID may appear in only one realm. Put all servers for an account in
-that realm, so two broker services cannot reach the same server through socket
-aliases and mistake an attachment being created for a restored copy.
+A Unix account may have several realms. Configure a separate realm for each
+server used by the Unified terminal, whose provider selects one server per realm.
 
 Start each configured tmux server as its realm's Unix user, outside the broker
 service. Use that user's normal host shell or a separate user service that
@@ -63,9 +62,12 @@ Session names matching `persea-attach-` followed by exactly 32 hexadecimal
 characters are reserved for internal attachments. The dashboard hides them
 and session creation refuses them. At startup, when a tmux server first
 appears, and during inventory, the broker removes detached, single-window
-copies restored without attachment owner options. Inventory also catches
-copies restored after the server became available. Ordinary sessions, live
-attachments, and attachments still being created are preserved.
+copies whose attachment owner options are all empty or absent. Each copy must
+be at least 12 seconds old and have been observed for at least 12 seconds before
+it can be removed. Inventory catches copies restored after the server became
+available. Ordinary sessions, live attachments, and attachments still being
+created are preserved, including when brokers reach the same server through
+different socket selectors.
 
 Each serving realm requires the Unified terminal's
 closed manifest block `unified_terminal_dev`. Its required fields are

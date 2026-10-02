@@ -118,6 +118,15 @@ func validPaneID(id string) bool {
 	return err == nil
 }
 
+type tmuxCommandError struct {
+	command string
+	message string
+}
+
+func (e *tmuxCommandError) Error() string {
+	return fmt.Sprintf("tmux %s failed: %s", e.command, e.message)
+}
+
 func tmuxOutput(s config.TmuxServer, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
@@ -134,7 +143,7 @@ func tmuxOutput(s config.TmuxServer, args ...string) (string, error) {
 		if tmuxNoServer(msg) {
 			return "", fmt.Errorf("%w: %s", errNoServer, msg)
 		}
-		return "", fmt.Errorf("tmux %s failed: %s", args[0], msg)
+		return "", &tmuxCommandError{command: args[0], message: msg}
 	}
 	if out.overflow {
 		return "", fmt.Errorf("tmux output exceeds limit")

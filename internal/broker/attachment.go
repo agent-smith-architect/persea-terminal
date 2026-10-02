@@ -208,6 +208,15 @@ func attachmentShadowPending(name string) bool {
 }
 
 func removeOrphanShadow(server config.TmuxServer, shadow orphanShadow) error {
+	refused, err := invocationSentinel("PROTECTED")
+	if err != nil {
+		return err
+	}
+	stale, err := invocationSentinel("STALE")
+	if err != nil {
+		return err
+	}
+	refusal := "display-message -p " + refused
 	guard := "#{&&:#{==:#{session_id}," + shadow.sessionID + "}," +
 		"#{&&:#{==:#{session_name}," + shadow.name + "}," +
 		"#{&&:#{==:#{session_attached},0}," +
@@ -216,7 +225,7 @@ func removeOrphanShadow(server config.TmuxServer, shadow orphanShadow) error {
 		"#{&&:#{==:#{" + attachmentOwnerPIDOption + "}," + strconv.Itoa(shadow.ownerPID) + "}," +
 		"#{==:#{" + attachmentOwnerStartOption + "}," + strconv.FormatUint(shadow.ownerStart, 10) + "}}}}}}}"
 	success := "kill-session -t " + shellQuote("="+shadow.sessionID)
-	args := []string{"if-shell", "-F", "-t", "=" + shadow.sessionID + ":", guard, success, "run-shell 'exit 78'"}
+	args := []string{"if-shell", "-F", "-t", "=" + shadow.sessionID + ":", guard, success, refusal}
 	if shadow.restored {
 		guard = "#{&&:#{==:#{session_id}," + shadow.sessionID + "}," +
 			"#{&&:#{==:#{session_name}," + shadow.name + "}," +
@@ -226,18 +235,22 @@ func removeOrphanShadow(server config.TmuxServer, shadow orphanShadow) error {
 			"#{&&:#{==:#{" + attachmentOwnerPIDOption + "},}," +
 			"#{==:#{" + attachmentOwnerStartOption + "},}}}}}}}"
 		// Pin the server as well as the session: IDs can be reused on restart.
-		guarded := "if-shell -F -t " + shellQuote("="+shadow.sessionID+":") + " " + shellQuote(guard) + " " + shellQuote(success)
-		args = []string{"if-shell", "-t", "=" + shadow.sessionID + ":", incarnationCondition(shadow.authority), guarded, "run-shell 'exit 78'"}
+		guarded := "if-shell -F -t " + shellQuote("="+shadow.sessionID+":") + " " + shellQuote(guard) + " " + shellQuote(success) + " " + shellQuote(refusal)
+		args = []string{"if-shell", "-t", "=" + shadow.sessionID + ":", incarnationCondition(shadow.authority), guarded, "display-message -p " + stale}
 	}
-	if _, guardErr := tmuxOutput(server, args...); guardErr != nil {
-		present, verifyErr := tmuxSessionPresent(server, shadow.sessionID)
-		if verifyErr == nil && !present {
-			return nil
-		}
-		if verifyErr != nil {
-			return fmt.Errorf("guarded orphan shadow cleanup: %v; verify target: %w", guardErr, verifyErr)
+	out, guardErr := tmuxOutput(server, args...)
+	if guardErr != nil {
+		var failure *tmuxCommandError
+		if errors.As(guardErr, &failure) && failure.message == "can't find session: "+shadow.sessionID {
+			return shadowCleanupRefusal(server, shadow, errShadowMissing)
 		}
 		return fmt.Errorf("guarded orphan shadow cleanup: %w", guardErr)
+	}
+	if strings.TrimSpace(out) == refused {
+		return shadowCleanupRefusal(server, shadow, errShadowProtected)
+	}
+	if strings.TrimSpace(out) == stale {
+		return shadowCleanupRefusal(server, shadow, errStaleTarget)
 	}
 	present, err := tmuxSessionPresent(server, shadow.sessionID)
 	if err != nil {
@@ -405,7 +418,9 @@ func (t *tmuxPinnedTransaction) bind(ctx context.Context, req terminal.Transacti
 		"; stat=$(cat /proc/" + strconv.Itoa(req.Witness.Pane.PID) + "/stat) || exit 1; suffix=${stat##*) }; set -- $suffix; [ \"$#\" -ge 20 ] && [ \"${20}\" = " + shellQuote(strconv.FormatUint(req.Witness.Pane.StartTime, 10)) + " ]"
 	success := fmt.Sprintf("new-session -d -P -F '#{session_id}' -x %d -y %d -s %s ; link-window -s %s -t %s:1 ; kill-window -t %s:0 ; move-window -s %s:1 -t %s:0 ; set-option -t %s status off ; set-option -t %s prefix None ; set-option -t %s prefix2 None ; set-option -t %s @persea_client_id %s ; set-option -t %s %s %d ; set-option -t %s %s %d", req.Witness.Columns, req.Witness.Rows, shellQuote(name), req.Witness.WindowID, name, name, name, name, name, name, name, name, shellQuote(clientID), name, attachmentOwnerPIDOption, owner.PID, name, attachmentOwnerStartOption, owner.StartTime)
 	argv := tmuxArgv(t.server, "if-shell", "-t", pinnedTmuxTarget(req.Witness), condition, success, "run-shell 'exit 77'")
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
+	birthCtx, cancelBirth := context.WithTimeout(ctx, shadowBirthTimeout)
+	defer cancelBirth()
+	cmd := exec.CommandContext(birthCtx, argv[0], argv[1:]...)
 	var bindStderr strings.Builder
 	cmd.Stderr = &bindStderr
 	out, bindErr := cmd.Output()

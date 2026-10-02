@@ -45,7 +45,7 @@ func TestCreateRefusesReservedShadowNames(t *testing.T) {
 	}
 }
 
-func TestRestoredShadowRequiresAbsentOptionsDetachedSingleWindow(t *testing.T) {
+func TestRestoredShadowRequiresEmptyMarkersDetachedSingleWindow(t *testing.T) {
 	for _, inventory := range []bool{false, true} {
 		t.Run(fmt.Sprintf("inventory=%t", inventory), func(t *testing.T) {
 			testRestoredShadowPreservation(t, inventory)
@@ -54,7 +54,7 @@ func TestRestoredShadowRequiresAbsentOptionsDetachedSingleWindow(t *testing.T) {
 }
 
 func testRestoredShadowPreservation(t *testing.T, inventory bool) {
-	for _, mutation := range []string{"none", "client", "pid", "start", "empty-client", "empty-pid", "empty-start", "inherited", "windows", "attached", "ordinary-name"} {
+	for _, mutation := range []string{"none", "client", "pid", "start", "empty-client", "empty-pid", "empty-start", "inherited-client", "inherited-pid", "inherited-start", "inherited-empty", "windows", "attached", "ordinary-name"} {
 		t.Run(mutation, func(t *testing.T) {
 			d := newDisposable(t)
 			if inventory {
@@ -68,6 +68,7 @@ func testRestoredShadowPreservation(t *testing.T, inventory bool) {
 			}
 			d.run("new-session", "-d", "-s", name, "sleep 600")
 			id := d.run("display-message", "-p", "-t", name, "#{session_id}")
+			ageRestoredShadow(t, d.tmux, id)
 			option := map[string]string{"client": "@persea_client_id", "pid": attachmentOwnerPIDOption, "start": attachmentOwnerStartOption}[strings.TrimPrefix(mutation, "empty-")]
 			if option != "" {
 				value := "marker"
@@ -77,8 +78,11 @@ func testRestoredShadowPreservation(t *testing.T, inventory bool) {
 				d.run("set-option", "-t", name, option, value)
 			}
 			switch mutation {
-			case "inherited":
+			case "inherited-empty":
 				d.run("set-option", "-g", "@persea_client_id", "")
+			case "inherited-client", "inherited-pid", "inherited-start":
+				option := map[string]string{"inherited-client": "@persea_client_id", "inherited-pid": attachmentOwnerPIDOption, "inherited-start": attachmentOwnerStartOption}[mutation]
+				d.run("set-option", "-g", option, "marker")
 			case "windows":
 				d.run("new-window", "-d", "-t", name, "sleep 600")
 			case "attached":
@@ -87,6 +91,14 @@ func testRestoredShadowPreservation(t *testing.T, inventory bool) {
 					t.Fatal(err)
 				}
 				w.roundtrip(t, "ATTACHED")
+			}
+			candidate := mutation == "none" || strings.HasPrefix(mutation, "empty-") || mutation == "inherited-empty"
+			inc, err := readIncarnation(d.tmux)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, got := inspectRestoredShadow(d.tmux, id, inc); got != candidate {
+				t.Fatalf("candidate predicate %s: got=%t want=%t", mutation, got, candidate)
 			}
 			if inventory {
 				s := &Server{config: bootCreationConfig(t, d.tmux)}
@@ -97,7 +109,7 @@ func testRestoredShadowPreservation(t *testing.T, inventory bool) {
 				t.Fatal(err)
 			}
 			present, err := tmuxSessionPresent(d.tmux, id)
-			if err != nil || present != (mutation != "none") {
+			if err != nil || present == candidate {
 				t.Fatalf("restored cleanup %s: present=%v err=%v", mutation, present, err)
 			}
 		})
@@ -128,6 +140,7 @@ func TestRestoredSweepPrecedesFirstUse(t *testing.T) {
 				name := attachmentShadowPrefix + strings.Repeat("b", 32)
 				d.run("new-session", "-d", "-s", name, "sleep 600")
 				id := d.run("display-message", "-p", "-t", name, "#{session_id}")
+				ageRestoredShadow(t, d.tmux, id)
 				switch entry {
 				case "inventory":
 					got := s.inventoryServer(d.tmux, 10)
@@ -208,6 +221,7 @@ func TestRestoredRemovalRechecksIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			ageRestoredShadow(t, d.tmux, id)
 			shadow, ok := inspectRestoredShadow(d.tmux, id, inc)
 			if !ok {
 				t.Fatal("restored candidate was not identified")
@@ -253,6 +267,7 @@ func TestIncarnationReplacementCannotPublishUnsweptRows(t *testing.T) {
 			name := attachmentShadowPrefix + strings.Repeat("e", 32)
 			b.run("new-session", "-d", "-s", name, "sleep 600")
 			id := b.run("display-message", "-p", "-t", name, "#{session_id}")
+			ageRestoredShadow(t, b.tmux, id)
 			command := "list-sessions"
 			if entry == "preview" {
 				command = "capture-pane"
