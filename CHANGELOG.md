@@ -2,20 +2,24 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 0.1.12 — 2026-10-02
 
 ### Fixed
 
-- An open terminal page keeps trying when its tmux server or broker is temporarily unavailable or its session list is incomplete, instead of reporting that the session has ended.
 - The service no longer restarts repeatedly at boot while waiting for a user's tmux server to start.
-- Stray hidden sessions restored after a reboot are cleaned up as soon as the broker sees them, while attachments owned by a running or suspended broker are preserved.
-- Hidden attachment sessions no longer displace regular sessions from a large session list.
-- Large session lists still load when hidden attachments or long session names would make the reply too large.
-- Unreadable or malformed attachment ownership records preserve the affected session without blocking the account's session list.
+- An open terminal page keeps trying when its tmux server or broker is temporarily unavailable or its session list is incomplete, instead of reporting that the session has ended.
+- Stray hidden sessions restored after a reboot are cleaned up as soon as the broker sees them. Attachments that belong to a running or suspended broker are kept.
+- Hidden attachment sessions are no longer part of the session list, so they cannot push regular sessions out of a long list.
+- A very long session list is shortened and marked as incomplete instead of failing to load.
 
 ### Changed
 
 - "New session" is available only when that account's tmux server is running. Start tmux on the host first; Persea Terminal never starts a tmux server itself.
+- Session names that start with `persea-attach-` followed by 32 hexadecimal characters are reserved for hidden attachment sessions. "New session" refuses them.
+
+### Testing notes
+
+- The boot condition was reproduced: the service ran with a read-only temporary directory and no tmux server. 0.1.11 exits at start. 0.1.12 starts, reports that no tmux server is running, and works normally when tmux starts. Cleanup of restored hidden sessions, protection of attachments whose broker is running, paused or hidden from other processes, and very long session lists were tested against real tmux servers. Page recovery during outages and with incomplete session lists was tested in Chromium and WebKit. A full host reboot was not part of the tests.
 
 ## 0.1.11 — 2026-09-27
 
