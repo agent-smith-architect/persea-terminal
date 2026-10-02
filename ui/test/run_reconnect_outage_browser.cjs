@@ -23,7 +23,7 @@ async function main() {
   const selectedEngine = process.env.PERSEA_RECONNECT_OUTAGE_ENGINE;
   assert(!selectedEngine || ["chromium", "webkit"].includes(selectedEngine), "unsupported browser engine");
   const selectedScenario = process.env.PERSEA_RECONNECT_OUTAGE_SCENARIO;
-  const scenarios = ["no_server", "stale_socket", "error", "broker_down", "realm_missing", "server_missing", "healthy_absent", "new_identity"];
+  const scenarios = ["no_server", "stale_socket", "error", "broker_down", "realm_missing", "server_missing", "truncated", "healthy_absent", "new_identity"];
   assert(!selectedScenario || scenarios.includes(selectedScenario), "unsupported outage scenario");
   try {
     for (const [engine, browserType] of [["chromium", chromium], ["webkit", webkit]]) {
@@ -57,6 +57,7 @@ async function main() {
                 realm.servers.push({ label: "private", status: "ok", sessions: [] });
               }
               if (unavailable === "healthy_absent") realm.servers.push({ label: "private", status: "ok", sessions: [] });
+              if (unavailable === "truncated") realm.servers.push({ label: "private", status: "ok", error: "inventory session limit reached", sessions: [] });
               realm.servers.push({ label: "other", status: "ok", sessions: [] });
               let body = { realms: unavailable === "realm_missing" ? [] : [realm], aliases: [] };
               body.realms.push({ name: "other", display_name: "Other realm", servers: [{ label: "private", status: "ok", sessions: [] }] });

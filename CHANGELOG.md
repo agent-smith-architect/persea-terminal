@@ -6,9 +6,10 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ### Fixed
 
-- An open terminal page reconnects when its tmux server or broker is temporarily unavailable, instead of reporting that the session has ended.
+- An open terminal page keeps trying when its tmux server or broker is temporarily unavailable or its session list is incomplete, instead of reporting that the session has ended.
 - The service no longer restarts repeatedly at boot while waiting for a user's tmux server to start.
 - Stray hidden sessions restored after a reboot are cleaned up as soon as the broker sees them, while attachments owned by a running or suspended broker are preserved.
+- Hidden attachment sessions no longer displace regular sessions from a large session list.
 
 ### Changed
 
