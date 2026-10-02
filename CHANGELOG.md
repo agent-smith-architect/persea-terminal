@@ -12,7 +12,6 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 ### Changed
 
 - "New session" is available only when that account's tmux server is running. Start tmux on the host first; Persea Terminal never starts a tmux server itself.
-- Each Unix account is configured in one realm, with all of its tmux servers listed there.
 
 ## 0.1.11 — 2026-09-27
 

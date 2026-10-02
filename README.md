@@ -105,8 +105,6 @@ it at boot. Persea Terminal waits for tmux and never starts a server itself: a
 server started by the broker would inherit its restricted filesystem, lack of
 network access, and lifetime, so restarting the broker would end its shells.
 "New session" is available only while the configured tmux server is running.
-Configure each Unix UID in one realm, with all of that account's servers listed
-there. This keeps attachment creation and restored-session cleanup in one broker.
 
 ### Try it locally
 

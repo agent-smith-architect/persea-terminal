@@ -6,16 +6,13 @@ DEPLOY_DIR=$(cd -- "$SCRIPT_DIR/.." && pwd -P)
 command -v rg >/dev/null || { printf 'hermetic deployment tests require ripgrep (rg)\n' >&2; exit 1; }
 PT_FIXTURE_FRONT_USER=termop_q7
 PT_FIXTURE_REALM_USER=tmuxbot_k4
-PT_FIXTURE_OPS_USER=termops_m9
 PT_FIXTURE_GROUP=termshare_x9
 PT_FIXTURE_FRONT_UID=$(id -u)
 PT_FIXTURE_REALM_UID=42002
-PT_FIXTURE_OPS_UID=42004
 PT_FIXTURE_GROUP_GID=42003
 PT_FIXTURE_OPERATOR=operator-q7@example.invalid
 export PT_FIXTURE_FRONT_USER PT_FIXTURE_REALM_USER PT_FIXTURE_GROUP
 export PT_FIXTURE_FRONT_UID PT_FIXTURE_REALM_UID PT_FIXTURE_GROUP_GID PT_FIXTURE_OPERATOR
-export PT_FIXTURE_OPS_USER PT_FIXTURE_OPS_UID
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/ptd.XXXXXXXX")
 MOCK_BIN="$TMP/mock-bin"
 FAKE_STATE="$TMP/fake-state"
@@ -159,9 +156,8 @@ if [[ -n ${PT_FIXTURE_FRONT_USER:-} && -n ${PT_FIXTURE_REALM_USER:-} ]]; then
   case "${1:-} ${2:-}" in
     "-u $PT_FIXTURE_FRONT_USER") printf '%s\n' "${PT_ID_FRONT_OVERRIDE:-$PT_FIXTURE_FRONT_UID}"; exit ;;
     "-u $PT_FIXTURE_REALM_USER") printf '%s\n' "${PT_ID_REALM_OVERRIDE:-$PT_FIXTURE_REALM_UID}"; exit ;;
-    "-u $PT_FIXTURE_OPS_USER") printf '%s\n' "$PT_FIXTURE_OPS_UID"; exit ;;
-    "-g $PT_FIXTURE_FRONT_USER"|"-g $PT_FIXTURE_REALM_USER"|"-g $PT_FIXTURE_OPS_USER") printf '%s\n' "$PT_FIXTURE_GROUP_GID"; exit ;;
-    "-nG $PT_FIXTURE_FRONT_USER"|"-nG $PT_FIXTURE_REALM_USER"|"-nG $PT_FIXTURE_OPS_USER") printf '%s\n' "$PT_FIXTURE_GROUP"; exit ;;
+    "-g $PT_FIXTURE_FRONT_USER"|"-g $PT_FIXTURE_REALM_USER") printf '%s\n' "$PT_FIXTURE_GROUP_GID"; exit ;;
+    "-nG $PT_FIXTURE_FRONT_USER"|"-nG $PT_FIXTURE_REALM_USER") printf '%s\n' "$PT_FIXTURE_GROUP"; exit ;;
   esac
 fi
 exec /usr/bin/id "$@"
@@ -170,7 +166,7 @@ cat >"$MOCK_BIN/getent" <<'SH'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ ${1:-} == group && ${2:-} == "$PT_FIXTURE_GROUP" ]]; then
-  printf '%s:x:%s:%s,%s,%s\n' "$PT_FIXTURE_GROUP" "${PT_GROUP_GID_OVERRIDE:-$PT_FIXTURE_GROUP_GID}" "$PT_FIXTURE_FRONT_USER" "$PT_FIXTURE_REALM_USER" "$PT_FIXTURE_OPS_USER"
+  printf '%s:x:%s:%s,%s\n' "$PT_FIXTURE_GROUP" "${PT_GROUP_GID_OVERRIDE:-$PT_FIXTURE_GROUP_GID}" "$PT_FIXTURE_FRONT_USER" "$PT_FIXTURE_REALM_USER"
 else
   exec /usr/bin/getent "$@"
 fi
@@ -197,7 +193,7 @@ uid_for_unit() {
   case $1 in
     persea-terminal-broker-desk-a7.service|persea-terminal-front.service) printf '%s\n' "$PT_FIXTURE_FRONT_UID" ;;
     persea-terminal-broker-lab-k4.service) printf '%s\n' "$PT_FIXTURE_REALM_UID" ;;
-    persea-terminal-broker-ops-m9.service) printf '%s\n' "$PT_FIXTURE_OPS_UID" ;;
+    persea-terminal-broker-ops-m9.service) printf '%s\n' "$PT_FIXTURE_FRONT_UID" ;;
     persea-terminal-tailscaled.service) id -u ;;
     *) exit 1 ;;
   esac
@@ -338,8 +334,8 @@ case $path in
   */run/persea-terminal-desk-a7/broker.sock) value=$PT_FIXTURE_FRONT_UID:$PT_FIXTURE_GROUP_GID; realm=local ;;
   */run/persea-terminal-lab-k4) value=$PT_FIXTURE_REALM_UID:$PT_FIXTURE_GROUP_GID ;;
   */run/persea-terminal-lab-k4/broker.sock) value=$PT_FIXTURE_REALM_UID:$PT_FIXTURE_GROUP_GID; realm=remote ;;
-  */run/persea-terminal-ops-m9) value=$PT_FIXTURE_OPS_UID:$PT_FIXTURE_GROUP_GID ;;
-  */run/persea-terminal-ops-m9/broker.sock) value=$PT_FIXTURE_OPS_UID:$PT_FIXTURE_GROUP_GID; realm=ops ;;
+  */run/persea-terminal-ops-m9) value=$PT_FIXTURE_FRONT_UID:$PT_FIXTURE_GROUP_GID ;;
+  */run/persea-terminal-ops-m9/broker.sock) value=$PT_FIXTURE_FRONT_UID:$PT_FIXTURE_GROUP_GID; realm=ops ;;
   *) exit 1 ;;
 esac
 value=$value:$(stat -Lc '%a' -- "$path")
@@ -351,8 +347,7 @@ cat >"$MOCK_BIN/persea-unified-runtime-metadata" <<'SH'
 set -euo pipefail
 unit=$1 runtime_dir=$3
 case $unit in
-  persea-terminal-broker-desk-a7.service) uid=$PT_FIXTURE_FRONT_UID ;;
-  persea-terminal-broker-ops-m9.service) uid=$PT_FIXTURE_OPS_UID ;;
+  persea-terminal-broker-desk-a7.service|persea-terminal-broker-ops-m9.service) uid=$PT_FIXTURE_FRONT_UID ;;
   persea-terminal-broker-lab-k4.service) uid=$PT_FIXTURE_REALM_UID ;;
   *) exit 1 ;;
 esac
@@ -591,11 +586,9 @@ hermetic_env=(
   "FAKE_DENIED_SOCKET=$DENIED_SOCKET"
   "PT_FIXTURE_FRONT_USER=$PT_FIXTURE_FRONT_USER"
   "PT_FIXTURE_REALM_USER=$PT_FIXTURE_REALM_USER"
-  "PT_FIXTURE_OPS_USER=$PT_FIXTURE_OPS_USER"
   "PT_FIXTURE_GROUP=$PT_FIXTURE_GROUP"
   "PT_FIXTURE_FRONT_UID=$PT_FIXTURE_FRONT_UID"
   "PT_FIXTURE_REALM_UID=$PT_FIXTURE_REALM_UID"
-  "PT_FIXTURE_OPS_UID=$PT_FIXTURE_OPS_UID"
   "PT_FIXTURE_GROUP_GID=$PT_FIXTURE_GROUP_GID"
   "PT_FIXTURE_OPERATOR=$PT_FIXTURE_OPERATOR"
   "PERSEA_DEPLOY_HERMETIC=1"
@@ -1284,14 +1277,14 @@ pass 'one-realm selector change restarts only that broker and the front'
 ops_runtime="$ROOT/run/persea-terminal-ops-m9"
 ops_broker_socket="$ops_runtime/broker.sock"
 ops_tmux_socket="$TMP/tmux-ops-m9.sock"
-mkdir -m 2710 -- "$ops_runtime"
+mkdir -m 0700 -- "$ops_runtime"
 python3 - "$ops_broker_socket" "$ops_tmux_socket" <<'PY' &
 import os, select, socket, sys
 servers = []
 for path in sys.argv[1:]:
     server = socket.socket(socket.AF_UNIX)
     server.bind(path)
-    os.chmod(path, 0o660 if path == sys.argv[1] else 0o600)
+    os.chmod(path, 0o600)
     server.listen(8)
     servers.append(server)
 while True:
@@ -1310,8 +1303,8 @@ value = json.load(open(path, encoding="utf-8"))
 value["realms"].append({
     "id": "ops-m9",
     "display_name": "Operations M9",
-    "user": os.environ["PT_FIXTURE_OPS_USER"],
-    "uid": int(os.environ["PT_FIXTURE_OPS_UID"]),
+    "user": os.environ["PT_FIXTURE_FRONT_USER"],
+    "uid": int(os.environ["PT_FIXTURE_FRONT_UID"]),
     "servers": [{"label": "isolated", "socket_path": tmux_socket}],
     "session_create": {
         "enabled": True, "servers": ["isolated"],

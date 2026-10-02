@@ -68,6 +68,7 @@ func TestInventoryReapsLateRestoredShadows(t *testing.T) {
 			name := attachmentShadowPrefix + strings.Repeat("f", 32)
 			d.run("new-session", "-d", "-s", name, "sleep 600")
 			id := d.run("display-message", "-p", "-t", name, "#{session_id}")
+			ageRestoredShadow(t, d.tmux, id)
 			got := s.inventoryServer(d.tmux, limit)
 			if got.Status != "ok" || (limit > 0 && (len(got.Sessions) != 1 || got.Sessions[0].Name != "alpha")) {
 				t.Fatalf("late restored inventory: %+v", got)
@@ -107,12 +108,13 @@ func TestInventorySkipsLiveShadowsWithoutExtraCalls(t *testing.T) {
 	baseline := calls()
 	name := attachmentShadowPrefix + strings.Repeat("a", 32)
 	d.run("new-session", "-d", "-s", name, "sleep 600")
+	id := d.run("display-message", "-p", "-t", name, "#{session_id}")
+	ageRestoredShadow(t, d.tmux, id)
 	owner, err := (procProbe{}).Witness(context.Background(), os.Getpid())
 	if err != nil {
 		t.Fatal(err)
 	}
 	setShadowOwner(t, d, name, attachmentClientPrefix+strings.Repeat("a", 32), owner.PID, owner.StartTime)
-	id := d.run("display-message", "-p", "-t", name, "#{session_id}")
 	if got := calls(); got != baseline {
 		t.Fatalf("live shadow added tmux calls: baseline=%q live=%q", baseline, got)
 	}
@@ -122,7 +124,7 @@ func TestInventorySkipsLiveShadowsWithoutExtraCalls(t *testing.T) {
 }
 
 func TestInventoryProtectsShadowBirthUntilCommandReturns(t *testing.T) {
-	for _, outcome := range []string{"success", "failure"} {
+	for _, outcome := range []string{"success", "failure", "timeout"} {
 		t.Run(outcome, func(t *testing.T) {
 			d := newDisposable(t)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -183,6 +185,7 @@ func TestInventoryProtectsShadowBirthUntilCommandReturns(t *testing.T) {
 			}()
 			name := shadowPipeLine(t, ready)
 			id := d.run("display-message", "-p", "-t", name, "#{session_id}")
+			ageRestoredShadow(t, d.tmux, id)
 			if out := d.run("show-options", "-Aq", "-t", "="+id+":", "@persea_client_id"); out != "" {
 				t.Fatalf("birth fixture already marked: %q", out)
 			}
@@ -193,12 +196,14 @@ func TestInventoryProtectsShadowBirthUntilCommandReturns(t *testing.T) {
 			if present, err := tmuxSessionPresent(d.tmux, id); err != nil || !present {
 				t.Fatalf("in-flight shadow removed: present=%v err=%v", present, err)
 			}
-			unblock()
+			if outcome != "timeout" {
+				unblock()
+			}
 			var got result
 			select {
 			case got = <-done:
-			case <-ctx.Done():
-				t.Fatal("birth result did not arrive")
+			case <-time.After(shadowBirthTimeout + time.Second):
+				t.Fatal("birth command exceeded its cleanup safety bound")
 			}
 			if (got.err == nil) != (outcome == "success") {
 				t.Fatalf("birth %s: %v", outcome, got.err)

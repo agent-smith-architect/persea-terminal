@@ -583,7 +583,7 @@ class HostConfigTest(unittest.TestCase):
         self.assert_invalid(lambda value: value["realms"][1]["servers"][0].update({"socket_path": "/srv/../tmp/main.sock"}))
         self.assert_invalid(lambda value: value["realms"][1]["servers"][0].update({"socket_path": "//srv/tmux-k4/main.sock"}))
 
-    def test_one_realm_per_uid_prevents_selector_aliases(self) -> None:
+    def test_one_uid_can_have_separate_realms_and_socket_aliases(self) -> None:
         for selector in (
             {"socket_path": "/tmp/tmux-42001/main-a7"},
             {"socket_path": "/srv/alias-a7/main.sock"},
@@ -594,8 +594,7 @@ class HostConfigTest(unittest.TestCase):
                 value["realms"][1]["user"] = value["realms"][0]["user"]
                 value["realms"][1]["uid"] = value["realms"][0]["uid"]
                 value["realms"][1]["servers"] = [{"label": "primary", **selector}]
-                result = self.run_helper("validate", self.write(value), success=False)
-                self.assertIn(b"uid is shared by another realm", result.stderr)
+                self.run_helper("validate", self.write(value))
 
         value = fixture()
         value["realms"][0]["servers"].append(
