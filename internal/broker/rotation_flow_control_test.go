@@ -806,7 +806,7 @@ func exerciseRotationCompositeDecoderPath(t *testing.T, ctx context.Context, uni
 	probeUnit := &unifiedDevUnit{owner: unit.owner, ptmx: writer}
 	read := make(chan []byte, 1)
 	read <- batch
-	_, _, err = probeUnit.submitRotationComposite(ctx, controlmode.NewDecoder(), read, make(chan error), rotation, 1)
+	_, _, err = probeUnit.submitRotationComposite(ctx, controlmode.NewDecoder(), read, newObserverReadResult(), rotation, 1)
 	return err
 }
 
@@ -817,7 +817,7 @@ func exerciseRotationBoundaryDecoderPath(ctx context.Context, unit *unifiedDevUn
 		read <- batch
 		done <- nil
 	}()
-	return unit.awaitRotationBoundary(ctx, controlmode.NewDecoder(), read, make(chan error), done, rotation)
+	return unit.awaitRotationBoundary(ctx, controlmode.NewDecoder(), read, newObserverReadResult(), done, rotation)
 }
 
 func TestRotationBoundaryFailureWaitsForSubmittedBoundary(t *testing.T) {
@@ -841,7 +841,7 @@ func TestRotationBoundaryFailureWaitsForSubmittedBoundary(t *testing.T) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 			defer cancel()
 			go func() {
-				returned <- unit.awaitRotationBoundary(ctx, controlmode.NewDecoder(), read, make(chan error), boundaryDone, &unifiedDevRotation{session: "boundary-order"})
+				returned <- unit.awaitRotationBoundary(ctx, controlmode.NewDecoder(), read, newObserverReadResult(), boundaryDone, &unifiedDevRotation{session: "boundary-order"})
 			}()
 			if !test.hook {
 				read <- test.batch

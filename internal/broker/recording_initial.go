@@ -115,7 +115,7 @@ func (birth *unifiedDevBirth) captureInitialIfEmpty() error {
 	}
 }
 
-func (unit *unifiedDevUnit) captureBirthInitial(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error, request unifiedDevCommand) error {
+func (unit *unifiedDevUnit) captureBirthInitial(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult, request unifiedDevCommand) error {
 	var batch controlmode.EventBatch
 	defer batch.Release()
 	birth := request.birthCapture
@@ -144,10 +144,8 @@ func (unit *unifiedDevUnit) captureBirthInitial(ctx context.Context, decoder *co
 			return ctx.Err()
 		case <-request.context.Done():
 			return request.context.Err()
-		case err := <-readErr:
-			if err == nil {
-				return io.EOF
-			}
+		case <-readResult.done():
+			err := readResult.err
 			return err
 		case chunk := <-read:
 			events, err := decodeRotationEvents(decoder, chunk, &batch)
@@ -615,8 +613,8 @@ func (effects *UnifiedDevPaneEffects) recordingReady(key unifiedjournal.PaneKey)
 	return err == nil
 }
 
-func (unit *unifiedDevUnit) awaitInitial(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error, op *recordingInitialOperation) error {
-	stream := &recordingSettlementStream{unit: unit, decoder: decoder, read: read, readErr: readErr}
+func (unit *unifiedDevUnit) awaitInitial(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult, op *recordingInitialOperation) error {
+	stream := &recordingSettlementStream{unit: unit, decoder: decoder, read: read, readResult: readResult}
 	return stream.awaitInitial(ctx, op)
 }
 
@@ -651,11 +649,9 @@ func (stream *recordingSettlementStream) awaitInitial(ctx context.Context, op *r
 			return stream.settleInitial(op, registry, ctx.Err())
 		case <-callerDone:
 			return stream.settleInitial(op, registry, unit.birth.context.Err())
-		case err := <-stream.readErr:
-			if err == nil {
-				err = io.EOF
-			}
-			stream.readErr = nil
+		case <-stream.readResult.done():
+			err := stream.readResult.err
+			stream.readResult = nil
 			return stream.settleInitial(op, registry, err)
 		case chunk := <-stream.read:
 			events, err := decodeRotationEvents(stream.decoder, chunk, &batch)
@@ -685,11 +681,11 @@ func (stream *recordingSettlementStream) settleInitial(op *recordingInitialOpera
 // Its dependency waits retain the first secondary failure so rollback cannot
 // restore a generation whose continuation was lost while work settled.
 type recordingSettlementStream struct {
-	unit    *unifiedDevUnit
-	decoder *controlmode.Decoder
-	read    <-chan []byte
-	readErr <-chan error
-	err     error
+	unit       *unifiedDevUnit
+	decoder    *controlmode.Decoder
+	read       <-chan []byte
+	readResult *observerReadResult
+	err        error
 }
 
 func (stream *recordingSettlementStream) fail(err error) {
@@ -701,18 +697,25 @@ func (stream *recordingSettlementStream) fail(err error) {
 func (stream *recordingSettlementStream) wait(done <-chan struct{}, result <-chan error) error {
 	var batch controlmode.EventBatch
 	defer batch.Release()
+	// A ready dependency must not hide a terminal read already published.
+	defer func() {
+		select {
+		case <-stream.readResult.done():
+			stream.fail(stream.readResult.err)
+			stream.readResult = nil
+		default:
+		}
+	}()
 	for {
 		select {
 		case <-done:
 			return nil
 		case err := <-result:
 			return err
-		case err := <-stream.readErr:
-			if err == nil {
-				err = io.EOF
-			}
+		case <-stream.readResult.done():
+			err := stream.readResult.err
 			stream.fail(err)
-			stream.readErr = nil
+			stream.readResult = nil
 		case chunk := <-stream.read:
 			events, err := decodeRotationEvents(stream.decoder, chunk, &batch)
 			if err != nil {

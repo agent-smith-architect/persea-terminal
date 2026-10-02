@@ -2,6 +2,12 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Fixed
+
+- A terminal page no longer stays frozen until the broker restarts when its connection to tmux fails during recording.
+
 ## 0.1.12 — 2026-10-02
 
 ### Fixed

@@ -293,9 +293,9 @@ func TestRecordingCorrectionStartupEOFClassification(t *testing.T) {
 	for _, readFailure := range []error{io.EOF, fmt.Errorf("wrapped read: %w", io.EOF)} {
 		unit := &unifiedDevUnit{}
 		unit.progress.stage.Store(uint32(observerStageReady))
-		readErrors := make(chan error, 1)
-		readErrors <- readFailure
-		err := unit.awaitReady(context.Background(), controlmode.NewDecoder(), make(chan []byte), readErrors)
+		readResult := newObserverReadResult()
+		readResult.finish(readFailure)
+		err := unit.awaitReady(context.Background(), controlmode.NewDecoder(), make(chan []byte), readResult)
 		if !errors.Is(err, io.EOF) {
 			t.Fatalf("startup did not return EOF: %v", err)
 		}

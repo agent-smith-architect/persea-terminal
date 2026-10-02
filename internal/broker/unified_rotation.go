@@ -627,11 +627,11 @@ func (effects *UnifiedDevPaneEffects) rotateSession(ctx context.Context, session
 	}
 }
 
-func (unit *unifiedDevUnit) runRotation(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error, rotation *unifiedDevRotation) (err error) {
+func (unit *unifiedDevUnit) runRotation(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult, rotation *unifiedDevRotation) (err error) {
 	// The returned bootstrap can overlap its queued runtime copy until this
 	// rotation settles, after the capture command's response owner has left.
 	effects := unit.owner
-	rotation.settlement = &recordingSettlementStream{unit: unit, decoder: decoder, read: read, readErr: readErr}
+	rotation.settlement = &recordingSettlementStream{unit: unit, decoder: decoder, read: read, readResult: readResult}
 	defer func() {
 		var retained *rotationOverflow
 		if errors.As(err, &retained) {
@@ -728,7 +728,7 @@ func (unit *unifiedDevUnit) runRotation(ctx context.Context, decoder *controlmod
 				return ctx.Err()
 			}
 		}
-		bootstrap, geometry, err = unit.submitRotationComposite(ctx, decoder, read, readErr, rotation, attempt)
+		bootstrap, geometry, err = unit.submitRotationComposite(ctx, decoder, read, readResult, rotation, attempt)
 		if errors.Is(err, errUnifiedAdoptDrift) {
 			continue
 		}
@@ -835,7 +835,7 @@ func (unit *unifiedDevUnit) runRotation(ctx context.Context, decoder *controlmod
 	if err = rotation.refitStage(refitFailureAwaitBoundary); err != nil {
 		return err
 	}
-	if err = unit.awaitRotationBoundary(ctx, decoder, read, readErr, bootstrapDone, rotation); err != nil {
+	if err = unit.awaitRotationBoundary(ctx, decoder, read, readResult, bootstrapDone, rotation); err != nil {
 		return rotation.refitStageError(refitFailureAwaitBoundary, err)
 	}
 	if edge := effects.rotationEdge; edge != nil {
@@ -854,7 +854,7 @@ func (unit *unifiedDevUnit) runRotation(ctx context.Context, decoder *controlmod
 	if edge := effects.rotationEdge; edge != nil {
 		edge(rotation.session, "registry_validated")
 	}
-	return unit.commitRotation(ctx, decoder, read, readErr, rotation)
+	return unit.commitRotation(ctx, decoder, read, readResult, rotation)
 }
 
 // refitGenerationIncarnation binds a current physical source to an existing
@@ -872,7 +872,7 @@ func (effects *UnifiedDevPaneEffects) refitGenerationIncarnation(key unifiedjour
 	return startupSourceIncarnation(source.Socket, source.Server, source.SessionID, source.WindowID, source.PaneID, source.Pane, initial.Columns, initial.Rows), nil
 }
 
-func (unit *unifiedDevUnit) commitRotation(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error, rotation *unifiedDevRotation) (err error) {
+func (unit *unifiedDevUnit) commitRotation(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult, rotation *unifiedDevRotation) (err error) {
 	effects := unit.owner
 	if err = rotation.refitStage(refitFailureSubmitSeal); err != nil {
 		return err
@@ -894,7 +894,7 @@ func (unit *unifiedDevUnit) commitRotation(ctx context.Context, decoder *control
 	if err = rotation.refitStage(refitFailureAwaitSeal); err != nil {
 		return err
 	}
-	if err = unit.awaitRotationBoundary(ctx, decoder, read, readErr, sealDone, rotation); err != nil {
+	if err = unit.awaitRotationBoundary(ctx, decoder, read, readResult, sealDone, rotation); err != nil {
 		return rotation.refitStageError(refitFailureAwaitSeal, errors.Join(ErrUnifiedRotateFatal, err))
 	}
 	if edge := effects.rotationEdge; edge != nil {
@@ -960,7 +960,7 @@ func (unit *unifiedDevUnit) commitRotation(ctx context.Context, decoder *control
 	if err = rotation.refitStage(refitFailureAwaitPending); err != nil {
 		return err
 	}
-	if err = unit.awaitRotationBoundary(ctx, decoder, read, readErr, pendingDone, rotation); err != nil {
+	if err = unit.awaitRotationBoundary(ctx, decoder, read, readResult, pendingDone, rotation); err != nil {
 		return rotation.refitStageError(refitFailureAwaitPending, errors.Join(ErrUnifiedRotateFatal, err))
 	}
 	if edge := effects.rotationEdge; edge != nil {
@@ -1015,7 +1015,7 @@ func refitCompositeLine(authority proto.Authority, source terminal.SourceWitness
 	return tmuxControlCommand(guardedResizeArgs(authority, source, columns, rows)) + " ; " + strings.TrimSuffix(adoptionCompositeLine(source.PaneID), "\n") + "\n"
 }
 
-func (unit *unifiedDevUnit) submitRotationComposite(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error, rotation *unifiedDevRotation, attempt int) ([]byte, unifiedjournal.Geometry, error) {
+func (unit *unifiedDevUnit) submitRotationComposite(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult, rotation *unifiedDevRotation, attempt int) ([]byte, unifiedjournal.Geometry, error) {
 	var batch controlmode.EventBatch
 	defer batch.Release()
 	if edge := unit.owner.rotationEdge; edge != nil {
@@ -1043,7 +1043,8 @@ func (unit *unifiedDevUnit) submitRotationComposite(ctx context.Context, decoder
 		select {
 		case <-ctx.Done():
 			return nil, unifiedjournal.Geometry{}, ctx.Err()
-		case err := <-readErr:
+		case <-readResult.done():
+			err := readResult.err
 			return nil, unifiedjournal.Geometry{}, err
 		case chunk := <-read:
 			events, err := decodeRotationEvents(decoder, chunk, &batch)
@@ -1174,11 +1175,11 @@ type rotationOverflow struct {
 func (*rotationOverflow) Error() string { return ErrUnifiedRotatePendingOverflow.Error() }
 func (*rotationOverflow) Unwrap() error { return ErrUnifiedRotatePendingOverflow }
 
-func (unit *unifiedDevUnit) awaitRotationBoundary(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readErr <-chan error, done <-chan error, rotation *unifiedDevRotation) error {
+func (unit *unifiedDevUnit) awaitRotationBoundary(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult, done <-chan error, rotation *unifiedDevRotation) error {
 	var batch controlmode.EventBatch
 	defer batch.Release()
 	if rotation.settlement == nil {
-		rotation.settlement = &recordingSettlementStream{unit: unit, decoder: decoder, read: read, readErr: readErr}
+		rotation.settlement = &recordingSettlementStream{unit: unit, decoder: decoder, read: read, readResult: readResult}
 	}
 	if fault := unit.owner.rotationFault; fault != nil {
 		if err := fault(rotation.session, "boundary_wait"); err != nil {
@@ -1206,11 +1207,9 @@ func (unit *unifiedDevUnit) awaitRotationBoundary(ctx context.Context, decoder *
 				return rotation.cancelAndSettleBoundary(done, err)
 			}
 			callerDone = nil
-		case err := <-readErr:
-			rotation.settlement.readErr = nil
-			if err == nil {
-				err = io.EOF
-			}
+		case <-readResult.done():
+			err := readResult.err
+			rotation.settlement.readResult = nil
 			return rotation.waitBoundarySettlement(done, err)
 		case chunk := <-read:
 			events, err := decodeRotationEvents(decoder, chunk, &batch)

@@ -500,9 +500,11 @@ func TestRecordingInitialWaitDecodesWhileStorageHeld(t *testing.T) {
 	holder := &unifiedDevBirth{owner: effects, witness: witness, streaming: true, initial: op}
 	effects.panes[witness.Pane] = holder
 	unit := &unifiedDevUnit{owner: effects, holder: holder, done: make(chan struct{}), birth: unifiedDevCommand{}}
-	read, readErr := make(chan []byte), make(chan error)
+	read, readResult := make(chan []byte), newObserverReadResult()
 	done := make(chan error, 1)
-	go func() { done <- unit.awaitInitial(context.Background(), controlmode.NewDecoder(), read, readErr, op) }()
+	go func() {
+		done <- unit.awaitInitial(context.Background(), controlmode.NewDecoder(), read, readResult, op)
+	}()
 	// Split the tmux control record itself, while also completing an ANSI
 	// prefix that belongs to the initial byte stream.
 	read <- []byte("%out")
@@ -572,11 +574,11 @@ func TestRecordingInitialCancellationKeepsDecodingAcceptedStream(t *testing.T) {
 	holder := &unifiedDevBirth{owner: effects, witness: witness, streaming: true, initial: op}
 	effects.panes[witness.Pane] = holder
 	unit := &unifiedDevUnit{owner: effects, holder: holder, done: make(chan struct{})}
-	read, readErr := make(chan []byte), make(chan error)
+	read, readResult := make(chan []byte), newObserverReadResult()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	done := make(chan error, 1)
-	go func() { done <- unit.awaitInitial(ctx, controlmode.NewDecoder(), read, readErr, op) }()
+	go func() { done <- unit.awaitInitial(ctx, controlmode.NewDecoder(), read, readResult, op) }()
 	cancel()
 	pollUntil(t, time.Second, "cancelled readiness", func() bool {
 		registry.retention.mu.Lock()

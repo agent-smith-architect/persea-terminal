@@ -190,7 +190,7 @@ func TestUnifiedDevCommandErrorConsumesDecodedRemainder(t *testing.T) {
 		unit := &unifiedDevUnit{owner: effects, done: make(chan struct{})}
 		read := make(chan []byte, 1)
 		read <- chunk
-		err := unit.finishCommand(context.Background(), controlmode.NewDecoder(), read, make(chan error, 1),
+		err := unit.finishCommand(context.Background(), controlmode.NewDecoder(), read, newObserverReadResult(),
 			unifiedDevCommand{blocks: 1, done: make(chan unifiedDevCommandResult, 1)})
 		if err == nil {
 			t.Fatal("rejected command was accepted")
@@ -207,7 +207,7 @@ func TestUnifiedDevCommandErrorConsumesDecodedRemainder(t *testing.T) {
 		}
 		read := make(chan []byte, 1)
 		read <- chunk
-		err := unit.finishBirth(context.Background(), controlmode.NewDecoder(), read, make(chan error, 1))
+		err := unit.finishBirth(context.Background(), controlmode.NewDecoder(), read, newObserverReadResult())
 		if err == nil {
 			t.Fatal("rejected birth was accepted")
 		}
