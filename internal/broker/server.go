@@ -39,12 +39,13 @@ const AttachSetupTimeout = SetupTimeout
 const AttachedReadTimeout = 100 * time.Second
 
 type Server struct {
-	socketPath string
-	config     config.Broker
-	images     *imageStager
-	panes      *paneRegistry
-	birth      sessionBirthEffect
-	unified    *UnifiedDevPaneEffects
+	socketPath    string
+	config        config.Broker
+	images        *imageStager
+	panes         *paneRegistry
+	birth         sessionBirthEffect
+	unified       *UnifiedDevPaneEffects
+	inventoryTurn atomic.Uint64
 }
 
 type unifiedAttachmentFrameWriter struct {
@@ -1739,8 +1740,29 @@ func (s *Server) handleConn(conn net.Conn) {
 func (s *Server) inventory(writer *lockedWriter) {
 	result := make([]proto.ServerInventory, 0, len(s.config.Servers))
 	remaining := InventorySessionLimit
-	for _, server := range s.config.Servers {
-		r := s.inventoryServer(server, remaining)
+	turn := 0
+	if len(s.config.Servers) != 0 {
+		turn = int((s.inventoryTurn.Add(1) - 1) % uint64(len(s.config.Servers)))
+	}
+	snapshots := make([]inventoryServerSnapshot, len(s.config.Servers))
+	workers := min(inventoryServerReadConcurrency, len(s.config.Servers))
+	var reads sync.WaitGroup
+	reads.Add(workers)
+	for worker := range workers {
+		go func() {
+			defer reads.Done()
+			for i := worker; i < len(s.config.Servers); i += workers {
+				budget := 0
+				if i == turn {
+					budget = inventoryOwnerReadBudget
+				}
+				snapshots[i] = s.readInventoryServer(s.config.Servers[i], budget)
+			}
+		}()
+	}
+	reads.Wait()
+	for i, server := range s.config.Servers {
+		r := s.projectInventoryServer(server, remaining, snapshots[i])
 		remaining -= len(r.Sessions)
 		result = append(result, r)
 	}
@@ -1785,7 +1807,16 @@ func inventoryPayload(servers []proto.ServerInventory) ([]byte, error) {
 }
 
 func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.ServerInventory {
+	return s.inventoryServerWithOwnerBudget(server, limit, inventoryOwnerReadBudget)
+}
+
+func (s *Server) inventoryServerWithOwnerBudget(server config.TmuxServer, limit, budget int) proto.ServerInventory {
+	return s.projectInventoryServer(server, limit, s.readInventoryServer(server, budget))
+}
+
+func (s *Server) readInventoryServer(server config.TmuxServer, budget int) inventoryServerSnapshot {
 	r := proto.ServerInventory{Label: server.Label, Status: "ok", CanStageImages: s.images != nil}
+	snapshot := inventoryServerSnapshot{ownerBudget: budget}
 	inc, err := incarnation(server)
 	if err != nil {
 		r.Error = err.Error()
@@ -1802,7 +1833,8 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 		} else {
 			r.Status = "error"
 		}
-		return r
+		snapshot.result = r
+		return snapshot
 	}
 	// Fields 7–9 are the per-session unified eligibility facts.
 	// Measured on tmux 3.4: under `list-sessions -F` the window/pane formats
@@ -1810,11 +1842,19 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 	// sufficient for the closed eligibility class (single window, single pane,
 	// primary screen).
 	format := "#{session_id}\t#{session_name}\t#{window_width}\t#{window_height}\t#{session_attached}\t#{session_activity}\t#{session_created}\t#{alternate_on}\t#{window_panes}\t#{session_windows}\t#{window_activity}\t" + shadowMarkerFlags
-	out, err := tmuxOutput(server, "list-sessions", "-F", format)
+	args := []string{"list-sessions", "-F", format}
+	if budget <= 0 {
+		// Only the selected server needs hidden-row metadata. Avoid expanding
+		// it for every configured selector while retaining every visible row.
+		filter := "#{==:#{m:" + attachmentShadowPrefix + strings.Repeat("[0-9a-fA-F]", attachmentNonceHexLength) + ",#{session_name}},0}"
+		args = append(args, "-f", filter)
+	}
+	out, err := tmuxOutput(server, args...)
 	if err != nil {
 		r.Status = "error"
 		r.Error = err.Error()
-		return r
+		snapshot.result = r
+		return snapshot
 	}
 	after, err := incarnation(server)
 	if err != nil || !sameIncarnation(inc, after) {
@@ -1823,37 +1863,30 @@ func (s *Server) inventoryServer(server config.TmuxServer, limit int) proto.Serv
 		if errors.Is(err, errNoServer) {
 			r.Status = "no_server"
 		}
+		snapshot.result = r
+		return snapshot
+	}
+	snapshot.result, snapshot.inc = r, inc
+	snapshot.lines = strings.Split(strings.TrimRight(out, "\r\n"), "\n")
+	return snapshot
+}
+
+func (s *Server) projectInventoryServer(server config.TmuxServer, limit int, snapshot inventoryServerSnapshot) proto.ServerInventory {
+	r, inc, lines := snapshot.result, snapshot.inc, snapshot.lines
+	if r.Status != "ok" {
+		return r
+	}
+	if err := inspectInventoryShadows(server, inc, lines, snapshot.ownerBudget); err != nil {
+		r.Status, r.Error = "error", err.Error()
 		return r
 	}
 	visible := 0
-	for _, line := range strings.Split(strings.TrimRight(out, "\r\n"), "\n") {
+	for _, line := range lines {
 		if line == "" {
 			continue
 		}
 		p := strings.Split(line, "\t")
-		// Restore can continue after admission, including beyond the display
-		// limit. Marker flags keep arbitrary option text out of the row format.
 		internal := len(p) >= 2 && attachmentShadowName(p[1])
-		if len(p) == 14 && internal {
-			fields := []string{p[0], p[1], p[4], p[9], p[6], p[11], p[12], p[13]}
-			shadow, ok, err := restoredShadowCandidate(server, fields, inc)
-			if err != nil {
-				r.Status, r.Error = "error", err.Error()
-				r.Sessions = nil
-				return r
-			}
-			if ok {
-				removed, err := reapOrphanShadow(server, shadow)
-				if err != nil {
-					r.Status, r.Error = "error", err.Error()
-					r.Sessions = nil
-					return r
-				}
-				if removed {
-					continue
-				}
-			}
-		}
 		if internal {
 			continue
 		}

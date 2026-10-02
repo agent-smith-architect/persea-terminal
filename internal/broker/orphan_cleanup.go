@@ -44,7 +44,8 @@ var shadowAdmission sync.Map // tmuxProcessIdentity -> *tmuxShadowAdmission
 
 type tmuxShadowAdmission struct {
 	sync.Mutex
-	ready bool
+	ready           bool
+	inventoryCursor shadowInventoryCursor
 }
 
 type tmuxProcessIdentity struct {
