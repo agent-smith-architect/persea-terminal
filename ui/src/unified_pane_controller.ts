@@ -22,6 +22,7 @@ import { adoptFailureMessage, parseInventory, resolveDraftScope, unifiedBlockedM
 import type { ComposerStagedImage } from "./composer_attachments";
 import type { SnippetServicePort } from "./snippet_client";
 import { switcherInventory, type SessionSwitcherInventory } from "./session_switcher";
+import { sessionScopeIdentity } from "./session_memory";
 import type { OperatorPreferencePort } from "./operator_preferences";
 import type { CommitFocusPolicy } from "./unified_focus_claim";
 import type { UnifiedInventoryDetail } from "./unified_close_policy";
@@ -792,6 +793,11 @@ export class UnifiedPaneController {
     this.snapshotGeneration = snapshot.generation;
     const resolution = resolveDraftScope(snapshot.inventory, key);
     if (resolution.kind === "missing") {
+      const identity = sessionScopeIdentity(key);
+      const realm = snapshot.inventory.realms.find((realm) => realm.name === identity?.realm);
+      const server = realm?.servers.find((server) => server.label === identity?.server);
+      // Only a healthy server can establish that the pinned session is gone.
+      if (!realm || realm.error || server?.status !== "ok") throw new Error("session inventory unavailable");
       observer?.identityResolve?.("session_gone");
       throw new ReconnectRefusal("session_gone");
     }
