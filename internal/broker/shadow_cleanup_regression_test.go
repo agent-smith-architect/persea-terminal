@@ -67,7 +67,6 @@ func TestShadowCleanupRaceOutcomes(t *testing.T) {
 				name := attachmentShadowPrefix + strings.Repeat("8", 32)
 				d.run("new-session", "-d", "-s", name, "sleep 600")
 				id := d.run("display-message", "-p", "-t", name, "#{session_id}")
-				ageRestoredShadow(t, d.tmux, id)
 				body := "if len(args) > 6 and args[4] == 'if-shell':\n"
 				switch change {
 				case "protected":
@@ -109,7 +108,6 @@ func TestRestoredEmptyMarkersMatchRemovalGuard(t *testing.T) {
 				name := attachmentShadowPrefix + strings.Repeat("7", 32)
 				d.run("new-session", "-d", "-s", name, "sleep 600")
 				id := d.run("display-message", "-p", "-t", name, "#{session_id}")
-				ageRestoredShadow(t, d.tmux, id)
 				inc, err := readIncarnation(d.tmux)
 				if err != nil {
 					t.Fatal(err)

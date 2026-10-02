@@ -68,7 +68,6 @@ func testRestoredShadowPreservation(t *testing.T, inventory bool) {
 			}
 			d.run("new-session", "-d", "-s", name, "sleep 600")
 			id := d.run("display-message", "-p", "-t", name, "#{session_id}")
-			ageRestoredShadow(t, d.tmux, id)
 			option := map[string]string{"client": "@persea_client_id", "pid": attachmentOwnerPIDOption, "start": attachmentOwnerStartOption}[strings.TrimPrefix(mutation, "empty-")]
 			if option != "" {
 				value := "marker"
@@ -140,7 +139,6 @@ func TestRestoredSweepPrecedesFirstUse(t *testing.T) {
 				name := attachmentShadowPrefix + strings.Repeat("b", 32)
 				d.run("new-session", "-d", "-s", name, "sleep 600")
 				id := d.run("display-message", "-p", "-t", name, "#{session_id}")
-				ageRestoredShadow(t, d.tmux, id)
 				switch entry {
 				case "inventory":
 					got := s.inventoryServer(d.tmux, 10)
@@ -221,7 +219,6 @@ func TestRestoredRemovalRechecksIdentity(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			ageRestoredShadow(t, d.tmux, id)
 			shadow, ok := inspectRestoredShadow(d.tmux, id, inc)
 			if !ok {
 				t.Fatal("restored candidate was not identified")
@@ -267,7 +264,6 @@ func TestIncarnationReplacementCannotPublishUnsweptRows(t *testing.T) {
 			name := attachmentShadowPrefix + strings.Repeat("e", 32)
 			b.run("new-session", "-d", "-s", name, "sleep 600")
 			id := b.run("display-message", "-p", "-t", name, "#{session_id}")
-			ageRestoredShadow(t, b.tmux, id)
 			command := "list-sessions"
 			if entry == "preview" {
 				command = "capture-pane"

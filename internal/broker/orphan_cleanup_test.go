@@ -48,7 +48,6 @@ func TestCleanupOrphanedShadowsRequiresExactDeadOwner(t *testing.T) {
 	}
 	setShadowOwner(t, d, liveOwner, attachmentClientPrefix+strings.Repeat("f", attachmentNonceHexLength), self.PID, self.StartTime)
 	d.run("set-option", "-t", metadataNoise, "@persea_client_id", "noise\t"+attachmentShadowPrefix+ownedNonce+"\nnoise")
-	ageRestoredShadow(t, d.tmux, d.run("display-message", "-p", "-t", restored, "#{session_id}"))
 
 	if err := cleanupOrphanedShadows(config.Broker{Servers: []config.TmuxServer{d.tmux}}); err != nil {
 		t.Fatal(err)
@@ -163,7 +162,6 @@ func TestRunReapsDeadOwnerBeforeOpeningBrokerSocket(t *testing.T) {
 	setShadowOwner(t, d, name, attachmentClientPrefix+nonce, testDeadOwnerPID, testDeadOwnerStart)
 	restored := attachmentShadowPrefix + strings.Repeat("a", attachmentNonceHexLength)
 	d.run("new-session", "-d", "-s", restored, "sleep 600")
-	ageRestoredShadow(t, d.tmux, d.run("display-message", "-p", "-t", restored, "#{session_id}"))
 
 	runtimeDir := shortTempDir(t)
 	blockedSocket := filepath.Join(runtimeDir, "blocked.sock")

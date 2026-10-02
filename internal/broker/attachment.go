@@ -177,36 +177,6 @@ type attachmentClient struct {
 const attachmentShadowPrefix = "persea-attach-"
 const attachmentClientPrefix = "client-"
 
-// Names cover selector aliases too. A failed birth can leave an unmarked
-// session, but inventory must not remove it while its command is still running.
-var attachmentShadowBirths = struct {
-	sync.Mutex
-	names map[string]int
-}{names: make(map[string]int)}
-
-func trackAttachmentShadow(name string) func() {
-	attachmentShadowBirths.Lock()
-	attachmentShadowBirths.names[name]++
-	attachmentShadowBirths.Unlock()
-	var once sync.Once
-	return func() {
-		once.Do(func() {
-			attachmentShadowBirths.Lock()
-			defer attachmentShadowBirths.Unlock()
-			attachmentShadowBirths.names[name]--
-			if attachmentShadowBirths.names[name] == 0 {
-				delete(attachmentShadowBirths.names, name)
-			}
-		})
-	}
-}
-
-func attachmentShadowPending(name string) bool {
-	attachmentShadowBirths.Lock()
-	defer attachmentShadowBirths.Unlock()
-	return attachmentShadowBirths.names[name] != 0
-}
-
 func removeOrphanShadow(server config.TmuxServer, shadow orphanShadow) error {
 	refused, err := invocationSentinel("PROTECTED")
 	if err != nil {
@@ -391,8 +361,6 @@ func (t *tmuxPinnedTransaction) bind(ctx context.Context, req terminal.Transacti
 		return terminal.TransactionResult{}, err
 	}
 	name := fmt.Sprintf("%s%x", attachmentShadowPrefix, nonce[:])
-	finishBirth := trackAttachmentShadow(name)
-	defer finishBirth()
 	clientID := fmt.Sprintf("%s%x", attachmentClientPrefix, nonce[:])
 	lookupShadowID := func() string {
 		out, err := tmuxOutput(t.server, "list-sessions", "-f", "#{==:#{session_name},"+name+"}", "-F", "#{session_id}")
@@ -416,7 +384,8 @@ func (t *tmuxPinnedTransaction) bind(ctx context.Context, req terminal.Transacti
 		"; [ " + shellQuote("#{pane_width}") + " = " + shellQuote(strconv.Itoa(req.Witness.Columns)) + " ] || exit 1" +
 		"; [ " + shellQuote("#{pane_height}") + " = " + shellQuote(strconv.Itoa(req.Witness.Rows)) + " ] || exit 1" +
 		"; stat=$(cat /proc/" + strconv.Itoa(req.Witness.Pane.PID) + "/stat) || exit 1; suffix=${stat##*) }; set -- $suffix; [ \"$#\" -ge 20 ] && [ \"${20}\" = " + shellQuote(strconv.FormatUint(req.Witness.Pane.StartTime, 10)) + " ]"
-	success := fmt.Sprintf("new-session -d -P -F '#{session_id}' -x %d -y %d -s %s ; link-window -s %s -t %s:1 ; kill-window -t %s:0 ; move-window -s %s:1 -t %s:0 ; set-option -t %s status off ; set-option -t %s prefix None ; set-option -t %s prefix2 None ; set-option -t %s @persea_client_id %s ; set-option -t %s %s %d ; set-option -t %s %s %d", req.Witness.Columns, req.Witness.Rows, shellQuote(name), req.Witness.WindowID, name, name, name, name, name, name, name, name, shellQuote(clientID), name, attachmentOwnerPIDOption, owner.PID, name, attachmentOwnerStartOption, owner.StartTime)
+	ownerEnvironment := fmt.Sprintf("%s=%s:%d:%d", attachmentOwnerEnvironment, t.authority.BootID, owner.PID, owner.StartTime)
+	success := fmt.Sprintf("new-session -d -P -F '#{session_id}' -x %d -y %d -s %s -e %s ; link-window -s %s -t %s:1 ; kill-window -t %s:0 ; move-window -s %s:1 -t %s:0 ; set-option -t %s status off ; set-option -t %s prefix None ; set-option -t %s prefix2 None ; set-option -t %s @persea_client_id %s ; set-option -t %s %s %d ; set-option -t %s %s %d", req.Witness.Columns, req.Witness.Rows, shellQuote(name), shellQuote(ownerEnvironment), req.Witness.WindowID, name, name, name, name, name, name, name, name, shellQuote(clientID), name, attachmentOwnerPIDOption, owner.PID, name, attachmentOwnerStartOption, owner.StartTime)
 	argv := tmuxArgv(t.server, "if-shell", "-t", pinnedTmuxTarget(req.Witness), condition, success, "run-shell 'exit 77'")
 	birthCtx, cancelBirth := context.WithTimeout(ctx, shadowBirthTimeout)
 	defer cancelBirth()
@@ -424,7 +393,6 @@ func (t *tmuxPinnedTransaction) bind(ctx context.Context, req terminal.Transacti
 	var bindStderr strings.Builder
 	cmd.Stderr = &bindStderr
 	out, bindErr := cmd.Output()
-	finishBirth()
 	ids := terminal.AttachmentIDs{ClientID: clientID}
 	for _, line := range strings.Fields(string(out)) {
 		if validSessionID(line) {

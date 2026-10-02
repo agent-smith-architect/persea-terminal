@@ -68,6 +68,10 @@ forwards requests to Persea Terminal over a local Unix socket.
 configured Linux user accounts (called *realms*). Only explicitly configured tmux
 servers are available. See the [security model](SECURITY.md).
 
+Hidden attachment copies restored after a reboot are removed when the broker
+first sees them. Copies restored later are removed during inventory. A living
+broker's attachment remains protected even while that broker is suspended.
+
 ## Get started
 
 ### Requirements

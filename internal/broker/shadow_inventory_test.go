@@ -68,7 +68,6 @@ func TestInventoryReapsLateRestoredShadows(t *testing.T) {
 			name := attachmentShadowPrefix + strings.Repeat("f", 32)
 			d.run("new-session", "-d", "-s", name, "sleep 600")
 			id := d.run("display-message", "-p", "-t", name, "#{session_id}")
-			ageRestoredShadow(t, d.tmux, id)
 			got := s.inventoryServer(d.tmux, limit)
 			if got.Status != "ok" || (limit > 0 && (len(got.Sessions) != 1 || got.Sessions[0].Name != "alpha")) {
 				t.Fatalf("late restored inventory: %+v", got)
@@ -109,7 +108,6 @@ func TestInventorySkipsLiveShadowsWithoutExtraCalls(t *testing.T) {
 	name := attachmentShadowPrefix + strings.Repeat("a", 32)
 	d.run("new-session", "-d", "-s", name, "sleep 600")
 	id := d.run("display-message", "-p", "-t", name, "#{session_id}")
-	ageRestoredShadow(t, d.tmux, id)
 	owner, err := (procProbe{}).Witness(context.Background(), os.Getpid())
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +121,7 @@ func TestInventorySkipsLiveShadowsWithoutExtraCalls(t *testing.T) {
 	}
 }
 
-func TestInventoryProtectsShadowBirthUntilCommandReturns(t *testing.T) {
+func TestInventoryProtectsShadowOwnerAcrossBirthOutcomes(t *testing.T) {
 	for _, outcome := range []string{"success", "failure", "timeout"} {
 		t.Run(outcome, func(t *testing.T) {
 			d := newDisposable(t)
@@ -185,7 +183,14 @@ func TestInventoryProtectsShadowBirthUntilCommandReturns(t *testing.T) {
 			}()
 			name := shadowPipeLine(t, ready)
 			id := d.run("display-message", "-p", "-t", name, "#{session_id}")
-			ageRestoredShadow(t, d.tmux, id)
+			owner, err := (procProbe{}).Witness(ctx, os.Getpid())
+			if err != nil {
+				t.Fatal(err)
+			}
+			wantOwner := fmt.Sprintf("%s=%s:%d:%d", attachmentOwnerEnvironment, authority.BootID, owner.PID, owner.StartTime)
+			if got := d.run("show-environment", "-t", "="+id+":", attachmentOwnerEnvironment); got != wantOwner {
+				t.Fatalf("shadow was born without its exact owner: got=%q want=%q", got, wantOwner)
+			}
 			if out := d.run("show-options", "-Aq", "-t", "="+id+":", "@persea_client_id"); out != "" {
 				t.Fatalf("birth fixture already marked: %q", out)
 			}
@@ -203,13 +208,10 @@ func TestInventoryProtectsShadowBirthUntilCommandReturns(t *testing.T) {
 			select {
 			case got = <-done:
 			case <-time.After(shadowBirthTimeout + time.Second):
-				t.Fatal("birth command exceeded its cleanup safety bound")
+				t.Fatal("birth command exceeded its cancellation deadline")
 			}
 			if (got.err == nil) != (outcome == "success") {
 				t.Fatalf("birth %s: %v", outcome, got.err)
-			}
-			if attachmentShadowPending(name) {
-				t.Fatal("completed birth still marked in-flight")
 			}
 			if outcome == "success" {
 				defer func() {
@@ -219,8 +221,8 @@ func TestInventoryProtectsShadowBirthUntilCommandReturns(t *testing.T) {
 			if inv := s.inventoryServer(d.tmux, 10); inv.Status != "ok" {
 				t.Fatalf("inventory after birth: %+v", inv)
 			}
-			if present, err := tmuxSessionPresent(d.tmux, id); err != nil || present != (outcome == "success") {
-				t.Fatalf("birth %s cleanup: present=%v err=%v", outcome, present, err)
+			if present, err := tmuxSessionPresent(d.tmux, id); err != nil || !present {
+				t.Fatalf("birth %s lost its live owner's session: present=%v err=%v", outcome, present, err)
 			}
 		})
 	}
