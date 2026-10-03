@@ -177,3 +177,22 @@ func TestAliasAPIJSONETagAndCAS(t *testing.T) {
 		t.Fatalf("delete=%d %s", deleted.Code, deleted.Body.String())
 	}
 }
+
+func TestAliasConflictHeaderPreservesUnicode(t *testing.T) {
+	current := AliasRecord{AliasID: "id", DisplayAlias: "工作 📖 + 50%", Realm: "r", Server: "s", SessionName: "he2", Incarnation: auth(7, "$0"), State: "active", Revision: 7}
+	w := httptest.NewRecorder()
+	writeAliasError(w, "alias_exists", http.StatusConflict, current)
+	header := w.Header().Get("X-Persea-Alias-Record")
+	for _, char := range header {
+		if char >= 128 {
+			t.Fatalf("non-ASCII byte in Fetch header: %q", header)
+		}
+	}
+	var parsed AliasRecord
+	if err := json.Unmarshal([]byte(header), &parsed); err != nil || parsed != current {
+		t.Fatalf("Unicode winning alias changed: %+v %v", parsed, err)
+	}
+	if w.Body.String() != "alias_exists\n" || w.Header().Get("ETag") != `"7"` {
+		t.Fatalf("refusal wire contract changed: %q %v", w.Body.String(), w.Header())
+	}
+}
