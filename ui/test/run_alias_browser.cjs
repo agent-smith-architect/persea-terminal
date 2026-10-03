@@ -137,7 +137,7 @@ async function run(engine) {
   try {
     for (const [name, width, height] of shapes) {
       let phase = 'dashboard';
-      state.aliases = [{ alias_id: 'detached', display_alias: 'Previous project', revision: 1, state: 'detached', realm: 'local', server: 'private', session_name: 'he9', session_incarnation: {} }];
+      state.aliases = [{ alias_id: 'detached', display_alias: 'Previous project', revision: 1, state: 'detached', realm: 'local', server: 'private', session_name: 'tm9', session_incarnation: {} }];
       const context = await browser.newContext({ viewport: { width, height }, hasTouch: name !== 'desktop', isMobile: name !== 'desktop', ignoreHTTPSErrors: true });
       await context.request.post(`${fixture.origin}/__fixture/control`, { data: { reset: true, switchSessions: true } });
       const page = await context.newPage();
@@ -168,7 +168,7 @@ async function run(engine) {
       await page.getByRole('button', { name: 'Settings', exact: true }).click();
       await shot('settings-disclosures');
       await page.getByText('Aliases of sessions that are not running', { exact: true }).click();
-      assert(await page.locator('.alias-history-session').innerText() === 'he9', 'History omitted session name');
+      assert(await page.locator('.alias-history-session').innerText() === 'tm9', 'History omitted session name');
       assert(!(await page.locator('body').innerText()).includes('tombstone'), 'Internal state appeared on page');
       await shot('history');
       await page.getByRole('button', { name: 'Remove alias Previous project', exact: true }).click();
