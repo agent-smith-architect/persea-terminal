@@ -91,6 +91,7 @@ async function main() {
           await dashboard.goto(fixture.origin + '/terminal');
           const defaults = dashboard.getByRole('combobox', { name: 'Scrollback rows', exact: true });
           await dashboard.locator('a.session-open-action').first().waitFor();
+          await dashboard.locator('.dashboard-navigation').getByRole('button', { name: 'Settings', exact: true }).click();
           assert(await defaults.inputValue() === '1000', 'Untouched device did not default to 1,000 rows');
           const linkHistory = scope => dashboard.locator('a.session-open-action').evaluateAll((links, wanted) => links.map(link => new URLSearchParams(new URL(link.href).hash.slice(1))).find(query => query.get('draft_scope') === wanted)?.get('history'), scope);
           assert(await linkHistory(fixture.draftScope) === '0' && await linkHistory(fixture.draftScopeB) === '1000', 'Dashboard lost terminal override isolation');
@@ -125,6 +126,7 @@ async function main() {
             fresh.on('console', message => result.console.push({ phase, type: message.type(), message: message.text().slice(0, 500) }));
             await fresh.goto(fixture.origin + '/terminal');
             await fresh.locator('a.session-open-action').first().waitFor();
+            await fresh.locator('.dashboard-navigation').getByRole('button', { name: 'Settings', exact: true }).click();
             assert(await fresh.getByRole('combobox', { name: 'Scrollback rows', exact: true }).inputValue() === '1000', 'A separate device inherited another device default');
             assert(await fresh.locator('a.session-open-action').evaluateAll(links => links.every(link => new URLSearchParams(new URL(link.href).hash.slice(1)).get('history') === '1000')), 'A separate device inherited terminal overrides');
           } finally { await secondDevice.close(); }
