@@ -152,9 +152,12 @@ appears in the dashboard and in the optional alias step after session creation.
 Alias store version 2 records session names and the last incarnation on which
 each alias was shown. Older stores are replaced with an empty version 2 store
 on load; old records cannot be converted because they do not contain names.
-Configured aliases seed a name only when it has no stored record. Alias text
-updates and removal require the saved revision; only creation needs a live
-session handle. Writes remain atomic and durable.
+Alias text updates and removal require the saved revision; only creation needs
+a live session handle. Writes remain atomic and durable. The store keeps at most
+1024 records and 1 MiB; detached entries are evicted oldest first. If the store
+cannot be saved, the session list stays available and the front door logs the
+failure once. Creating an alias while a server's inventory is incomplete is
+refused as unavailable.
 
 The dedicated durable `dashboard-preferences.json` file is a sibling of the
 configured appearance preferences store. It preserves that store's closed schema
