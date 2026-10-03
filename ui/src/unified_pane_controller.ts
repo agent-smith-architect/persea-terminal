@@ -544,7 +544,8 @@ export class UnifiedPaneController {
   private async sessionInventory(_refresh: boolean, signal: AbortSignal, readAfter?: number): Promise<SessionSwitcherInventory> {
     const snapshot = await this.options.resolveInventory(signal, this.snapshotGeneration, readAfter);
     if (signal.aborted || this.disposed) throw new DOMException("session inventory superseded", "AbortError");
-    this.snapshotGeneration = snapshot.generation;
+    // Reads can resume out of order; the consumed generation never moves back.
+    this.snapshotGeneration = Math.max(this.snapshotGeneration, snapshot.generation);
     return switcherInventory(snapshot.inventory, snapshot.readOrder);
   }
 
@@ -797,7 +798,8 @@ export class UnifiedPaneController {
       this.observeAuthorityResult("identity_remint", "discarded", operation, key);
       throw new DOMException("identity superseded", "AbortError");
     }
-    this.snapshotGeneration = snapshot.generation;
+    // Reads can resume out of order; the consumed generation never moves back.
+    this.snapshotGeneration = Math.max(this.snapshotGeneration, snapshot.generation);
     const resolution = resolveDraftScope(snapshot.inventory, key);
     if (resolution.kind === "missing") {
       const identity = sessionScopeIdentity(key);
