@@ -23,7 +23,11 @@ import (
 
 const aliasStoreVersion = 2
 const aliasStoreMaxBytes = 1 << 20
-const aliasStoreMaxRecords = 4096
+
+// Typical records take a few hundred bytes, so the record limit is usually
+// reached first; long aliases can reach the byte limit first. Either limit makes
+// room by removing the oldest detached aliases (fitLocked).
+const aliasStoreMaxRecords = 1024
 
 var errAliasConflict = errors.New("alias revision conflict")
 var errAliasInUse = errors.New("alias in use")
@@ -67,39 +71,6 @@ type AliasRecord struct {
 type aliasSession struct {
 	Authority proto.Authority
 	Name      string
-}
-
-// A seed has never been shown on a session, so its last witness is null.
-// Keep the broker's Authority decoder strict: only this store record can
-// represent an absent witness, and load still requires one for active aliases.
-func (r AliasRecord) MarshalJSON() ([]byte, error) {
-	type record AliasRecord
-	var incarnation *proto.Authority
-	if r.Incarnation != (proto.Authority{}) {
-		incarnation = &r.Incarnation
-	}
-	return json.Marshal(struct {
-		record
-		Incarnation *proto.Authority `json:"session_incarnation"`
-	}{record: record(r), Incarnation: incarnation})
-}
-
-func (r *AliasRecord) UnmarshalJSON(data []byte) error {
-	type record AliasRecord
-	wire := struct {
-		*record
-		Incarnation *proto.Authority `json:"session_incarnation"`
-	}{record: (*record)(r)}
-	dec := json.NewDecoder(bytes.NewReader(data))
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&wire); err != nil {
-		return err
-	}
-	r.Incarnation = proto.Authority{}
-	if wire.Incarnation != nil {
-		r.Incarnation = *wire.Incarnation
-	}
-	return nil
 }
 
 type aliasStoreFile struct {
@@ -349,12 +320,12 @@ func (s *aliasStore) load() error {
 			r.Realm == "" || r.Server == "" || r.SessionName == "" || (r.State != "active" && r.State != "detached") || ids[r.AliasID] {
 			return errors.New("invalid alias record")
 		}
-		if r.Incarnation != (proto.Authority{}) && (!r.Incarnation.Valid() || r.Incarnation.SessionCreated <= 0 || r.Incarnation.Realm != r.Realm || r.Incarnation.Server != r.Server) {
+		if !r.Incarnation.Valid() || r.Incarnation.SessionCreated <= 0 || r.Incarnation.Realm != r.Realm || r.Incarnation.Server != r.Server {
 			return errors.New("invalid alias incarnation")
 		}
 		if r.State == "active" {
 			key := authorityKey(r.Incarnation)
-			if !r.Incarnation.Valid() || norms[n] || sessions[key] {
+			if norms[n] || sessions[key] {
 				return errors.New("duplicate or invalid active alias")
 			}
 			norms[n], sessions[key] = true, true
@@ -475,20 +446,37 @@ func aliasNewer(a, b AliasRecord) bool {
 	return a.AliasID < b.AliasID
 }
 
-func (s *aliasStore) makeRoomLocked() error {
-	if len(s.records) < aliasStoreMaxRecords {
-		return nil
-	}
-	var oldest AliasRecord
+// fitLocked removes the oldest detached aliases until the store is within its
+// record and byte limits. Detached history is the only thing it removes, and
+// never the record named by protect.
+func (s *aliasStore) fitLocked(protect string) error {
+	list := make([]AliasRecord, 0, len(s.records))
 	for _, r := range s.records {
-		if r.State == "detached" && (oldest.AliasID == "" || aliasNewer(oldest, r)) {
-			oldest = r
+		list = append(list, r)
+	}
+	b, err := json.Marshal(aliasStoreFile{Version: aliasStoreVersion, Aliases: list})
+	if err != nil {
+		return err
+	}
+	size := len(b)
+	for len(s.records) > aliasStoreMaxRecords || size > aliasStoreMaxBytes {
+		var oldest AliasRecord
+		for _, r := range s.records {
+			if r.State == "detached" && r.AliasID != protect && (oldest.AliasID == "" || aliasNewer(oldest, r)) {
+				oldest = r
+			}
 		}
+		if oldest.AliasID == "" {
+			return errAliasStoreUnavailable
+		}
+		item, err := json.Marshal(oldest)
+		if err != nil {
+			return err
+		}
+		delete(s.records, oldest.AliasID)
+		// The record and the comma that separated it from its neighbour.
+		size -= len(item) + 1
 	}
-	if oldest.AliasID == "" {
-		return errAliasStoreUnavailable
-	}
-	delete(s.records, oldest.AliasID)
 	return nil
 }
 
@@ -532,11 +520,11 @@ func (s *aliasStore) create(display string, target aliasSession) (AliasRecord, e
 	r := AliasRecord{AliasID: id, DisplayAlias: strings.TrimSpace(display), NormalizedAlias: n, Realm: a.Realm, Server: a.Server, SessionName: target.Name, Incarnation: a, Revision: 1, CreatedAt: now, UpdatedAt: now, State: "active"}
 	before := s.snapshotLocked()
 	s.supersedeLocked(n, "")
-	if e = s.makeRoomLocked(); e != nil {
+	s.records[id] = r
+	if e = s.fitLocked(id); e != nil {
 		s.records = before
 		return AliasRecord{}, e
 	}
-	s.records[id] = r
 	if e = s.commitLocked(before); e != nil {
 		return AliasRecord{}, e
 	}
@@ -588,6 +576,10 @@ func (s *aliasStore) update(id, display string, revision uint64) (AliasRecord, e
 	r.UpdatedAt = s.now().UTC()
 	s.supersedeLocked(n, id)
 	s.records[id] = r
+	if e = s.fitLocked(id); e != nil {
+		s.records = before
+		return AliasRecord{}, e
+	}
 	if e = s.commitLocked(before); e != nil {
 		return AliasRecord{}, e
 	}
@@ -618,34 +610,6 @@ func (s *aliasStore) delete(id string, revision uint64) (AliasRecord, error) {
 }
 
 func sameAuthority(a, b proto.Authority) bool { return authorityKey(a) == authorityKey(b) }
-
-func (s *aliasStore) seed(display, realm, server, name string) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if err := s.availableLocked(); err != nil {
-		return err
-	}
-	for _, r := range s.records {
-		if r.Realm == realm && r.Server == server && r.SessionName == name {
-			return nil
-		}
-	}
-	n, err := normalizeAlias(display)
-	if err != nil || realm == "" || server == "" || name == "" {
-		return errAliasValidation
-	}
-	id, err := newAliasID()
-	if err != nil {
-		return err
-	}
-	before := s.snapshotLocked()
-	if err = s.makeRoomLocked(); err != nil {
-		return err
-	}
-	now := s.now().UTC()
-	s.records[id] = AliasRecord{AliasID: id, DisplayAlias: strings.TrimSpace(display), NormalizedAlias: n, Realm: realm, Server: server, SessionName: name, Revision: 1, CreatedAt: now, UpdatedAt: now, State: "detached"}
-	return s.commitLocked(before)
-}
 
 func (s *aliasStore) reconcile(live []aliasSession, complete map[string]bool) error {
 	s.mu.Lock()
@@ -715,8 +679,12 @@ func (s *aliasStore) reconcile(live []aliasSession, complete map[string]bool) er
 			changed = true
 		}
 	}
-	if changed {
-		return s.commitLocked(before)
+	if !changed {
+		return nil
 	}
-	return nil
+	if err := s.fitLocked(""); err != nil {
+		s.records = before
+		return err
+	}
+	return s.commitLocked(before)
 }
