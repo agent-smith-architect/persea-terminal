@@ -33,6 +33,7 @@ import type { DashboardSession } from "./dashboard";
 import { saveAlias, type DashboardAlias } from "./alias_client";
 import "./alias_editor.css";
 import { UNIFIED_THEME_IDS, unifiedTheme } from "./unified_themes";
+import { DEFAULT_TERMINAL_POSITION, centersVertically, type TerminalPosition } from "./terminal_position";
 import { sessionScopeIdentity } from "./session_memory";
 import { CopyFeedback, type CopyFeedbackState } from "./copy_feedback";
 import { frozenRangeAtColumn, serializeFrozenRange, serializeFrozenScreen, type FrozenTerminalCellStyle, type FrozenTerminalPoint, type FrozenTerminalSegment, type FrozenTerminalSnapshot } from "./frozen_terminal_snapshot";
@@ -243,6 +244,15 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private readonly copyFeedback = new Map<HTMLButtonElement, CopyFeedback>();
   private readonly copyAnnouncementAttempts = new Map<HTMLElement, number>();
   private cellHeightPixels = 0;
+  // Terminal position. The horizontal axis is the stylesheet's, keyed by the
+  // shell's data-terminal-position; the vertical offset belongs to the
+  // projection and is re-derived wherever the grid is measured.
+  private terminalPosition: TerminalPosition = DEFAULT_TERMINAL_POSITION;
+  // How far the projection moves the grid down into the free space under it:
+  // nonzero only for Center with a grid shorter than the viewport.
+  private gridOffsetY = 0;
+  // That free space at the last measurement; the frozen overlay mirrors it.
+  private gridFreeHeight = 0;
   private projectedRow = -1;
   private projectedBuffer: "normal" | "alternate" = "normal";
   private applyingProjection = false;
@@ -527,9 +537,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     const initialTheme = unifiedTheme(initialPreferences?.preferences.theme ?? "default");
     this.fontPreference = initialPreferences?.preferences.fontSize ?? null;
     this.composerFontPreference = initialPreferences?.preferences.composerFontSize ?? DEFAULT_COMPOSER_FONT_SIZE;
+    this.terminalPosition = initialPreferences?.preferences.terminalPosition ?? DEFAULT_TERMINAL_POSITION;
     const shell = document.createElement("section");
     shell.className = "persea-unified-terminal";
     shell.dataset.theme = initialTheme.id;
+    shell.dataset.terminalPosition = this.terminalPosition;
     shell.dataset.fontBaseline = fontBaselineAttribute(this.fontPreference);
     shell.style.setProperty("--persea-composer-font-size", `${this.composerFontPreference}px`);
     shell.dataset.composerFont = String(this.composerFontPreference);
@@ -1635,9 +1647,21 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.terminal.options.theme = theme.xterm;
   }
 
+  // The stylesheet moves the grid sideways as soon as the attribute changes;
+  // the vertical offset follows on the ordinary reconcile, which measures the
+  // grid again. Position changes no scroll range or row mapping, so the
+  // reconcile's anchor holds the same rows in view.
+  private applyTerminalPosition(position: TerminalPosition): void {
+    if (position === this.terminalPosition) return;
+    this.terminalPosition = position;
+    this.shell.dataset.terminalPosition = position;
+    this.scheduleReconcile();
+  }
+
   private applyPreferences(snapshot: OperatorPreferenceSnapshot): void {
     if (this.closed) return;
     this.applyTheme(snapshot.preferences.theme);
+    this.applyTerminalPosition(snapshot.preferences.terminalPosition);
     // A pending intent is authority even when its value is `null`: the operator
     // asked for auto and the record has not caught up yet. `??` would read that
     // as "no intent" and let the stale stored number win.
@@ -2380,6 +2404,12 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.selectBody.style.setProperty("--persea-terminal-font-family", snapshot.fontFamily);
     this.selectBody.style.setProperty("--persea-terminal-font-size", `${snapshot.fontSizePixels}px`);
     this.selectBody.style.setProperty("--persea-terminal-row-height", `${snapshot.rowHeightPixels}px`);
+    // Placement is frozen the same way: the body mirrors the live projection —
+    // the band above the grid, the grid's width, and room below for the last
+    // screen to sit where it sat — so entering Select moves no text.
+    this.selectBody.style.setProperty("--persea-select-offset-top", `${this.gridOffsetY}px`);
+    this.selectBody.style.setProperty("--persea-select-band-bottom", `${this.gridFreeHeight - this.gridOffsetY}px`);
+    this.selectBody.style.setProperty("--persea-select-grid-width", this.host.style.width);
     const fragment = document.createDocumentFragment();
     snapshot.lines.forEach((line, index) => {
       const row = document.createElement("span");
@@ -4370,11 +4400,22 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.cellHeightPixels = measured;
     this.host.style.height = `${grid.height}px`;
     this.host.style.width = `${grid.width}px`;
+    // The stylesheet centres a narrow grid from this value; see the
+    // data-terminal-position rules for .persea-unified-xterm.
+    this.host.style.setProperty("--persea-unified-grid-width", `${grid.width}px`);
     const buffer = this.terminal.buffer.active;
+    const viewportHeight = this.viewport.clientHeight;
     // Sizing the last screen by grid height rather than viewport height is what
     // keeps the final rows reachable: a grid taller than the viewport needs that
     // surplus in the range, or the bottom of the screen has nowhere to scroll to.
-    const rangeHeight = Math.ceil(buffer.baseY * measured + Math.max(grid.height, this.viewport.clientHeight));
+    const rangeHeight = Math.ceil(buffer.baseY * measured + Math.max(grid.height, viewportHeight));
+    // Center spends the free space under a short grid evenly above and below
+    // it. The offset only moves the grid inside the band the range already
+    // reserves below the last history row, so the range, the row mapping,
+    // anchors and the follow-tail test are the same for every position, and a
+    // grid with no free space gets no offset.
+    this.gridFreeHeight = Math.max(0, viewportHeight - grid.height);
+    this.gridOffsetY = centersVertically(this.terminalPosition) ? Math.floor(this.gridFreeHeight / 2) : 0;
     this.scrollRange.style.height = `${rangeHeight}px`;
     this.scrollRange.style.width = `${grid.width}px`;
     // Read the range back from layout rather than trusting the height just
@@ -4420,7 +4461,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     const target = this.viewport.scrollTop >= maximumTop - 1
       ? buffer.baseY
       : Math.max(0, Math.min(buffer.baseY, Math.floor((this.viewport.scrollTop + 0.001) / cellHeight)));
-    this.host.style.top = `${target * cellHeight}px`;
+    this.host.style.top = `${target * cellHeight + this.gridOffsetY}px`;
     // Font measurement can make xterm reconcile its own scrollbar after our
     // last projection. Its live viewport must agree too; the cached row alone
     // cannot prove that the requested history is still what it is painting.
