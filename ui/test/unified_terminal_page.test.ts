@@ -239,7 +239,7 @@ async function main(): Promise<void> {
   writeJSON(frontConfig, {
     ingress: { socket_path: frontSocket, peer_uid: uid, canonical_host: canonicalHost, operator_login: "operator@example.test", max_connections: 64, ...(browserEngine === "webkit" ? { hermetic_tls: true } : {}) },
     realms: [{ name: "e2e1", display_name: "E2E1", socket: brokerSocket, broker_uid: uid }],
-    aliases: [], alias_store_path: path.join(tmp, "aliases.json"), handle_ttl_seconds: 120, handle_capacity: 256,
+    alias_store_path: path.join(tmp, "aliases.json"), handle_ttl_seconds: 120, handle_capacity: 256,
     workspace_store_path: path.join(tmp, "workspaces.json"),
   });
 
