@@ -1,4 +1,4 @@
-import { COLLAPSE_STORAGE_KEY, HISTORY_CHOICES, adoptFailureMessage, defaultCardLabel, defaultUnavailableMessage, landingAmbiguousMessage, landingBlockedMessage, landingEndedMessage, resumeCardDetail, resumeCardLabel, aliasRequest, assignText, collapseGroupKey, createFailureMessage, effectiveCollapse, formatPreviewMeta, parseHistoryChoice, parseInventory, parsePreview, previewFailureMessage, previewRequestPath, readCollapsedGroups, RefreshGate, sessionMatchesFilter, terminalURL, unifiedBlockedMessage, unifiedTerminalURL, writeCollapsedGroups } from "../src/dashboard";
+import { COLLAPSE_STORAGE_KEY, HISTORY_CHOICES, adoptFailureMessage, defaultCardLabel, defaultUnavailableMessage, landingAmbiguousMessage, landingBlockedMessage, landingEndedMessage, aliasRequest, assignText, collapseGroupKey, createFailureMessage, effectiveCollapse, formatPreviewMeta, parseHistoryChoice, parseInventory, parsePreview, previewFailureMessage, previewRequestPath, readCollapsedGroups, RefreshGate, sessionMatchesFilter, terminalURL, unifiedBlockedMessage, unifiedTerminalURL, writeCollapsedGroups } from "../src/dashboard";
 import { WorkspaceAPI, WorkspaceAPIError, parseWorkspaceList } from "../src/workspace_api";
 import { leaf } from "../src/workspace_model";
 
@@ -318,9 +318,6 @@ const gate = new RefreshGate(); assert.equal(gate.permitsBackgroundRefresh(), tr
 // --- session memory landing copy. Every state names what is true and nothing else: no
 // message promises a session, and the default never speaks as a resume.
 {
-  assert.equal(resumeCardLabel({ name: "ops", server: "private" }), "Resume ops · private");
-  assert.equal(resumeCardDetail({ realm: "local", server: "private" }), "local · private");
-  assert.equal(resumeCardDetail({ realm: "local", server: "private" }, "Primary"), "local · private · Primary");
   assert.equal(landingEndedMessage({ name: "ops", server: "private" }), "Your last session ops · private has ended.");
   assert.ok(landingAmbiguousMessage({ name: "ops" }).includes("ops"));
   assert.equal(landingBlockedMessage({ name: "ops", server: "private" }, "blocked_alt_screen"),

@@ -70,7 +70,7 @@ The bounded store keeps the latest 128 terminal choices and contains no session
 capability or terminal content. Existing explicitly saved device defaults remain.
 
 Choose Device default in the terminal selector to remove its override and apply
-the current device default. Dashboard opens, Resume, switching and workspace
+the current device default. Dashboard opens, Recent, switching and workspace
 panes resolve the same setting. Defaults apply when a terminal is opened; changes
 in another tab never shrink a terminal already open. Dashboard links follow
 storage changes. If browser storage is unavailable, the current page still

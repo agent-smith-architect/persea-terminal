@@ -41,7 +41,7 @@ body.dashboard-mode:has(.dashboard) #app { width: min(1180px, 100%); margin-inli
 .dashboard .session-open-action { min-width: 86px; padding: .45rem .7rem; background: var(--dashboard-chrome); color: var(--dashboard-fg); font-size: .875rem; font-weight: 600; }
 .session-open-action svg { width: 18px; height: 18px; flex: 0 0 18px; fill: none; stroke: var(--dashboard-accent); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .dashboard-control-icon { width: 19px; height: 19px; flex: 0 0 19px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.dashboard .session-alias-edit { color: var(--dashboard-muted); border-color: transparent; background: transparent; }
+.dashboard .session-alias-edit { color: var(--dashboard-muted); border: 0; background: transparent; padding: 0; box-shadow: none; }
 .dashboard .session-alias-edit .dashboard-control-icon { width: 16px; height: 16px; }
 .dashboard .session-disclosure[aria-expanded="true"] { background: var(--dashboard-chrome); color: var(--dashboard-accent); border-color: var(--dashboard-border); }
 .dashboard .session-pin { border-color: transparent; background: transparent; color: var(--dashboard-muted); font-size: 1.45rem; line-height: 1; }
@@ -59,7 +59,7 @@ body.dashboard-mode:has(.dashboard) #app { width: min(1180px, 100%); margin-inli
 .dashboard-header-actions { justify-content: flex-end; }
 .dashboard .dashboard-create-shortcut { border-color: var(--dashboard-accent); }
 .dashboard-navigation { display: flex; gap: .2rem; margin: 1rem 0 1.25rem; border-bottom: 1px solid var(--dashboard-border); }
-.dashboard .dashboard-navigation button { flex: 1 1 0; min-width: 0; padding-inline: .4rem; border: 0; border-radius: .4rem .4rem 0 0; background: transparent; overflow-wrap: anywhere; color: var(--dashboard-muted); }
+.dashboard .dashboard-navigation button { flex: 1 1 0; min-width: 0; padding-inline: min(.4rem, 1vw); border: 0; border-radius: .4rem .4rem 0 0; background: transparent; font-size: clamp(12px, 4vw, 1rem); white-space: nowrap; overflow-wrap: normal; color: var(--dashboard-muted); }
 .dashboard .dashboard-navigation button[aria-current="page"] { box-shadow: inset 0 -2px var(--dashboard-accent); color: var(--dashboard-fg); font-weight: 650; }
 .dashboard .dashboard-status, .dashboard-favorites-status { margin: .65rem 0; color: var(--dashboard-muted); font-size: .8125rem; overflow-wrap: anywhere; }
 .dashboard .dashboard-status:empty, .dashboard-favorites-status:empty { display: none; }
@@ -73,27 +73,30 @@ body.dashboard-mode:has(.dashboard) #app { width: min(1180px, 100%); margin-inli
 .session-create-status { grid-column: 2 / -1; align-self: center; min-width: 0; font-size: .8125rem; color: var(--dashboard-muted); overflow-wrap: anywhere; }
 .session-create-status:empty { display: none; }
 
-/* Resume uses a passive identity block and the same actions as every row. */
-.dashboard-landing { display: grid; gap: .65rem; margin: 0 0 1.25rem; }
-.landing-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .65rem 1rem; border: 1px solid var(--dashboard-border); border-radius: .9rem; padding: 1rem; background: var(--dashboard-card); }
-.landing-card-kicker { grid-column: 1 / -1; color: var(--dashboard-muted); font-size: .75rem; }
-.landing-card-body { display: grid; gap: .15rem; min-width: 0; grid-column: 1; grid-row: 2; }
-.dashboard .landing-card-label { font-size: 1.05rem; overflow-wrap: anywhere; }
-.landing-card-detail { font-size: .8125rem; color: var(--dashboard-muted); overflow-wrap: anywhere; }
-.landing-card-actions { display: flex; align-items: center; gap: .3rem; grid-column: 2; grid-row: 2; align-self: center; }
-.landing-card-status { grid-column: 1 / -1; font-size: .8125rem; color: var(--dashboard-muted); overflow-wrap: anywhere; }
-.landing-card-status:empty { display: none; }
-.dashboard .landing-note { padding: .75rem 1rem; border-left: 2px solid var(--dashboard-border); color: var(--dashboard-muted); background: var(--dashboard-card); border-radius: .4rem; font-size: .875rem; overflow-wrap: anywhere; }
+/* Recent and default entries are the same keyed rows as the main inventory. */
+.dashboard-landing { display: grid; gap: 1rem; margin: 0 0 1rem; }
+.dashboard-recent, .dashboard-default-session { display: grid; gap: .45rem; min-width: 0; }
+.dashboard-recent-heading { display: flex; align-items: baseline; gap: .65rem; flex-wrap: wrap; }
+.dashboard-recent-heading p, .landing-note { color: var(--dashboard-muted); font-size: .8125rem; }
+.dashboard-recent-notes:empty, .dashboard-default-notes:empty { display: none; }
+.dashboard-sessions-settings { padding: 1rem; }
+.dashboard-sessions-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: center; gap: .75rem 1.5rem; margin-block: .65rem; }
+.dashboard-sessions-setting { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: .65rem; min-width: 0; color: var(--dashboard-muted); font-size: .8125rem; }
+.dashboard-sessions-setting > span { flex: 1 1 10rem; min-width: 0; }
+.dashboard-sessions-setting select { flex: 0 0 auto; width: auto; min-width: 4.5rem; max-width: 7rem; margin-inline-start: auto; }
+.dashboard-sessions-settings-status { color: var(--dashboard-muted); font-size: .8125rem; }
+.dashboard-sessions-settings-status:empty { display: none; }
 
-/* Discovery tools and grouped rows preserve a compact, readable rhythm. */
+/* A filter row and a chip row on phones; a single toolbar where they fit. */
 .dashboard-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: .65rem; }
 .dashboard-search { display: flex; flex: 1 1 16rem; gap: .3rem; min-width: 0; }
-.dashboard-search-input { flex: 1 1 auto; }
-.dashboard-list-modes { display: flex; flex-wrap: wrap; gap: .25rem; }
-.dashboard .dashboard-list-modes button { padding-inline: .7rem; background: transparent; border-color: transparent; font-size: .875rem; }
+.dashboard-search-input { flex: 1 1 auto; min-width: 0; }
+.dashboard-search > button { flex: 0 0 44px; }
+.dashboard-list-modes { display: flex; flex-wrap: wrap; align-items: center; gap: .25rem; min-width: 0; }
+.dashboard .dashboard-list-modes button { flex: none; padding-inline: .7rem; background: transparent; border-color: transparent; font-size: .875rem; white-space: nowrap; }
 .dashboard .dashboard-list-modes button[aria-pressed="true"] { background: var(--dashboard-chrome); border-color: var(--dashboard-border); }
 .dashboard .dashboard-refresh { margin-left: auto; font-size: .875rem; }
-.dashboard .dashboard-results { margin: .85rem 0 .75rem; color: var(--dashboard-muted); font-size: .8125rem; }
+.dashboard .dashboard-results { flex: 1 1 auto; min-width: 0; margin: 0 0 0 auto; padding-inline-start: .4rem; color: var(--dashboard-muted); font-size: .8125rem; text-align: end; }
 .dashboard-empty-results { padding: 1.5rem .8rem; border: 1px dashed var(--dashboard-border); border-radius: .8rem; text-align: center; }
 .dashboard-empty-results p { margin-bottom: .75rem; }
 .dashboard-content { display: grid; gap: 1rem; }
@@ -110,7 +113,7 @@ body.dashboard-mode:has(.dashboard) #app { width: min(1180px, 100%); margin-inli
 .session-card { container-type: inline-size; min-width: 0; border: 1px solid var(--dashboard-border); border-radius: .7rem; padding: .4rem; background: var(--dashboard-bg); }
 .session-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: .1rem .5rem; min-height: 64px; padding-inline-start: .45rem; }
 .session-title { display: grid; gap: .15rem; grid-column: 1; grid-row: 1; min-width: 0; }
-.session-names { display: flex; gap: .2rem; align-items: center; flex-wrap: wrap; min-width: 0; }
+.session-names { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; min-width: 0; }
 .dashboard .session-name { flex: 0 1 auto; min-width: 0; font-size: .9375rem; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .alias-badge { display: inline-block; flex: 0 1 auto; min-width: 0; max-width: 65%; padding: .12rem .4rem; border-radius: .35rem; color: var(--dashboard-accent); background: var(--dashboard-chrome); font-size: .75rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-metadata { min-width: 0; color: var(--dashboard-muted); font-size: max(12px, .75rem); line-height: 1.5; overflow-wrap: anywhere; }
@@ -208,24 +211,21 @@ body.dashboard-mode:has(.dashboard) #app { width: min(1180px, 100%); margin-inli
   .dashboard-header-actions button { font-size: .8125rem; padding-inline: .6rem; }
   .realm-card { padding: .4rem; }
   .session-row { gap: .15rem .2rem; }
-  .session-names { gap: .15rem; }
+  .session-names { gap: .35rem; }
   .session-name { max-width: 100%; }
   .alias-badge { max-width: 100%; }
   .session-detail { padding: .75rem .35rem .25rem; }
-  .landing-card { padding: .8rem; gap: .5rem; }
-  .landing-card-actions { flex-direction: column-reverse; gap: 0; }
   .workspace-panel__create { grid-template-columns: minmax(0, 1fr); }
 }
+@media (max-width: 719px) {
+  .dashboard-search, .dashboard-list-modes { flex-basis: 100%; }
+  .dashboard-sessions-settings-grid { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 360px) {
-  .dashboard .dashboard-navigation button { flex-basis: auto; font-size: .875rem; }
+  .dashboard .dashboard-navigation button { font-size: clamp(12px, 4.2vw, .875rem); padding-inline: min(.2rem, 1vw); }
   .dashboard-toolbar { gap: .4rem; }
-  .dashboard .dashboard-list-modes button { padding-inline: .5rem; }
-  .dashboard .dashboard-refresh { padding-inline: .55rem; }
-  .dashboard-toolbar { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
-  .dashboard-search { grid-column: 1 / -1; }
-  .dashboard-list-modes { grid-column: 1; grid-row: 2; }
-  .dashboard-refresh { grid-column: 2; grid-row: 2; }
-  .dashboard-toolbar > .scrollback-control { grid-column: 1 / -1; grid-row: 3; justify-self: start; }
+  .dashboard .dashboard-list-modes button { font-size: .8125rem; padding-inline: .35rem; }
+  .dashboard .dashboard-results { font-size: .75rem; padding-inline-start: .2rem; }
 }
 /* Cards switch to an eye button when a useful thumbnail would crowd the name. */
 @container (max-width: 42rem) {

@@ -25,7 +25,7 @@ async function main() {
   const ready = async target => { await target.locator('.session-card').first().waitFor(); await target.waitForFunction(() => !document.querySelector('.session-card .session-pin').disabled); };
   const refresh = async () => {
     const response = page.waitForResponse(response => response.url().endsWith('/api/inventory'));
-    await page.getByRole('button', { name: 'Refresh session list', exact: true }).click(); await response;
+    await page.getByRole('button', { name: 'Refresh sessions', exact: true }).click(); await response;
     await page.waitForFunction(() => !document.querySelector('.dashboard-refresh').disabled);
   };
   const section = async name => { await page.locator('.dashboard-navigation').getByRole('button', { name, exact: true }).click(); };
@@ -40,20 +40,20 @@ async function main() {
     const remembered = fixture.state.sessions[0];
     await context.addInitScript(record => localStorage.setItem('persea-terminal.last-session.v1', JSON.stringify(record)), { draftScope: scope(remembered), name: remembered.name, realm: remembered.realm, server: remembered.server, at: Date.now() });
     await page.clock.install({ time: new Date() }); await page.goto(fixture.origin); await ready(page);
-    await check('consistent rows and Resume have explicit matching actions and live metadata', async () => {
+    await check('consistent rows and Recent have explicit matching actions and live metadata', async () => {
       assert(await page.locator('.unified-dev-launch, .session-legacy, .session-detail-actions').count() === 0, 'Development or legacy entry point remains');
       assert(await page.locator('.session-create').count() === 1, 'Creation has duplicate entry forms');
       assert((await page.locator('.server-heading h2').allTextContents()).join(',') === 'local_operator,other_operator', 'Infrastructure labels leaked into single-server user headings');
       const actions = page.locator('.session-open-action');
       for (const action of await actions.all()) { assert(await action.locator('svg').count() === 1 && await action.innerText() === 'Open', 'Open controls differ'); }
-      assert((await page.locator('.landing-card-kicker').innerText()).includes('Last opened on this device'), 'Resume selection is unexplained');
-      assert((await page.locator('.landing-card .session-metadata').innerText()) === (await row('qt1').locator('.session-metadata').innerText()), 'Resume omitted live metadata');
+      assert(await page.locator('.dashboard-recent-heading p').innerText() === 'Opened on this device', 'Recent selection is unexplained');
+      assert((await page.locator('.dashboard-recent-rows .session-metadata').innerText()) === (await row('qt1').locator('.session-metadata').innerText()), 'Recent omitted live metadata');
       const before = page.url(), requests = fixture.state.requests.filter(request => request.method !== 'GET').length;
-      await page.locator('.landing-card-body').click();
-      assert(page.url() === before && fixture.state.requests.filter(request => request.method !== 'GET').length === requests, 'Passive Resume body performed an action');
+      await page.locator('.dashboard-recent-rows .session-name').click();
+      assert(page.url() === before && fixture.state.requests.filter(request => request.method !== 'GET').length === requests, 'Passive Recent body performed an action');
       assert(await row('qt1').locator('.session-pin').isVisible() && await row('qt1').locator('.session-detail').isHidden(), 'Favorite requires Details');
-      const gap = await page.evaluate(() => document.querySelector('.dashboard-results').getBoundingClientRect().top - document.querySelector('.dashboard-toolbar').getBoundingClientRect().bottom);
-      assert(gap >= 10, 'Session count touches the filter controls');
+      const countAtEnd = await page.locator('.dashboard-list-modes').evaluate(group => { const count = group.querySelector('.dashboard-results').getBoundingClientRect(), lastChip = [...group.querySelectorAll('button')].at(-1).getBoundingClientRect(); return count.left >= lastChip.right && count.right <= group.getBoundingClientRect().right + 1; });
+      assert(countAtEnd, 'Live count is not at the end of the chip row');
       assert((await page.locator('.dashboard-status').textContent()) === '', 'Unexplained refresh timestamp remains');
     });
 
@@ -93,17 +93,17 @@ async function main() {
       const editor = card.locator('.session-alias-dialog');
       await editor.getByRole('textbox', { name: 'Alias for qt1', exact: true }).fill('Build worker');
       await editor.getByRole('button', { name: 'Save alias for qt1', exact: true }).click();
-      await page.waitForFunction(() => !document.querySelector('.session-alias-dialog').open);
+      await editor.waitFor({ state: 'hidden' });
       assert(await card.locator('.session-name').innerText() === 'Build worker', 'Saved alias did not become the row title');
       assert(await card.locator('.session-tmux-name').innerText() === 'qt1' && await card.locator('.session-detail').isHidden(), 'Editing an alias lost the tmux name or expanded the row');
       assert(await card.locator('.session-alias-edit').evaluate(node => document.activeElement === node), 'Alias save lost return focus');
       await card.locator('.session-alias-edit').click();
       await editor.getByRole('button', { name: 'Clear alias for qt1', exact: true }).click();
-      await page.waitForFunction(() => !document.querySelector('.session-alias-dialog').open);
+      await editor.waitFor({ state: 'hidden' });
       assert(await card.locator('.session-tmux-name').isHidden() && await card.locator('.session-name').innerText() === 'qt1', 'Clearing an alias did not restore the tmux title');
     });
 
-    await check('row previews and the single information panel reflow beside balanced Resume actions', async () => {
+    await check('row previews and the single information panel reflow beside matching Recent actions', async () => {
       const phoneContext = await browser.newContext({ viewport: { width: 390, height: 844 }, ignoreHTTPSErrors: true });
       const phone = await phoneContext.newPage(); capture(phone);
       try {
@@ -126,7 +126,8 @@ async function main() {
       } finally { await phoneContext.close(); }
       for (const width of [320, 390, 1440]) {
         await page.setViewportSize({ width, height: 900 });
-        assert(await page.locator('.landing-card').evaluate(node => { const body = node.querySelector('.landing-card-body').getBoundingClientRect(), actions = node.querySelector('.landing-card-actions').getBoundingClientRect(); return actions.left >= body.right && Math.abs((actions.top + actions.bottom - body.top - body.bottom) / 2) < 2; }), `Resume actions fell below the identity at ${width}`);
+        const aligned = await page.evaluate(() => { const recent = document.querySelector('.dashboard-recent-rows .session-card'), main = [...document.querySelectorAll('.dashboard-content .session-card')].find(row => row.dataset.sessionScope === recent.dataset.sessionScope); const layout = row => { const box = row.getBoundingClientRect(), action = row.querySelector('.session-open-action').getBoundingClientRect(), name = row.querySelector('.session-title').getBoundingClientRect(); return [action.top - box.top, name.top - box.top, action.height]; }; const a = layout(recent), b = layout(main); return a.every((value, i) => Math.abs(value - b[i]) < 2); });
+        assert(aligned, `Recent action layout differs from the main row at ${width}`);
       }
       await page.setViewportSize({ width: 1280, height: 960 });
     });
@@ -136,10 +137,14 @@ async function main() {
       const opening = await openingContext.newPage(); capture(opening);
       try {
         await opening.goto(fixture.origin); await ready(opening);
+        await opening.locator('.dashboard-navigation').getByRole('button', { name: 'Settings', exact: true }).click();
         const choice = opening.getByRole('combobox', { name: 'Scrollback rows', exact: true });
         await choice.selectOption('5000');
         for (const action of await opening.locator('a.session-open-action').all()) assert(new URLSearchParams(new URL(await action.getAttribute('href'), fixture.origin).hash.slice(1)).get('history') === '5000', 'An Open action ignored the selected scrollback');
-        await opening.reload(); await ready(opening); assert(await choice.inputValue() === '5000', 'Scrollback choice did not persist');
+        await opening.reload(); await ready(opening);
+        await opening.locator('.dashboard-navigation').getByRole('button', { name: 'Settings', exact: true }).click();
+        assert(await choice.inputValue() === '5000', 'Scrollback choice did not persist');
+        await opening.locator('.dashboard-navigation').getByRole('button', { name: 'Sessions', exact: true }).click();
         let adoption;
         await opening.route('**/api/session-adoptions', async route => { adoption = route.request().postDataJSON(); await route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }); });
         await opening.route('**/terminal?**', route => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Opened</title>' }));

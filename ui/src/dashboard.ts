@@ -2,10 +2,11 @@ import { installTapFeedback } from "./tap_feedback";
 import { hasDraft, preserveFocus, reconcileChildren } from "./dashboard_dom";
 import { compareSessionNames, sessionMetadata, SESSION_METADATA_HELP } from "./session_metadata";
 import { readSessionDiscovery, type SessionDiscovery } from "./session_discovery";
+import { RECENT_SESSION_COUNT_KEY, RECENT_SESSION_COUNTS, readRecentSessionCount, saveRecentSessionCount, recentSessionResolution, recentSessions, type RecentSession, type RecentSessionCount } from "./dashboard_recent";
 import { DashboardFavorites } from "./dashboard_favorites";
 import { renderTerminalPreview } from "./terminal_preview";
 import { SCROLLBACK_CHOICES as HISTORY_CHOICES, ADOPTION_HISTORY_ROWS, SCROLLBACK_STORAGE_KEY, TERMINAL_SCROLLBACK_STORAGE_KEY, type ScrollbackRows as HistoryChoice, createScrollbackControl, readScrollbackRows, readTerminalScrollbackRows, saveScrollbackRows } from "./scrollback_preferences";
-import { defaultSessionIsOffered, defaultSessionState, landingMemoryState, parseDefaultSessionPreference, newOperationId, pendingIdentityFromSession, readLastSession, stagePendingSession, type DefaultSessionPreference, type DefaultSessionState, type LastSessionRecord } from "./session_memory";
+import { defaultSessionState, landingMemoryState, parseDefaultSessionPreference, newOperationId, pendingIdentityFromSession, readLastSession, stagePendingSession, type DefaultSessionPreference, type DefaultSessionState, type LastSessionRecord } from "./session_memory";
 import { leaf, type SessionSelector } from "./workspace_model";
 import { COMPOSER_FONT_SIZE_MAX, COMPOSER_FONT_SIZE_MIN, OperatorPreferencesService, type OperatorPreferenceOutcome, type OperatorPreferencePatch, type OperatorPreferenceSnapshot } from "./operator_preferences";
 import { KeyboardSettings } from "./keyboard_settings";
@@ -342,8 +343,6 @@ export function resolveDraftScope(inventory: DashboardInventory, draftScope: str
 // --- session memory landing copy. Reviewed operator-facing wording lives here as pure
 // functions so the states can be asserted without a DOM. Every message names
 // what is true; none of them promises a session the inventory did not confirm.
-export function resumeCardLabel(session: Pick<DashboardSession, "name" | "server">): string { return `Resume ${session.name} · ${session.server}`; }
-export function resumeCardDetail(session: Pick<DashboardSession, "realm" | "server">, alias?: string): string { return `${session.realm} · ${session.server}${alias ? ` · ${alias}` : ""}`; }
 export function landingEndedMessage(record: Pick<LastSessionRecord, "name" | "server">): string { return `Your last session ${record.name}${record.server === "default" ? "" : ` · ${record.server}`} has ended.`; }
 export function landingAmbiguousMessage(record: Pick<LastSessionRecord, "name">): string { return `Your last session ${record.name} matches more than one live session; the list below is filtered to that name.`; }
 export function landingBlockedMessage(record: Pick<LastSessionRecord, "name" | "server">, blocked: Exclude<UnifiedSessionProjection, { state: "open" | "adoptable" }>["state"]): string {
@@ -357,7 +356,7 @@ export function defaultUnavailableMessage(state: DefaultSessionState): string {
   return "";
 }
 
-type LandingCard = Readonly<{ el: HTMLElement; action: HTMLElement }>;
+type SessionRow = Readonly<{ el: HTMLElement; update(session: DashboardSession): void; dispose(): void; current(): DashboardSession }>;
 type SessionView = Readonly<{ el: HTMLElement; session: Pick<DashboardSession, "name" | "aliases"> }>;
 type ServerView = Readonly<{ el: HTMLElement; body: HTMLElement; toggle: HTMLButtonElement; key: string; hasError: boolean; sessions: readonly SessionView[] }>;
 type RealmView = Readonly<{ el: HTMLElement; hasError: boolean; servers: readonly ServerView[] }>;
@@ -380,7 +379,7 @@ export class Dashboard {
   private listMode: "all" | "pinned" | "recent" = "all";
   private readonly listModes = element("div", "dashboard-list-modes");
   private readonly newSession = element("button", "dashboard-create-shortcut", "+ New session");
-  private readonly refreshButton = element("button", "dashboard-refresh", "↻ Refresh");
+  private readonly refreshButton = element("button", "dashboard-refresh dashboard-icon-button", "↻");
   private readonly workspaceRefresh = element("button", "dashboard-workspace-refresh", "↻ Refresh");
   private readonly creationPanel = element("section", "dashboard-create-panel");
   private readonly createTarget = element("select");
@@ -388,16 +387,34 @@ export class Dashboard {
   private creationBusy = false;
   private createSelectionExplicit = false;
   private readDeviceHints(): void {
-    try { this.lastSession = readLastSession(window.localStorage); this.discovery = readSessionDiscovery(window.localStorage); } catch { /* retain in-page hints if storage is unavailable */ }
+    try {
+      this.lastSession = readLastSession(window.localStorage); this.discovery = readSessionDiscovery(window.localStorage);
+      if (this.recentWasSaved) this.recentLimit = readRecentSessionCount(window.localStorage);
+    } catch { /* retain in-page hints if storage is unavailable */ }
+    if (this.recentSelect) this.recentSelect.value = String(this.recentLimit);
   }
   private isFavorite(scope: string): boolean { return this.favorites.snapshot().favorites.includes(scope); }
-  private recentAt(scope: string): number {
-    const candidate = this.discovery.recent.find(item => item.scope === scope)?.at ?? (this.lastSession?.draftScope === scope ? this.lastSession.at : 0);
-    const now = Date.now(); return candidate >= now - 30 * 86_400_000 && candidate <= now + 60_000 ? candidate : 0;
+  private recentAt(scope: string): number { return this.recentTimes.get(scope) ?? 0; }
+  private updateRecentProjection(): void {
+    this.recentProjection = this.inventory ? recentSessions(this.inventory, this.discovery, this.lastSession) : [];
+    this.recentTimes = new Map(this.recentProjection.map(item => [item.session.draftScope, item.at]));
   }
   private readonly realmNodes = new Map<string, HTMLElement>();
   private readonly serverNodes = new Map<string, ServerView>();
-  private readonly sessionNodes = new Map<string, { el: HTMLElement; update(session: DashboardSession): void; dispose(): void }>();
+  private readonly sessionNodes = new Map<string, SessionRow>();
+  private readonly recentNodes = new Map<string, SessionRow>();
+  private recentProjection: readonly RecentSession[] = [];
+  private recentTimes = new Map<string, number>();
+  private recentLimit: RecentSessionCount = 3;
+  private recentWasSaved = true;
+  private recentSelect?: HTMLSelectElement;
+  private readonly recentSection = element("section", "dashboard-recent");
+  private readonly recentRows = element("div", "dashboard-recent-rows session-grid");
+  private readonly recentNotes = element("div", "dashboard-recent-notes");
+  private readonly defaultSection = element("section", "dashboard-default-session");
+  private readonly defaultRows = element("div", "dashboard-default-rows session-grid");
+  private readonly defaultNotes = element("div", "dashboard-default-notes");
+  private landingHasContent = false;
   private readonly workspaceNodes = new Map<string, { record: WorkspaceRecord; el: HTMLElement }>();
   private readonly workspaceList = element("ul", "workspace-panel__list");
   private readonly workspaceStatus = element("output", "workspace-panel__status");
@@ -411,11 +428,8 @@ export class Dashboard {
   private workspaceRecords: readonly WorkspaceRecord[] = [];
   private workspaceInventory?: DashboardInventory;
   private readonly searchInput = element("input", "dashboard-search-input"); private filterQuery = ""; private collapsedGroups = new Set<string>(); private readonly expandedSessions = new Set<string>(); private view: readonly RealmView[] = [];
-  // Resume appears above the inventory with an explicit Open action. It is
-  // presentation only: everything it needs comes from the
-  // device memory read at mount, the inventory the dashboard already fetches,
-  // and one preferences GET. Nothing here attaches, creates, adopts, or mints
-  // before a trusted tap.
+  // Device history is a display hint. Recent resolves from the same inventory
+  // as the main list, and only a trusted Open stages an identity or adopts.
   private readonly landing = element("section", "dashboard-landing");
   private lastSession?: LastSessionRecord;
   private defaultPreference?: DefaultSessionPreference;
@@ -423,9 +437,10 @@ export class Dashboard {
   private landingFocusPending = false;
   private landingFilterApplied = false;
   private landingActionPending = false;
-  private landingView?: LandingCard & { key: string; update(session: DashboardSession, title: string, detail: string): void };
   private previewDialog?: HTMLDialogElement;
   private previewQueue: Promise<void> = Promise.resolve();
+  private readonly previewSnapshots = new Map<string, SessionPreview>();
+  private readonly previewSnapshotListeners = new Map<string, Set<(preview: SessionPreview) => void>>();
   private scrollbackRows = readScrollbackRows();
   private scrollbackWasSaved = true;
   private nextSessionDOMId = 0;
@@ -464,7 +479,7 @@ export class Dashboard {
   }
   mount(): void {
     document.body.classList.add("dashboard-mode"); const header = element("header", "dashboard-header"); const titles = element("div"); titles.append(element("p", "dashboard-eyebrow", "PERSEA TERMINAL"), element("h1", undefined, "Sessions"));
-    this.refreshButton.type = "button"; this.refreshButton.title = "Refresh the session list"; this.refreshButton.setAttribute("aria-label", "Refresh session list"); this.refreshButton.addEventListener("click", () => void this.refresh("manual"));
+    this.refreshButton.type = "button"; this.refreshButton.title = "Refresh sessions"; this.refreshButton.setAttribute("aria-label", "Refresh sessions"); this.refreshButton.addEventListener("click", () => void this.refresh("manual"));
     this.workspaceRefresh.type = "button"; this.workspaceRefresh.setAttribute("aria-label", "Refresh workspaces"); this.workspaceRefresh.addEventListener("click", () => void this.refresh("manual"));
     const clipboard = element("button", "dashboard-clipboard", "Clipboard"); clipboard.type = "button"; clipboard.setAttribute("aria-label", "Open shared clipboard"); clipboard.addEventListener("click", () => this.clipboard.open(clipboard));
     const headerActions = element("div", "dashboard-header-actions"); headerActions.append(this.newSession, clipboard); header.append(titles, headerActions);
@@ -476,10 +491,14 @@ export class Dashboard {
     this.searchInput.addEventListener("input", () => { this.filterQuery = this.searchInput.value; this.applyPresentation(); });
     const clear = element("button", "dashboard-search-clear", "×"); clear.type = "button"; clear.setAttribute("aria-label", "Clear session filter");
     clear.addEventListener("click", () => { this.searchInput.value = ""; this.filterQuery = ""; this.applyPresentation(); this.searchInput.focus(); });
-    search.append(this.searchInput, clear);
+    search.append(this.searchInput, clear, this.refreshButton);
     this.status.setAttribute("role", "status"); this.status.setAttribute("aria-live", "polite"); this.workspacePanel.setAttribute("aria-label", "Workspaces"); this.root.className = "dashboard"; this.root.setAttribute("aria-label", "Persea Terminal dashboard");
-    // Resume is hidden until the current inventory confirms its exact target.
-    this.landing.setAttribute("aria-label", "Resume a session");
+    this.landing.setAttribute("aria-label", "Recent and default sessions");
+    const recentHeading = element("div", "dashboard-recent-heading");
+    recentHeading.append(element("h2", undefined, "Recent"), element("p", undefined, "Opened on this device"));
+    this.recentSection.append(recentHeading, this.recentNotes, this.recentRows);
+    this.defaultSection.append(element("h2", undefined, "Default session"), this.defaultNotes, this.defaultRows);
+    this.landing.append(this.recentSection, this.defaultSection);
     this.landing.hidden = true;
     this.resultStatus.setAttribute("role", "status");
     this.emptyResults.hidden = true;
@@ -514,12 +533,17 @@ export class Dashboard {
     }, { deviceDefault: true });
     scrollback.label.title = "Default for terminals opened on this device. A terminal's own setting takes priority. Already open terminals keep their current limit.";
     this.scrollbackSelect = scrollback.select;
-    const onStorage = (event: StorageEvent): void => { if (event.key === SCROLLBACK_STORAGE_KEY || event.key === TERMINAL_SCROLLBACK_STORAGE_KEY || event.key === null) { this.scrollbackWasSaved = true; this.syncScrollbackPreference(true); } };
+    const onStorage = (event: StorageEvent): void => {
+      if (event.key === SCROLLBACK_STORAGE_KEY || event.key === TERMINAL_SCROLLBACK_STORAGE_KEY || event.key === null) { this.scrollbackWasSaved = true; this.syncScrollbackPreference(true); }
+      if (event.key === RECENT_SESSION_COUNT_KEY || event.key === "persea-terminal.session-discovery.v1" || event.key === "persea-terminal.last-session.v1" || event.key === null) {
+        this.recentWasSaved = true; this.readDeviceHints(); if (this.inventory) preserveFocus(() => this.render(this.inventory!));
+      }
+    };
     window.addEventListener("storage", onStorage); this.cleanup.push(() => window.removeEventListener("storage", onStorage));
-    const toolbar = element("div", "dashboard-toolbar"); toolbar.append(search, this.listModes, scrollback.label, this.refreshButton);
+    const toolbar = element("div", "dashboard-toolbar"); this.listModes.append(this.resultStatus); toolbar.append(search, this.listModes);
     this.favoritesStatus.setAttribute("role", "status");
-    this.sessionsPanel.append(toolbar, this.resultStatus, this.favoritesStatus, this.emptyResults, this.content);
-    this.settingsPanel.append(this.appearanceCard(), this.keyboardCard(), this.aliasArchive);
+    this.sessionsPanel.append(toolbar, this.favoritesStatus, this.emptyResults, this.content);
+    this.settingsPanel.append(this.sessionsCard(scrollback.label), this.appearanceCard(), this.keyboardCard(), this.aliasArchive);
     const navigation = element("nav", "dashboard-navigation"); navigation.setAttribute("aria-label", "Dashboard sections");
     const panels = [{ label: "Sessions", panel: this.sessionsPanel }, { label: "Workspaces", panel: this.workspacePanel }, { label: "Settings", panel: this.settingsPanel }];
     for (const { label, panel } of panels) {
@@ -529,7 +553,7 @@ export class Dashboard {
       button.addEventListener("click", () => {
         titles.querySelector("h1")!.textContent = label;
         for (const entry of panels) entry.panel.hidden = entry.panel !== panel;
-        this.landing.hidden = panel !== this.sessionsPanel || this.landing.childElementCount === 0;
+        this.landing.hidden = panel !== this.sessionsPanel || !this.landingHasContent;
         this.creationPanel.hidden = true; this.newSession.setAttribute("aria-expanded", "false");
         this.newSession.hidden = panel !== this.sessionsPanel || this.createTargets.size === 0;
         if (panel === this.workspacePanel) void this.refreshWorkspaces();
@@ -567,6 +591,25 @@ export class Dashboard {
     open.addEventListener("click", () => editor.open(open));
     body.append(note, open); card.append(heading, body); return card;
   }
+  private sessionsCard(scrollback: HTMLElement): HTMLElement {
+    const card = element("section", "dashboard-settings-panel dashboard-sessions-settings");
+    const body = element("div", "dashboard-sessions-settings-grid");
+    const label = element("label", "dashboard-sessions-setting");
+    label.append(element("span", undefined, "Recent sessions on the Sessions tab"));
+    const select = element("select"); select.setAttribute("aria-label", "Recent sessions on the Sessions tab");
+    for (const count of RECENT_SESSION_COUNTS) { const option = element("option", undefined, count === 0 ? "Off" : String(count)); option.value = String(count); select.append(option); }
+    select.value = String(this.recentLimit); this.recentSelect = select;
+    const status = element("output", "dashboard-sessions-settings-status"); status.setAttribute("role", "status");
+    select.addEventListener("change", () => {
+      this.recentLimit = RECENT_SESSION_COUNTS.find(count => String(count) === select.value) ?? 3;
+      try { this.recentWasSaved = saveRecentSessionCount(window.localStorage, this.recentLimit); } catch { this.recentWasSaved = false; }
+      status.textContent = this.recentWasSaved ? "Saved on this device." : "Selected for this page. This browser could not save the preference.";
+      preserveFocus(() => this.renderLanding());
+    });
+    label.append(select); body.append(label, scrollback);
+    card.append(element("h2", undefined, "Sessions"), body, status); return card;
+  }
+
   private appearanceCard(): HTMLElement {
     // the one settings surface for every terminal — theme, terminal
     // font and composer text moved here from the terminal's View popover.
@@ -887,6 +930,7 @@ export class Dashboard {
   }
 
   private render(inventory: DashboardInventory): void {
+    this.inventory = inventory; this.updateRecentProjection();
     const view: RealmView[] = [];
     const liveScopes = new Set<string>(); const liveServers = new Set<string>();
     for (const realm of inventory.realms) {
@@ -915,7 +959,8 @@ export class Dashboard {
     reconcileChildren(this.content, view.map(realm => realm.el));
     for (const key of this.realmNodes.keys()) if (!inventory.realms.some(realm => realm.name === key)) this.realmNodes.delete(key);
     for (const key of this.serverNodes.keys()) if (!liveServers.has(key)) this.serverNodes.delete(key);
-    for (const key of this.sessionNodes.keys()) if (!liveScopes.has(key)) { this.sessionNodes.get(key)?.dispose(); this.sessionNodes.delete(key); this.expandedSessions.delete(key); }
+    for (const key of this.sessionNodes.keys()) if (!liveScopes.has(key) && this.sessionNodes.get(key)?.el.dataset.openPending !== "true") { this.sessionNodes.get(key)?.dispose(); this.sessionNodes.delete(key); this.expandedSessions.delete(key); }
+    for (const scope of this.previewSnapshots.keys()) if (!liveScopes.has(scope)) this.previewSnapshots.delete(scope);
     const archiveKey = JSON.stringify(inventory.detachedAliases);
     if (this.aliasArchive.dataset.version !== archiveKey) {
       this.aliasArchive.dataset.version = archiveKey;
@@ -951,50 +996,45 @@ export class Dashboard {
   // unchanged.
   private renderLanding(): void {
     const inventory = this.inventory;
-    if (inventory === undefined) return;
-    // A landing action in flight owns the card. An inventory refresh arrives on
-    // a timer AND on every pageshow/visibilitychange — backgrounding the app
-    // mid-adoption and returning to it would otherwise replace the disabled
-    // button with a fresh enabled one, dropping its status line and letting a
-    // second tap spend a second adoption.
-    if (this.landingActionPending) return;
-    const memory = landingMemoryState(this.lastSession, this.lastSession ? resolveDraftScope(inventory, this.lastSession.draftScope) : undefined);
-    const nodes: HTMLElement[] = [];
-    let primary: LandingCard | undefined;
-    if (memory.kind === "resume") {
-      primary = this.renderLandingAction(resumeCardLabel(memory.session), memory.session.name, resumeCardDetail(memory.session, memory.record.alias), "Resume", memory.session, memory.state, "resume");
-      nodes.push(primary.el);
-    } else if (memory.kind === "ended") {
-      nodes.push(element("p", "landing-note", landingEndedMessage(memory.record)));
-    } else if (memory.kind === "ambiguous") {
-      nodes.push(element("p", "landing-note", landingAmbiguousMessage(memory.record)));
-      this.applyAmbiguousFilter(memory.record.name);
-    } else if (memory.kind === "blocked") {
-      nodes.push(element("p", "landing-note", landingBlockedMessage(memory.record, memory.blocked)));
-    }
-    // The default is offered only when there is no resumable remembered
-    // identity, and it always says "default" — a missing memory never silently
-    // becomes a same-name resume.
-    if (defaultSessionIsOffered(memory)) {
+    if (!inventory) return;
+    this.updateRecentProjection();
+    const selected = this.recentLimit === 0 ? [] : this.recentProjection.slice(0, this.recentLimit).map(item => item.session);
+    const recentEls = selected.map(session => {
+      const row = this.renderSession(session, this.recentNodes, "recent:");
+      row.dataset.landingKind = "recent"; return row;
+    });
+    const memory = landingMemoryState(this.lastSession, this.lastSession ? recentSessionResolution(inventory, this.lastSession.draftScope, this.lastSession.name) : undefined);
+    const notes: HTMLElement[] = [];
+    if (memory.kind === "ended") notes.push(element("p", "landing-note", landingEndedMessage(memory.record)));
+    if (memory.kind === "ambiguous") { notes.push(element("p", "landing-note", landingAmbiguousMessage(memory.record))); this.applyAmbiguousFilter(memory.record.name); }
+    if (memory.kind === "blocked") notes.push(element("p", "landing-note", landingBlockedMessage(memory.record, memory.blocked)));
+    const defaultEls: HTMLElement[] = []; const defaultNotes: HTMLElement[] = [];
+    if (this.recentProjection.length === 0) {
       const fallback = defaultSessionState(inventory, this.defaultPreference);
       if (fallback.kind === "open") {
-        const card = this.renderLandingAction(defaultCardLabel(fallback.preference), fallback.session.name, resumeCardDetail(fallback.session), "Default session", fallback.session, fallback.state, "default");
-        nodes.push(card.el);
-        primary = primary ?? card;
-      } else if (fallback.kind !== "none") {
-        nodes.push(element("p", "landing-note", defaultUnavailableMessage(fallback)));
-      }
+        const row = this.renderSession(fallback.session, this.recentNodes, "recent:");
+        row.dataset.landingKind = "default"; defaultEls.push(row);
+      } else if (fallback.kind !== "none") defaultNotes.push(element("p", "landing-note", defaultUnavailableMessage(fallback)));
     }
-    // The connected card keeps its focus while its action uses current handles.
-    // Carry focus explicitly if its availability changes the action variant.
+    // An adoption owns its row until the response arrives. Other Recent rows
+    // still reconcile, but a refresh cannot replace this disabled action.
+    for (const row of this.recentNodes.values()) {
+      if (row.el.dataset.openPending !== "true" || recentEls.includes(row.el) || defaultEls.includes(row.el)) continue;
+      (row.el.dataset.landingKind === "default" ? defaultEls : recentEls).push(row.el);
+    }
+    const retained = new Set([...recentEls, ...defaultEls]);
+    for (const [scope, row] of this.recentNodes) if (!retained.has(row.el)) { row.dispose(); this.recentNodes.delete(scope); this.expandedSessions.delete("recent:" + scope); }
     const hadFocus = this.landing.contains(document.activeElement);
-    reconcileChildren(this.landing, nodes);
-    this.landing.hidden = this.sessionsPanel.hidden || nodes.length === 0;
-    // `?resume=1` (and the PWA start_url) only ORDER AND FOCUS this card. Focus
-    // is not activation: a link or button never raises the software keyboard,
-    // and nothing is attached until the operator taps.
-    if (!this.landing.hidden && this.landingFocusPending && primary) { this.landingFocusPending = false; primary.action.focus(); }
-    else if (!this.landing.hidden && hadFocus && primary && !this.landing.contains(document.activeElement)) primary.action.focus();
+    reconcileChildren(this.recentRows, recentEls); reconcileChildren(this.defaultRows, defaultEls);
+    reconcileChildren(this.recentNotes, notes); reconcileChildren(this.defaultNotes, defaultNotes);
+    this.recentSection.hidden = this.recentLimit === 0 || (recentEls.length === 0 && notes.length === 0);
+    this.defaultSection.hidden = defaultEls.length === 0 && defaultNotes.length === 0;
+    this.landingHasContent = !this.recentSection.hidden || !this.defaultSection.hidden;
+    this.landing.hidden = this.sessionsPanel.hidden || !this.landingHasContent;
+    const primary = (!this.recentSection.hidden ? recentEls[0] : undefined)?.querySelector<HTMLElement>(".session-open-action") ?? defaultEls[0]?.querySelector<HTMLElement>(".session-open-action");
+    // A PWA/resume launch focuses once; it never activates or stages an action.
+    if (!this.landing.hidden && this.landingFocusPending && primary) { this.landingFocusPending = false; primary.focus(); }
+    else if (!this.landing.hidden && hadFocus && primary && !this.landing.contains(document.activeElement)) primary.focus();
   }
 
   // An ambiguous remembered identity shows the list filtered to that name
@@ -1011,8 +1051,7 @@ export class Dashboard {
     this.applyPresentation();
   }
 
-  // Resume and ordinary rows share the same trusted Open action. The card's
-  // accessible name also explains whether the choice is Resume or a default.
+  // Recent, default and ordinary rows share the same trusted Open action.
   // committed-identity. Every trusted action that navigates into the unified terminal
   // stages the identity of the session IT resolved from the authoritative
   // inventory, immediately before the navigation. The terminal page records
@@ -1030,42 +1069,10 @@ export class Dashboard {
     return stagePendingSession(window.localStorage, operationId, identity) === "staged" ? operationId : undefined;
   }
 
-  private renderLandingAction(accessibleName: string, title: string, detail: string, kicker: string, session: DashboardSession, state: "open" | "adoptable", variant: "resume" | "default"): LandingCard {
-    const key = `${variant}:${state}:${session.draftScope}`;
-    if (this.landingView?.key === key) { this.landingView.update(session, title, detail); return this.landingView; }
-    let current = session;
-    const status = element("output", "landing-card-status");
-    status.setAttribute("role", "status");
-    status.setAttribute("aria-live", "polite");
-    const card = element("div", `landing-card landing-card-${variant}`);
-    const heading = element("p", "landing-card-kicker", variant === "resume" ? "Resume · Last opened on this device" : kicker);
-    const body = element("div", "landing-card-body");
-    const name = element("h2", "landing-card-label", title);
-    const identity = element("p", "landing-card-detail");
-    const metadata = element("p", "session-metadata"); metadata.title = SESSION_METADATA_HELP;
-    body.append(name, identity, metadata);
-    const actions = element("div", "landing-card-actions");
-    const favorite = this.createFavoriteButton(() => current);
-    const action = this.createOpenAction(session, state, status, () => current); action.classList.add("landing-action"); action.setAttribute("aria-label", accessibleName);
-    actions.append(favorite, action); card.append(heading, body, actions, status);
-    const update = (next: DashboardSession, nextTitle: string, _detail: string): void => {
-      current = next; name.textContent = next.aliases[0]?.displayAlias || nextTitle;
-      const realm = this.inventory?.realms.find(realm => realm.name === next.realm);
-      identity.textContent = [realm?.displayName ?? next.realm, ...(realm && realm.servers.length > 1 ? [next.server] : []), ...(next.aliases.length ? [next.name] : [])].join(" · ");
-      updateSessionMetadata(metadata, next); this.updateFavoriteButton(favorite, next);
-      if (action instanceof HTMLAnchorElement) action.href = unifiedTerminalURL(window.location.href, next.handles.control, next, undefined, this.scrollbackRows);
-    };
-    update(session, title, detail);
-    this.landingView = { key, el: card, action, update }; return this.landingView;
-  }
-
-  // Same authority as the row's one-click adopt (`adoptAndOpen`), minus the
-  // popup: exactly one adoption POST, then a same-tab navigation with the
-  // row's already-minted control handle. A refusal renders as reviewed copy and
-  // leaves the page where it is.
   private async adoptAndAssign(session: DashboardSession, button: HTMLButtonElement, status: HTMLElement): Promise<void> {
     if (button.disabled || !button.isConnected || this.landingActionPending) return;
     button.disabled = true;
+    const row = button.closest<HTMLElement>(".session-card"); if (row) row.dataset.openPending = "true";
     this.landingActionPending = true;
     this.gate.setMutating(true);
     assignText(status, "Opening…");
@@ -1084,6 +1091,7 @@ export class Dashboard {
     } catch (error) {
       assignText(status, error instanceof Error ? error.message : "The session could not be opened.");
       this.landingActionPending = false;
+      if (row) delete row.dataset.openPending;
       this.gate.setMutating(false);
       button.disabled = false;
     }
@@ -1113,9 +1121,9 @@ export class Dashboard {
       });
       realm.el.hidden = !realm.hasError && realm.servers.every(server => server.el.hidden);
     });
-    const total = this.view.reduce((sum, realm) => sum + realm.servers.reduce((n, server) => n + server.sessions.length, 0), 0);
+    const total = this.inventory?.realms.reduce((sum, realm) => sum + realm.servers.reduce((n, server) => n + server.sessions.length, 0), 0) ?? 0;
     const matched = this.view.reduce((sum, realm) => sum + realm.servers.reduce((n, server) => n + server.sessions.filter(item => !item.el.hidden).length, 0), 0);
-    const label = normalizeSessionFilter(this.filterQuery) || this.listMode !== "all" ? `${matched} of ${total} sessions${this.listMode === "all" ? "" : this.listMode === "pinned" ? " · Favorites" : " · Recent on this device"}` : `${total} live session${total === 1 ? "" : "s"}`;
+    const label = normalizeSessionFilter(this.filterQuery) || this.listMode !== "all" ? `${matched} of ${total} sessions` : `${total} live session${total === 1 ? "" : "s"}`;
     if (this.resultStatus.textContent !== label) this.resultStatus.textContent = label;
     this.emptyResults.hidden = (!normalizeSessionFilter(this.filterQuery) && this.listMode === "all") || matched > 0;
     const emptyText = this.emptyResults.querySelector("p");
@@ -1138,7 +1146,12 @@ export class Dashboard {
     status.textContent = server.status === "ok" ? String(server.sessions.length) : "Unavailable"; status.className = `server-status status-${server.status}`;
     const failure = previous.el.querySelector<HTMLElement>(".failure")!; failure.textContent = server.error ?? ""; failure.hidden = !server.error;
     const grid = previous.body.querySelector<HTMLElement>(".session-grid")!;
-    const sessions = [...server.sessions].sort((a, b) => {
+    const live = [...server.sessions];
+    for (const row of this.sessionNodes.values()) {
+      const current = row.current();
+      if (row.el.dataset.openPending === "true" && current.realm === server.realm && current.server === server.label && !live.some(session => session.draftScope === current.draftScope)) live.push(current);
+    }
+    const sessions = live.sort((a, b) => {
       if (this.listMode === "recent") {
         return this.recentAt(b.draftScope) - this.recentAt(a.draftScope) || compareSessionNames(a, b);
       }
@@ -1283,7 +1296,7 @@ export class Dashboard {
   }
   // Both thumbnails and the modal share one capture. Only an explicit refresh
   // replaces it; wide rows request their first capture when they become visible.
-  private renderPreview(session: DashboardSession, currentSession = () => session): { el: HTMLElement; rowButton: HTMLButtonElement; load: () => void; dispose: () => void } {
+  private renderPreview(session: DashboardSession, currentSession = () => session, passive = true): { el: HTMLElement; rowButton: HTMLButtonElement; load: () => void; dispose: () => void } {
     const block = element("div", "session-preview");
     const header = element("div", "session-preview-header");
     const refresh = element("button", "session-preview-refresh", "↻");
@@ -1346,6 +1359,8 @@ export class Dashboard {
           if (disposed || !block.isConnected || this.destroyed) return;
           const changed = JSON.stringify([preview?.rows, preview?.ansiRows]) !== JSON.stringify([next.rows, next.ansiRows]);
           preview = next;
+          this.previewSnapshots.set(session.draftScope, next);
+          for (const listener of this.previewSnapshotListeners.get(session.draftScope) ?? []) if (listener !== onSnapshot) listener(next);
           if (changed) { paint(screen); paint(rowScreen); if (modalScreen) paint(modalScreen); }
         } catch {
           if (!disposed) { assignText(notice, "The preview could not be loaded. Use its Refresh button to retry."); if (!preview) { assignText(screen, "Preview unavailable"); if (modalScreen) assignText(modalScreen, "Preview unavailable"); } }
@@ -1388,6 +1403,14 @@ export class Dashboard {
     };
     thumbnail.addEventListener("click", () => enlarge(thumbnail));
     rowButton.addEventListener("click", () => enlarge(rowButton));
+    const onSnapshot = (next: SessionPreview): void => {
+      if (disposed) return;
+      preview = next; paint(screen); paint(rowScreen); if (modalScreen) paint(modalScreen); sync();
+    };
+    let listeners = this.previewSnapshotListeners.get(session.draftScope);
+    if (!listeners) { listeners = new Set(); this.previewSnapshotListeners.set(session.draftScope, listeners); }
+    listeners.add(onSnapshot);
+    const cached = this.previewSnapshots.get(session.draftScope); if (cached) onSnapshot(cached);
     const observer = new IntersectionObserver(entries => {
       if (!entries.some(entry => entry.isIntersecting) || document.visibilityState !== "visible") return;
       observer.disconnect();
@@ -1400,25 +1423,25 @@ export class Dashboard {
         await new Promise<void>(resolve => window.setTimeout(resolve, 550));
       });
     });
-    observer.observe(rowScreen);
+    if (passive) observer.observe(rowScreen);
     const resumeObservation = (): void => {
-      if (document.visibilityState === "visible" && !disposed && !preview) { observer.unobserve(rowScreen); observer.observe(rowScreen); }
+      if (passive && document.visibilityState === "visible" && !disposed && !preview) { observer.unobserve(rowScreen); observer.observe(rowScreen); }
     };
     document.addEventListener("visibilitychange", resumeObservation);
     let theme = this.preferences.snapshot().preferences.theme;
     const paletteSubscription = this.preferences.subscribe(snapshot => {
       if (snapshot.preferences.theme !== theme) { theme = snapshot.preferences.theme; if (preview) { paint(screen); paint(rowScreen); if (modalScreen) paint(modalScreen); } }
     });
-    const dispose = (): void => { disposed = true; observer.disconnect(); document.removeEventListener("visibilitychange", resumeObservation); paletteSubscription.dispose(); controller?.abort(); dialog?.close(); dialog?.remove(); };
+    const dispose = (): void => { disposed = true; observer.disconnect(); listeners?.delete(onSnapshot); if (!listeners?.size) this.previewSnapshotListeners.delete(session.draftScope); document.removeEventListener("visibilitychange", resumeObservation); paletteSubscription.dispose(); controller?.abort(); dialog?.close(); dialog?.remove(); };
     return { el: block, rowButton, load, dispose };
   }
-  private renderSession(session: DashboardSession): HTMLElement {
-    const existing = this.sessionNodes.get(session.draftScope);
+  private renderSession(session: DashboardSession, cache = this.sessionNodes, prefix = ""): HTMLElement {
+    const existing = cache.get(session.draftScope);
     if (existing) { existing.update(session); return existing.el; }
     const article = element("article", "session-card");
     const domId = ++this.nextSessionDOMId;
-    article.dataset.sessionScope = session.draftScope;
-    const sessionKey = sessionStateKey(session);
+    article.dataset.sessionScope = session.draftScope; article.dataset.sessionInstance = prefix ? "recent" : "main";
+    const sessionKey = prefix + sessionStateKey(session);
     const expanded = this.expandedSessions.has(sessionKey);
     const row = element("div", "session-row");
     const disclosure = element("button", "session-disclosure"); disclosure.append(dashboardIcon("info"));
@@ -1430,7 +1453,7 @@ export class Dashboard {
     const alias = element("span", "alias-badge");
     const editAlias = element("button", "session-alias-edit dashboard-icon-button"); editAlias.type = "button"; editAlias.append(dashboardIcon("edit"));
     editAlias.setAttribute("aria-label", `Edit alias for ${session.name}`); editAlias.title = "Edit alias"; editAlias.setAttribute("aria-haspopup", "dialog");
-    const names = element("div", "session-names"); names.append(name, editAlias, alias);
+    const names = element("div", "session-names"); names.append(name, alias, editAlias);
     const metadata = element("span", "session-metadata"); metadata.title = SESSION_METADATA_HELP;
     title.append(names);
     const unifiedStatus = element("span", "session-unified-status");
@@ -1450,7 +1473,7 @@ export class Dashboard {
     closeAlias.addEventListener("click", () => aliasDialog.close());
     editAlias.addEventListener("click", () => { aliasDialog.showModal(); editors.querySelector("input")?.focus(); });
     aliasDialog.addEventListener("close", () => { if (editAlias.isConnected) editAlias.focus({ preventScroll: true }); });
-    const preview = this.renderPreview(session, () => session);
+    const preview = this.renderPreview(session, () => session, cache === this.sessionNodes);
     const history = element("p", "session-history-origin");
     const pin = this.createFavoriteButton(() => session);
     const secondaryActions = element("div", "session-secondary-actions"); secondaryActions.append(preview.rowButton, pin, disclosure);
@@ -1462,8 +1485,12 @@ export class Dashboard {
     detail.append(info, preview.el);
     let aliasVersion = ""; let actionVersion = "";
     const update = (next: DashboardSession): void => {
+      if (article.dataset.openPending === "true") return;
       session = next;
       name.textContent = session.aliases[0]?.displayAlias ?? session.name; name.title = name.textContent;
+      editAlias.setAttribute("aria-label", `Edit alias for ${session.name}`);
+      disclosure.setAttribute("aria-label", `Session information for ${session.name}`);
+      aliasHeading.textContent = `Alias for ${session.name}`;
       alias.className = "session-tmux-name";
       alias.textContent = session.aliases.length ? session.name : ""; alias.title = alias.textContent; alias.hidden = !alias.textContent;
       updateSessionMetadata(metadata, session);
@@ -1482,12 +1509,16 @@ export class Dashboard {
       }
       const nextActions = JSON.stringify(session.unified ?? null);
       if (nextActions !== actionVersion) {
+        const hadFocus = open.contains(document.activeElement);
         actionVersion = nextActions; open.replaceChildren(); unifiedStatus.textContent = "";
         if (session.unified) this.renderUnifiedPrimary(session, session.unified, open, unifiedStatus, () => session);
         if (!session.unified) unifiedStatus.textContent = "Browser access is unavailable for this session.";
+        if (hadFocus) (open.querySelector<HTMLElement>(".session-open-action") ?? disclosure).focus({ preventScroll: true });
       }
       const primary = open.querySelector<HTMLAnchorElement>("a.action-unified-open");
       if (primary) primary.href = unifiedTerminalURL(window.location.href, session.handles.control, session, undefined, this.scrollbackRows);
+      const action = open.querySelector<HTMLElement>(".session-open-action");
+      if (action) { action.title = `Open ${session.name}`; action.setAttribute("aria-label", action.title); }
     };
     editors.addEventListener("focusout", () => queueMicrotask(() => { if (article.isConnected) update(session); }));
     if (expanded) queueMicrotask(preview.load);
@@ -1502,7 +1533,7 @@ export class Dashboard {
     update(session);
     const dispose = (): void => { preview.dispose(); aliasDialog.close(); aliasDialog.remove(); };
     this.cleanup.push(dispose);
-    this.sessionNodes.set(sessionKey, { el: article, update, dispose });
+    cache.set(session.draftScope, { el: article, update, dispose, current: () => session });
     return article;
   }
   // The row's ONE primary action when the broker projects a unified state:
@@ -1589,6 +1620,7 @@ export class Dashboard {
     if (form.dataset.busy === "true") return;
     form.dataset.busy = "true"; this.gate.setMutating(true);
     const status = form.querySelector<HTMLElement>(".alias-status")!;
+    const row = form.closest<HTMLElement>(".session-card");
     status.textContent = "Saving alias…";
     form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button").forEach(control => { control.disabled = true; });
     try {
@@ -1600,13 +1632,13 @@ export class Dashboard {
           current.querySelector<HTMLElement>(".alias-status")!.textContent = result.message;
           form.replaceWith(current);
           await this.refresh("mutation");
-          const shownStatus = this.sessionNodes.get(session.draftScope)?.el.querySelector<HTMLElement>(".alias-status");
+          const shownStatus = row?.querySelector<HTMLElement>(".alias-status");
           if (shownStatus) shownStatus.textContent = result.message;
         } else if (result.code === "alias_changed") {
           const reload = element("button", undefined, "Reload saved alias"); reload.type = "button";
           reload.addEventListener("click", () => {
             form.dataset.reload = "true";
-            void this.refresh("manual").finally(() => { delete form.dataset.reload; this.sessionNodes.get(session.draftScope)?.el.querySelector<HTMLElement>(".alias-editor input")?.focus(); });
+            void this.refresh("manual").finally(() => { delete form.dataset.reload; row?.querySelector<HTMLElement>(".alias-editor input")?.focus(); });
           });
           status.append(reload);
         }
@@ -1615,7 +1647,7 @@ export class Dashboard {
       for (const input of Array.from(form.querySelectorAll("input"))) input.defaultValue = input.value;
       form.dataset.busy = "false"; form.dataset.saved = "true";
       await this.refresh("mutation");
-      this.sessionNodes.get(session.draftScope)?.el.querySelector<HTMLDialogElement>(".session-alias-dialog")?.close();
+      row?.querySelector<HTMLDialogElement>(".session-alias-dialog")?.close();
       this.status.textContent = displayAlias === undefined ? "Alias cleared." : "Alias saved.";
     } finally { this.gate.setMutating(false); form.dataset.busy = "false"; form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button").forEach(control => { control.disabled = false; }); }
   }
