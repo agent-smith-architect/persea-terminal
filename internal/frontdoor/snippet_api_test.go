@@ -521,9 +521,9 @@ func TestSnippetAndPreferencesAPIRefuseCaseFoldedKeys(t *testing.T) {
 		return ergoRequest(t, s, http.MethodPut, "http://localhost/api/preferences", "application/json", strings.NewReader(body), func(r *http.Request) { r.Header.Set("If-Match", `"0"`) })
 	}
 	for name, w := range map[string]*httptest.ResponseRecorder{
-		"PUT THEME":             put(`{"version":1,"THEME":"` + preferencesSecret + `","font_size":14,"default_session":null}`),
-		"PUT Version":           put(`{"Version":1,"theme":"default","font_size":14,"default_session":null}`),
-		"PUT nested Realm":      put(`{"version":1,"theme":"default","font_size":14,"default_session":{"Realm":"r","SERVER":"s","name":"` + preferencesSecret + `"}}`),
+		"PUT THEME":             put(`{"version":1,"THEME":"` + preferencesSecret + `","font_size":14,"terminal_position":"top-center","default_session":null}`),
+		"PUT Version":           put(`{"Version":1,"theme":"default","font_size":14,"terminal_position":"top-center","default_session":null}`),
+		"PUT nested Realm":      put(`{"version":1,"theme":"default","font_size":14,"terminal_position":"top-center","default_session":{"Realm":"r","SERVER":"s","name":"` + preferencesSecret + `"}}`),
 		"POST KIND/BODY":        c.post(`{"KIND":"snippet","Label":"x","BODY":"`+snippetSecret+`"}`, nil),
 		"POST Origin":           c.post(`{"kind":"clip","body":"`+snippetSecret+`","Origin":"laptop"}`, nil),
 		"PATCH Body/REVISION":   c.patch(id, `{"Body":"`+snippetSecret+`","REVISION":1}`, nil),

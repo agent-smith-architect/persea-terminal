@@ -8,6 +8,7 @@
 // boot paths.
 import { csrfToken } from "./csrf_refresh";
 import { DEFAULT_UNIFIED_THEME, isUnifiedThemeID, type UnifiedThemeID } from "./unified_themes";
+import { DEFAULT_TERMINAL_POSITION, isTerminalPosition, type TerminalPosition } from "./terminal_position";
 
 export const OPERATOR_PREFERENCES_HINT_KEY = "persea-terminal.operator-preferences-hint.v1";
 
@@ -26,11 +27,13 @@ export type DefaultSessionPreference = Readonly<{ realm: string; server: string;
 // absence of one: the wire carries it as JSON null, and the record's own
 // revision covers it like any other field. No number in 9…24 is spent as a
 // sentinel, so every size in the range stays a choice an operator can make.
+// terminalPosition places a terminal grid that is smaller than its space.
 export type OperatorPreferences = Readonly<{
   version: 1;
   theme: UnifiedThemeID;
   fontSize: number | null;
   composerFontSize: number;
+  terminalPosition: TerminalPosition;
   defaultSession: DefaultSessionPreference | null;
 }>;
 
@@ -39,6 +42,7 @@ export const DEFAULT_OPERATOR_PREFERENCES: OperatorPreferences = Object.freeze({
   theme: DEFAULT_UNIFIED_THEME,
   fontSize: null,
   composerFontSize: DEFAULT_COMPOSER_FONT_SIZE,
+  terminalPosition: DEFAULT_TERMINAL_POSITION,
   defaultSession: null,
 });
 
@@ -66,6 +70,7 @@ export type OperatorPreferencePatch = Readonly<{
   theme?: UnifiedThemeID;
   fontSize?: number | null;
   composerFontSize?: number;
+  terminalPosition?: TerminalPosition;
   defaultSession?: DefaultSessionPreference | null;
 }>;
 
@@ -99,10 +104,10 @@ function exactObject(value: unknown, keys: readonly string[]): Record<string, un
 }
 
 // Like exactObject, but a named key may be absent. Used ONLY for the local
-// presentation hint: a hint written by a release before composer_font_size
-// existed is worth honouring for the theme it carries, and the missing field
-// reads as its default. The wire record stays exact — it comes from the server
-// this release is deployed with.
+// presentation hint: a hint written by a release before composer_font_size or
+// terminal_position existed is worth honouring for the theme it carries, and a
+// missing field reads as its default. The wire record stays exact — it comes
+// from the server this release is deployed with.
 function objectWithOptional(value: unknown, required: readonly string[], optional: readonly string[]): Record<string, unknown> | undefined {
   if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
   const object = value as Record<string, unknown>;
@@ -139,6 +144,7 @@ function validPreferences(preferences: OperatorPreferences): boolean {
     && isUnifiedThemeID(preferences.theme)
     && validFontSize(preferences.fontSize)
     && validComposerFontSize(preferences.composerFontSize)
+    && isTerminalPosition(preferences.terminalPosition)
     && parseDefaultSession(preferences.defaultSession) !== undefined;
 }
 
@@ -148,6 +154,7 @@ function freezePreferences(preferences: OperatorPreferences): OperatorPreference
     theme: preferences.theme,
     fontSize: preferences.fontSize,
     composerFontSize: preferences.composerFontSize,
+    terminalPosition: preferences.terminalPosition,
     defaultSession: preferences.defaultSession === null ? null : Object.freeze({ ...preferences.defaultSession }),
   });
 }
@@ -164,10 +171,11 @@ type WriteSettlement =
   | Readonly<{ kind: "degraded"; preferences: OperatorPreferences }>;
 
 function parseRecord(value: unknown, etag: string | null): ParsedRecord | undefined {
-  const object = exactObject(value, ["version", "theme", "font_size", "composer_font_size", "default_session", "revision", "stored", "available"]);
+  const object = exactObject(value, ["version", "theme", "font_size", "composer_font_size", "terminal_position", "default_session", "revision", "stored", "available"]);
   if (object === undefined || object.version !== 1 || !isUnifiedThemeID(object.theme)) return undefined;
   if (!validFontSize(object.font_size)) return undefined;
   if (!validComposerFontSize(object.composer_font_size)) return undefined;
+  if (!isTerminalPosition(object.terminal_position)) return undefined;
   if (!Number.isSafeInteger(object.revision) || (object.revision as number) < 0) return undefined;
   if (typeof object.stored !== "boolean" || typeof object.available !== "boolean") return undefined;
   const revision = object.revision as number;
@@ -175,7 +183,10 @@ function parseRecord(value: unknown, etag: string | null): ParsedRecord | undefi
   const defaultSession = parseDefaultSession(object.default_session);
   if (defaultSession === undefined) return undefined;
   return Object.freeze({
-    preferences: freezePreferences({ version: 1, theme: object.theme, fontSize: object.font_size, composerFontSize: object.composer_font_size, defaultSession }),
+    preferences: freezePreferences({
+      version: 1, theme: object.theme, fontSize: object.font_size, composerFontSize: object.composer_font_size,
+      terminalPosition: object.terminal_position, defaultSession,
+    }),
     revision,
     stored: object.stored,
     available: object.available,
@@ -190,11 +201,12 @@ function readHint(storage: OperatorPreferencesServiceOptions["storage"]): Operat
   try {
     const raw = storage.getItem(OPERATOR_PREFERENCES_HINT_KEY);
     if (raw === null) return undefined;
-    const object = objectWithOptional(JSON.parse(raw), ["version", "theme", "font_size", "default_session"], ["composer_font_size"]);
+    const object = objectWithOptional(JSON.parse(raw), ["version", "theme", "font_size", "default_session"], ["composer_font_size", "terminal_position"]);
     if (object === undefined || object.version !== 1 || !isUnifiedThemeID(object.theme)) return undefined;
     const defaultSession = parseDefaultSession(object.default_session);
     const composerFontSize = object.composer_font_size === undefined ? DEFAULT_COMPOSER_FONT_SIZE : object.composer_font_size;
-    const preferences = { version: 1 as const, theme: object.theme, fontSize: object.font_size as number | null, composerFontSize, defaultSession };
+    const terminalPosition = object.terminal_position === undefined ? DEFAULT_TERMINAL_POSITION : object.terminal_position;
+    const preferences = { version: 1 as const, theme: object.theme, fontSize: object.font_size as number | null, composerFontSize, terminalPosition, defaultSession };
     if (defaultSession === undefined || !validPreferences(preferences as OperatorPreferences)) return undefined;
     return freezePreferences(preferences as OperatorPreferences);
   } catch {
@@ -210,6 +222,7 @@ function writeHint(storage: OperatorPreferencesServiceOptions["storage"], prefer
       theme: preferences.theme,
       font_size: preferences.fontSize,
       composer_font_size: preferences.composerFontSize,
+      terminal_position: preferences.terminalPosition,
       default_session: preferences.defaultSession,
     }));
   } catch { /* the server record remains authoritative */ }
@@ -410,6 +423,7 @@ export class OperatorPreferencesService implements OperatorPreferencePort {
       theme: patch.theme ?? base.theme,
       fontSize: patch.fontSize === undefined ? base.fontSize : patch.fontSize,
       composerFontSize: patch.composerFontSize ?? base.composerFontSize,
+      terminalPosition: patch.terminalPosition ?? base.terminalPosition,
       defaultSession: patch.defaultSession === undefined ? base.defaultSession : patch.defaultSession,
     });
     return validPreferences(preferences) ? preferences : undefined;
@@ -464,7 +478,10 @@ export class OperatorPreferencesService implements OperatorPreferencePort {
           "X-Persea-CSRF": this.csrf(),
           "If-Match": `"${revision}"`,
         },
-        body: JSON.stringify({ version: 1, theme: next.theme, font_size: next.fontSize, composer_font_size: next.composerFontSize, default_session: next.defaultSession }),
+        body: JSON.stringify({
+          version: 1, theme: next.theme, font_size: next.fontSize, composer_font_size: next.composerFontSize,
+          terminal_position: next.terminalPosition, default_session: next.defaultSession,
+        }),
       });
       if (response.status === 412) {
         const record = parseRecord(await response.json(), response.headers.get("ETag"));

@@ -19,7 +19,7 @@ async function startCohesionFixture(ui = path.resolve(__dirname, '..')) {
     inventoryStatus: 200, favoritesStatus: 200, previewStatus: 200, aliasStatus: 200,
     stoppedRealms: [], createRefusal: '',
     previewDelay: 0, inventoryDelay: 0, favoriteDelay: 0, previewVersion: 1, nextID: 100, aliasCommitThenFail: false,
-    preferences: { version: 1, theme: 'default', font_size: null, composer_font_size: 11, default_session: null, revision: 1, stored: true, available: true },
+    preferences: { version: 1, theme: 'default', font_size: null, composer_font_size: 11, terminal_position: 'top-center', default_session: null, revision: 1, stored: true, available: true },
   };
   const json = (res, status, body, revision) => { res.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...(revision === undefined ? {} : { ETag: `"${revision}"` }) }); res.end(JSON.stringify(body)); };
   const read = async req => { let body = ''; for await (const chunk of req) body += chunk; return body ? JSON.parse(body) : {}; };

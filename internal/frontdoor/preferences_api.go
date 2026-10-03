@@ -114,6 +114,12 @@ type preferencesWire struct {
 	// no such value, and a *int cannot tell it from absent, which is why this
 	// is captured raw like font_size and default_session.
 	ComposerFontSize json.RawMessage `json:"composer_font_size"`
+	// terminal_position is required. A page that predates the field states a
+	// whole record without it, and storing that as the default would silently
+	// undo the operator's choice, so the request is refused like any
+	// incomplete record. A *string reads absent and null alike as nil, and the
+	// schema admits neither.
+	TerminalPosition *string         `json:"terminal_position"`
 	DefaultSession   json.RawMessage `json:"default_session"`
 }
 
@@ -147,11 +153,11 @@ func (s *Server) putPreferences(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "invalid preferences request", http.StatusBadRequest)
 		return
 	}
-	if wire.Version == nil || wire.Theme == nil || wire.FontSize == nil || wire.DefaultSession == nil {
+	if wire.Version == nil || wire.Theme == nil || wire.FontSize == nil || wire.TerminalPosition == nil || wire.DefaultSession == nil {
 		http.Error(w, "invalid preferences request", http.StatusBadRequest)
 		return
 	}
-	prefs := Preferences{Version: *wire.Version, Theme: *wire.Theme, ComposerFontSize: preferenceDefaultComposerFontSize}
+	prefs := Preferences{Version: *wire.Version, Theme: *wire.Theme, ComposerFontSize: preferenceDefaultComposerFontSize, TerminalPosition: *wire.TerminalPosition}
 	if wire.ComposerFontSize != nil {
 		var size int
 		if err := decodeStrict(wire.ComposerFontSize, &size); err != nil {

@@ -203,7 +203,7 @@ async function startStack({ tls }) {
       // validates the whole record.
       response.setHeader("ETag", '"1"');
       response.writeHead(state.preferencesStatus);
-      response.end(JSON.stringify({ version: 1, theme: "default", font_size: 14, composer_font_size: 13, default_session: state.preferenceDefault, revision: 1, stored: true, available: true }));
+      response.end(JSON.stringify({ version: 1, theme: "default", font_size: 14, composer_font_size: 13, terminal_position: "top-center", default_session: state.preferenceDefault, revision: 1, stored: true, available: true }));
       return;
     }
     if (request.method === "POST" && url.pathname === "/api/session-adoptions") {
