@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 	"unicode/utf16"
@@ -100,6 +101,7 @@ type Server struct {
 	takeovers               *controlTakeoverStore
 	aliases                 *aliasStore
 	aliasErr                error
+	aliasDegraded           atomic.Bool
 	preferences             *preferencesStore
 	preferencesErr          error
 	keyboardPreferences     *keyboardPreferencesStore
@@ -721,15 +723,14 @@ func (s *Server) inventory(w http.ResponseWriter, r *http.Request) {
 	for _, v := range all {
 		live = append(live, aliasSession{Authority: v.authority, Name: v.Name})
 	}
-	for _, seed := range s.cfg.Aliases {
-		if err := s.aliases.seed(seed.Alias, seed.Realm, seed.Server, seed.Session); err != nil {
-			http.Error(w, "alias_unavailable", http.StatusServiceUnavailable)
-			return
-		}
-	}
+	// Aliases are display names: a store that cannot record a change must not
+	// hide the sessions. The list keeps the aliases as last saved.
 	if err := s.aliases.reconcile(live, complete); err != nil {
-		http.Error(w, "alias_unavailable", http.StatusServiceUnavailable)
-		return
+		if !s.aliasDegraded.Swap(true) {
+			frontLogf("component=frontdoor event=alias_store_degraded error=%q", err.Error())
+		}
+	} else if s.aliasDegraded.Swap(false) {
+		frontLogf("component=frontdoor event=alias_store_recovered")
 	}
 	records := s.aliases.list()
 	for _, record := range records {
@@ -870,7 +871,12 @@ func (s *Server) resolveAliasSession(r *http.Request, handle string) (aliasSessi
 	if err := s.aliases.reconcile(live, complete); err != nil {
 		return aliasSession{}, errAliasStoreUnavailable
 	}
-	if target.Name == "" || !complete[target.Authority.Realm+"\x00"+target.Authority.Server] {
+	// A target missing from a complete inventory has ended. When the inventory
+	// is incomplete nobody can tell, so the request is unavailable, not gone.
+	if !complete[a.Realm+"\x00"+a.Server] {
+		return aliasSession{}, errAliasStoreUnavailable
+	}
+	if target.Name == "" {
 		return aliasSession{}, errInvalidHandle
 	}
 	return target, nil

@@ -3,11 +3,13 @@ package frontdoor
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -194,5 +196,81 @@ func TestAliasConflictHeaderPreservesUnicode(t *testing.T) {
 	}
 	if w.Body.String() != "alias_exists\n" || w.Header().Get("ETag") != `"7"` {
 		t.Fatalf("refusal wire contract changed: %q %v", w.Body.String(), w.Header())
+	}
+}
+
+// fakeAliasBroker answers every connection with one inventory of server "s".
+func fakeAliasBroker(t *testing.T, inventory proto.ServerInventory) string {
+	t.Helper()
+	socket := filepath.Join(shortTestDir(t), "alias-broker.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	go func() {
+		for {
+			c, e := listener.Accept()
+			if e != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				_, _ = proto.ReadFrame(c)
+				_ = writeControl(c, proto.Control{Type: "hello_ok", V: 1})
+				_, _ = proto.ReadFrame(c)
+				_ = writeControl(c, proto.Control{Type: "inventory_ok", Servers: []proto.ServerInventory{inventory}})
+			}()
+		}
+	}()
+	return socket
+}
+
+// A live target in an inventory the broker marked incomplete has not ended:
+// the request is unavailable, never "session gone".
+func TestAliasCreateOnIncompleteInventoryIsUnavailable(t *testing.T) {
+	a := auth(7, "$3")
+	socket := fakeAliasBroker(t, proto.ServerInventory{Label: "s", Status: "ok", Error: "inventory session limit reached", Sessions: []proto.Session{{Authority: a, Name: "he2", Width: 80, Height: 24}}})
+	s := newServer(config.Front{Realms: []config.Realm{{Name: "r", Socket: socket, BrokerUID: uint32(os.Getuid()), BrokerUIDConfigured: true}}, HandleTTLSeconds: 60, HandleCapacity: 8}, ".", "127.0.0.1:8080")
+	handle, err := s.handles.mint(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := json.Marshal(map[string]string{"display_alias": "Research", "handle": handle})
+	w := httptest.NewRecorder()
+	s.handler().ServeHTTP(w, httptest.NewRequest("POST", "http://127.0.0.1:8080/api/aliases", bytes.NewReader(body)))
+	if w.Code != 503 || strings.TrimSpace(w.Body.String()) != "alias_unavailable" || len(s.aliases.list()) != 0 {
+		t.Fatalf("incomplete inventory answered %d %q with %d records", w.Code, w.Body.String(), len(s.aliases.list()))
+	}
+}
+
+// Aliases are display names: a store that cannot save a change must not hide
+// the session list.
+func TestAliasStoreFailureKeepsInventory(t *testing.T) {
+	a := auth(7, "$3")
+	socket := fakeAliasBroker(t, proto.ServerInventory{Label: "s", Status: "ok", Sessions: []proto.Session{{Authority: a, Name: "he2", Width: 80, Height: 24}}})
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	s := newServer(config.Front{Realms: []config.Realm{{Name: "r", Socket: socket, BrokerUID: uint32(os.Getuid()), BrokerUIDConfigured: true}}, AliasStorePath: filepath.Join(dir, "aliases.json"), HandleTTLSeconds: 60, HandleCapacity: 8}, ".", "127.0.0.1:8080")
+	if s.aliasErr != nil {
+		t.Fatal(s.aliasErr)
+	}
+	mustAlias(t, s.aliases, "Research", aliasSession{Authority: auth(7, "$9"), Name: "gone"})
+	s.aliases.fs = faultAliasFS{aliasFS: s.aliases.fs, rename: true}
+	var logs []string
+	priorLog := frontLogf
+	frontLogf = func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
+	t.Cleanup(func() { frontLogf = priorLog })
+	for i := 0; i < 2; i++ {
+		w := httptest.NewRecorder()
+		s.handler().ServeHTTP(w, httptest.NewRequest("GET", "http://127.0.0.1:8080/api/inventory", nil))
+		if w.Code != 200 || !strings.Contains(w.Body.String(), `"name":"he2"`) {
+			t.Fatalf("store failure hid the inventory: %d %s", w.Code, w.Body.String())
+		}
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "event=alias_store_degraded") {
+		t.Fatalf("degraded store logs=%q", logs)
 	}
 }

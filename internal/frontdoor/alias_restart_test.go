@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,15 +78,17 @@ func TestAliasRestartOverRealBroker(t *testing.T) {
 		t.Fatalf("save=%d %s", w.Code, w.Body.String())
 	}
 	tmux("kill-server")
-	// tmux may finish removing its socket just after the command reply.
-	serverSocket := filepath.Join(os.TempDir(), fmt.Sprintf("tmux-%d", os.Getuid()), label)
+	// tmux replies before the old server has closed its socket, and tmux 3.4
+	// leaves the socket file behind. A new session started too early reaches the
+	// exiting server, so wait until no server answers on the private socket.
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		if _, err := os.Stat(serverSocket); os.IsNotExist(err) {
+		out, err := exec.Command("tmux", "-L", label, "has-session").CombinedOutput()
+		if err != nil && strings.Contains(string(out), "no server running") {
 			break
 		}
 		if time.Now().After(deadline) {
-			t.Fatal("private server socket was not removed")
+			t.Fatalf("private tmux server did not stop: %s", out)
 		}
 		time.Sleep(10 * time.Millisecond)
 	}

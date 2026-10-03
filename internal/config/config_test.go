@@ -191,7 +191,7 @@ func TestRequiredUIDsRejectMissingNegativeOverflowNullAndAmbiguous(t *testing.T)
 		`{"realms":[{"name":"r","socket":"/tmp/x","broker_uid":0,"BROKER_UID":0}]}`,
 		`{"realms":[{"name":"r","socket":"/tmp/x","broker_uid":0,"BROKER_UID":1}]}`,
 		`{"realms":[{"name":"r","socket":"/tmp/x","broker_uid":0,"bro\u212Aer_uid":1}]}`,
-		`{"realms":[{"name":"r","socket":"/tmp/x","broker_uid":0}],"aliases":[{"alias":"a","realm":"r","server":"s","session":"one","session":"two"}]}`,
+		`{"realms":[{"name":"r","socket":"/tmp/x","broker_uid":0}],"aliases":[]}`,
 	}
 	for _, body := range brokers {
 		if _, err := LoadBroker(write(t, body)); err == nil {
@@ -212,7 +212,7 @@ func TestRequiredUIDsRejectMissingNegativeOverflowNullAndAmbiguous(t *testing.T)
 	if _, err := LoadBroker(write(t, `{"realm":"r","front_uid":1,"servers":[{"label":"s","socket_path":"/tmp/x"}]}`)); err != nil {
 		t.Fatalf("distinct legitimate broker keys rejected: %v", err)
 	}
-	if _, err := LoadFront(write(t, `{"realms":[{"name":"r","socket":"/tmp/x","broker_uid":1}],"alias_store_path":"/tmp/aliases.json","aliases":[{"alias":"a","realm":"r","server":"s","session":"one"}]}`)); err != nil {
+	if _, err := LoadFront(write(t, `{"realms":[{"name":"r","socket":"/tmp/x","broker_uid":1}],"alias_store_path":"/tmp/aliases.json"}`)); err != nil {
 		t.Fatalf("distinct legitimate front keys rejected: %v", err)
 	}
 	programmaticBroker := Broker{FrontUID: 0, FrontUIDConfigured: true}

@@ -130,12 +130,6 @@ type Realm struct {
 	BrokerUID           uint32 `json:"broker_uid"`
 	BrokerUIDConfigured bool   `json:"-"`
 }
-type Alias struct {
-	Alias   string `json:"alias"`
-	Realm   string `json:"realm"`
-	Server  string `json:"server"`
-	Session string `json:"session"`
-}
 type Ingress struct {
 	SocketPath    string `json:"socket_path"`
 	PeerUID       uint32 `json:"peer_uid"`
@@ -176,7 +170,6 @@ func (i *Ingress) UnmarshalJSON(data []byte) error {
 type Front struct {
 	Ingress        Ingress `json:"ingress"`
 	Realms         []Realm `json:"realms"`
-	Aliases        []Alias `json:"aliases,omitempty"`
 	AliasStorePath string  `json:"alias_store_path"`
 	// PreferencesStorePath holds per-operator preferences (theme, font size,
 	// default session). Optional: an absent path leaves the store unconfigured
@@ -561,13 +554,6 @@ func LoadFront(path string) (Front, error) {
 	}
 	if c.HandleCapacity < 1 || c.HandleCapacity > 65536 {
 		return c, fmt.Errorf("invalid handle capacity")
-	}
-	aliasSeen := map[string]bool{}
-	for _, a := range c.Aliases {
-		if !labelRE.MatchString(a.Alias) || aliasSeen[a.Alias] || !seen[a.Realm] || !labelRE.MatchString(a.Server) || a.Session == "" || len(a.Session) > 128 {
-			return c, fmt.Errorf("invalid or duplicate alias %q", a.Alias)
-		}
-		aliasSeen[a.Alias] = true
 	}
 	return c, nil
 }

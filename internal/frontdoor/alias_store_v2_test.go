@@ -143,7 +143,7 @@ func TestAliasIncompleteInventoryNeverChangesRecords(t *testing.T) {
 	}
 }
 
-func TestAliasOldStoreResetsAndSeedsByName(t *testing.T) {
+func TestAliasOldStoreResets(t *testing.T) {
 	var logs []string
 	priorLog := frontLogf
 	frontLogf = func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
@@ -167,26 +167,6 @@ func TestAliasOldStoreResetsAndSeedsByName(t *testing.T) {
 	}
 	if err = json.Unmarshal(data, &disk); err != nil || disk.Version != 2 || len(disk.Aliases) != 0 || len(s.list()) != 0 {
 		t.Fatalf("old store not replaced: %s %v", data, err)
-	}
-	if err = s.seed("Seed", "r", "s", "he2"); err != nil {
-		t.Fatal(err)
-	}
-	r := s.list()[0]
-	if r.State != "detached" || r.SessionName != "he2" {
-		t.Fatalf("missing-session seed=%+v", r)
-	}
-	seeded, err := newAliasStore(path)
-	if err != nil || len(seeded.list()) != 1 || seeded.list()[0] != r {
-		t.Fatalf("seed without a witness could not reopen: %v", err)
-	}
-	if err = s.seed("Changed config", "r", "s", "he2"); err != nil || s.list()[0] != r {
-		t.Fatal("seed overwrote operator alias")
-	}
-	if err = s.reconcile([]aliasSession{aliasTarget(1, "$0", "he2")}, map[string]bool{"r\x00s": true}); err != nil || s.list()[0].State != "active" {
-		t.Fatalf("seed did not bind: %v %+v", err, s.list())
-	}
-	if _, err = newAliasStore(path); err != nil {
-		t.Fatalf("seed store cannot reopen: %v", err)
 	}
 	if len(logs) != 1 || !strings.Contains(logs[0], "event=alias_store_reset") {
 		t.Fatalf("reset log=%v", logs)
@@ -266,5 +246,91 @@ func TestAliasCharacterValidation(t *testing.T) {
 	}
 	if _, err := normalizeAlias(strings.Repeat("界", 128)); err != nil {
 		t.Fatal("128 characters were measured as bytes")
+	}
+}
+
+// A live session keeps its alias through a rename even when the inventory also
+// holds a replacement with the old name and a newer alias claims the new name.
+func TestAliasExactWitnessBeatsNewerNameClaims(t *testing.T) {
+	s := memoryAliases(t)
+	s.now = func() time.Time { return time.Unix(10, 0) }
+	original := mustAlias(t, s, "Original", aliasTarget(1, "$0", "he2"))
+	competitor := mustAlias(t, s, "Competitor", aliasTarget(1, "$1", "he3"))
+	s.now = func() time.Time { return time.Unix(20, 0) }
+	complete := map[string]bool{"r\x00s": true}
+	if err := s.reconcile([]aliasSession{aliasTarget(1, "$0", "he2")}, complete); err != nil {
+		t.Fatal(err)
+	}
+	if s.records[competitor.AliasID].State != "detached" || s.records[competitor.AliasID].UpdatedAt.Before(s.records[original.AliasID].UpdatedAt) {
+		t.Fatalf("competitor is not the newer detached claim: %+v", s.records[competitor.AliasID])
+	}
+	if err := s.reconcile([]aliasSession{aliasTarget(1, "$0", "he3"), aliasTarget(2, "$2", "he2")}, complete); err != nil {
+		t.Fatal(err)
+	}
+	got, other := s.records[original.AliasID], s.records[competitor.AliasID]
+	if got.State != "active" || got.SessionName != "he3" || !sameAuthority(got.Incarnation, original.Incarnation) || other.State != "detached" {
+		t.Fatalf("exact witness lost to a name claim: original=%+v competitor=%+v", got, other)
+	}
+}
+
+// The byte limit is reached long before the record limit. Room is made by
+// removing the oldest detached aliases, never active ones.
+func TestAliasByteLimitEvictsOldestDetachedOnDisk(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	s, err := newAliasStore(filepath.Join(dir, "aliases.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	live := mustAlias(t, s, "Live", aliasTarget(9, "$live", "live"))
+	for i := 0; ; i++ {
+		id := fmt.Sprintf("%032x", i)
+		r := AliasRecord{AliasID: id, DisplayAlias: fmt.Sprintf("Record%05d %s", i, strings.Repeat("界", 100)), Realm: "r", Server: "s", SessionName: fmt.Sprintf("he%d", i), Incarnation: auth(7, fmt.Sprintf("$%d", i)), State: "detached", Revision: 2, CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(int64(100+i), 0)}
+		r.NormalizedAlias, _ = normalizeAlias(r.DisplayAlias)
+		s.records[id] = r
+		if data, _ := json.Marshal(aliasStoreFile{Version: aliasStoreVersion, Aliases: s.list()}); len(data) > aliasStoreMaxBytes-600 {
+			break
+		}
+	}
+	if len(s.records) >= aliasStoreMaxRecords {
+		t.Fatal("fixture reached the record limit instead of the byte limit")
+	}
+	if err = s.persistLocked(); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 5; i++ {
+		if _, err = s.create(fmt.Sprintf("New%d %s", i, strings.Repeat("界", 120)), aliasTarget(9, fmt.Sprintf("$n%d", i), fmt.Sprintf("new%d", i))); err != nil {
+			t.Fatalf("create %d refused with detached history present: %v", i, err)
+		}
+	}
+	if _, kept := s.records[fmt.Sprintf("%032x", 0)]; kept {
+		t.Fatal("oldest detached alias was not removed first")
+	}
+	if s.records[live.AliasID].State != "active" {
+		t.Fatal("an active alias was removed")
+	}
+	reopened, err := newAliasStore(filepath.Join(dir, "aliases.json"))
+	if err != nil || len(reopened.list()) != len(s.list()) {
+		t.Fatalf("store over its byte limit or unreadable: %v", err)
+	}
+	full := memoryAliases(t)
+	for i := 0; ; i++ {
+		id := fmt.Sprintf("%032x", i)
+		r := AliasRecord{AliasID: id, DisplayAlias: fmt.Sprintf("Active%05d %s", i, strings.Repeat("界", 100)), Realm: "r", Server: "s", SessionName: fmt.Sprintf("he%d", i), Incarnation: auth(7, fmt.Sprintf("$%d", i)), State: "active", Revision: 1, CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(1, 0)}
+		r.NormalizedAlias, _ = normalizeAlias(r.DisplayAlias)
+		full.records[id] = r
+		if data, _ := json.Marshal(aliasStoreFile{Version: aliasStoreVersion, Aliases: full.list()}); len(data) > aliasStoreMaxBytes-600 {
+			break
+		}
+	}
+	count := len(full.records)
+	_, err = full.create(fmt.Sprintf("Over %s", strings.Repeat("界", 120)), aliasTarget(10, "$over", "over"))
+	if len(full.records) != count {
+		t.Fatal("a refused create changed the store")
+	}
+	if !errors.Is(err, errAliasStoreUnavailable) {
+		t.Fatalf("an all-active full store did not refuse: %v", err)
 	}
 }
