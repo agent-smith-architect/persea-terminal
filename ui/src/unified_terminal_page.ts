@@ -1125,7 +1125,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       identityActions.className = "persea-unified-identity__session-actions";
       const dashboard = document.createElement("button");
       dashboard.type = "button";
-      dashboard.textContent = "Dashboard";
+      const dashboardIcon = document.createElement("span");
+      dashboardIcon.className = "persea-unified-identity__dashboard-icon";
+      dashboardIcon.setAttribute("aria-hidden", "true");
+      dashboardIcon.textContent = "▦";
+      dashboard.append(dashboardIcon, "Dashboard");
       dashboard.title = "Open the dashboard";
       dashboard.setAttribute("aria-label", "Open the dashboard");
       this.cleanupListeners.push(bindTapActivation(dashboard, (event) => {
@@ -1133,7 +1137,10 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       }, () => undefined, () => !this.closed, () => this.keyInteractionGeneration));
       const list = document.createElement("div");
       identityActions.append(dashboard);
-      this.identitySessionList.append(identityActions, list);
+      // The way back to the dashboard leads the popover, above the current
+      // session and the list, so it never scrolls away.
+      this.identityDetails.prepend(identityActions);
+      this.identitySessionList.append(list);
       const switcher = new SessionSwitcherView({
         root: list,
         currentDraftScope: () => this.options.sessionSwitch?.currentDraftScope() ?? null,

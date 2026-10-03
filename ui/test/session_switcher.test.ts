@@ -48,7 +48,7 @@ const inventory: SessionSwitcherInventory = Object.freeze({
     ["legacy", false, false, "Unified terminal unavailable"],
   ], "authoritative inventory order and closed eligibility");
   assert.equal(rows[0]?.activityLabel, "Output 53m ago", "output time is honest and compact");
-  assert.equal(rows[0]?.statusLabel, "current · Output 53m ago", "current state hid its activity");
+  assert.equal(rows[0]?.statusLabel, "Output 53m ago", "the current row keeps its activity; the Current chip marks it");
   assert.deepEqual(
     rows.map((row) => [row.realmLabel, row.serverLabel, row.primaryAlias, row.geometryLabel, row.attachmentLabel]),
     [
