@@ -126,6 +126,23 @@ async function run(engine) {
       assert(await page.title() === 'Deploy · Persea Terminal', 'Terminal save did not update title');
       await editor.getByText('Alias saved.', { exact: true }).waitFor();
       assert(!await input.isVisible(), 'Successful Save did not collapse the editor');
+      // Dashboard, the alias, a status line and open details must not squeeze the
+      // session list: its first row stays whole, and the whole list is reachable.
+      const panel = page.locator('.persea-unified-identity__details');
+      const listRoom = () => panel.evaluate(el => {
+        const list = el.querySelector('.persea-session-switcher__list'), row = list.querySelector('.persea-session-switcher__row');
+        el.scrollTop = el.scrollHeight;
+        const p = el.getBoundingClientRect(), l = list.getBoundingClientRect(), r = row.getBoundingClientRect();
+        const room = { list: l.height, firstRowBottom: r.bottom - l.top, listBottom: l.bottom, panelBottom: p.bottom, panelTop: p.top, dashboardTop: 0 };
+        el.scrollTop = 0; room.dashboardTop = el.querySelector('[aria-label="Open the dashboard"]').getBoundingClientRect().top - el.getBoundingClientRect().top;
+        return room;
+      });
+      for (const open of [false, true]) {
+        if (open) await page.locator('.persea-unified-identity__current-details > summary').click();
+        const room = await listRoom();
+        assert(room.list + 0.5 >= room.firstRowBottom && room.listBottom <= room.panelBottom + 0.5 && room.dashboardTop >= 0 && room.dashboardTop < 16, `${name}: session list squeezed (details ${open ? 'open' : 'closed'}): ${JSON.stringify(room)}`);
+        if (open) await page.locator('.persea-unified-identity__current-details > summary').click();
+      }
       await shot('terminal-editor');
       const tag = await page.locator('.persea-unified-tag').evaluate(el => {
         const alias = el.querySelector('.persea-unified-tag__alias'), name = el.querySelector('.persea-unified-tag__name');

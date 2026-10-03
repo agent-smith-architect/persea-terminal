@@ -1142,8 +1142,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       }, () => undefined, () => !this.closed, () => this.keyInteractionGeneration));
       const list = document.createElement("div");
       identityActions.append(dashboard);
-      // The way back to the dashboard leads the popover, above the current
-      // session and the list, so it never scrolls away.
+      // The way back to the dashboard leads the popover, above the alias, the
+      // current session and the list, so it is the first thing in view.
       this.identityDetails.prepend(identityActions);
       this.identitySessionList.append(list);
       const switcher = new SessionSwitcherView({
