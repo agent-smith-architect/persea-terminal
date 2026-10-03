@@ -23,6 +23,7 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode/utf16"
 	"unicode/utf8"
 
 	"github.com/gorilla/websocket"
@@ -1220,7 +1221,19 @@ func writeAliasError(w http.ResponseWriter, code string, status int, current Ali
 		// Refusals have a plain code body. This bounded JSON header lets the
 		// editor show the winning record without mixing server text into copy.
 		if b, err := json.Marshal(current); err == nil {
-			w.Header().Set("X-Persea-Alias-Record", string(b))
+			// Fetch reads header bytes as Latin-1. JSON escapes preserve alias
+			// characters, including supplementary characters, on every device.
+			var header strings.Builder
+			for _, char := range string(b) {
+				if char < utf8.RuneSelf {
+					header.WriteByte(byte(char))
+				} else {
+					for _, unit := range utf16.Encode([]rune{char}) {
+						fmt.Fprintf(&header, "\\u%04x", unit)
+					}
+				}
+			}
+			w.Header().Set("X-Persea-Alias-Record", header.String())
 		}
 	}
 	http.Error(w, code, status)

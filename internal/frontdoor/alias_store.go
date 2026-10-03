@@ -69,6 +69,39 @@ type aliasSession struct {
 	Name      string
 }
 
+// A seed has never been shown on a session, so its last witness is null.
+// Keep the broker's Authority decoder strict: only this store record can
+// represent an absent witness, and load still requires one for active aliases.
+func (r AliasRecord) MarshalJSON() ([]byte, error) {
+	type record AliasRecord
+	var incarnation *proto.Authority
+	if r.Incarnation != (proto.Authority{}) {
+		incarnation = &r.Incarnation
+	}
+	return json.Marshal(struct {
+		record
+		Incarnation *proto.Authority `json:"session_incarnation"`
+	}{record: record(r), Incarnation: incarnation})
+}
+
+func (r *AliasRecord) UnmarshalJSON(data []byte) error {
+	type record AliasRecord
+	wire := struct {
+		*record
+		Incarnation *proto.Authority `json:"session_incarnation"`
+	}{record: (*record)(r)}
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(&wire); err != nil {
+		return err
+	}
+	r.Incarnation = proto.Authority{}
+	if wire.Incarnation != nil {
+		r.Incarnation = *wire.Incarnation
+	}
+	return nil
+}
+
 type aliasStoreFile struct {
 	Version int           `json:"version"`
 	Aliases []AliasRecord `json:"aliases"`

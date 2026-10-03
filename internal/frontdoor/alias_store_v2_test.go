@@ -175,6 +175,10 @@ func TestAliasOldStoreResetsAndSeedsByName(t *testing.T) {
 	if r.State != "detached" || r.SessionName != "he2" {
 		t.Fatalf("missing-session seed=%+v", r)
 	}
+	seeded, err := newAliasStore(path)
+	if err != nil || len(seeded.list()) != 1 || seeded.list()[0] != r {
+		t.Fatalf("seed without a witness could not reopen: %v", err)
+	}
 	if err = s.seed("Changed config", "r", "s", "he2"); err != nil || s.list()[0] != r {
 		t.Fatal("seed overwrote operator alias")
 	}
