@@ -1847,7 +1847,10 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.aliasInput = document.createElement("input"); this.aliasInput.type = "text";
     this.aliasInput.name = "display_alias"; this.aliasInput.maxLength = 128; this.aliasInput.autocomplete = "off";
     this.aliasInput.setAttribute("aria-label", "Alias for current session"); label.append(this.aliasInput);
-    this.aliasSave = document.createElement("button"); this.aliasSave.type = "submit"; this.aliasSave.textContent = "Save";
+    // Save is a plain button so that only its fenced activation can save. A
+    // submit button would let a click the fence rejects fall through to a native
+    // form submission. Enter in the field still submits the form implicitly.
+    this.aliasSave = document.createElement("button"); this.aliasSave.type = "button"; this.aliasSave.textContent = "Save";
     this.aliasClear = document.createElement("button"); this.aliasClear.type = "button"; this.aliasClear.textContent = "Clear";
     this.aliasCancel = document.createElement("button"); this.aliasCancel.type = "button"; this.aliasCancel.textContent = "Cancel";
     const actions = document.createElement("div"); actions.className = "persea-unified-identity__alias-actions"; actions.append(this.aliasSave, this.aliasClear, this.aliasCancel);
@@ -1860,8 +1863,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.aliasInput.value = this.aliasInput.defaultValue = this.aliasBaseline?.displayAlias ?? "";
       this.aliasEditing = false; this.aliasStatus.textContent = ""; this.renderAliasControls(); this.aliasEdit.focus({ preventScroll: true });
     }, () => !this.closed && !this.aliasCancel.disabled, () => this.keyInteractionGeneration));
-    this.cleanupListeners.push(bindGenerationFencedClickActivation(this.aliasSave, event => {
-      event.preventDefault(); void this.mutateCurrentAlias(this.aliasInput.value);
+    this.cleanupListeners.push(bindGenerationFencedClickActivation(this.aliasSave, () => {
+      void this.mutateCurrentAlias(this.aliasInput.value);
     }, () => !this.closed && !this.aliasSave.disabled, () => this.keyInteractionGeneration));
     this.cleanupListeners.push(bindGenerationFencedClickActivation(this.aliasClear, () => {
       void this.mutateCurrentAlias(undefined);
@@ -1869,6 +1872,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.aliasStatus = document.createElement("output"); this.aliasStatus.setAttribute("role", "status"); this.aliasStatus.setAttribute("aria-live", "polite");
     form.append(compact, this.aliasFields, this.aliasStatus);
     form.addEventListener("submit", event => {
+      // The form has no submit button, so a trusted submission comes only from
+      // Enter in the alias field.
       event.preventDefault();
       if (event.isTrusted && !this.closed && !this.aliasSave.disabled) void this.mutateCurrentAlias(this.aliasInput.value);
     });

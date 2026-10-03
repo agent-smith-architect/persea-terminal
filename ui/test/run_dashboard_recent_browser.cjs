@@ -3,7 +3,7 @@ const fs = require('fs'), path = require('path');
 const { startCohesionFixture, session, scope } = require('./dashboard_cohesion_fixture.cjs');
 const playwright = require(process.env.PERSEA_PLAYWRIGHT_MODULE || require.resolve('playwright'));
 const ENGINE = process.env.PERSEA_DASHBOARD_ENGINE || 'chromium';
-const OUT = process.env.PERSEA_DASHBOARD_EVIDENCE || '/tmp/agent_logs/dashboard-recent';
+const OUT = process.env.PERSEA_DASHBOARD_EVIDENCE || path.join(require('os').tmpdir(), 'persea-terminal-tests', 'run_dashboard_recent_browser');
 const assert = (value, message) => { if (!value) throw Error(message); };
 
 async function main() {

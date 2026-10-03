@@ -3,7 +3,7 @@ const fs = require('fs'), path = require('path'), crypto = require('crypto');
 const { startFixture } = require('./unified_reopen_fixture.cjs');
 const playwright = require(process.env.PERSEA_PLAYWRIGHT_MODULE || require.resolve('playwright'));
 const UI = process.env.PERSEA_ALIAS_UI || path.resolve(__dirname, '..');
-const OUT = process.env.PERSEA_ALIAS_EVIDENCE || '/data4/agent/artifacts/evidence/persea-terminal/2026-10-03-alias-switcher/scratch/alias';
+const OUT = process.env.PERSEA_ALIAS_EVIDENCE || path.join(require('os').tmpdir(), 'persea-terminal-tests', 'run_alias_browser');
 const engines = process.env.PERSEA_ALIAS_ENGINE ? [process.env.PERSEA_ALIAS_ENGINE] : ['chromium', 'webkit'];
 const assert = (value, message) => { if (!value) throw new Error(message); };
 const scope = a => JSON.stringify([a.realm, a.server, a.selector_kind, a.selector_value, a.boot_id, a.session_id, a.uid, a.server_pid, a.server_start, a.session_created]);
@@ -135,6 +135,26 @@ async function run(engine) {
       assert(Number(tag.aliasWeight) >= 600, 'Alias tag is not bold');
       assert(width < 720 ? !tag.nameVisible : tag.nameVisible && tag.aliasX < tag.nameX, 'Tag does not lead with the alias or hide the tmux name on a phone');
       assert(/mono/i.test(tag.nameFamily), 'Wide tag tmux name lost its code face');
+      if (name === 'desktop') {
+        // A Save click that the activation fence rejects (the pointer left the
+        // button while held) must not fall through to a native form submission.
+        // Enter in the field then saves exactly once.
+        await edit.click(); await input.fill('Should not save');
+        const box = await editor.getByRole('button', { name: 'Save', exact: true }).boundingBox();
+        const before = state.requests.length;
+        await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
+        await page.mouse.move(box.x + box.width + 40, box.y + box.height / 2); await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+        await page.mouse.up();
+        // A save disables the field synchronously, so the field state shows a fall-through submission at once.
+        assert(await input.isVisible() && await input.isEnabled(), 'A Save click rejected by the activation fence submitted the form');
+        await input.fill('Deploy');
+        const patched = page.waitForResponse(response => response.url().endsWith(`/api/aliases/${state.aliases.find(alias => alias.session_name === 'alpha').alias_id}`) && response.request().method() === 'PATCH');
+        await input.press('Enter'); await patched;
+        const sent = state.requests.slice(before).map(request => `${request.method} ${request.body.display_alias}`);
+        assert(JSON.stringify(sent) === JSON.stringify(['PATCH Deploy']), `Rejected Save click or Enter sent the wrong saves: ${JSON.stringify(sent)}`);
+        await editor.getByText('Alias saved.', { exact: true }).waitFor();
+        assert(!await input.isVisible(), 'Enter save did not collapse the editor');
+      }
       await edit.click(); await shot('terminal-editor-expanded');
       const measurements = await editor.evaluate(el => ({ width: el.getBoundingClientRect().width, targets: [...el.querySelectorAll('button,input')].filter(item => item.getBoundingClientRect().height > 0).map(item => ({ tag: item.tagName, height: item.getBoundingClientRect().height, shadow: getComputedStyle(item).boxShadow, border: getComputedStyle(item).borderTopWidth })), overflow: document.documentElement.scrollWidth > innerWidth }));
       assert(measurements.targets.every(item => item.height >= 44), `${name}: alias editor has a small touch target`);
