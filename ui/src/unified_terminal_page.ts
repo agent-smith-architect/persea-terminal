@@ -378,6 +378,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private scrollbackSelect?: HTMLSelectElement;
   private readonly shell: HTMLElement;
   private aliasInput!: HTMLInputElement;
+  private aliasEditing = false;
+  private aliasSummary!: HTMLElement;
+  private aliasFields!: HTMLElement;
+  private aliasEdit!: HTMLButtonElement;
+  private aliasCancel!: HTMLButtonElement;
   private aliasSave!: HTMLButtonElement;
   private aliasClear!: HTMLButtonElement;
   private aliasStatus!: HTMLOutputElement;
@@ -581,7 +586,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     const tagAlias = document.createElement("span");
     tagAlias.className = "persea-unified-tag__alias";
     tagAlias.hidden = true;
-    tag.append(dot, tagName, tagAlias);
+    tag.append(dot, tagAlias, tagName);
     identity.append(tag, identityDetails);
     this.cleanupListeners.push(bindTapActivation(
       tag,
@@ -1832,12 +1837,29 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private createAliasEditor(): HTMLFormElement {
     const form = document.createElement("form"); form.className = "persea-unified-identity__alias";
     form.hidden = !(this.options.aliasSession || this.options.sessionSwitch);
+    const compact = document.createElement("div"); compact.className = "persea-unified-identity__alias-summary";
+    const caption = document.createElement("span"); caption.textContent = "Alias";
+    this.aliasSummary = document.createElement("span"); this.aliasSummary.className = "persea-unified-identity__alias-value";
+    this.aliasEdit = document.createElement("button"); this.aliasEdit.type = "button"; this.aliasEdit.textContent = "Edit"; this.aliasEdit.setAttribute("aria-label", "Edit alias for current session");
+    compact.append(caption, this.aliasSummary, this.aliasEdit);
+    this.aliasFields = document.createElement("div"); this.aliasFields.className = "persea-unified-identity__alias-fields";
     const label = document.createElement("label"); label.textContent = "Alias";
     this.aliasInput = document.createElement("input"); this.aliasInput.type = "text";
     this.aliasInput.name = "display_alias"; this.aliasInput.maxLength = 128; this.aliasInput.autocomplete = "off";
     this.aliasInput.setAttribute("aria-label", "Alias for current session"); label.append(this.aliasInput);
     this.aliasSave = document.createElement("button"); this.aliasSave.type = "submit"; this.aliasSave.textContent = "Save";
     this.aliasClear = document.createElement("button"); this.aliasClear.type = "button"; this.aliasClear.textContent = "Clear";
+    this.aliasCancel = document.createElement("button"); this.aliasCancel.type = "button"; this.aliasCancel.textContent = "Cancel";
+    const actions = document.createElement("div"); actions.className = "persea-unified-identity__alias-actions"; actions.append(this.aliasSave, this.aliasClear, this.aliasCancel);
+    this.aliasFields.append(label, actions);
+    this.cleanupListeners.push(bindGenerationFencedClickActivation(this.aliasEdit, () => {
+      this.aliasEditing = true; this.aliasStatus.textContent = ""; this.renderAliasControls(); this.aliasInput.focus({ preventScroll: true });
+    }, () => !this.closed && !this.aliasEdit.disabled, () => this.keyInteractionGeneration));
+    this.cleanupListeners.push(bindGenerationFencedClickActivation(this.aliasCancel, () => {
+      this.aliasBaseline = this.aliasCurrentSession?.aliases[0];
+      this.aliasInput.value = this.aliasInput.defaultValue = this.aliasBaseline?.displayAlias ?? "";
+      this.aliasEditing = false; this.aliasStatus.textContent = ""; this.renderAliasControls(); this.aliasEdit.focus({ preventScroll: true });
+    }, () => !this.closed && !this.aliasCancel.disabled, () => this.keyInteractionGeneration));
     this.cleanupListeners.push(bindGenerationFencedClickActivation(this.aliasSave, event => {
       event.preventDefault(); void this.mutateCurrentAlias(this.aliasInput.value);
     }, () => !this.closed && !this.aliasSave.disabled, () => this.keyInteractionGeneration));
@@ -1845,7 +1867,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       void this.mutateCurrentAlias(undefined);
     }, () => !this.closed && !this.aliasClear.disabled, () => this.keyInteractionGeneration));
     this.aliasStatus = document.createElement("output"); this.aliasStatus.setAttribute("role", "status"); this.aliasStatus.setAttribute("aria-live", "polite");
-    form.append(label, this.aliasSave, this.aliasClear, this.aliasStatus);
+    form.append(compact, this.aliasFields, this.aliasStatus);
     form.addEventListener("submit", event => {
       event.preventDefault();
       if (event.isTrusted && !this.closed && !this.aliasSave.disabled) void this.mutateCurrentAlias(this.aliasInput.value);
@@ -1856,7 +1878,14 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
 
   private renderAliasControls(): void {
     const disabled = this.aliasBusy || !this.aliasCurrentSession;
-    this.aliasInput.disabled = disabled; this.aliasSave.disabled = disabled; this.aliasClear.disabled = disabled;
+    if (this.aliasSummary.parentElement) this.aliasSummary.parentElement.hidden = this.aliasEditing;
+    this.aliasFields.hidden = !this.aliasEditing;
+    this.aliasEdit.hidden = this.aliasEditing; this.aliasEdit.disabled = disabled;
+    this.aliasEdit.setAttribute("aria-expanded", String(this.aliasEditing));
+    this.aliasSummary.textContent = this.sessionAlias || "None"; this.aliasSummary.title = this.aliasSummary.textContent;
+    this.aliasInput.disabled = disabled || !this.aliasEditing;
+    this.aliasSave.disabled = disabled || !this.aliasEditing; this.aliasClear.disabled = disabled || !this.aliasEditing;
+    this.aliasCancel.disabled = this.aliasBusy;
     this.aliasClear.hidden = !this.aliasBaseline;
   }
 
@@ -1880,6 +1909,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private async mutateCurrentAlias(displayAlias: string | undefined): Promise<void> {
     const session = this.aliasCurrentSession;
     if (this.closed || this.aliasBusy || !session) return;
+    let returnFocus = false;
     this.aliasBusy = true; this.renderAliasControls(); this.aliasStatus.textContent = "Saving alias…";
     try {
       const result = await saveAlias(this.aliasBaseline, session.handles.alias, displayAlias);
@@ -1905,10 +1935,15 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.aliasBaseline = result.alias;
       this.sessionAlias = result.alias?.displayAlias;
       this.aliasInput.value = this.aliasInput.defaultValue = result.alias?.displayAlias ?? "";
+      returnFocus = this.aliasFields.contains(document.activeElement);
+      this.aliasEditing = false;
       this.aliasStatus.textContent = displayAlias === undefined ? "Alias cleared." : "Alias saved.";
       this.renderSessionTag();
       await this.loadSessionInventory(true);
-    } finally { this.aliasBusy = false; this.renderAliasControls(); }
+    } finally {
+      this.aliasBusy = false; this.renderAliasControls();
+      if (returnFocus && !this.closed && this.aliasCurrentSession?.draftScope === session.draftScope) this.aliasEdit.focus({ preventScroll: true });
+    }
   }
 
   private async openSessionSwitcher(refresh: boolean): Promise<void> {
@@ -3340,6 +3375,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.takeoverPending = false;
     this.sessionName = value.sessionName;
     this.sessionAlias = value.aliasLabel;
+    this.aliasEditing = false;
     this.aliasCurrentSession = undefined;
     this.aliasBaseline = undefined;
     this.aliasInput.value = this.aliasInput.defaultValue = "";
