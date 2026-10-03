@@ -657,7 +657,7 @@ async function main() {
     await navigate("/");
     await waitForDashboard();
     await evaluate(`(() => {
-      const grid = document.querySelector(".session-grid");
+      const grid = document.querySelector(".dashboard-content .session-grid");
       const card = grid?.querySelector(".session-card");
       if (!(grid instanceof HTMLElement) || !(card instanceof HTMLElement)) {
         throw new Error("R2-C dashboard overflow fixture absent");
