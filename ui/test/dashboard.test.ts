@@ -45,6 +45,16 @@ const secondLiveRequest = aliasRequest(inventory.detachedAliases[0], "");
 assert.equal(firstLiveRequest.url, "/api/aliases/alias%2F1"); assert.equal((firstLiveRequest.init.headers as Record<string, string>)["If-Match"], '"7"');
 assert.equal(secondLiveRequest.url, "/api/aliases/alias%2F2"); assert.equal(secondLiveRequest.init.method, "DELETE"); assert.equal((secondLiveRequest.init.headers as Record<string, string>)["If-Match"], '"11"');
 
+{
+  // An incomplete server keeps its alias records, so an active alias can still
+  // carry the session name from before a tmux rename. The row stays usable.
+  const stale = { alias_id: "alias/r", display_alias: "Research", normalized_alias: "research", session_incarnation: a, revision: 2, created_at: "ignored", updated_at: "ignored", realm: "local", server: "private", session_name: "before-rename", state: "active" };
+  const renamed = parseInventory({ realms: [{ name: "local", servers: [{ label: "private", status: "partial", sessions: [session("local", "private", 1000, "after-rename", "$1", "r")] }] }], aliases: [stale] });
+  const row = renamed.realms[0].servers[0].sessions[0];
+  assert.deepEqual([row.name, row.aliases.map((item) => item.displayAlias)], ["after-rename", ["Research"]], "a stale alias name must not reject the inventory");
+  assert.throws(() => parseInventory({ realms: [{ name: "local", servers: [{ label: "private", status: "ok", sessions: [session("local", "private", 1000, "after-rename", "$1", "r")] }] }], aliases: [{ ...stale, server: "other" }] }), /alias identity does not match its session/);
+}
+
 for (const malformed of [null, {}, { realms: [], aliases: null }, { realms: [{ name: "x", servers: "bad" }], aliases: [] }, { realms: [{ name: "x", servers: [{ label: "s", status: "ok", sessions: [{ ...session("x", "s", 1, "n", "$1", ""), handles: { alias: "", observe: "o", control: "c" } }] }] }], aliases: [] }]) {
   assert.throws(() => parseInventory(malformed));
 }

@@ -151,7 +151,10 @@ const aliasesByAuthority = new Map<string, ParsedAlias[]>();
         if (realmUID !== undefined && realmUID !== authority.uid) throw new Error(`realm ${name} contains inconsistent UIDs`); realmUID = authority.uid;
         const sessionName = string(session.name, `${path}.name`);
 const matchingAliases = aliasesByAuthority.get(authority.key) ?? [];
-        if (matchingAliases.some(alias => alias.realm !== sessionRealm || alias.server !== sessionServer || alias.sessionName !== sessionName)) throw new Error(`${path} alias identity does not match its session`);
+        // An alias names its session by realm, server and incarnation. Its stored
+        // session name can lag a tmux rename while that server's inventory is
+        // incomplete, so the name is display data, not identity.
+        if (matchingAliases.some(alias => alias.realm !== sessionRealm || alias.server !== sessionServer)) throw new Error(`${path} alias identity does not match its session`);
         const handles=object(session.handles,`${path}.handles`); const unified = parseUnifiedSession(session.unified, `${path}.unified`); return { handles:{alias:string(handles.alias,`${path}.handles.alias`),observe:string(handles.observe,`${path}.handles.observe`),control:string(handles.control,`${path}.handles.control`)}, realm: sessionRealm, uid: authority.uid, server: sessionServer, serverStatus: string(session.server_status, `${path}.server_status`), sessionId: string(session.session_id, `${path}.session_id`), name: sessionName, width: integer(session.width, `${path}.width`, 1), height: integer(session.height, `${path}.height`, 1), attached: integer(session.attached, `${path}.attached`), activity: integer(session.activity, `${path}.activity`), ...(session.output_activity === undefined ? {} : { outputActivity: integer(session.output_activity, `${path}.output_activity`) }), aliases: matchingAliases.map(({ incarnationKey: _key, ...alias }) => alias), draftScope: authority.key, ...(unified ? { unified } : {}), ...(canStageImages ? { canStageImages: true as const } : {}) };
       });
       const unifiedDev = parseUnifiedDev(server.unified_dev, `${sp}.unified_dev`);
