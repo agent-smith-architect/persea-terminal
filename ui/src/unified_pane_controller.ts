@@ -132,8 +132,11 @@ export type ResolvedPaneIdentity = Readonly<{
 // controller that already consumed a handle from generation g can ask for one
 // strictly newer than g and a workspace can answer six such requests with ONE
 // fetch.
-export type InventorySnapshot = Readonly<{ generation: number; inventory: DashboardInventory }>;
-export type InventoryResolver = (signal: AbortSignal, newerThan: number) => Promise<InventorySnapshot>;
+// readOrder numbers the physical read that produced the snapshot (see
+// inventory_read_order.ts). With readAfter, a resolver returns only a snapshot
+// whose read started after that number, so it cannot predate an alias save.
+export type InventorySnapshot = Readonly<{ generation: number; readOrder: number; inventory: DashboardInventory }>;
+export type InventoryResolver = (signal: AbortSignal, newerThan: number, readAfter?: number) => Promise<InventorySnapshot>;
 
 // Per-pane observability for a consumer that renders pane state outside the
 // page (the workspace cell). Every hook is optional and purely observational:
@@ -335,11 +338,11 @@ export class UnifiedPaneController {
       refitWidth: (columns: number, rows?: number) => this.refitWidth(columns, rows),
       aliasSession: Object.freeze({
         currentDraftScope: () => this.currentIdentity.incarnationKey,
-        inventory: (refresh: boolean, signal: AbortSignal) => this.sessionInventory(refresh, signal),
+        inventory: (refresh: boolean, signal: AbortSignal, readAfter?: number) => this.sessionInventory(refresh, signal, readAfter),
       }),
       ...(mode === "control" ? { sessionSwitch: Object.freeze({
         currentDraftScope: () => this.currentIdentity.incarnationKey,
-        inventory: (refresh: boolean, signal: AbortSignal) => this.sessionInventory(refresh, signal),
+        inventory: (refresh: boolean, signal: AbortSignal, readAfter?: number) => this.sessionInventory(refresh, signal, readAfter),
         blockedMessage: (session: DashboardSession) => this.blockedSessionMessage(session),
         select: (session: DashboardSession) => this.switchSession(session),
       }) } : {}),
@@ -538,11 +541,11 @@ export class UnifiedPaneController {
     try { this.options.observer?.projectionDetail?.(detail); } catch { /* observation has no product authority */ }
   }
 
-  private async sessionInventory(_refresh: boolean, signal: AbortSignal): Promise<SessionSwitcherInventory> {
-    const snapshot = await this.options.resolveInventory(signal, this.snapshotGeneration);
+  private async sessionInventory(_refresh: boolean, signal: AbortSignal, readAfter?: number): Promise<SessionSwitcherInventory> {
+    const snapshot = await this.options.resolveInventory(signal, this.snapshotGeneration, readAfter);
     if (signal.aborted || this.disposed) throw new DOMException("session inventory superseded", "AbortError");
     this.snapshotGeneration = snapshot.generation;
-    return switcherInventory(snapshot.inventory);
+    return switcherInventory(snapshot.inventory, snapshot.readOrder);
   }
 
   private blockedSessionMessage(session: DashboardSession): string {

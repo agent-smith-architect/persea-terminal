@@ -70,13 +70,15 @@ export type UnifiedTerminalPageOptions = Readonly<{
   // after an explicit session switch so session memory memory can record the new exact
   // identity only after the new session is genuinely live.
   onCommit?(generation: number): void;
+  // inventory(…, readAfter) returns a list whose read started after that read
+  // order (inventory_read_order.ts), so it cannot predate an alias save.
   aliasSession?: Readonly<{
     currentDraftScope(): string | null;
-    inventory(refresh: boolean, signal: AbortSignal): Promise<SessionSwitcherInventory>;
+    inventory(refresh: boolean, signal: AbortSignal, readAfter?: number): Promise<SessionSwitcherInventory>;
   }>;
   sessionSwitch?: Readonly<{
     currentDraftScope(): string | null;
-    inventory(refresh: boolean, signal: AbortSignal): Promise<SessionSwitcherInventory>;
+    inventory(refresh: boolean, signal: AbortSignal, readAfter?: number): Promise<SessionSwitcherInventory>;
     blockedMessage(session: DashboardSession): string;
     select(session: DashboardSession): Promise<Readonly<{ ok: boolean; message: string }>>;
   }>;

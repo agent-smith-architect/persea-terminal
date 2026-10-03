@@ -31,6 +31,7 @@ import { UnifiedKeyboardBaseline } from "./unified_keyboard_baseline";
 import { SessionSwitcherView, type SessionSwitcherInventory } from "./session_switcher";
 import type { DashboardSession } from "./dashboard";
 import { saveAlias, type DashboardAlias } from "./alias_client";
+import { nextInventoryReadOrder } from "./inventory_read_order";
 import "./alias_editor.css";
 import { UNIFIED_THEME_IDS, unifiedTheme } from "./unified_themes";
 import { DEFAULT_TERMINAL_POSITION, centersVertically, type TerminalPosition } from "./terminal_position";
@@ -404,10 +405,10 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // The saved alias a draft is based on; its revision is the save's If-Match.
   private aliasBaseline?: DashboardAlias;
   private aliasBusy = false;
-  // Advances when an alias save starts and when it is acknowledged. An
-  // inventory request sent at an older epoch can predate the save, so its
-  // alias state is not applied and it is not reused for a refresh.
-  private aliasEpoch = 0;
+  // The read order taken when the last alias save replied. Only a session
+  // list read after it can show that save, so an older list never sets alias
+  // state and is never reused for a refresh.
+  private aliasFence = 0;
   private readonly insetViewport?: UnifiedViewportInsetSource;
   private readonly keyBar: HTMLDivElement;
   private readonly keyBankToggle: HTMLButtonElement;
@@ -479,7 +480,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private sessionInventory?: SessionSwitcherInventory;
   private sessionInventoryAbort?: AbortController;
   private sessionInventoryRequest?: Promise<void>;
-  private sessionInventoryEpoch = 0;
+  private sessionInventoryReadAfter = 0;
   private sessionSwitchPending = false;
   private readonly selectOverlay: HTMLElement;
   private readonly selectBody: HTMLElement;
@@ -1950,16 +1951,15 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     const session = this.aliasCurrentSession;
     if (this.closed || this.aliasBusy || !session) return;
     let returnFocus = false;
-    this.aliasEpoch += 1;
     this.aliasBusy = true; this.renderAliasControls(); this.aliasStatus.textContent = "Saving alias…";
     try {
       const result = await saveAlias(this.aliasBaseline, session.handles.alias, displayAlias);
+      this.aliasFence = nextInventoryReadOrder();
       if (this.closed || this.aliasCurrentSession?.draftScope !== session.draftScope) return;
       if (!result.ok) {
         this.aliasStatus.textContent = result.message;
         if (result.code === "alias_exists" && result.current) {
           this.aliasSaved = this.aliasBaseline = result.current;
-          this.aliasEpoch += 1;
           this.aliasInput.value = this.aliasInput.defaultValue = result.current.displayAlias;
           this.sessionAlias = result.current.displayAlias;
           this.renderSessionTag();
@@ -1968,14 +1968,15 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
           const reload = document.createElement("button"); reload.type = "button"; reload.textContent = "Reload saved alias";
           this.cleanupListeners.push(bindGenerationFencedClickActivation(reload, () => {
             this.aliasInput.value = this.aliasInput.defaultValue;
-            void this.loadSessionInventory(true).then(() => { this.aliasStatus.textContent = ""; });
+            // A later save owns the status line; this reload must not clear it.
+            const fence = this.aliasFence;
+            void this.loadSessionInventory(true).then(() => { if (this.aliasFence === fence && !this.aliasBusy) this.aliasStatus.textContent = ""; });
           }, () => !this.closed && !this.aliasBusy && reload.isConnected, () => this.keyInteractionGeneration));
           this.aliasStatus.append(reload);
         }
         return;
       }
       this.aliasSaved = this.aliasBaseline = result.alias;
-      this.aliasEpoch += 1;
       this.sessionAlias = result.alias?.displayAlias;
       this.aliasInput.value = this.aliasInput.defaultValue = result.alias?.displayAlias ?? "";
       returnFocus = this.aliasFields.contains(document.activeElement);
@@ -2028,11 +2029,12 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     const source = this.options.aliasSession ?? this.options.sessionSwitch;
     if (this.closed || !source) return;
     if (this.sessionInventoryRequest) {
-      if (this.sessionInventoryEpoch === this.aliasEpoch) return this.sessionInventoryRequest;
-      // That request was sent before the latest alias save and cannot show it.
+      if (this.sessionInventoryReadAfter === this.aliasFence) return this.sessionInventoryRequest;
+      // That request may predate the latest alias save. Stop waiting for it;
+      // a shared read it joined still serves its other callers.
       this.sessionInventoryAbort?.abort();
     }
-    const epoch = this.sessionInventoryEpoch = this.aliasEpoch;
+    const readAfter = this.sessionInventoryReadAfter = this.aliasFence;
     const loading = refresh ? "Refreshing sessions…" : "Loading sessions…";
     this.sheetStatus.textContent = loading;
     this.identitySessionStatus.textContent = loading;
@@ -2041,11 +2043,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     let request: Promise<void> | undefined;
     request = (async () => {
       try {
-        const inventory = await source.inventory(refresh, controller.signal);
+        const inventory = await source.inventory(refresh, controller.signal, readAfter);
         if (this.closed || controller.signal.aborted || this.sessionInventoryAbort !== controller) return;
         this.sessionInventory = inventory;
         this.sessionInventoryLoaded = true;
-        if (epoch === this.aliasEpoch) this.updateAliasSession(inventory);
+        if ((inventory.readOrder ?? 0) > this.aliasFence) this.updateAliasSession(inventory);
         this.sessionSwitcher?.setInventory(inventory);
         this.identitySessionSwitcher?.setInventory(inventory);
         this.sheetStatus.textContent = "";

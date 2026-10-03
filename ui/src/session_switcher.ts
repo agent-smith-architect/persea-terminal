@@ -50,6 +50,8 @@ export type SessionSwitcherGroup = Readonly<{
 export type SessionSwitcherInventory = Readonly<{
   sessions: readonly DashboardSession[];
   groups?: readonly SessionSwitcherGroup[];
+  // The order of the read that produced this list (inventory_read_order.ts).
+  readOrder?: number;
 }>;
 export type SessionSwitcherRow = Readonly<{
   session: DashboardSession;
@@ -66,7 +68,7 @@ export type SessionSwitcherRow = Readonly<{
   attachmentLabel: string;
 }>;
 
-export function switcherInventory(inventory: DashboardInventory): SessionSwitcherInventory {
+export function switcherInventory(inventory: DashboardInventory, readOrder: number): SessionSwitcherInventory {
   const groups = inventory.realms.flatMap((realm) => realm.servers.map((server) => Object.freeze({
     key: `${realm.name}\u0000${server.label}`,
     realm: realm.name,
@@ -77,6 +79,7 @@ export function switcherInventory(inventory: DashboardInventory): SessionSwitche
   return Object.freeze({
     sessions: Object.freeze(groups.flatMap((group) => group.sessions)),
     groups: Object.freeze(groups),
+    readOrder,
   });
 }
 

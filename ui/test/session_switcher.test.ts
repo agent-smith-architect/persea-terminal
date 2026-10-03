@@ -79,7 +79,8 @@ const inventory: SessionSwitcherInventory = Object.freeze({
       { name: "remote", displayName: "Build user", servers: [{ realm: "remote", label: "build", status: "ok", canCreate: false, sessions: [remote] }] },
     ],
     detachedAliases: [],
-  } satisfies DashboardInventory);
+  } satisfies DashboardInventory, 7);
+  assert.equal(projected.readOrder, 7, "the list lost the order of the read that produced it");
   assert.deepEqual(projected.groups?.map((group) => [group.realmLabel, group.server, group.sessions[0]?.name]), [
     ["Alice", "private", "alpha"],
     ["Build user", "build", "beta"],
