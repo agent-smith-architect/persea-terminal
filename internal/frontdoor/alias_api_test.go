@@ -35,7 +35,7 @@ func TestAliasAPIJSONETagAndCAS(t *testing.T) {
 				_, _ = proto.ReadFrame(c)
 				_ = writeControl(c, proto.Control{Type: "hello_ok", V: 1})
 				_, _ = proto.ReadFrame(c)
-				_ = writeControl(c, proto.Control{Type: "inventory_ok", Servers: []proto.ServerInventory{{Label: "s", Status: "ok", Sessions: []proto.Session{{Authority: a, Name: "live", Width: 80, Height: 24}}}}})
+				_ = writeControl(c, proto.Control{Type: "inventory_ok", Servers: []proto.ServerInventory{{Label: "s", Status: "ok", Sessions: []proto.Session{{Authority: a, Name: "live", Width: 80, Height: 24}, {Authority: auth(7, "$4"), Name: "other", Width: 80, Height: 24}}}}})
 			}()
 		}
 	}()
@@ -74,6 +74,36 @@ func TestAliasAPIJSONETagAndCAS(t *testing.T) {
 	if err = json.Unmarshal(created.Body.Bytes(), &record); err != nil {
 		t.Fatal(err)
 	}
+	otherHandle, err := s.handles.mint(auth(7, "$4"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		method, path, body, etag, code string
+		status                         int
+	}{
+		{"POST", "/api/aliases", `{"display_alias":"Other","handle":"` + handle + `"}`, "", "alias_exists", 409},
+		{"POST", "/api/aliases", `{"display_alias":"work","handle":"` + otherHandle + `"}`, "", "alias_in_use", 409},
+		{"POST", "/api/aliases", `{"display_alias":"","handle":"` + handle + `"}`, "", "alias_invalid", 400},
+		{"POST", "/api/aliases", `{"display_alias":"valid","handle":"gone"}`, "", "session_gone", 410},
+		{"PATCH", "/api/aliases/missing", `{"display_alias":"valid"}`, `"1"`, "alias_not_found", 404},
+		{"DELETE", "/api/aliases/missing", "", `"1"`, "alias_not_found", 404},
+		{"PATCH", "/api/aliases/" + record.AliasID, `{"display_alias":"valid","handle":"` + otherHandle + `"}`, `"1"`, "alias_invalid", 400},
+		{"PATCH", "/api/aliases/" + record.AliasID, `{"display_alias":""}`, `"1"`, "alias_invalid", 400},
+		{"DELETE", "/api/aliases/" + record.AliasID, `{"handle":"` + handle + `"}`, `"1"`, "alias_invalid", 400},
+		{"DELETE", "/api/aliases/" + record.AliasID, "", "", "alias_changed", 412},
+	} {
+		got := request(tc.method, tc.path, tc.body, tc.etag)
+		if got.Code != tc.status || got.Body.String() != tc.code+"\n" {
+			t.Fatalf("%s %s: status=%d code=%q", tc.method, tc.code, got.Code, got.Body.String())
+		}
+		if tc.code == "alias_exists" {
+			var current AliasRecord
+			if err := json.Unmarshal([]byte(got.Header().Get("X-Persea-Alias-Record")), &current); err != nil || current != record {
+				t.Fatalf("exists missing current record: %+v %v", current, err)
+			}
+		}
+	}
 	missing := request(http.MethodPatch, "/api/aliases/"+record.AliasID, `{"display_alias":"New"}`, "")
 	if missing.Code != http.StatusPreconditionFailed {
 		t.Fatalf("missing If-Match=%d", missing.Code)
@@ -102,12 +132,15 @@ func TestAliasAPIJSONETagAndCAS(t *testing.T) {
 	if statuses[http.StatusOK] != 1 || statuses[http.StatusConflict] != 1 {
 		t.Fatalf("concurrent statuses=%v", statuses)
 	}
-	staleWithBadHandle := request(http.MethodPatch, "/api/aliases/"+record.AliasID, `{"display_alias":"Rebound","handle":"not-a-handle"}`, `"1"`)
+	staleWithBadHandle := request(http.MethodPatch, "/api/aliases/"+record.AliasID, `{"display_alias":"Rebound"}`, `"1"`)
 	if staleWithBadHandle.Code != http.StatusConflict || staleWithBadHandle.Header().Get("ETag") != `"2"` {
 		t.Fatalf("stale revision attribution=%d etag=%q body=%s", staleWithBadHandle.Code, staleWithBadHandle.Header().Get("ETag"), staleWithBadHandle.Body.String())
 	}
+	if staleWithBadHandle.Body.String() != "alias_changed\n" {
+		t.Fatalf("revision code=%q", staleWithBadHandle.Body.String())
+	}
 	var current AliasRecord
-	if err = json.Unmarshal(staleWithBadHandle.Body.Bytes(), &current); err != nil || current.Revision != 2 || current.AliasID != record.AliasID {
+	if err = json.Unmarshal([]byte(staleWithBadHandle.Header().Get("X-Persea-Alias-Record")), &current); err != nil || current.Revision != 2 || current.AliasID != record.AliasID {
 		t.Fatalf("stale current record=%+v err=%v", current, err)
 	}
 	for name, body := range map[string][]byte{
@@ -126,7 +159,20 @@ func TestAliasAPIJSONETagAndCAS(t *testing.T) {
 	if unsupported.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("unsupported=%d", unsupported.Code)
 	}
-	deleted := request(http.MethodDelete, "/api/aliases/"+record.AliasID, "", `"2"`)
+	if err = s.aliases.reconcile(nil, map[string]bool{"r\x00s": true}); err != nil {
+		t.Fatal(err)
+	}
+	deleted := request(http.MethodDelete, "/api/aliases/"+record.AliasID, "", `"3"`)
+	s.aliasErr = errAliasStoreUnavailable
+	for _, method := range []string{"POST", "PATCH", "DELETE"} {
+		got := request(method, "/api/aliases/"+record.AliasID, "", `"3"`)
+		if method == "POST" {
+			got = request(method, "/api/aliases", "", "")
+		}
+		if got.Code != 503 || got.Body.String() != "alias_unavailable\n" {
+			t.Fatalf("unavailable %s=%d %q", method, got.Code, got.Body.String())
+		}
+	}
 	if deleted.Code != http.StatusNoContent {
 		t.Fatalf("delete=%d %s", deleted.Code, deleted.Body.String())
 	}
