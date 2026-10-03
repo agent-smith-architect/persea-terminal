@@ -21,11 +21,13 @@ import (
 	"persea-terminal/internal/proto"
 )
 
-const aliasStoreVersion = 1
+const aliasStoreVersion = 2
 const aliasStoreMaxBytes = 1 << 20
 const aliasStoreMaxRecords = 4096
 
 var errAliasConflict = errors.New("alias revision conflict")
+var errAliasInUse = errors.New("alias in use")
+var errAliasExists = errors.New("session already has an alias")
 var errAliasNotFound = errors.New("alias not found")
 var errAliasValidation = errors.New("invalid alias")
 var errAliasStoreUnavailable = errors.New("alias store unavailable")
@@ -52,11 +54,19 @@ type AliasRecord struct {
 	AliasID         string          `json:"alias_id"`
 	DisplayAlias    string          `json:"display_alias"`
 	NormalizedAlias string          `json:"normalized_alias"`
+	Realm           string          `json:"realm"`
+	Server          string          `json:"server"`
+	SessionName     string          `json:"session_name"`
 	Incarnation     proto.Authority `json:"session_incarnation"`
 	Revision        uint64          `json:"revision"`
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 	State           string          `json:"state"`
+}
+
+type aliasSession struct {
+	Authority proto.Authority
+	Name      string
 }
 
 type aliasStoreFile struct {
@@ -93,14 +103,17 @@ func foldKey(v string) string {
 }
 
 func normalizeAlias(v string) (string, error) {
-	v = strings.TrimSpace(v)
-	if v == "" || len(v) > 128 {
+	if !utf8.ValidString(v) {
 		return "", errAliasValidation
 	}
 	for _, r := range v {
 		if unicode.IsControl(r) {
 			return "", errAliasValidation
 		}
+	}
+	v = strings.TrimSpace(v)
+	if v == "" || utf8.RuneCountInString(v) > 128 {
+		return "", errAliasValidation
 	}
 	return foldKey(v), nil
 }
@@ -281,21 +294,38 @@ func (s *aliasStore) load() error {
 	if err := dec.Decode(&f); err != nil {
 		return fmt.Errorf("invalid alias store: %w", err)
 	}
-	if f.Version != aliasStoreVersion || len(f.Aliases) > aliasStoreMaxRecords {
+	if len(f.Aliases) > aliasStoreMaxRecords {
 		return errors.New("unsupported or oversized alias store")
+	}
+	if f.Version > 0 && f.Version < aliasStoreVersion {
+		if err := s.persistLocked(); err != nil {
+			return err
+		}
+		frontLogf("component=frontdoor event=alias_store_reset old_version=%d version=%d", f.Version, aliasStoreVersion)
+		return nil
+	}
+	if f.Version != aliasStoreVersion {
+		return errors.New("unsupported alias store version")
 	}
 	norms := map[string]bool{}
 	ids := map[string]bool{}
+	sessions := map[string]bool{}
 	for _, r := range f.Aliases {
 		n, e := normalizeAlias(r.DisplayAlias)
 		if e != nil || n != r.NormalizedAlias || r.AliasID == "" || r.Revision == 0 || r.CreatedAt.IsZero() || r.UpdatedAt.Before(r.CreatedAt) ||
-			!r.Incarnation.Valid() || (r.State != "active" && r.State != "tombstone" && r.State != "rebound") || norms[n] || ids[r.AliasID] {
+			r.Realm == "" || r.Server == "" || r.SessionName == "" || (r.State != "active" && r.State != "detached") || ids[r.AliasID] {
 			return errors.New("invalid alias record")
 		}
-		if r.Incarnation.SessionCreated <= 0 {
+		if r.Incarnation != (proto.Authority{}) && (!r.Incarnation.Valid() || r.Incarnation.SessionCreated <= 0 || r.Incarnation.Realm != r.Realm || r.Incarnation.Server != r.Server) {
 			return errors.New("invalid alias incarnation")
 		}
-		norms[n] = true
+		if r.State == "active" {
+			key := authorityKey(r.Incarnation)
+			if !r.Incarnation.Valid() || norms[n] || sessions[key] {
+				return errors.New("duplicate or invalid active alias")
+			}
+			norms[n], sessions[key] = true, true
+		}
 		ids[r.AliasID] = true
 		s.records[r.AliasID] = r
 	}
@@ -385,25 +415,80 @@ func (s *aliasStore) list() []AliasRecord {
 	return out
 }
 
-func (s *aliasStore) create(display string, a proto.Authority) (AliasRecord, error) {
+func (s *aliasStore) snapshotLocked() map[string]AliasRecord {
+	before := make(map[string]AliasRecord, len(s.records))
+	for id, r := range s.records {
+		before[id] = r
+	}
+	return before
+}
+
+func (s *aliasStore) commitLocked(before map[string]AliasRecord) error {
+	if err := s.persistLocked(); err != nil {
+		if s.fault == nil {
+			s.records = before
+		}
+		return err
+	}
+	return nil
+}
+
+// Equal timestamps use the ID so inventory order and map iteration cannot
+// change which detached alias returns or which history entry is evicted.
+func aliasNewer(a, b AliasRecord) bool {
+	if !a.UpdatedAt.Equal(b.UpdatedAt) {
+		return a.UpdatedAt.After(b.UpdatedAt)
+	}
+	return a.AliasID < b.AliasID
+}
+
+func (s *aliasStore) makeRoomLocked() error {
+	if len(s.records) < aliasStoreMaxRecords {
+		return nil
+	}
+	var oldest AliasRecord
+	for _, r := range s.records {
+		if r.State == "detached" && (oldest.AliasID == "" || aliasNewer(oldest, r)) {
+			oldest = r
+		}
+	}
+	if oldest.AliasID == "" {
+		return errAliasStoreUnavailable
+	}
+	delete(s.records, oldest.AliasID)
+	return nil
+}
+
+func (s *aliasStore) supersedeLocked(normalized, except string) {
+	for id, r := range s.records {
+		if id != except && r.State == "detached" && r.NormalizedAlias == normalized {
+			delete(s.records, id)
+		}
+	}
+}
+
+func (s *aliasStore) create(display string, target aliasSession) (AliasRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.availableLocked(); err != nil {
 		return AliasRecord{}, err
 	}
-	if !a.Valid() {
+	a := target.Authority
+	if !a.Valid() || a.SessionCreated <= 0 || target.Name == "" {
 		return AliasRecord{}, errAliasValidation
-	}
-	if len(s.records) >= aliasStoreMaxRecords {
-		return AliasRecord{}, errors.New("alias capacity reached")
 	}
 	n, e := normalizeAlias(display)
 	if e != nil {
 		return AliasRecord{}, e
 	}
 	for _, r := range s.records {
-		if r.NormalizedAlias == n {
-			return AliasRecord{}, errAliasConflict
+		if r.State == "active" && sameAuthority(r.Incarnation, a) {
+			return r, errAliasExists
+		}
+	}
+	for _, r := range s.records {
+		if r.State == "active" && r.NormalizedAlias == n {
+			return AliasRecord{}, errAliasInUse
 		}
 	}
 	id, e := newAliasID()
@@ -411,12 +496,15 @@ func (s *aliasStore) create(display string, a proto.Authority) (AliasRecord, err
 		return AliasRecord{}, e
 	}
 	now := s.now().UTC()
-	r := AliasRecord{AliasID: id, DisplayAlias: strings.TrimSpace(display), NormalizedAlias: n, Incarnation: a, Revision: 1, CreatedAt: now, UpdatedAt: now, State: "active"}
+	r := AliasRecord{AliasID: id, DisplayAlias: strings.TrimSpace(display), NormalizedAlias: n, Realm: a.Realm, Server: a.Server, SessionName: target.Name, Incarnation: a, Revision: 1, CreatedAt: now, UpdatedAt: now, State: "active"}
+	before := s.snapshotLocked()
+	s.supersedeLocked(n, "")
+	if e = s.makeRoomLocked(); e != nil {
+		s.records = before
+		return AliasRecord{}, e
+	}
 	s.records[id] = r
-	if e = s.persistLocked(); e != nil {
-		if s.fault == nil {
-			delete(s.records, id)
-		}
+	if e = s.commitLocked(before); e != nil {
 		return AliasRecord{}, e
 	}
 	return r, nil
@@ -438,14 +526,11 @@ func (s *aliasStore) precondition(id string, revision uint64) (AliasRecord, erro
 	return r, nil
 }
 
-func (s *aliasStore) update(id, display string, a *proto.Authority, revision uint64) (AliasRecord, error) {
+func (s *aliasStore) update(id, display string, revision uint64) (AliasRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.availableLocked(); err != nil {
 		return AliasRecord{}, err
-	}
-	if a != nil && !a.Valid() {
-		return AliasRecord{}, errAliasValidation
 	}
 	r, ok := s.records[id]
 	if !ok {
@@ -459,24 +544,18 @@ func (s *aliasStore) update(id, display string, a *proto.Authority, revision uin
 		return AliasRecord{}, e
 	}
 	for oid, o := range s.records {
-		if oid != id && o.NormalizedAlias == n {
-			return AliasRecord{}, errAliasConflict
+		if oid != id && o.State == "active" && o.NormalizedAlias == n {
+			return AliasRecord{}, errAliasInUse
 		}
 	}
-	old := r
+	before := s.snapshotLocked()
 	r.DisplayAlias = strings.TrimSpace(display)
 	r.NormalizedAlias = n
-	if a != nil {
-		r.Incarnation = *a
-		r.State = "rebound"
-	}
 	r.Revision++
 	r.UpdatedAt = s.now().UTC()
+	s.supersedeLocked(n, id)
 	s.records[id] = r
-	if e = s.persistLocked(); e != nil {
-		if s.fault == nil {
-			s.records[id] = old
-		}
+	if e = s.commitLocked(before); e != nil {
 		return AliasRecord{}, e
 	}
 	return r, nil
@@ -507,32 +586,96 @@ func (s *aliasStore) delete(id string, revision uint64) (AliasRecord, error) {
 
 func sameAuthority(a, b proto.Authority) bool { return authorityKey(a) == authorityKey(b) }
 
-func (s *aliasStore) reconcile(live []proto.Authority, complete map[string]bool) error {
+func (s *aliasStore) seed(display, realm, server, name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if err := s.availableLocked(); err != nil {
 		return err
 	}
-	before := make(map[string]AliasRecord, len(s.records))
-	for id, record := range s.records {
-		before[id] = record
+	for _, r := range s.records {
+		if r.Realm == realm && r.Server == server && r.SessionName == name {
+			return nil
+		}
+	}
+	n, err := normalizeAlias(display)
+	if err != nil || realm == "" || server == "" || name == "" {
+		return errAliasValidation
+	}
+	id, err := newAliasID()
+	if err != nil {
+		return err
+	}
+	before := s.snapshotLocked()
+	if err = s.makeRoomLocked(); err != nil {
+		return err
+	}
+	now := s.now().UTC()
+	s.records[id] = AliasRecord{AliasID: id, DisplayAlias: strings.TrimSpace(display), NormalizedAlias: n, Realm: realm, Server: server, SessionName: name, Revision: 1, CreatedAt: now, UpdatedAt: now, State: "detached"}
+	return s.commitLocked(before)
+}
+
+func (s *aliasStore) reconcile(live []aliasSession, complete map[string]bool) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.availableLocked(); err != nil {
+		return err
+	}
+	before := s.snapshotLocked()
+	byIncarnation := map[string]aliasSession{}
+	byName := map[string]aliasSession{}
+	for _, target := range live {
+		a := target.Authority
+		if !a.Valid() || a.SessionCreated <= 0 || target.Name == "" || !complete[a.Realm+"\x00"+a.Server] {
+			continue
+		}
+		byIncarnation[authorityKey(a)] = target
+		byName[a.Realm+"\x00"+a.Server+"\x00"+target.Name] = target
+	}
+	ordered := make([]AliasRecord, 0, len(s.records))
+	usedSessions, usedNames := map[string]bool{}, map[string]bool{}
+	for _, r := range s.records {
+		ordered = append(ordered, r)
+		if !complete[r.Realm+"\x00"+r.Server] && r.State == "active" {
+			usedSessions[authorityKey(r.Incarnation)], usedNames[r.NormalizedAlias] = true, true
+		}
+	}
+	sort.Slice(ordered, func(i, j int) bool { return aliasNewer(ordered[i], ordered[j]) })
+	bound := map[string]aliasSession{}
+	claim := func(r AliasRecord, target aliasSession) bool {
+		key := authorityKey(target.Authority)
+		if usedSessions[key] || usedNames[r.NormalizedAlias] {
+			return false
+		}
+		bound[r.AliasID] = target
+		usedSessions[key], usedNames[r.NormalizedAlias] = true, true
+		return true
+	}
+	// Exact witnesses take precedence over names, including a tmux rename.
+	for _, r := range ordered {
+		if target, ok := byIncarnation[authorityKey(r.Incarnation)]; ok {
+			claim(r, target)
+		}
+	}
+	for _, r := range ordered {
+		if _, ok := bound[r.AliasID]; ok || !complete[r.Realm+"\x00"+r.Server] {
+			continue
+		}
+		if target, ok := byName[r.Realm+"\x00"+r.Server+"\x00"+r.SessionName]; ok {
+			claim(r, target)
+		}
 	}
 	changed := false
 	now := s.now().UTC()
 	for id, r := range s.records {
-		found := false
-		for _, a := range live {
-			if sameAuthority(a, r.Incarnation) {
-				found = true
-				break
-			}
+		if !complete[r.Realm+"\x00"+r.Server] {
+			continue
 		}
-		next := r.State
-		if !found && complete[r.Incarnation.Realm+"\x00"+r.Incarnation.Server] {
-			next = "tombstone"
+		old := r
+		r.State = "detached"
+		if target, ok := bound[id]; ok {
+			r.State, r.Incarnation, r.SessionName = "active", target.Authority, target.Name
 		}
-		if next != r.State {
-			r.State = next
+		if r != old {
 			r.Revision++
 			r.UpdatedAt = now
 			s.records[id] = r
@@ -540,12 +683,7 @@ func (s *aliasStore) reconcile(live []proto.Authority, complete map[string]bool)
 		}
 	}
 	if changed {
-		if err := s.persistLocked(); err != nil {
-			if s.fault == nil {
-				s.records = before
-			}
-			return err
-		}
+		return s.commitLocked(before)
 	}
 	return nil
 }

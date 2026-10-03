@@ -1,0 +1,266 @@
+package frontdoor
+
+import (
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+func aliasTarget(pid int, id, name string) aliasSession {
+	return aliasSession{Authority: auth(pid, id), Name: name}
+}
+
+func memoryAliases(t *testing.T) *aliasStore {
+	t.Helper()
+	s, err := newAliasStore("")
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
+}
+
+func mustAlias(t *testing.T, s *aliasStore, display string, target aliasSession) AliasRecord {
+	t.Helper()
+	r, err := s.create(display, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return r
+}
+
+func TestAliasRestartAndRenameFollowSession(t *testing.T) {
+	s := memoryAliases(t)
+	first := aliasTarget(1, "$0", "he2")
+	r := mustAlias(t, s, "Research", first)
+	complete := map[string]bool{"r\x00s": true}
+	renamed := first
+	renamed.Name = "he3"
+	if err := s.reconcile([]aliasSession{renamed}, complete); err != nil {
+		t.Fatal(err)
+	}
+	r = s.list()[0]
+	if r.SessionName != "he3" || r.State != "active" || r.Revision != 2 {
+		t.Fatalf("rename did not follow: %+v", r)
+	}
+	replacement := aliasTarget(2, "$0", "he3")
+	replacement.Authority.BootID = "next-boot"
+	if err := s.reconcile([]aliasSession{replacement}, complete); err != nil {
+		t.Fatal(err)
+	}
+	r = s.list()[0]
+	if r.State != "active" || !sameAuthority(r.Incarnation, replacement.Authority) || r.Revision != 3 {
+		t.Fatalf("restart did not rebind: %+v", r)
+	}
+	if err := s.reconcile([]aliasSession{replacement}, complete); err != nil || s.list()[0] != r {
+		t.Fatalf("unchanged inventory rewrote record: %v", err)
+	}
+}
+
+func TestAliasDetachedClaimsAndExactWitnessPriority(t *testing.T) {
+	for _, tied := range []bool{false, true} {
+		t.Run(fmt.Sprint(tied), func(t *testing.T) {
+			s := memoryAliases(t)
+			older := mustAlias(t, s, "Older", aliasTarget(1, "$0", "he2"))
+			newer := mustAlias(t, s, "Newer", aliasTarget(1, "$1", "he3"))
+			older.AliasID, newer.AliasID = "a", "b"
+			older.State, newer.State = "detached", "detached"
+			newer.SessionName = "he2"
+			older.UpdatedAt = time.Unix(100, 0)
+			newer.UpdatedAt = time.Unix(101, 0)
+			want := newer.AliasID
+			if tied {
+				newer.UpdatedAt = older.UpdatedAt
+				want = older.AliasID
+			}
+			s.records = map[string]AliasRecord{older.AliasID: older, newer.AliasID: newer}
+			if err := s.reconcile([]aliasSession{aliasTarget(2, "$7", "he2")}, map[string]bool{"r\x00s": true}); err != nil {
+				t.Fatal(err)
+			}
+			for id, got := range s.records {
+				if (got.State == "active") != (id == want) {
+					t.Fatalf("claim winner=%s record=%+v", want, got)
+				}
+			}
+			// A live incarnation follows a rename even when a newer record claims its name.
+			s.records[older.AliasID] = older
+			s.records[newer.AliasID] = newer
+			if err := s.reconcile([]aliasSession{{Authority: older.Incarnation, Name: "he4"}}, map[string]bool{"r\x00s": true}); err != nil {
+				t.Fatal(err)
+			}
+			if s.records[older.AliasID].State != "active" || s.records[older.AliasID].SessionName != "he4" || s.records[newer.AliasID].State != "detached" {
+				t.Fatal("exact witness lost to name claim")
+			}
+		})
+	}
+}
+
+func TestAliasActiveUniquenessSupersedesDetachedAndOnePerSession(t *testing.T) {
+	s := memoryAliases(t)
+	first := aliasTarget(1, "$0", "he2")
+	second := aliasTarget(1, "$1", "he3")
+	a := mustAlias(t, s, "Work", first)
+	if current, err := s.create("Other", first); !errors.Is(err, errAliasExists) || current != a {
+		t.Fatalf("second alias accepted: %+v %v", current, err)
+	}
+	if _, err := s.create("work", second); !errors.Is(err, errAliasInUse) {
+		t.Fatalf("active duplicate accepted: %v", err)
+	}
+	b := mustAlias(t, s, "Play", second)
+	if _, err := s.update(b.AliasID, "WORK", b.Revision); !errors.Is(err, errAliasInUse) {
+		t.Fatalf("active text conflict accepted: %v", err)
+	}
+	if err := s.reconcile([]aliasSession{second}, map[string]bool{"r\x00s": true}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := s.update(b.AliasID, "Work", b.Revision)
+	if err != nil || len(s.list()) != 1 || s.records[a.AliasID].AliasID != "" {
+		t.Fatalf("detached name blocked update or survived: %v %+v", err, s.list())
+	}
+	if err := s.reconcile(nil, map[string]bool{"r\x00s": true}); err != nil {
+		t.Fatal(err)
+	}
+	c := mustAlias(t, s, "work", aliasTarget(2, "$5", "he5"))
+	if len(s.list()) != 1 || s.records[b.AliasID].AliasID != "" || c.State != "active" {
+		t.Fatalf("detached name blocked create or survived: %+v", s.list())
+	}
+}
+
+func TestAliasIncompleteInventoryNeverChangesRecords(t *testing.T) {
+	s := memoryAliases(t)
+	target := aliasTarget(1, "$0", "he2")
+	r := mustAlias(t, s, "Work", target)
+	target.Name = "renamed"
+	if err := s.reconcile([]aliasSession{target}, map[string]bool{}); err != nil || s.list()[0] != r {
+		t.Fatalf("partial inventory changed alias: %v %+v", err, s.list())
+	}
+	if err := s.reconcile(nil, map[string]bool{}); err != nil || s.list()[0] != r {
+		t.Fatal("missing partial inventory detached alias")
+	}
+}
+
+func TestAliasOldStoreResetsAndSeedsByName(t *testing.T) {
+	var logs []string
+	priorLog := frontLogf
+	frontLogf = func(format string, args ...any) { logs = append(logs, fmt.Sprintf(format, args...)) }
+	t.Cleanup(func() { frontLogf = priorLog })
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	path := filepath.Join(dir, "aliases.json")
+	if err := os.WriteFile(path, []byte(`{"version":1,"aliases":[{"alias_id":"old","display_alias":"Work","state":"tombstone"}]}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s, err := newAliasStore(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var disk aliasStoreFile
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = json.Unmarshal(data, &disk); err != nil || disk.Version != 2 || len(disk.Aliases) != 0 || len(s.list()) != 0 {
+		t.Fatalf("old store not replaced: %s %v", data, err)
+	}
+	if err = s.seed("Seed", "r", "s", "he2"); err != nil {
+		t.Fatal(err)
+	}
+	r := s.list()[0]
+	if r.State != "detached" || r.SessionName != "he2" {
+		t.Fatalf("missing-session seed=%+v", r)
+	}
+	if err = s.seed("Changed config", "r", "s", "he2"); err != nil || s.list()[0] != r {
+		t.Fatal("seed overwrote operator alias")
+	}
+	if err = s.reconcile([]aliasSession{aliasTarget(1, "$0", "he2")}, map[string]bool{"r\x00s": true}); err != nil || s.list()[0].State != "active" {
+		t.Fatalf("seed did not bind: %v %+v", err, s.list())
+	}
+	if _, err = newAliasStore(path); err != nil {
+		t.Fatalf("seed store cannot reopen: %v", err)
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], "event=alias_store_reset") {
+		t.Fatalf("reset log=%v", logs)
+	}
+}
+
+func TestAliasRebindStaysWithinRealmAndServer(t *testing.T) {
+	s := memoryAliases(t)
+	r := mustAlias(t, s, "Work", aliasTarget(1, "$0", "he2"))
+	for _, otherRealm := range []bool{false, true} {
+		target := aliasTarget(2, "$0", "he2")
+		if otherRealm {
+			target.Authority.Realm = "other"
+		} else {
+			target.Authority.Server = "other"
+		}
+		if err := s.reconcile([]aliasSession{target}, map[string]bool{"r\x00s": true, "r\x00other": true, "other\x00s": true}); err != nil {
+			t.Fatal(err)
+		}
+		got := s.list()[0]
+		if got.State != "detached" || !sameAuthority(got.Incarnation, r.Incarnation) {
+			t.Fatalf("alias crossed its name scope: %+v", got)
+		}
+	}
+}
+
+func TestAliasSupersessionRollsBackAndUnchangedInventoryDoesNotWrite(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.Chmod(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	s, err := newAliasStore(filepath.Join(dir, "aliases.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	target := aliasTarget(1, "$0", "he2")
+	r := mustAlias(t, s, "Work", target)
+	s.fs = faultAliasFS{aliasFS: s.fs, rename: true}
+	if err := s.reconcile([]aliasSession{target}, map[string]bool{"r\x00s": true}); err != nil || s.list()[0] != r {
+		t.Fatal("unchanged inventory attempted to persist")
+	}
+	s.records[r.AliasID] = func() AliasRecord { r.State = "detached"; return r }()
+	if _, err := s.create("work", aliasTarget(2, "$4", "he3")); err == nil {
+		t.Fatal("failed durable supersession reported success")
+	}
+	if len(s.list()) != 1 || s.list()[0] != r {
+		t.Fatalf("supersession failure lost detached record: %+v", s.list())
+	}
+}
+
+func TestAliasLimitEvictsOldestDetached(t *testing.T) {
+	s := memoryAliases(t)
+	for i := 0; i < aliasStoreMaxRecords; i++ {
+		id := fmt.Sprint(i)
+		a := auth(1, "$"+id)
+		s.records[id] = AliasRecord{AliasID: id, DisplayAlias: id, NormalizedAlias: id, Realm: "r", Server: "s", SessionName: "he" + id, Incarnation: a, State: "active", Revision: 1, CreatedAt: time.Unix(1, 0), UpdatedAt: time.Unix(int64(i+1), 0)}
+	}
+	if _, err := s.create("New", aliasTarget(2, "$new", "new")); !errors.Is(err, errAliasStoreUnavailable) || len(s.records) != aliasStoreMaxRecords {
+		t.Fatalf("full live store=%v", err)
+	}
+	for _, id := range []string{"4", "8"} {
+		r := s.records[id]
+		r.State = "detached"
+		s.records[id] = r
+	}
+	mustAlias(t, s, "New", aliasTarget(2, "$new", "new"))
+	if _, exists := s.records["4"]; exists || s.records["8"].State != "detached" || len(s.records) != aliasStoreMaxRecords {
+		t.Fatal("did not evict oldest detached")
+	}
+}
+
+func TestAliasCharacterValidation(t *testing.T) {
+	for _, display := range []string{"", "  ", "x\n", "\tx", strings.Repeat("界", 129), string([]byte{0xff})} {
+		if _, err := normalizeAlias(display); !errors.Is(err, errAliasValidation) {
+			t.Fatalf("accepted invalid %q", display)
+		}
+	}
+	if _, err := normalizeAlias(strings.Repeat("界", 128)); err != nil {
+		t.Fatal("128 characters were measured as bytes")
+	}
+}

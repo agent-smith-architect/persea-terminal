@@ -702,10 +702,10 @@ func (s *Server) inventory(w http.ResponseWriter, r *http.Request) {
 		views = append(views, rv)
 	}
 	if s.aliasErr != nil {
-		http.Error(w, "alias store unavailable", http.StatusServiceUnavailable)
+		http.Error(w, "alias_unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	live := make([]proto.Authority, 0, len(all))
+	live := make([]aliasSession, 0, len(all))
 	complete := map[string]bool{}
 	for i, realm := range s.cfg.Realms {
 		if results[i].err != nil {
@@ -718,28 +718,22 @@ func (s *Server) inventory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	for _, v := range all {
-		live = append(live, v.authority)
+		live = append(live, aliasSession{Authority: v.authority, Name: v.Name})
 	}
 	for _, seed := range s.cfg.Aliases {
-		for _, v := range all {
-			if v.Realm == seed.Realm && v.Server == seed.Server && v.Name == seed.Session {
-				_, err := s.aliases.create(seed.Alias, v.authority)
-				if err != nil && !errors.Is(err, errAliasConflict) {
-					http.Error(w, "alias store unavailable", http.StatusServiceUnavailable)
-					return
-				}
-				break
-			}
+		if err := s.aliases.seed(seed.Alias, seed.Realm, seed.Server, seed.Session); err != nil {
+			http.Error(w, "alias_unavailable", http.StatusServiceUnavailable)
+			return
 		}
 	}
 	if err := s.aliases.reconcile(live, complete); err != nil {
-		http.Error(w, "alias store unavailable", http.StatusServiceUnavailable)
+		http.Error(w, "alias_unavailable", http.StatusServiceUnavailable)
 		return
 	}
 	records := s.aliases.list()
 	for _, record := range records {
 		for _, v := range all {
-			if sameAuthority(record.Incarnation, v.authority) {
+			if record.State == "active" && sameAuthority(record.Incarnation, v.authority) {
 				v.Alias = record.DisplayAlias
 				v.AliasState = record.State
 			}
@@ -828,38 +822,57 @@ func writeAliasRecord(w http.ResponseWriter, status int, r AliasRecord) {
 	_ = json.NewEncoder(w).Encode(r)
 }
 
-func (s *Server) resolveCurrentHandle(r *http.Request, handle string) (proto.Authority, error) {
-	if !s.cfg.Ingress.PeerUIDConfigured {
-		return s.handles.resolve(handle)
-	}
+func (s *Server) resolveAliasSession(r *http.Request, handle string) (aliasSession, error) {
 	operator := ""
 	if id, ok := identity(r); ok {
 		operator = id.operator
 	}
-	a, err := s.handles.resolve(handle, operator, "alias")
+	var a proto.Authority
+	var err error
+	if s.cfg.Ingress.PeerUIDConfigured {
+		a, err = s.handles.resolve(handle, operator, "alias")
+	} else {
+		a, err = s.handles.resolve(handle)
+	}
 	if err != nil {
 		logRequestIngress(r, "capability")
-		return proto.Authority{}, err
+		return aliasSession{}, err
 	}
 	realm, err := s.realmFor(a)
 	if err != nil {
-		return proto.Authority{}, err
+		return aliasSession{}, err
 	}
 	result := fetchRealmInventory(realm)
 	if result.err != nil {
-		return proto.Authority{}, errInvalidHandle
+		return aliasSession{}, errAliasStoreUnavailable
 	}
+	live := []aliasSession{}
+	complete := map[string]bool{}
+	var target aliasSession
 	for _, server := range result.servers {
 		if server.Status != "ok" || server.Error != "" {
 			continue
 		}
+		complete[realm.Name+"\x00"+server.Label] = true
 		for _, session := range server.Sessions {
+			if !session.Authority.Valid() || session.Authority.Realm != realm.Name || session.Authority.Server != server.Label || session.Authority.UID != realm.BrokerUID || session.Name == "" {
+				complete[realm.Name+"\x00"+server.Label] = false
+				continue
+			}
+			item := aliasSession{Authority: session.Authority, Name: session.Name}
+			live = append(live, item)
 			if sameAuthority(session.Authority, a) {
-				return a, nil
+				target = item
 			}
 		}
 	}
-	return proto.Authority{}, errInvalidHandle
+	if err := s.aliases.reconcile(live, complete); err != nil {
+		return aliasSession{}, errAliasStoreUnavailable
+	}
+	if target.Name == "" || !complete[target.Authority.Realm+"\x00"+target.Authority.Server] {
+		return aliasSession{}, errInvalidHandle
+	}
+	return target, nil
 }
 
 // createSessionStatus maps a broker refusal to a status code. Refusals are the
@@ -1200,9 +1213,43 @@ func requestRealmRefit(realm config.Realm, authority proto.Authority, columns, r
 	}
 }
 
+func writeAliasError(w http.ResponseWriter, code string, status int, current AliasRecord) {
+	w.Header().Set("Cache-Control", "no-store")
+	if current.AliasID != "" {
+		w.Header().Set("ETag", fmt.Sprintf("\"%d\"", current.Revision))
+		// Refusals have a plain code body. This bounded JSON header lets the
+		// editor show the winning record without mixing server text into copy.
+		if b, err := json.Marshal(current); err == nil {
+			w.Header().Set("X-Persea-Alias-Record", string(b))
+		}
+	}
+	http.Error(w, code, status)
+}
+
+func aliasMutationError(w http.ResponseWriter, err error, current AliasRecord) bool {
+	if err == nil {
+		return false
+	}
+	code, status := "alias_unavailable", http.StatusServiceUnavailable
+	switch {
+	case errors.Is(err, errAliasValidation):
+		code, status = "alias_invalid", http.StatusBadRequest
+	case errors.Is(err, errAliasInUse):
+		code, status = "alias_in_use", http.StatusConflict
+	case errors.Is(err, errAliasExists):
+		code, status = "alias_exists", http.StatusConflict
+	case errors.Is(err, errAliasConflict):
+		code, status = "alias_changed", http.StatusConflict
+	case errors.Is(err, errAliasNotFound):
+		code, status = "alias_not_found", http.StatusNotFound
+	}
+	writeAliasError(w, code, status, current)
+	return true
+}
+
 func (s *Server) createAlias(w http.ResponseWriter, r *http.Request) {
 	if s.aliasErr != nil {
-		http.Error(w, "alias store unavailable", http.StatusServiceUnavailable)
+		writeAliasError(w, "alias_unavailable", http.StatusServiceUnavailable, AliasRecord{})
 		return
 	}
 	var req struct {
@@ -1210,152 +1257,71 @@ func (s *Server) createAlias(w http.ResponseWriter, r *http.Request) {
 		Handle       string `json:"handle"`
 	}
 	if decodeAliasRequest(r, &req) != nil {
-		http.Error(w, "invalid alias request", http.StatusBadRequest)
+		writeAliasError(w, "alias_invalid", http.StatusBadRequest, AliasRecord{})
 		return
 	}
-	a, err := s.resolveCurrentHandle(r, req.Handle)
+	if _, err := normalizeAlias(req.DisplayAlias); err != nil {
+		aliasMutationError(w, err, AliasRecord{})
+		return
+	}
+	target, err := s.resolveAliasSession(r, req.Handle)
 	if err != nil {
-		http.Error(w, "stale handle", http.StatusGone)
+		if errors.Is(err, errAliasStoreUnavailable) {
+			aliasMutationError(w, err, AliasRecord{})
+		} else {
+			writeAliasError(w, "session_gone", http.StatusGone, AliasRecord{})
+		}
 		return
 	}
-	record, err := s.aliases.create(req.DisplayAlias, a)
-	if errors.Is(err, errAliasConflict) {
-		http.Error(w, "alias conflict", http.StatusConflict)
-		return
+	record, err := s.aliases.create(req.DisplayAlias, target)
+	if !aliasMutationError(w, err, record) {
+		writeAliasRecord(w, http.StatusCreated, record)
 	}
-	if errors.Is(err, errAliasValidation) {
-		http.Error(w, "invalid alias request", http.StatusBadRequest)
-		return
-	}
-	if err != nil {
-		http.Error(w, "alias store unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	writeAliasRecord(w, http.StatusCreated, record)
 }
 
 func (s *Server) updateAlias(w http.ResponseWriter, r *http.Request) {
 	if s.aliasErr != nil {
-		http.Error(w, "alias store unavailable", http.StatusServiceUnavailable)
+		writeAliasError(w, "alias_unavailable", http.StatusServiceUnavailable, AliasRecord{})
 		return
 	}
 	revision, err := parseIfMatch(r)
 	if err != nil {
-		http.Error(w, "If-Match required", http.StatusPreconditionFailed)
+		writeAliasError(w, "alias_changed", http.StatusPreconditionFailed, AliasRecord{})
 		return
 	}
 	var req struct {
 		DisplayAlias string `json:"display_alias"`
-		Handle       string `json:"handle"`
 	}
 	if decodeAliasRequest(r, &req) != nil {
-		http.Error(w, "invalid alias request", http.StatusBadRequest)
+		writeAliasError(w, "alias_invalid", http.StatusBadRequest, AliasRecord{})
 		return
 	}
-	current, err := s.aliases.precondition(r.PathValue("id"), revision)
-	if errors.Is(err, errAliasConflict) {
-		writeAliasRecord(w, http.StatusConflict, current)
-		return
+	record, err := s.aliases.update(r.PathValue("id"), req.DisplayAlias, revision)
+	if !aliasMutationError(w, err, record) {
+		writeAliasRecord(w, http.StatusOK, record)
 	}
-	if errors.Is(err, errAliasNotFound) {
-		http.Error(w, "alias not found", http.StatusNotFound)
-		return
-	}
-	if err != nil {
-		http.Error(w, "alias store unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	var authority *proto.Authority
-	if s.cfg.Ingress.PeerUIDConfigured {
-		a, e := s.resolveCurrentHandle(r, req.Handle)
-		if e != nil {
-			http.Error(w, "stale handle", http.StatusGone)
-			return
-		}
-		if !sameAuthority(current.Incarnation, a) {
-			authority = &a
-		}
-	}
-	record, err := s.aliases.update(r.PathValue("id"), req.DisplayAlias, authority, revision)
-	if errors.Is(err, errAliasConflict) {
-		if record.AliasID != "" {
-			writeAliasRecord(w, http.StatusConflict, record)
-		} else {
-			http.Error(w, "alias conflict", http.StatusConflict)
-		}
-		return
-	}
-	if errors.Is(err, errAliasNotFound) {
-		http.Error(w, "alias not found", http.StatusNotFound)
-		return
-	}
-	if errors.Is(err, errAliasValidation) {
-		http.Error(w, "invalid alias request", http.StatusBadRequest)
-		return
-	}
-	if err != nil {
-		http.Error(w, "alias store unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	writeAliasRecord(w, http.StatusOK, record)
 }
 
 func (s *Server) deleteAlias(w http.ResponseWriter, r *http.Request) {
 	if s.aliasErr != nil {
-		http.Error(w, "alias store unavailable", http.StatusServiceUnavailable)
+		writeAliasError(w, "alias_unavailable", http.StatusServiceUnavailable, AliasRecord{})
 		return
 	}
 	revision, err := parseIfMatch(r)
 	if err != nil {
-		http.Error(w, "If-Match required", http.StatusPreconditionFailed)
+		writeAliasError(w, "alias_changed", http.StatusPreconditionFailed, AliasRecord{})
 		return
 	}
-	if s.cfg.Ingress.PeerUIDConfigured {
-		var req struct {
-			Handle string `json:"handle"`
-		}
-		if decodeAliasRequest(r, &req) != nil {
-			http.Error(w, "invalid alias request", http.StatusBadRequest)
-			return
-		}
-		a, e := s.resolveCurrentHandle(r, req.Handle)
-		if e != nil {
-			http.Error(w, "stale handle", http.StatusGone)
-			return
-		}
-		current, e := s.aliases.precondition(r.PathValue("id"), revision)
-		if e != nil {
-			if errors.Is(e, errAliasConflict) {
-				writeAliasRecord(w, http.StatusConflict, current)
-				return
-			}
-			if errors.Is(e, errAliasNotFound) {
-				http.Error(w, "alias not found", http.StatusNotFound)
-				return
-			}
-			http.Error(w, "alias store unavailable", http.StatusServiceUnavailable)
-			return
-		}
-		if !sameAuthority(current.Incarnation, a) {
-			http.Error(w, "stale handle", http.StatusGone)
-			return
-		}
+	body, err := io.ReadAll(io.LimitReader(r.Body, 1))
+	if err != nil || len(body) != 0 {
+		writeAliasError(w, "alias_invalid", http.StatusBadRequest, AliasRecord{})
+		return
 	}
 	record, err := s.aliases.delete(r.PathValue("id"), revision)
-	if errors.Is(err, errAliasConflict) {
-		writeAliasRecord(w, http.StatusConflict, record)
-		return
+	if !aliasMutationError(w, err, record) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.WriteHeader(http.StatusNoContent)
 	}
-	if errors.Is(err, errAliasNotFound) {
-		http.Error(w, "alias not found", http.StatusNotFound)
-		return
-	}
-	if err != nil {
-		http.Error(w, "alias store unavailable", http.StatusServiceUnavailable)
-		return
-	}
-	w.Header().Set("Cache-Control", "no-store")
-	w.WriteHeader(http.StatusNoContent)
 }
 
 func (s *Server) realmFor(a proto.Authority) (config.Realm, error) {
