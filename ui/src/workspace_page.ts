@@ -36,6 +36,7 @@ import {
 } from "./workspace_layout";
 import { WorkspaceAPI, WorkspaceAPIError, workspaceAPIMessage, type WorkspaceRecord } from "./workspace_api";
 import { parseWorkspaceLocation, workspaceRouteNotice, workspaceURL } from "./workspace_url";
+import { nextInventoryReadOrder } from "./inventory_read_order";
 
 // --- Posture. Authored in workspace_posture.ts, which
 // the dashboard reads too so that its create affordance and this document's
@@ -84,7 +85,7 @@ export function autoArrange(selectors: readonly SessionSelector[]): WorkspaceNod
 export class WorkspaceInventory {
   private generation = 0;
   private current?: InventorySnapshot;
-  private inflight?: Promise<InventorySnapshot>;
+  private inflight?: Readonly<{ readOrder: number; promise: Promise<InventorySnapshot> }>;
   private requests = 0;
 
   constructor(private readonly fetch: (signal: AbortSignal) => Promise<DashboardInventory> = fetchInventory) {}
@@ -92,21 +93,29 @@ export class WorkspaceInventory {
   requestCount(): number { return this.requests; }
   latest(): InventorySnapshot | undefined { return this.current; }
 
-  snapshot(signal: AbortSignal | undefined, newerThan: number): Promise<InventorySnapshot> {
-    if (this.current && this.current.generation > newerThan) return this.detachable(Promise.resolve(this.current), signal);
-    if (!this.inflight) {
+  // Panes share one read at a time. A caller that needs a read started after
+  // readAfter (an alias save) neither reuses an older snapshot nor joins an
+  // older read; it starts a new one, and the older read still serves its
+  // other callers.
+  snapshot(signal: AbortSignal | undefined, newerThan: number, readAfter = 0): Promise<InventorySnapshot> {
+    if (this.current && this.current.generation > newerThan && this.current.readOrder > readAfter) return this.detachable(Promise.resolve(this.current), signal);
+    if (!this.inflight || this.inflight.readOrder <= readAfter) {
       this.requests += 1;
+      const readOrder = nextInventoryReadOrder();
       const shared = new AbortController();
-      this.inflight = this.fetch(shared.signal).then((inventory) => {
-        this.current = Object.freeze({ generation: ++this.generation, inventory });
+      const promise: Promise<InventorySnapshot> = this.fetch(shared.signal).then((inventory) => {
+        // A read that started earlier never replaces a later read's result;
+        // its callers receive the later one.
+        if (!this.current || readOrder > this.current.readOrder) this.current = Object.freeze({ generation: ++this.generation, readOrder, inventory });
         return this.current;
-      }).finally(() => { this.inflight = undefined; });
+      }).finally(() => { if (this.inflight?.promise === promise) this.inflight = undefined; });
+      this.inflight = Object.freeze({ readOrder, promise });
     }
-    return this.detachable(this.inflight, signal);
+    return this.detachable(this.inflight.promise, signal);
   }
 
   resolver(): InventoryResolver {
-    return (signal, newerThan) => this.snapshot(signal, newerThan);
+    return (signal, newerThan, readAfter) => this.snapshot(signal, newerThan, readAfter);
   }
 
   private detachable<T>(promise: Promise<T>, signal: AbortSignal | undefined): Promise<T> {

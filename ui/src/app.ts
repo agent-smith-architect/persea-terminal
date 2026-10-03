@@ -18,6 +18,7 @@ import { createCommittedSessionRecorder, dropPendingSession, pendingIdentityFrom
 import { SnippetService, deviceOrigin } from "./snippet_client";
 import { OperatorPreferencesService } from "./operator_preferences";
 import { bootWorkspace } from "./workspace_page";
+import { nextInventoryReadOrder } from "./inventory_read_order";
 
 /**
  * Bounds a fragment-supplied label before it is displayed. Control characters are
@@ -241,7 +242,11 @@ async function boot(): Promise<void> {
       ...(typeof switchProbe === "function" ? { sessionSwitchPhase: switchProbe } : {}),
       ...(typeof authorityProbe === "function" ? { authorityResult: authorityProbe } : {}),
     }),
-    resolveInventory: async (signal) => Object.freeze({ generation: 0, inventory: await fetchInventory(signal) }),
+    // Every call is a new read, so it always starts after any earlier save.
+    resolveInventory: async (signal) => {
+      const readOrder = nextInventoryReadOrder();
+      return Object.freeze({ generation: 0, readOrder, inventory: await fetchInventory(signal) });
+    },
     ...(sourceLabel ? { sessionName: sourceLabel } : {}),
     ...(aliasLabel ? { aliasLabel } : {}),
     ...(imageRealm ? { imageRealm } : {}),
