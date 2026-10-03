@@ -176,6 +176,25 @@ body.dashboard-mode:has(.dashboard) #app { width: min(1180px, 100%); margin-inli
 .dashboard-appearance__field { display: grid; min-width: 0; gap: .4rem; color: var(--dashboard-muted); font-size: .8125rem; }
 .dashboard-appearance__note, .dashboard-appearance__status, .alias-record, .detached-aliases p { color: var(--dashboard-muted); font-size: .8125rem; overflow-wrap: anywhere; }
 .dashboard-appearance__status:empty { display: none; }
+/* Terminal position: a segmented radio group whose options draw what they
+   name. Each native radio is stretched, transparent, over its option, so the
+   option is the 44px target and focus and checked state style the option. */
+.dashboard-appearance__position { grid-column: 1 / -1; display: grid; gap: .4rem; min-width: 0; margin: 0; padding: 0; border: 0; color: var(--dashboard-muted); font-size: .8125rem; }
+.dashboard-appearance__position > legend { margin-bottom: .4rem; padding: 0; }
+.dashboard-position { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .5rem; max-width: 30rem; }
+.dashboard-position__choice { position: relative; display: grid; justify-items: center; align-content: center; gap: .4rem; min-width: 0; min-height: 44px; padding: .6rem .35rem .5rem; border: 1px solid var(--dashboard-border); border-radius: .6rem; color: var(--dashboard-fg); background: var(--dashboard-bg); text-align: center; cursor: pointer; }
+.dashboard .dashboard-position__choice input { position: absolute; inset: 0; z-index: 1; width: 100%; height: 100%; min-width: 0; min-height: 0; margin: 0; padding: 0; border: 0; border-radius: inherit; opacity: 0; cursor: inherit; }
+.dashboard-position__choice:hover { border-color: var(--dashboard-muted); }
+.dashboard-position__choice:has(input:checked) { border-color: var(--dashboard-accent); background: color-mix(in srgb, var(--dashboard-accent) 12%, var(--dashboard-bg)); }
+.dashboard-position__choice:has(input:focus-visible) { outline: 2px solid var(--dashboard-accent); outline-offset: 3px; }
+.dashboard-position__choice:has(input:disabled) { opacity: .5; cursor: not-allowed; }
+.dashboard-position__preview { position: relative; display: block; width: 3.25rem; height: 2.1rem; border: 1px solid var(--dashboard-border); border-radius: .3rem; background: var(--dashboard-card); }
+.dashboard-position__grid { position: absolute; top: .22rem; left: .22rem; width: 1.6rem; height: .85rem; border-radius: .15rem; background: repeating-linear-gradient(to bottom, currentColor 0 1px, transparent 1px 3px) .2rem .2rem / calc(100% - .4rem) calc(100% - .3rem) no-repeat, color-mix(in srgb, var(--dashboard-muted) 35%, transparent); color: var(--dashboard-muted); }
+.dashboard-position__preview[data-position="top-center"] .dashboard-position__grid { left: calc(50% - .8rem); }
+.dashboard-position__preview[data-position="center"] .dashboard-position__grid { top: calc(50% - .425rem); left: calc(50% - .8rem); }
+.dashboard-position__choice:has(input:checked) .dashboard-position__grid { color: var(--dashboard-bg); background-color: var(--dashboard-accent); }
+.dashboard-position__label { font-size: .8125rem; line-height: 1.2; overflow-wrap: anywhere; }
+.dashboard-position__hint { margin: 0; color: var(--dashboard-muted); font-size: .8125rem; }
 
 /* Workspace controls follow the same spacing and disclosure conventions. */
 .workspace-panel { display: grid; grid-template-columns: minmax(0, 1fr); gap: .8rem; min-width: 0; border: 1px solid var(--dashboard-border); border-radius: .9rem; padding: 1rem; background: var(--dashboard-card); }
