@@ -1938,6 +1938,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       returnFocus = this.aliasFields.contains(document.activeElement);
       this.aliasEditing = false;
       this.aliasStatus.textContent = displayAlias === undefined ? "Alias cleared." : "Alias saved.";
+      this.renderAliasControls();
       this.renderSessionTag();
       await this.loadSessionInventory(true);
     } finally {
