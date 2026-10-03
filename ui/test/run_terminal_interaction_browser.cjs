@@ -402,7 +402,17 @@ async function main() {
       assert(selectState.overlayText.includes("fixture-live") && selectState.renderedText.includes("fixture-live"), `${shape.name}: frozen overlay does not match the rendered buffer marker`);
       const autoNormalMetrics = await assertFrozenMetrics("auto-normal");
       assert(sameShellSize(beforeSelectShell, await shellBoxes()), `${shape.name}: Select changed terminal shell box sizes`);
-      await page.locator(".persea-unified-select__body").click({ position: { x: 8, y: 8 } });
+      // Tap frozen text, wherever the terminal position put it: text keeps its
+      // native selection gestures and must not resume input.
+      const frozenText = await page.evaluate(() => {
+        const row = [...document.querySelectorAll(".persea-unified-select__row")].find((entry) => /^\S/.test(entry.textContent || ""));
+        const node = row && document.createTreeWalker(row, NodeFilter.SHOW_TEXT).nextNode();
+        if (!node) throw new Error("no frozen text to tap");
+        const range = document.createRange(); range.setStart(node, 0); range.setEnd(node, 1);
+        const box = range.getBoundingClientRect();
+        return { x: box.left + box.width / 2, y: box.top + box.height / 2 };
+      });
+      await page.mouse.click(frozenText.x, frozenText.y);
       assert(!await page.locator(".xterm-helper-textarea:focus").count(), `${shape.name}: overlay tap focused xterm helper`);
       await page.evaluate(() => {
         const row = [...document.querySelectorAll(".persea-unified-select__row")].find((entry) => (entry.textContent || "").trim() !== "");

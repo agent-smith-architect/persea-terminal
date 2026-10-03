@@ -606,6 +606,14 @@ button[data-copy-state="failed"] {
   background: var(--persea-terminal-bg, #111318);
 }
 
+/* Terminal position. A grid narrower than its scroller is centred in the
+   scroll range from the width the projection writes. The range is never
+   narrower than the grid, so a wider grid gets no offset and keeps its whole
+   scroll range. Center's vertical offset is part of the projection's top. */
+.persea-unified-terminal:is([data-terminal-position="top-center"], [data-terminal-position="center"]) .persea-unified-xterm {
+  left: calc((100% - var(--persea-unified-grid-width, 100%)) / 2);
+}
+
 /* xterm remains the renderer, but its pinned 6.0.0 custom scrollbar is not an
    input or presentation surface. The product-owned outer overflow is both. */
 .persea-unified-xterm .xterm-scrollable-element > .scrollbar {

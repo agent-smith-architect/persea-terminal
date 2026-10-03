@@ -1,5 +1,6 @@
-// Text keeps its native selection gestures. Only unused space to its right
-// (or an empty row) is an input target; terminals have no semantic input field.
+// Text keeps its native selection gestures. Only unused space — beside the
+// rows, right of a row's text, or an empty row — is an input target; terminals
+// have no semantic input field.
 function isBlankInputPoint(body: HTMLElement, x: number, y: number): boolean {
   const target = document.elementFromPoint(x, y);
   if (!target || !body.contains(target)) return false;

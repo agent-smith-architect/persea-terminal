@@ -68,6 +68,13 @@
   text-align: center;
 }
 .persea-unified-loading[hidden] { display: none; }
+/* The notice sits where the terminal will appear; Center keeps it centred. */
+.persea-unified-terminal[data-terminal-position="top-center"] .persea-unified-loading { justify-content: flex-start; }
+.persea-unified-terminal[data-terminal-position="top-left"] .persea-unified-loading {
+  justify-content: flex-start;
+  align-items: flex-start;
+  text-align: start;
+}
 .persea-unified-loading__identity { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font: 600 0.82rem/1.3 ui-monospace, monospace; }
 .persea-unified-loading__detail { opacity: 0.72; font-size: 0.78rem; line-height: 1.3; }
 
@@ -108,7 +115,14 @@
   box-sizing: border-box;
   overflow: auto;
   overscroll-behavior: contain;
-  padding: 0.25rem 0.4rem max(1rem, env(safe-area-inset-bottom));
+  /* The live grid's own placement, frozen at entry (renderFrozenSnapshot):
+     the host's 0.5rem padding plus the projection's band above the grid, and
+     below it room for the last screen to sit where it sat. The extra pixel
+     covers the grid height's rounding up to whole pixels. */
+  padding:
+    calc(var(--persea-select-offset-top, 0px) + 0.5rem)
+    0.5rem
+    max(1rem, env(safe-area-inset-bottom), calc(var(--persea-select-band-bottom, 0px) + 0.5rem + 1px));
   white-space: pre;
   font-family: var(--persea-terminal-font-family, ui-monospace, monospace);
   font-size: var(--persea-terminal-font-size, 14px);
@@ -124,6 +138,12 @@
   min-height: var(--persea-terminal-row-height, 1.2em);
   line-height: var(--persea-terminal-row-height, 1.2em);
   white-space: pre;
+}
+/* Rows take the live grid's text width, so centring them reproduces the live
+   grid's horizontal placement; a grid wider than the body starts at its edge. */
+.persea-unified-terminal:is([data-terminal-position="top-center"], [data-terminal-position="center"]) .persea-unified-select__row {
+  width: calc(var(--persea-select-grid-width) - 1rem);
+  margin-inline: auto;
 }
 .persea-unified-select__cell { white-space: pre; }
 .persea-unified-select__cell--blink {
