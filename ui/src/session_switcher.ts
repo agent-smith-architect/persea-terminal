@@ -104,7 +104,7 @@ export function sessionSwitcherRows(
       current,
       reason,
       activityLabel: activity,
-      statusLabel: reason || (current ? `current · ${activity}` : activity),
+      statusLabel: reason || activity,
       groupKey: group?.key ?? `${session.realm}\u0000${session.server}`,
       realmLabel: group?.realmLabel ?? session.realm,
       serverLabel: group?.server ?? session.server,
@@ -209,23 +209,20 @@ export class SessionSwitcherView {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "persea-session-switcher__row";
-      button.disabled = !row.selectable || row.current;
-      button.dataset.current = row.current ? "true" : "false";
-      button.dataset.state = row.session.unified?.state ?? "unavailable";
-      button.setAttribute("aria-label", `${row.current ? "Current session " : "Switch to "}${row.session.name}${row.primaryAlias ? ` · ${row.primaryAlias}` : ""}`);
+      // An alias is the label the operator chose, so it leads; the tmux name
+      // follows it in a code face. Without an alias the tmux name leads.
       const name = document.createElement("span");
       name.className = "persea-session-switcher__name";
+      const alias = document.createElement("span");
+      alias.className = "persea-session-switcher__alias";
       const sessionName = document.createElement("span");
       sessionName.className = "persea-session-switcher__session-name";
-      sessionName.textContent = row.session.name;
-      name.append(sessionName);
-        const alias = document.createElement("span");
-        alias.className = "persea-session-switcher__alias";
-        alias.textContent = row.primaryAlias;
-        name.append(alias);
+      const currentChip = document.createElement("span");
+      currentChip.className = "persea-session-switcher__current";
+      currentChip.textContent = "Current";
+      name.append(alias, sessionName, currentChip);
       const meta = document.createElement("span");
       meta.className = "persea-session-switcher__meta";
-      meta.textContent = `${row.geometryLabel} · ${row.attachmentLabel} · ${row.statusLabel}`;
       button.append(name, meta);
       let current = row;
       bindTapActivation(button, () => {
@@ -238,8 +235,10 @@ export class SessionSwitcherView {
         button.setAttribute("aria-current", next.current ? "true" : "false");
         button.dataset.state = next.session.unified?.state ?? "unavailable";
         button.setAttribute("aria-label", `${next.current ? "Current session " : "Switch to "}${next.session.name}${next.primaryAlias ? ` · ${next.primaryAlias}` : ""}`);
+        button.dataset.alias = String(next.primaryAlias !== "");
         sessionName.textContent = next.session.name; sessionName.title = next.session.name;
-        alias.textContent = next.primaryAlias; alias.hidden = !next.primaryAlias;
+        alias.textContent = next.primaryAlias; alias.title = next.primaryAlias; alias.hidden = !next.primaryAlias;
+        currentChip.hidden = !next.current;
         meta.textContent = `${next.geometryLabel} · ${next.attachmentLabel} · ${next.statusLabel}`;
         meta.title = SESSION_METADATA_HELP;
       } };
