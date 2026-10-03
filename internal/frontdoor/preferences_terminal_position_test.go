@@ -96,7 +96,7 @@ func TestPreferencesStoreTerminalPosition(t *testing.T) {
 		t.Fatalf("a refused write changed the record: %+v", got)
 	}
 
-	for name, stored := range map[string]string{"unknown": `"bottom"`, "empty": `""`, "wrong_case": `"Center"`, "number": `1`} {
+	for name, stored := range map[string]string{"unknown": `"bottom"`, "empty": `""`, "wrong_case": `"Center"`, "number": `1`, "null": `null`} {
 		t.Run(name, func(t *testing.T) {
 			path := filepath.Join(shortTestDir(t), "preferences.json")
 			file := `{"version":1,"operators":[{"operator":"operator@example.com","theme":"dracula","font_size":null,` +

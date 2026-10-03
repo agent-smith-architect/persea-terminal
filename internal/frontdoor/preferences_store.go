@@ -108,10 +108,11 @@ type preferenceEntry struct {
 	// a store this release rewrites is byte-identical in shape to what it was
 	// for records it did not touch.
 	ComposerFontSize *int `json:"composer_font_size,omitempty"`
-	// A pointer for the same reason: nil only for a record written before the
-	// field existed, which reads as the default. Present, it must be one of
-	// the closed values, or the store does not load.
-	TerminalPosition *string         `json:"terminal_position,omitempty"`
+	// Raw so that absence and null stay distinct: absent only for a record
+	// written before the field existed, which reads as the default. Present,
+	// it must be one of the closed values, or the store does not load; null
+	// is not one of them.
+	TerminalPosition json.RawMessage `json:"terminal_position,omitempty"`
 	DefaultSession   *DefaultSession `json:"default_session"`
 	Revision         uint64          `json:"revision"`
 	CreatedAt        time.Time       `json:"created_at"`
@@ -152,11 +153,16 @@ func composerFontSizeOf(v *int) int {
 	return *v
 }
 
-// terminalPositionOf resolves the stored pointer the same way: a record written
-// before the field existed reads as the default.
-func terminalPositionOf(v *string) string {
-	if v == nil {
+// terminalPositionOf resolves the stored field: a record written before the
+// field existed reads as the default. Anything present but not a JSON string,
+// null included, yields "", which validation refuses.
+func terminalPositionOf(raw json.RawMessage) string {
+	if raw == nil {
 		return preferenceDefaultTerminalPosition
+	}
+	var v *string
+	if err := json.Unmarshal(raw, &v); err != nil || v == nil {
+		return ""
 	}
 	return *v
 }
@@ -324,8 +330,11 @@ func (s *preferencesStore) put(operator string, p Preferences, revision uint64) 
 		return PreferenceRecord{}, fmt.Errorf("%w: capacity reached", errPreferencesStoreUnavailable)
 	}
 	composerFont := p.ComposerFontSize
-	position := p.TerminalPosition
-	next := preferenceEntry{Operator: operator, Theme: p.Theme, FontSize: copyFontSize(p.FontSize), ComposerFontSize: &composerFont, TerminalPosition: &position, DefaultSession: copySession(p.DefaultSession), Revision: revision + 1, CreatedAt: now, UpdatedAt: now}
+	position, err := json.Marshal(p.TerminalPosition)
+	if err != nil {
+		return PreferenceRecord{}, err
+	}
+	next := preferenceEntry{Operator: operator, Theme: p.Theme, FontSize: copyFontSize(p.FontSize), ComposerFontSize: &composerFont, TerminalPosition: position, DefaultSession: copySession(p.DefaultSession), Revision: revision + 1, CreatedAt: now, UpdatedAt: now}
 	if exists {
 		next.CreatedAt = old.CreatedAt
 	}
