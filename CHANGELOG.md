@@ -2,6 +2,35 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
+## 0.1.14 — 2026-10-03
+
+### Fixed
+
+- Session aliases work again. An alias now names a session by its tmux server and session name. It follows the session when tmux renames it, and it comes back after a restart when a session with the same name starts again on the same server. Before, every alias was lost at each restart, and the text of a lost alias could not be used again.
+- The page title and the terminal tag show the current alias, also when it was changed on another device. A save is never undone by a session list that was read before it, also in workspaces.
+
+### Added
+
+- **Terminal position** in Settings → Appearance. It sets where a terminal sits when it is smaller than its window: **Top center** (the new default), **Top left** (the earlier placement) or **Center**. On an axis where the terminal is larger than its window, it starts at the edge and scrolls, as before. A change applies at once to every open terminal and workspace pane.
+- The dashboard shows the sessions most recently opened on this device above the session list. They use the same rows as the list, with Preview, Favorite and the other actions. Settings sets how many are shown: Off, 3 (the default), 5 or 8.
+- The alias of the current session can be edited from the terminal tag.
+
+### Changed
+
+- The session list that opens from the terminal tag starts with a Dashboard button. Its rows show the alias first, then the tmux name, and mark the current session. On a short screen, such as a phone in landscape, the whole panel scrolls so the list keeps room for its rows.
+- The dashboard shows the alias first, then the tmux name. The toolbar is smaller: Refresh is an icon button, and the default scrollback setting is now in Settings → Sessions.
+- Aliases can no longer be set in the configuration file. A configuration that still contains `aliases` does not load.
+
+### Upgrade notes
+
+- At the first start, the existing alias store is replaced by an empty one, because the earlier format did not record session names. Set your aliases again.
+- A page that was open before the update cannot save appearance settings. Reload it.
+- An earlier release cannot read appearance preferences saved by this release. Before a rollback, see "Appearance preferences and rollback" in `deploy/README.md`.
+
+### Testing notes
+
+- Aliases were tested against real tmux servers and the broker: a restart with a new tmux server, renames, a session replaced by one with the same name, incomplete session lists, and the store limits. In Chromium and WebKit, at phone, landscape and desktop sizes, the tests cover alias editing, saves that overlap with session list refreshes (also in workspaces), Recent sessions, and each terminal position with scrolling, selection and Select. Each new test was shown to fail without the change it checks. Touch scrolling and the on-screen keyboard were not tested on a real iPhone.
+
 ## 0.1.13 — 2026-10-02
 
 ### Fixed
