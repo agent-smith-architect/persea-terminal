@@ -135,14 +135,13 @@ const STATE = `(() => {
       controls: tag.getAttribute("aria-controls"),
       rect: rect(tag),
       nameRect: rect(q(".persea-unified-tag__name")),
-      // The rendered box, not the hidden attribute: below the phone breakpoint
-      // the alias is dropped by the stylesheet, which leaves the attribute
-      // alone and the accessible name intact.
+      // Measure the visible label, including the friendly alias on phones.
       aliasRect: rect(q(".persea-unified-tag__alias")),
       // Whether the name is ellipsised right now, and whether it CAN be: the
       // second is the property that matters at a width no test can enumerate.
       nameTruncation: (() => {
-        const n = q(".persea-unified-tag__name");
+        const n = [q(".persea-unified-tag__alias"), q(".persea-unified-tag__name")]
+          .find((label) => label && label.getBoundingClientRect().width > 0);
         if (!n) return null;
         const style = getComputedStyle(n);
         return {
@@ -349,10 +348,10 @@ async function main() {
 
     // --- desktop, fine pointer -------------------------------------------
     await tab.emulate(DESKTOP, false);
-    await control({ reset: true });
-    // The alias travels in the display-only fragment, exactly as the dashboard
-    // sends it, so the tag's alias path is exercised rather than assumed.
-    await tab.navigate(unifiedURL(await freshControlHandle(), { alias: "dev-alias" }));
+    await control({ reset: true, terminal_touchSwitcherMetadata: true });
+    // The fragment starts with the same alias as the inventory. Opening the
+    // popover must retain that friendly label through the inventory refresh.
+    await tab.navigate(unifiedURL(await freshControlHandle(), { alias: "primary shell" }));
     const fine = await tab.waitUntil(isLive, 10_000);
     assert(fine.state, `precondition: the desktop page did not reach live control: ${JSON.stringify(fine.last)}`);
     await delay(200);
@@ -423,7 +422,7 @@ async function main() {
       const tag = desktop.tag;
       if (!tag) { fail("the top bar has no session tag", null); return; }
       if (tag.name !== "alpha") fail("the tag does not name the attached session", tag);
-      if (tag.alias !== "dev-alias") fail("the tag does not render the alias the fragment carried", tag);
+      if (tag.alias !== "primary shell") fail("the tag does not render the session alias", tag);
       if (tag.wrapped) fail("the tag wrapped onto a second line", tag);
       // The dot is live and green: this page is attached and replayed.
       if (tag.dotState !== "live") fail("a live attachment does not read as attached on the status dot", tag);
@@ -462,7 +461,7 @@ async function main() {
       // screen, so the tag stays below the breakpoint --
       // and the arithmetic that used to be the argument for hiding it becomes
       // the thing measured: one line, a dot at full size, a name that can
-      // ellipsise, no alias, and nothing outside 390 pt.
+      // ellipsise the friendly label, and keep everything inside 390 pt.
       await tab.emulate(PHONE, true);
       await delay(250);
       const phoneTag = await tab.state();
@@ -479,9 +478,8 @@ async function main() {
         if (t.wrapped) fail("the tag wrapped onto a second line at 390pt", evidence.u3narrow);
         if (!(t.dotRect.w >= 4)) fail("the status dot lost its size at 390pt", evidence.u3narrow);
         if (t.name !== "alpha") fail("the tag stopped naming the session at 390pt", evidence.u3narrow);
-        if (t.aliasRect.w > 0.5) fail("the alias still claims row width at 390pt", evidence.u3narrow);
-        // Dropping it from the row must not drop it from the spoken name.
-        if (!t.label.includes("dev-alias")) fail("the narrow tag lost the alias from its accessible name", evidence.u3narrow);
+        if (t.alias !== "primary shell" || t.aliasRect.w <= 0.5) fail("the inventory alias is not visible at 390pt", evidence.u3narrow);
+        if (!t.label.includes("primary shell")) fail("the narrow tag lost the alias from its accessible name", evidence.u3narrow);
         if (!(t.rect.w >= 43.5)) fail("the tag is below the 44px touch target at 390pt", evidence.u3narrow);
         // The name must be able to give way at a width no case can enumerate.
         if (!t.nameTruncation || t.nameTruncation.overflow === "visible"
