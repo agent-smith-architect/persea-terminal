@@ -333,6 +333,10 @@ export class UnifiedPaneController {
       ...(options.stageImage ? { stageImage: options.stageImage } : {}),
       rememberSource: (source) => this.rememberSource(source),
       refitWidth: (columns: number, rows?: number) => this.refitWidth(columns, rows),
+      aliasSession: Object.freeze({
+        currentDraftScope: () => this.currentIdentity.incarnationKey,
+        inventory: (refresh: boolean, signal: AbortSignal) => this.sessionInventory(refresh, signal),
+      }),
       ...(mode === "control" ? { sessionSwitch: Object.freeze({
         currentDraftScope: () => this.currentIdentity.incarnationKey,
         inventory: (refresh: boolean, signal: AbortSignal) => this.sessionInventory(refresh, signal),

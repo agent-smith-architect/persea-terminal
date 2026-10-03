@@ -30,6 +30,8 @@ import { REFUSAL_NOTICE_MS, refusalPausesTyping, refusalReleasesFit, unifiedRefu
 import { UnifiedKeyboardBaseline } from "./unified_keyboard_baseline";
 import { SessionSwitcherView, type SessionSwitcherInventory } from "./session_switcher";
 import type { DashboardSession } from "./dashboard";
+import { saveAlias, type DashboardAlias } from "./alias_client";
+import "./alias_editor.css";
 import { UNIFIED_THEME_IDS, unifiedTheme } from "./unified_themes";
 import { sessionScopeIdentity } from "./session_memory";
 import { CopyFeedback, type CopyFeedbackState } from "./copy_feedback";
@@ -375,6 +377,13 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private scrollbackScope: string | undefined;
   private scrollbackSelect?: HTMLSelectElement;
   private readonly shell: HTMLElement;
+  private aliasInput!: HTMLInputElement;
+  private aliasSave!: HTMLButtonElement;
+  private aliasClear!: HTMLButtonElement;
+  private aliasStatus!: HTMLOutputElement;
+  private aliasCurrentSession?: DashboardSession;
+  private aliasBaseline?: DashboardAlias;
+  private aliasBusy = false;
   private readonly insetViewport?: UnifiedViewportInsetSource;
   private readonly keyBar: HTMLDivElement;
   private readonly keyBankToggle: HTMLButtonElement;
@@ -531,7 +540,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     // The top bar's leading slot is the session's identity, not a build
     // caption. It is a tag: a status dot whose colour is the page's OWN
     // connection/attachment state — no second state machine — and the session
-    // name (with its alias when the fragment carried one) in a code face. The
+    // name and the alias from the latest inventory in a code face. The
     // tag is a button because the details an operator occasionally needs
     // (server, session id, size) must not cost row width: they live in a
     // positioned popover, which is not a grid row and changes no measured box.
@@ -553,6 +562,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     currentDetails.className = "persea-unified-identity__current-details";
     const currentSummary = document.createElement("summary"); currentSummary.textContent = "Current session details";
     currentDetails.append(currentSummary, identityFacts);
+    const aliasEditor = this.createAliasEditor();
+    identityDetails.append(aliasEditor);
     identityDetails.append(currentDetails, identitySessionStatus, identitySessionList);
     const tag = document.createElement("button");
     tag.type = "button";
@@ -1811,6 +1822,88 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     return this.sessionSwitcher?.search.parentElement?.parentElement ?? undefined;
   }
 
+  private createAliasEditor(): HTMLFormElement {
+    const form = document.createElement("form"); form.className = "persea-unified-identity__alias";
+    form.hidden = !(this.options.aliasSession || this.options.sessionSwitch);
+    const label = document.createElement("label"); label.textContent = "Alias";
+    this.aliasInput = document.createElement("input"); this.aliasInput.type = "text";
+    this.aliasInput.name = "display_alias"; this.aliasInput.maxLength = 128; this.aliasInput.autocomplete = "off";
+    this.aliasInput.setAttribute("aria-label", "Alias for current session"); label.append(this.aliasInput);
+    this.aliasSave = document.createElement("button"); this.aliasSave.type = "submit"; this.aliasSave.textContent = "Save";
+    this.aliasClear = document.createElement("button"); this.aliasClear.type = "button"; this.aliasClear.textContent = "Clear";
+    this.cleanupListeners.push(bindGenerationFencedClickActivation(this.aliasSave, event => {
+      event.preventDefault(); void this.mutateCurrentAlias(this.aliasInput.value);
+    }, () => !this.closed && !this.aliasSave.disabled, () => this.keyInteractionGeneration));
+    this.cleanupListeners.push(bindGenerationFencedClickActivation(this.aliasClear, () => {
+      void this.mutateCurrentAlias(undefined);
+    }, () => !this.closed && !this.aliasClear.disabled, () => this.keyInteractionGeneration));
+    this.aliasStatus = document.createElement("output"); this.aliasStatus.setAttribute("role", "status"); this.aliasStatus.setAttribute("aria-live", "polite");
+    form.append(label, this.aliasSave, this.aliasClear, this.aliasStatus);
+    form.addEventListener("submit", event => {
+      event.preventDefault();
+      if (event.isTrusted && !this.closed && !this.aliasSave.disabled) void this.mutateCurrentAlias(this.aliasInput.value);
+    });
+    this.renderAliasControls();
+    return form;
+  }
+
+  private renderAliasControls(): void {
+    const disabled = this.aliasBusy || !this.aliasCurrentSession;
+    this.aliasInput.disabled = disabled; this.aliasSave.disabled = disabled; this.aliasClear.disabled = disabled;
+    this.aliasClear.hidden = !this.aliasBaseline;
+  }
+
+  private updateAliasSession(inventory: SessionSwitcherInventory): void {
+    const key = (this.options.aliasSession ?? this.options.sessionSwitch)?.currentDraftScope();
+    const session = inventory.sessions.find(item => item.draftScope === key);
+    const sameSession = this.aliasCurrentSession?.draftScope === session?.draftScope;
+    this.aliasCurrentSession = session;
+    if (session) {
+      this.sessionName = session.name;
+      this.sessionAlias = session.aliases[0]?.displayAlias;
+      if (!this.aliasBusy && (!sameSession || this.aliasInput.value === this.aliasInput.defaultValue)) {
+        this.aliasBaseline = session.aliases[0];
+        this.aliasInput.value = this.aliasInput.defaultValue = this.aliasBaseline?.displayAlias ?? "";
+      }
+    }
+    this.renderAliasControls();
+    this.renderSessionTag();
+  }
+
+  private async mutateCurrentAlias(displayAlias: string | undefined): Promise<void> {
+    const session = this.aliasCurrentSession;
+    if (this.closed || this.aliasBusy || !session) return;
+    this.aliasBusy = true; this.renderAliasControls(); this.aliasStatus.textContent = "Saving alias…";
+    try {
+      const result = await saveAlias(this.aliasBaseline, session.handles.alias, displayAlias);
+      if (this.closed || this.aliasCurrentSession?.draftScope !== session.draftScope) return;
+      if (!result.ok) {
+        this.aliasStatus.textContent = result.message;
+        if (result.code === "alias_exists" && result.current) {
+          this.aliasBaseline = result.current;
+          this.aliasInput.value = this.aliasInput.defaultValue = result.current.displayAlias;
+          this.sessionAlias = result.current.displayAlias;
+          this.renderSessionTag();
+          await this.loadSessionInventory(true);
+        } else if (result.code === "alias_changed") {
+          const reload = document.createElement("button"); reload.type = "button"; reload.textContent = "Reload saved alias";
+          this.cleanupListeners.push(bindGenerationFencedClickActivation(reload, () => {
+            this.aliasInput.value = this.aliasInput.defaultValue;
+            void this.loadSessionInventory(true).then(() => { this.aliasStatus.textContent = ""; });
+          }, () => !this.closed && !this.aliasBusy && reload.isConnected, () => this.keyInteractionGeneration));
+          this.aliasStatus.append(reload);
+        }
+        return;
+      }
+      this.aliasBaseline = result.alias;
+      this.sessionAlias = result.alias?.displayAlias;
+      this.aliasInput.value = this.aliasInput.defaultValue = result.alias?.displayAlias ?? "";
+      this.aliasStatus.textContent = displayAlias === undefined ? "Alias cleared." : "Alias saved.";
+      this.renderSessionTag();
+      await this.loadSessionInventory(true);
+    } finally { this.aliasBusy = false; this.renderAliasControls(); }
+  }
+
   private async openSessionSwitcher(refresh: boolean): Promise<void> {
     if (this.closed || !this.options.sessionSwitch || !this.sessionSwitcher) return;
     const root = this.sessionSwitcherRoot();
@@ -1846,7 +1939,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   }
 
   private async loadSessionInventory(refresh: boolean): Promise<void> {
-    if (this.closed || !this.options.sessionSwitch) return;
+    const source = this.options.aliasSession ?? this.options.sessionSwitch;
+    if (this.closed || !source) return;
     if (this.sessionInventoryRequest) return this.sessionInventoryRequest;
     const loading = refresh ? "Refreshing sessions…" : "Loading sessions…";
     this.sheetStatus.textContent = loading;
@@ -1856,10 +1950,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     let request: Promise<void> | undefined;
     request = (async () => {
       try {
-        const inventory = await this.options.sessionSwitch!.inventory(refresh, controller.signal);
+        const inventory = await source.inventory(refresh, controller.signal);
         if (this.closed || controller.signal.aborted || this.sessionInventoryAbort !== controller) return;
         this.sessionInventory = inventory;
         this.sessionInventoryLoaded = true;
+        this.updateAliasSession(inventory);
         this.sessionSwitcher?.setInventory(inventory);
         this.identitySessionSwitcher?.setInventory(inventory);
         this.sheetStatus.textContent = "";
@@ -3238,6 +3333,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.takeoverPending = false;
     this.sessionName = value.sessionName;
     this.sessionAlias = value.aliasLabel;
+    this.aliasCurrentSession = undefined;
+    this.aliasBaseline = undefined;
+    this.aliasInput.value = this.aliasInput.defaultValue = "";
+    this.aliasStatus.textContent = "";
+    this.renderAliasControls();
     this.sessionDraftScope = value.composerStorageScope;
     this.scrollbackScope = value.composerStorageScope;
     this.composer?.rescope(value.composerStorageScope, value.stageImage);
@@ -3533,6 +3633,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.identityName.textContent = name;
     this.identityAlias.textContent = alias;
     this.identityAlias.hidden = alias === "";
+    this.identityTag.dataset.hasAlias = String(alias !== "");
+    if (window.location.pathname === "/terminal") document.title = `${alias || name} · Persea Terminal`;
     // The dot is decoration; the state is in the accessible name, so nothing
     // here asks a reader to interpret a colour.
     const spoken = `Session ${name}${alias === "" ? "" : ` (${alias})`} \u2014 ${status}. Show session details`;
@@ -3580,7 +3682,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     if (open && !coordinated) this.claimPopover("tag");
     if (open) {
       this.renderIdentityDetails(this.connectionPhase());
-      if (this.options.sessionSwitch) void this.loadSessionInventory(false);
+      if (this.options.aliasSession || this.options.sessionSwitch) void this.loadSessionInventory(true);
     }
     this.identityDetails.hidden = !open;
     this.identityTag.setAttribute("aria-expanded", open ? "true" : "false");

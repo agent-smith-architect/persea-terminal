@@ -70,6 +70,10 @@ export type UnifiedTerminalPageOptions = Readonly<{
   // after an explicit session switch so session memory memory can record the new exact
   // identity only after the new session is genuinely live.
   onCommit?(generation: number): void;
+  aliasSession?: Readonly<{
+    currentDraftScope(): string | null;
+    inventory(refresh: boolean, signal: AbortSignal): Promise<SessionSwitcherInventory>;
+  }>;
   sessionSwitch?: Readonly<{
     currentDraftScope(): string | null;
     inventory(refresh: boolean, signal: AbortSignal): Promise<SessionSwitcherInventory>;

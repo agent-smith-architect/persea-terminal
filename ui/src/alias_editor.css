@@ -1,0 +1,39 @@
+.persea-unified-identity__alias {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: .5rem;
+  margin-block: .5rem .75rem;
+}
+.persea-unified-identity__alias label {
+  display: grid;
+  gap: .25rem;
+  flex: 1 1 10rem;
+  min-width: 0;
+}
+.persea-unified-identity__alias input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: .4rem .5rem;
+  border: 1px solid color-mix(in srgb, var(--persea-chrome-muted-fg, #aeb9cc) 40%, transparent);
+  border-radius: .35rem;
+  background: var(--persea-chrome-bg, #1b1e25);
+  color: inherit;
+  font: inherit;
+  font-size: 16px;
+}
+.persea-unified-identity__alias button { min-height: 44px; padding: .4rem .65rem; }
+.persea-unified-identity__alias output { flex: 1 1 100%; overflow-wrap: anywhere; }
+.persea-unified-identity__alias output button { margin-inline-start: .5rem; }
+.persea-unified-identity__alias [hidden] { display: none; }
+.persea-unified-tag[data-has-alias="true"] .persea-unified-tag__alias {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+@container (max-width: 719px) {
+  .persea-unified-tag[data-has-alias="true"] .persea-unified-tag__name { display: none; }
+}
