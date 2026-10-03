@@ -363,7 +363,7 @@ async function main(): Promise<void> {
       await page.waitForTimeout(4100);
       await page.setViewportSize(viewport);
       await page.goto(base, { waitUntil: "domcontentloaded" });
-      const row = page.locator(".session-card").filter({ has: page.getByRole("heading", { name: "unified_target", exact: true }) });
+      const row = page.locator(".dashboard-content .session-card").filter({ has: page.getByRole("heading", { name: "unified_target", exact: true }) });
       const action = row.locator("button.action-unified-adopt, a.action-unified-open");
       try { await action.waitFor({ state: "visible", timeout: 10000 }); } catch (error) {
         throw new Error(`alternate Open unavailable: ${await page.locator("body").innerText()} inventory=${JSON.stringify(await page.evaluate(async () => (await fetch("/api/inventory")).json()))}: ${error}`);
