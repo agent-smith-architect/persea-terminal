@@ -52,7 +52,9 @@ assert.equal(secondLiveRequest.url, "/api/aliases/alias%2F2"); assert.equal(seco
   const renamed = parseInventory({ realms: [{ name: "local", servers: [{ label: "private", status: "partial", sessions: [session("local", "private", 1000, "after-rename", "$1", "r")] }] }], aliases: [stale] });
   const row = renamed.realms[0].servers[0].sessions[0];
   assert.deepEqual([row.name, row.aliases.map((item) => item.displayAlias)], ["after-rename", ["Research"]], "a stale alias name must not reject the inventory");
-  assert.throws(() => parseInventory({ realms: [{ name: "local", servers: [{ label: "private", status: "ok", sessions: [session("local", "private", 1000, "after-rename", "$1", "r")] }] }], aliases: [{ ...stale, server: "other" }] }), /alias identity does not match its session/);
+  let refusal = "";
+  try { parseInventory({ realms: [{ name: "local", servers: [{ label: "private", status: "ok", sessions: [session("local", "private", 1000, "after-rename", "$1", "r")] }] }], aliases: [{ ...stale, server: "other" }] }); } catch (error) { refusal = String(error); }
+  assert.ok(refusal.includes("alias identity does not match its session"), `an alias on another server was accepted: ${refusal}`);
 }
 
 for (const malformed of [null, {}, { realms: [], aliases: null }, { realms: [{ name: "x", servers: "bad" }], aliases: [] }, { realms: [{ name: "x", servers: [{ label: "s", status: "ok", sessions: [{ ...session("x", "s", 1, "n", "$1", ""), handles: { alias: "", observe: "o", control: "c" } }] }] }], aliases: [] }]) {

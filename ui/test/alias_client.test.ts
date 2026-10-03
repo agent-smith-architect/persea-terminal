@@ -19,10 +19,10 @@ const session = { realm: "local", server: "private", server_status: "ok", sessio
 const payload = (aliases: unknown[]) => ({ realms: [{ name: "local", servers: [{ label: "private", status: "ok", sessions: [session] }] }], aliases });
 const parsed = parseInventory(payload([active, detached]));
 assert(parsed.realms[0].servers[0].sessions[0].aliases[0].displayAlias === "Research", "Active alias did not project");
-assert(parsed.detachedAliases[0].sessionName === "he3", "Detached seed without witness did not parse");
+assert(parsed.detachedAliases[0].sessionName === "he3", "Detached alias did not parse");
 const hidden = parseInventory(payload([{ ...detached, session_incarnation: a }]));
 assert(hidden.realms[0].servers[0].sessions[0].aliases.length === 0 && hidden.detachedAliases.length === 1, "Detached alias leaked onto a live session");
-for (const records of [[active, { ...active, alias_id: "second" }], [{ ...active, state: "tombstone" }], [{ ...active, session_name: "wrong" }], [{ ...active, revision: 0 }]]) {
+for (const records of [[active, { ...active, alias_id: "second" }], [{ ...active, state: "tombstone" }], [{ ...active, server: "other" }], [{ ...active, revision: 0 }]]) {
   let failed = false; try { parseInventory(payload(records)); } catch { failed = true; } assert(failed, "Invalid alias inventory accepted");
 }
 const record = parseAliasRecord(active);
