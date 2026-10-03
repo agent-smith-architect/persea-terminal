@@ -1,6 +1,6 @@
 "use strict";
 
-// session memory gate — Resume/default landing, PWA manifest, and the memory that feeds
+// session memory gate — Recent/default landing, PWA manifest, and the memory that feeds
 // them (regression tests remember-committed-identity … landing-privacy; installed-pwa-hardware is hardware and is reported NOT
 // RUN with its manifest RED control executed here).
 //
@@ -72,8 +72,8 @@ function stagedEntry(operationId, session, alias) {
 }
 
 // Two incarnations of the SAME NAME on the same server. Only the session id and
-// the creation time differ — which is exactly what an exact-incarnation resume
-// must refuse to confuse (remember-exact-target).
+// the creation time differ. Recent may use a unique live name match; the Open
+// action must use the successor's current authority (remember-exact-target).
 function authority(sessionID, created) {
   return { realm: "local", server: "private", uid: 1000, selector_kind: "socket_path", selector_value: "/tmp/private.sock", boot_id: "boot-session_memory", server_pid: 42, server_start: 100, session_id: sessionID, session_created: created };
 }
@@ -369,7 +369,7 @@ const INIT_SCRIPT = `
 const STATE_EXPRESSION = `(() => {
   const record = window.__perseaSessionMemory || { opens: 0, sockets: 0, serviceWorkerRegistrations: 0, cspViolations: [] };
   const landing = document.querySelector(".dashboard-landing");
-  const action = landing ? landing.querySelector(".landing-action") : null;
+  const action = landing ? landing.querySelector(".session-open-action") : null;
   const box = action ? action.getBoundingClientRect() : null;
   const interactive = [...document.querySelectorAll("a[href], button, input, select, textarea")].filter((node) => {
     const rect = node.getBoundingClientRect();
@@ -383,8 +383,8 @@ const STATE_EXPRESSION = `(() => {
     ready: document.readyState,
     landingHidden: landing ? landing.hidden : null,
     landingText: landing ? landing.textContent : "",
-    kicker: landing ? [...landing.querySelectorAll(".landing-card-kicker")].map((node) => node.textContent) : [],
-    label: landing ? [...landing.querySelectorAll(".landing-card-label")].map((node) => node.textContent) : [],
+    kicker: landing ? [...landing.querySelectorAll("h2")].filter((node) => node.getBoundingClientRect().height > 0).map((node) => node.textContent) : [],
+    label: landing ? [...landing.querySelectorAll(".session-name")].map((node) => node.textContent) : [],
     notes: landing ? [...landing.querySelectorAll(".landing-note")].map((node) => node.textContent) : [],
     actionTag: action ? action.tagName : null,
     actionHref: action && action.tagName === "A" ? action.getAttribute("href") : null,
@@ -392,15 +392,15 @@ const STATE_EXPRESSION = `(() => {
     actionDisabled: action ? Boolean(action.disabled) : null,
     actionBox: box ? { x: box.x, y: box.y, width: box.width, height: box.height } : null,
     interactiveCount: interactive.length,
-    dedicatedLandingAction: Boolean(action && action.textContent.trim() === "Open" && action.closest(".landing-card-actions")),
+    dedicatedLandingAction: Boolean(action && action.textContent.trim() === "Open" && action.closest(".session-row-actions")),
     firstInteractiveClass: first ? first.className : "",
     activeElementTag: document.activeElement ? document.activeElement.tagName : null,
     activeElementClass: document.activeElement ? String(document.activeElement.className) : "",
     activeElementIsAction: Boolean(action && document.activeElement === action),
     textEntryFocused: Boolean(document.activeElement && ["INPUT", "TEXTAREA"].includes(document.activeElement.tagName)),
     filterValue: (document.querySelector(".dashboard-search-input") || { value: null }).value,
-    sessionRows: document.querySelectorAll(".session-card").length,
-    visibleSessionRows: [...document.querySelectorAll(".session-card")].filter((node) => node.getBoundingClientRect().height > 0).length,
+    sessionRows: document.querySelectorAll(".dashboard-content .session-card").length,
+    visibleSessionRows: [...document.querySelectorAll(".dashboard-content .session-card")].filter((node) => node.getBoundingClientRect().height > 0).length,
     xtermScreens: document.querySelectorAll(".xterm-screen").length,
     opens: record.opens,
     sockets: record.sockets,
@@ -842,16 +842,16 @@ async function main() {
       } finally { await page.close(); }
     });
 
-    await item("remember-exact-target", "resume is exact-incarnation: a same-name successor is never resumed", async () => {
+    await item("remember-exact-target", "Recent resolves an exact witness or one same-name successor, never an ambiguous identity", async () => {
       const page = await driver.open({ viewport: PHONE, coarse: true });
       try {
         stack.reset();
         await page.seed([[MEMORY_KEY, memoryRecord(REMEMBERED.scope, REMEMBERED.name, Date.now() - 60_000)]]);
         await page.goto(`${stack.origin}/`);
         let state = await page.state();
-        assert(state.landingHidden === false, "a live remembered session produced no landing card");
-        assert(state.kicker.some(text => text.startsWith("Resume")), `expected a Resume card, saw ${JSON.stringify(state.kicker)}`);
-        assert(state.actionAria === `Resume ${REMEMBERED.name} · private`, `card accessible name is ${JSON.stringify(state.actionAria)}`);
+        assert(state.landingHidden === false, "a live remembered session produced no Recent row");
+        assert(state.kicker.includes("Recent"), `expected Recent, saw ${JSON.stringify(state.kicker)}`);
+        assert(state.actionAria === `Open ${REMEMBERED.name}`, `row accessible name is ${JSON.stringify(state.actionAria)}`);
         assert(state.label.includes(REMEMBERED.name), `card must show the session name: ${JSON.stringify(state.label)}`);
         if (shot("phone_resume_first")) await page.screenshot(shot("phone_resume_first"));
 
@@ -861,11 +861,17 @@ async function main() {
         const mark = stack.mark();
         await page.goto(`${stack.origin}/`);
         state = await page.state();
-        assert(state.kicker.length === 0 || !state.kicker.some(text => text.startsWith("Resume")), "a same-name successor was offered as a resume");
-        assert(state.notes.some((note) => note.includes("has ended")), `expected an honest ended notice, saw ${JSON.stringify(state.notes)}`);
+        assert(state.kicker.includes("Recent") && state.label.includes(REMEMBERED.name), "a unique same-name successor was omitted from Recent");
+        assert(!state.notes.some(note => note.includes("has ended")), "a live same-name successor was called ended");
+        assert(new URLSearchParams(state.actionHref.split("#")[1]).get("draft_scope") === SUCCESSOR.scope, "Recent kept the old authority after the restart");
         assert(state.sessionRows === 1, "the successor must still be listed like any other session");
-        assertNoAuthority(stack.ledgerSince(mark), "remember-exact-target ended");
-        assertQuiet(state, "remember-exact-target ended");
+        assertNoAuthority(stack.ledgerSince(mark), "remember-exact-target successor");
+        assertQuiet(state, "remember-exact-target successor");
+
+        stack.state.successor = false;
+        await page.goto(`${stack.origin}/`);
+        state = await page.state();
+        assert(state.label.length === 0 && state.notes.some(note => note.includes("has ended")), "a missing session did not produce an ended note");
         if (shot("phone_has_ended")) await page.screenshot(shot("phone_has_ended"));
 
         // Two live sessions carrying the SAME pinned scope: ambiguous, never a guess.
@@ -874,7 +880,7 @@ async function main() {
         stack.state.duplicateRemembered = true;
         await page.goto(`${stack.origin}/`);
         state = await page.state();
-        assert(!state.kicker.some(text => text.startsWith("Resume")), "an ambiguous identity produced a resume card");
+        assert(state.label.length === 0 && !state.actionHref, "an ambiguous identity produced a Recent row");
         assert(state.notes.some((note) => note.includes("more than one")), `expected an ambiguity notice, saw ${JSON.stringify(state.notes)}`);
         assert(state.filterValue === REMEMBERED.name, `the list was not filtered to the remembered name: ${state.filterValue}`);
       } finally { await page.close(); }
@@ -996,7 +1002,7 @@ async function main() {
         stack.state.remembered = "adoptable";
         await page.goto(`${stack.origin}/`);
         const mark = stack.mark();
-        await page.evaluate(`document.querySelector(".landing-action").click()`);
+        await page.evaluate(`document.querySelector(".dashboard-landing .session-open-action").click()`);
         await delay(400);
         state = await page.state();
         assert(!state.href.includes("/terminal"), "an untrusted click attached to a session");
@@ -1018,8 +1024,7 @@ async function main() {
         await page.goto(`${stack.origin}/`);
         let state = await page.state();
         assert(state.kicker.includes("Default session"), `expected a default card, saw ${JSON.stringify(state.kicker)}`);
-        assert(String(state.actionAria).toLowerCase().includes("default"), `the default action must name itself: ${JSON.stringify(state.actionAria)}`);
-        assert(!String(state.actionAria).startsWith("Resume"), "the default impersonated a resume");
+        assert(state.actionAria === `Open ${DEFAULT_SESSION.name}`, `the default action must name the current session: ${JSON.stringify(state.actionAria)}`);
         assertNoAuthority(stack.ledgerSince(mark), "refuse-name-reuse default");
         assertQuiet(state, "refuse-name-reuse default");
         if (shot("phone_default_card")) await page.screenshot(shot("phone_default_card"));
@@ -1031,20 +1036,18 @@ async function main() {
         await page.seed([[MEMORY_KEY, memoryRecord(REMEMBERED.scope, REMEMBERED.name, Date.now() - 60_000)]]);
         await page.goto(`${stack.origin}/`);
         state = await page.state();
-        assert(state.kicker.some(text => text.startsWith("Resume")) && !state.kicker.includes("Default session"), `precedence is wrong: ${JSON.stringify(state.kicker)}`);
+        assert(state.kicker.includes("Recent") && !state.kicker.includes("Default session"), `precedence is wrong: ${JSON.stringify(state.kicker)}`);
 
-        // An ended memory shows the honest notice AND the default, clearly
-        // labelled — never the default silently standing in for the resume.
+        // An ended memory without a live name match keeps its note beside the default.
         stack.state.remembered = "absent";
-        stack.state.successor = true;
+        stack.state.successor = false;
         await page.goto(`${stack.origin}/`);
         state = await page.state();
         assert(state.notes.some((note) => note.includes("has ended")), "the ended notice disappeared once a default existed");
-        assert(state.kicker.includes("Default session") && !state.kicker.some(text => text.startsWith("Resume")), `ended + default is wrong: ${JSON.stringify(state.kicker)}`);
+        assert(state.kicker.includes("Default session") && !state.label.includes(REMEMBERED.name), `ended + default is wrong: ${JSON.stringify(state.kicker)}`);
 
-        // A remembered session that is live but cannot be opened says exactly
-        // why, is never dressed as a resume, and lets the default be offered
-        // beneath the reason.
+        // A blocked live session keeps its normal row and reason in Recent.
+        // Defaults are offered only when there are no recent live sessions.
         stack.reset();
         stack.state.remembered = "blocked";
         stack.state.defaultSession = "open";
@@ -1053,9 +1056,9 @@ async function main() {
         mark = stack.mark();
         await page.goto(`${stack.origin}/`);
         state = await page.state();
-        assert(!state.kicker.some(text => text.startsWith("Resume")), "a blocked session was offered as a resume");
+        assert(state.kicker.includes("Recent") && state.label.includes(REMEMBERED.name) && state.actionTag === null, "a blocked Recent row acquired an Open action or disappeared");
         assert(state.notes.some((note) => note.includes("full-screen app is active")), `expected the reviewed blocked reason, saw ${JSON.stringify(state.notes)}`);
-        assert(state.kicker.includes("Default session"), `the default was not offered beside a blocked resume: ${JSON.stringify(state.kicker)}`);
+        assert(!state.kicker.includes("Default session"), `a default was offered despite a live Recent session: ${JSON.stringify(state.kicker)}`);
         assertNoAuthority(stack.ledgerSince(mark), "refuse-name-reuse blocked");
         assertQuiet(state, "refuse-name-reuse blocked");
 
@@ -1093,7 +1096,7 @@ async function main() {
           const mark = stack.mark();
           await page.goto(`${stack.origin}/`);
           const state = await page.state();
-          assert(!state.kicker.some(text => text.startsWith("Resume")), `hostile memory (${label}) produced a resume card`);
+          assert(state.label.length === 0 && state.actionTag === null, `hostile memory (${label}) produced a Recent row`);
           assert(state.sessionRows === 1, `hostile memory (${label}) broke the ordinary list`);
           assert(!state.landingText.includes("cccccccccccccccccccccccccccccccccccccccccc0"), `hostile memory (${label}) reflected a token into the page`);
           assertNoAuthority(stack.ledgerSince(mark), `validate-stored-record ${label}`);
@@ -1107,7 +1110,7 @@ async function main() {
     });
 
     // ---------------------------------------------------------------- shared-landing-inventory
-    await item("shared-landing-inventory", "the cards share one inventory snapshot and spend one preferences read", async () => {
+    await item("shared-landing-inventory", "Recent and default rows share one inventory snapshot and spend one preferences read", async () => {
       const page = await driver.open({ viewport: PHONE, coarse: true });
       try {
         // A load with NOTHING for the landing to draw, and an otherwise
@@ -1127,7 +1130,7 @@ async function main() {
 
         stack.reset();
         stack.state.remembered = "absent";
-        stack.state.successor = true;
+        stack.state.successor = false;
         stack.state.defaultSession = "open";
         stack.state.preferenceDefault = { realm: "local", server: "private", name: DEFAULT_SESSION.name };
         await page.seed([[MEMORY_KEY, memoryRecord(REMEMBERED.scope, REMEMBERED.name, Date.now() - 60_000)]]);
@@ -1293,7 +1296,7 @@ async function main() {
     });
 
     // --------------------------------------------------------------- landing-failure
-    await item("landing-failure", "Resume has a dedicated visible Open action, 44px+, and raises no keyboard", async () => {
+    await item("landing-failure", "Recent has a dedicated visible Open action, 44px+, and raises no keyboard", async () => {
       const page = await driver.open({ viewport: PHONE, coarse: true });
       try {
         stack.reset();
@@ -1301,8 +1304,8 @@ async function main() {
         await page.goto(`${stack.origin}/?resume=1`);
         let state = await page.state();
         assert(state.coarse === true, "the phone case is not running under a coarse pointer");
-        assert(state.dedicatedLandingAction, "Resume does not have its dedicated Open action");
-        assert(state.actionBox.width >= 44 && state.actionBox.height >= 44, `the resume action measures ${state.actionBox.width}x${state.actionBox.height}`);
+        assert(state.dedicatedLandingAction, "Recent does not have its dedicated Open action");
+        assert(state.actionBox.width >= 44 && state.actionBox.height >= 44, `the Recent Open action measures ${state.actionBox.width}x${state.actionBox.height}`);
         assert(state.actionBox.y >= 0 && state.actionBox.y + state.actionBox.height <= state.viewport.height, `the card is not fully visible: ${JSON.stringify(state.actionBox)}`);
         // `?resume=1` focuses the card. Focus is not activation, and a link or
         // button never raises the software keyboard.
@@ -1334,7 +1337,7 @@ async function main() {
         await page.touchDrag(at(state.actionBox), 220);
         await delay(400);
         state = await page.state();
-        assert(!state.href.includes("/terminal"), "a touch scroll activated the resume card");
+        assert(!state.href.includes("/terminal"), "a touch scroll activated the Recent row");
         assertNoAuthority(stack.ledgerSince(mark), "landing-failure touch scroll");
 
         // Keyboard activation follows ordinary button semantics.

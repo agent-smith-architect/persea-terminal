@@ -23,11 +23,27 @@ by the same refresh and conflict rules. The information button reveals session
 facts directly with a preview beside them; on phones the preview comes first.
 There is no second information disclosure. A single-server user
 heading shows the user's display name; multiple servers retain their labels so
-the choice stays clear. Resume explains that it is the last session opened on
-this device, shows the row's live metadata, and has the same dedicated Open and
-favorite controls. Its actions stay beside the identity on phones and desktops.
-A configured default is offered only when there is no live
-resumable memory and is explicitly described as a default.
+the choice stays clear.
+
+Recent appears above the filter with the hint “Opened on this device”. It shows
+the three most recently opened sessions that are still running, newest first.
+Each uses the same row as the main list, including Preview, favorite, information,
+alias editing and Open. A session can appear in both places; each row keeps its
+own focus, open preview and alias draft during inventory refreshes. Recent uses
+the inventory and preview snapshots the list already loads.
+
+Settings has a Sessions card with “Recent sessions on the Sessions tab”: Off, 3,
+5 or 8. The choice takes effect immediately and is saved on this device. Off hides
+Recent. Default scrollback is in the same card. Refresh is the ↻ button beside the
+filter; the live count follows the All, Favorites and Recent filters.
+
+Recent first looks for the exact session previously opened. After a restart, it
+can show a single running session with the same name in the same realm and server.
+It never chooses between multiple matches. Ended, ambiguous and blocked sessions
+keep their short explanations. A configured default is offered as a normal row
+under “Default session” only when there is no recent live session. Opening the
+dashboard with `?resume=1`, including from the installed app, focuses the first
+Recent row's Open action (or the default's Open action); it never activates it.
 
 The dashboard uses one scoped control and spacing system: 44px minimum targets,
 clear primary actions, a bounded desktop width, and reflow for phones and enlarged
@@ -55,7 +71,7 @@ a private tmux server to prove that the two values can diverge.
 
 The history explanation in Session information means that earlier history was
 bootstrapped from a capture of the screen and the selected available scrollback
-when browser access began. The Scrollback selector in the list controls the
+when browser access began. Default scrollback in Settings controls the
 import and browser retention limits. An open terminal offers the same control
 and an explicit reload of available recorded history. See [Scrollback](scrollback.md)
 for bounds, storage, replay, and what an increase can recover. The typed journal
@@ -125,8 +141,11 @@ entry prevents that alias from returning. At the store limit, a new alias
 replaces the oldest detached entry; running aliases are retained.
 
 The terminal tag and page title use the current alias from the session list.
-Opening the tag refreshes that list and offers an Alias field with Save and
-Clear. Revision conflicts preserve a draft and offer Reload saved alias. Name
+Opening the tag refreshes that list. The alias leads the tag in bold; the tmux
+name follows on wide screens and is hidden on phones. The compact Alias row shows
+the current name or None. Edit opens a field with Save, Clear when a name exists,
+and Cancel. Save or Cancel returns to the compact row. Revision conflicts preserve
+a draft and offer Reload saved alias. Name
 conflicts explain that another running session uses the alias. The same wording
 appears in the dashboard and in the optional alias step after session creation.
 
@@ -142,8 +161,11 @@ configured appearance preferences store. It preserves that store's closed schema
 and rollback compatibility: older releases ignore the new file. Store failures
 report unavailable state and do not silently downgrade to device-only favorites.
 
-Recent identities and Resume remain device history, recorded only after an
-accepted terminal COMMIT. Recent keeps at most 32 records from the last 30 days.
+Recent remains device history, recorded only after an accepted terminal COMMIT.
+It keeps at most 32 records from the last 30 days. Each new history entry includes
+the session name so it can be found after a restart; earlier entries without a name
+can still match their exact identity. The section count is saved under
+`persea-terminal.recent-sessions.v1`.
 Neither history nor favorites contain capability handles or terminal content;
 they grant no authority.
 
@@ -165,7 +187,7 @@ regression gate. The focused checks cover a real 60-second refresh, exact DOM
 focus, drafts and selection, fresh links, deletion confirmation and revision,
 same-name reincarnation, empty filters, themes, enlarged text and responsive
 layout. `test:dashboard-cohesion-browser` adds shared favorites across independent
-browser contexts, concurrent saves, passive Resume, consistent actions, creation
+browser contexts, concurrent saves, passive Recent rows, consistent actions, creation
 and alias recovery, colored cached previews, modal errors and session removal,
 settings spacing and responsive layouts. Session-menu tests use a private fixture and assert zero additional
 terminal input, adoption or resize during menu interaction.
