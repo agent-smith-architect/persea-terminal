@@ -161,9 +161,18 @@ func TestIngressCanonicalHostsAndPorts(t *testing.T) {
 		}
 	}
 }
-func TestFrontConfigRejectsDuplicateAliasNames(t *testing.T) {
-	if _, e := LoadFront(write(t, `{"realms":[{"name":"r","socket":"/tmp/b.sock","broker_uid":0}],"alias_store_path":"/tmp/aliases.json","aliases":[{"alias":"primary","realm":"r","server":"s","session":"one"},{"alias":"primary","realm":"r","server":"s","session":"two"}]}`)); e == nil {
-		t.Fatal("duplicate alias name accepted")
+
+// Aliases are named only through the alias store. The configuration has no
+// aliases field, so an otherwise valid configuration that states one is refused.
+func TestFrontConfigRejectsAliasesField(t *testing.T) {
+	base := `{"realms":[{"name":"r","socket":"/tmp/b.sock","broker_uid":0}],"alias_store_path":"/tmp/aliases.json"`
+	if _, err := LoadFront(write(t, base+`}`)); err != nil {
+		t.Fatalf("valid base refused: %v", err)
+	}
+	for _, field := range []string{`"aliases":[]`, `"aliases":[{"alias":"primary","realm":"r","server":"s","session":"one"}]`} {
+		if _, err := LoadFront(write(t, base+","+field+`}`)); err == nil {
+			t.Fatalf("accepted %s", field)
+		}
 	}
 }
 
@@ -191,7 +200,6 @@ func TestRequiredUIDsRejectMissingNegativeOverflowNullAndAmbiguous(t *testing.T)
 		`{"realms":[{"name":"r","socket":"/tmp/x","broker_uid":0,"BROKER_UID":0}]}`,
 		`{"realms":[{"name":"r","socket":"/tmp/x","broker_uid":0,"BROKER_UID":1}]}`,
 		`{"realms":[{"name":"r","socket":"/tmp/x","broker_uid":0,"bro\u212Aer_uid":1}]}`,
-		`{"realms":[{"name":"r","socket":"/tmp/x","broker_uid":0}],"aliases":[]}`,
 	}
 	for _, body := range brokers {
 		if _, err := LoadBroker(write(t, body)); err == nil {
