@@ -51,6 +51,15 @@ text. Appearance, Keyboard and aliases of sessions that are not running are coll
 panels with inset controls. Dashboard chrome follows the operator's terminal
 palette; these layout rules do not restyle the terminal surface.
 
+Appearance also sets **Terminal position**: where a terminal grid that is
+smaller than its space sits. **Top center** is the default; **Top left** and
+**Center** are the alternatives. On an axis where the grid is larger than its
+space, the grid starts at the edge and scrolls, so nothing is clipped. The
+choice is part of the shared appearance preferences, like Theme and Terminal
+font, and applies at once to every open terminal and workspace pane. It moves
+the grid only; it never resizes a session. Select and the replay notice use the
+same position.
+
 Session rows share their metadata wording with the terminal's session menu:
 
 - Size is columns × rows of the active tmux window.
@@ -194,6 +203,18 @@ browser contexts, concurrent saves, passive Recent rows, consistent actions, cre
 and alias recovery, colored cached previews, modal errors and session removal,
 settings spacing and responsive layouts. Session-menu tests use a private fixture and assert zero additional
 terminal input, adoption or resize during menu interaction.
+
+`npm run test:terminal-position-browser` (Chromium and WebKit, inside
+`test:browser:terminal`) places grids smaller, wider and taller than their
+space for every Terminal position on desktop and phone viewports. With Center
+it checks history scrolling, follow-tail, anchors, touch and wheel scrolling,
+taps, long-press, Select, and the replay notice. It also checks that a change
+in Settings reaches an open terminal and workspace panes without a reload.
+`npm run test:terminal-position-mutants` breaks each of those parts in a
+private build and requires the gate to fail on the matching assertion.
+WebKit cannot synthesize a trusted touch drag, so its touch-scroll check
+scrolls the scroller by script; on iOS, momentum scrolling is a
+physical-device check.
 
 Dashboard viewports include 320, 390, 430, 768, 844, 1440 and 1920 CSS pixels.
 Menu viewports include 360, 390, 430, 844 and 1440. The existing toolbar's very
