@@ -22,7 +22,7 @@ const http = require("http");
 const https = require("https");
 const os = require("os");
 const path = require("path");
-const { Socket, subprotocols, cookieCSRF, createSnippetStore, readJSON, token, WS_GUID, LIVENESS_PREFIX, REFUSAL_PREFIX, attachFlow } = require("./unified_reopen_fixture.cjs");
+const { Socket, subprotocols, cookieCSRF, createSnippetStore, readJSON, token, WS_GUID, LIVENESS_PREFIX, REFUSAL_PREFIX, PLAYWRIGHT_SCREENSHOT_STYLE_HASH, attachFlow } = require("./unified_reopen_fixture.cjs");
 
 const STYLE_NONCE = "BBBBBBBBBBBBBBBBBBBBBB";
 const CSRF_TOKEN = "wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww";
@@ -61,6 +61,13 @@ function hermeticTLS() {
 }
 
 function startWorkspaceFixture(ui, options = {}) {
+  // As in the unified fixture, a test that takes screenshots may authorize
+  // only Playwright WebKit's no-op screenshot style, so the capture itself is
+  // not reported as a CSP violation. Without the option the policy is exact.
+  const baseCSP = options.playwrightScreenshotStyle
+    ? BASE_CSP.replace("; connect-src", ` ${PLAYWRIGHT_SCREENSHOT_STYLE_HASH}; connect-src`)
+    : BASE_CSP;
+  const attributeCSP = baseCSP + "; style-src-attr 'unsafe-inline'";
   const index = fs.readFileSync(path.join(ui, "dist/index.html"), "utf8").replace("__PERSEA_STYLE_NONCE__", STYLE_NONCE);
   const files = {
     "/app.js": { file: path.join(ui, "dist/app.js"), type: "text/javascript" },
@@ -548,7 +555,7 @@ function startWorkspaceFixture(ui, options = {}) {
       state.counters.documents += 1;
       response.setHeader("Content-Type", "text/html");
       const exact = (url.pathname === "/terminal" || url.pathname === "/workspace") && url.search === "?engine=unified-dev";
-      response.setHeader("Content-Security-Policy", exact ? ATTRIBUTE_CSP : BASE_CSP);
+      response.setHeader("Content-Security-Policy", exact ? attributeCSP : baseCSP);
       response.setHeader("Set-Cookie", `__Host-persea-terminal-csrf=${CSRF_TOKEN}; Path=/; Secure; SameSite=Strict`);
       response.end(index);
       return;
@@ -556,7 +563,7 @@ function startWorkspaceFixture(ui, options = {}) {
     const extra = extraDocuments[url.pathname];
     if (extra && request.method === "GET") {
       response.setHeader("Content-Type", extra.type || "text/html");
-      response.setHeader("Content-Security-Policy", ATTRIBUTE_CSP);
+      response.setHeader("Content-Security-Policy", attributeCSP);
       response.setHeader("Set-Cookie", `__Host-persea-terminal-csrf=${CSRF_TOKEN}; Path=/; Secure; SameSite=Strict`);
       response.end(typeof extra.body === "function" ? extra.body() : fs.readFileSync(extra.file));
       return;
@@ -564,7 +571,7 @@ function startWorkspaceFixture(ui, options = {}) {
     const file = files[url.pathname];
     if (!file || request.method !== "GET") { response.writeHead(404); response.end("not found"); return; }
     response.setHeader("Content-Type", file.type);
-    response.setHeader("Content-Security-Policy", BASE_CSP);
+    response.setHeader("Content-Security-Policy", baseCSP);
     response.end(fs.readFileSync(file.file));
   };
   const material = options.tls ? hermeticTLS() : null;

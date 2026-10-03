@@ -669,7 +669,7 @@ async function liveCase(browser, fixture, api, control, snapshot) {
 // ---------------------------------------------------------------------------
 // Workspace panes follow the setting like the single terminal does.
 async function workspaceCase(browser) {
-  const fixture = await startWorkspaceFixture(UI, { tls: true });
+  const fixture = await startWorkspaceFixture(UI, { tls: true, playwrightScreenshotStyle: SHOTS !== "" });
   const api = await playwright.request.newContext({ baseURL: fixture.origin, ignoreHTTPSErrors: true });
   const control = async (data) => (await api.post("/__fixture/control", { data })).json();
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, ignoreHTTPSErrors: true });
@@ -725,7 +725,9 @@ async function workspaceCase(browser) {
 async function main() {
   if (!playwright[ENGINE]) throw new Error(`Playwright has no ${ENGINE} engine`);
   const browser = await launch();
-  const fixture = await startFixture(UI, { tls: true, playwrightScreenshotStyle: true });
+  // The gate runs under the exact document policy; only a screenshot run
+  // authorizes Playwright's no-op capture style.
+  const fixture = await startFixture(UI, { tls: true, playwrightScreenshotStyle: SHOTS !== "" });
   const api = await playwright.request.newContext({ baseURL: fixture.origin, ignoreHTTPSErrors: true });
   const control = async (data) => (await api.post("/__fixture/control", { data })).json();
   const snapshot = async () => (await api.get("/__fixture/control")).json();

@@ -1615,4 +1615,4 @@ function startFixture(ui, options = {}) {
   });
 }
 
-module.exports = { startFixture, createSnippetStore, defaultKeyboardRecord, STYLE_NONCE, CSRF_TOKEN, DRAFT_SCOPE, DRAFT_SCOPE_B, SOURCE, SOURCE_B, Socket, subprotocols, cookieCSRF, readJSON, token, WS_GUID, LIVENESS_PREFIX, REFUSAL_PREFIX, FLOW_PREFIX, attachFlow };
+module.exports = { startFixture, createSnippetStore, defaultKeyboardRecord, STYLE_NONCE, CSRF_TOKEN, DRAFT_SCOPE, DRAFT_SCOPE_B, SOURCE, SOURCE_B, Socket, subprotocols, cookieCSRF, readJSON, token, WS_GUID, LIVENESS_PREFIX, REFUSAL_PREFIX, FLOW_PREFIX, PLAYWRIGHT_SCREENSHOT_STYLE_HASH, attachFlow };
