@@ -535,12 +535,15 @@
 .persea-session-switcher__meta { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #aeb9cc; font-size: 0.68rem; text-align: left; }
 .persea-session-switcher__empty { margin: 0.35rem 0; color: #aeb9cc; font-size: 0.75rem; }
 
-/* Keep the familiar session rows, with search visible while the list scrolls. */
+/* Keep the familiar session rows, with search visible while the list scrolls.
+   The list keeps room for a full row and a glimpse of the next. When the
+   popover is too short for that (phone landscape, or an open editor or open
+   details), the whole popover scrolls instead of squeezing the list. */
 .persea-unified-identity__details {
   display: flex;
   flex-direction: column;
   max-height: min(80dvh, 38rem);
-  overflow: hidden;
+  overflow: hidden auto;
 }
 .persea-unified-identity__current-details { flex: 0 0 auto; min-width: 0; }
 .persea-unified-identity__current-details > summary { display: flex; align-items: center; min-height: 44px; cursor: pointer; color: var(--persea-chrome-muted-fg, #c5d5ec); }
@@ -548,7 +551,7 @@
 .persea-unified-identity__current-details[open] > summary::before { content: "▾"; }
 .persea-unified-identity__facts { padding-bottom: .5rem; max-height: 25dvh; overflow: auto; }
 .persea-unified-identity__session-status:empty { display: none; }
-.persea-unified-identity__sessions { display: flex; flex-direction: column; min-height: 0; }
+.persea-unified-identity__sessions { display: flex; flex-direction: column; min-height: 9rem; }
 .persea-unified-identity__sessions > div:not(.persea-unified-identity__session-actions) { display: flex; flex-direction: column; min-height: 0; }
 .persea-unified-identity__session-actions { flex: 0 0 auto; margin: 0 0 .25rem; }
 .persea-unified-identity__session-actions > button {
