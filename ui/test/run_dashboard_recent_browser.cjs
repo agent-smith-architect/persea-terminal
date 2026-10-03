@@ -91,6 +91,21 @@ async function main() {
       await count.selectOption('5');
       assert(await recent.count() === 5, `${shape.name}: five did not update Recent at once`);
       await count.selectOption('3');
+      if (ENGINE === 'chromium' && shape.name === 'desktop') {
+        // Rows that Recent drops must be released. Cycle the count, collect
+        // garbage, and count the detached session rows the heap still holds.
+        phase = `${shape.name}:retention`;
+        for (let i = 0; i < 20; i++) { await count.selectOption('0'); await count.selectOption('5'); }
+        await count.selectOption('3');
+        const cdp = await context.newCDPSession(page);
+        await cdp.send('HeapProfiler.collectGarbage');
+        const prototype = await cdp.send('Runtime.evaluate', { expression: 'HTMLElement.prototype' });
+        const elements = await cdp.send('Runtime.queryObjects', { prototypeObjectId: prototype.result.objectId });
+        const held = await cdp.send('Runtime.callFunctionOn', { objectId: elements.objects.objectId, returnByValue: true, functionDeclaration: 'function () { return this.filter(el => { try { return el.classList.contains("session-card") && !el.isConnected; } catch { return false; } }).length; }' });
+        await cdp.detach();
+        assert(!held.exceptionDetails, `${shape.name}: heap query failed: ${held.exceptionDetails?.text}`);
+        assert(held.result.value === 0, `${shape.name}: ${held.result.value} removed session rows are still held after collection`);
+      }
       await page.getByRole('button', { name: 'Sessions', exact: true }).click();
       phase = `${shape.name}:restart`;
       fixture.state.sessions = original.map(s => ({ ...s, authority: { ...s.authority, boot_id: 'restarted', server_pid: 99, server_start: 999, session_created: s.authority.session_created + 1000 } }));

@@ -746,7 +746,7 @@ export class Dashboard {
     this.defaultPreference = snapshot.status === "ready" ? snapshot.preferences.defaultSession ?? undefined : undefined;
     this.renderLanding();
   }
-  destroy(): void { this.destroyed = true; this.requestSerial += 1; this.workspaceSerial += 1; window.removeEventListener("pageshow", this.onPageShow); document.removeEventListener("visibilitychange", this.onVisibility); window.removeEventListener("hashchange", this.handleFragmentTransition); if (this.periodic !== undefined) window.clearInterval(this.periodic); for (const dispose of this.cleanup.splice(0)) dispose(); this.clipboard.dispose(); this.favorites.dispose(); }
+  destroy(): void { this.destroyed = true; this.requestSerial += 1; this.workspaceSerial += 1; window.removeEventListener("pageshow", this.onPageShow); document.removeEventListener("visibilitychange", this.onVisibility); window.removeEventListener("hashchange", this.handleFragmentTransition); if (this.periodic !== undefined) window.clearInterval(this.periodic); for (const dispose of this.cleanup.splice(0)) dispose(); for (const rows of [this.sessionNodes, this.recentNodes]) { for (const row of rows.values()) row.dispose(); rows.clear(); } this.clipboard.dispose(); this.favorites.dispose(); }
   async refresh(reason: "initial" | "manual" | "return" | "background" | "mutation"): Promise<void> {
     if (this.destroyed) return;
     if ((reason === "background" || reason === "return") && (this.refreshPending || !this.gate.permitsBackgroundRefresh())) return;
@@ -1559,8 +1559,9 @@ export class Dashboard {
     });
     article.append(row, detail, aliasDialog);
     update(session);
+    // The row cache owns the disposer: a removed row is disposed and dropped
+    // with its cache entry, and destroy() disposes the rows still cached.
     const dispose = (): void => { preview.dispose(); aliasDialog.close(); aliasDialog.remove(); };
-    this.cleanup.push(dispose);
     cache.set(session.draftScope, { el: article, update, dispose, current: () => session });
     return article;
   }
