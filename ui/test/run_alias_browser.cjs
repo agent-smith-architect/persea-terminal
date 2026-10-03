@@ -126,6 +126,9 @@ async function run(engine) {
     state.aliases = state.aliases.filter(alias => alias === record || alias.state !== 'detached' || alias.display_alias.toLowerCase() !== display.toLowerCase());
     record.display_alias = display; record.revision++;
     if (req.method === 'POST') state.aliases.push(record);
+    // A test can hold the reply after the store has changed.
+    const held = state.holdReply; state.holdReply = undefined;
+    if (held) { held.markFetched(); await held.released; }
     res.writeHead(req.method === 'POST' ? 201 : 200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(record)); return true;
   } });
   const browser = await playwright[engine].launch({ headless: true, ...(engine === 'chromium' ? { executablePath: require('./browser_path.cjs')() } : {}) });
@@ -308,6 +311,30 @@ async function run(engine) {
         phase = 'terminal';
         await reload.click(); await page.waitForFunction(() => document.querySelector('.persea-unified-identity__alias output')?.textContent === '');
         await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
+        // D: an incomplete session list that lacks this session, arriving while
+        // a save waits for its reply, must not make the page drop that reply.
+        const partial = holdNext(), reply = holdNext();
+        await page.route('**/api/inventory', async route => {
+          try {
+            const response = await route.fetch(), inventory = await response.json();
+            inventory.realms[0] = { ...inventory.realms[0], error: 'broker unavailable', servers: [] };
+            partial.markFetched(); await partial.released; await route.fulfill({ response, json: inventory });
+          } catch { /* the page stopped waiting */ } finally { partial.markHandled(); }
+        }, { times: 1 });
+        state.holdReply = reply;
+        await page.locator('.persea-unified-tag').click(); await page.locator('.persea-unified-tag').click();
+        await partial.fetched;
+        await edit.click(); await input.fill('After a partial list');
+        await editor.getByRole('button', { name: 'Save', exact: true }).click();
+        await reply.fetched;
+        partial.release(); await partial.handled;
+        await page.waitForFunction(() => document.querySelector('.persea-unified-identity__session-status')?.textContent === '');
+        reply.release();
+        await page.waitForFunction(() => document.querySelector('.persea-unified-identity__alias output')?.textContent !== 'Saving alias…').catch(() => { throw new Error('A save whose reply came after an incomplete session list never finished'); });
+        const outcome = await editor.locator('output').textContent();
+        assert(outcome === 'Alias saved.', `A save whose reply came after an incomplete session list reported: ${outcome}`);
+        await whenEnabled(page, edit);
+        assert(await page.locator('.persea-unified-tag__alias').textContent() === 'After a partial list', 'The saved alias is not shown after an incomplete session list');
       }
       await edit.click(); await shot('terminal-editor-expanded');
       const measurements = await editor.evaluate(el => ({ width: el.getBoundingClientRect().width, targets: [...el.querySelectorAll('button,input')].filter(item => item.getBoundingClientRect().height > 0).map(item => ({ tag: item.tagName, height: item.getBoundingClientRect().height, shadow: getComputedStyle(item).boxShadow, border: getComputedStyle(item).borderTopWidth })), overflow: document.documentElement.scrollWidth > innerWidth }));

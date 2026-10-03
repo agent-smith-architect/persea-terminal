@@ -1929,8 +1929,14 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.aliasClear.hidden = !this.aliasBaseline;
   }
 
+  // The session this page is attached to. A save's reply belongs to it while
+  // the page stays on it, even if the latest list lacks it (an incomplete list).
+  private pinnedAliasScope(): string | null | undefined {
+    return (this.options.aliasSession ?? this.options.sessionSwitch)?.currentDraftScope();
+  }
+
   private updateAliasSession(inventory: SessionSwitcherInventory): void {
-    const key = (this.options.aliasSession ?? this.options.sessionSwitch)?.currentDraftScope();
+    const key = this.pinnedAliasScope();
     const session = inventory.sessions.find(item => item.draftScope === key);
     const sameSession = this.aliasCurrentSession?.draftScope === session?.draftScope;
     this.aliasCurrentSession = session;
@@ -1955,7 +1961,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     try {
       const result = await saveAlias(this.aliasBaseline, session.handles.alias, displayAlias);
       this.aliasFence = nextInventoryReadOrder();
-      if (this.closed || this.aliasCurrentSession?.draftScope !== session.draftScope) return;
+      if (this.closed || this.pinnedAliasScope() !== session.draftScope) return;
       if (!result.ok) {
         this.aliasStatus.textContent = result.message;
         if (result.code === "alias_exists" && result.current) {
@@ -1987,7 +1993,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       await this.loadSessionInventory(true);
     } finally {
       this.aliasBusy = false; this.renderAliasControls();
-      if (returnFocus && !this.closed && this.aliasCurrentSession?.draftScope === session.draftScope) this.aliasEdit.focus({ preventScroll: true });
+      if (returnFocus && !this.closed && this.pinnedAliasScope() === session.draftScope) this.aliasEdit.focus({ preventScroll: true });
     }
   }
 
