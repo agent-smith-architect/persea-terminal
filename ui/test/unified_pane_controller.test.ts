@@ -251,4 +251,29 @@ for (const [recovering, expected] of [[true, 1], [false, 0]] as const) {
   assert.equal(attaches, expected, recovering ? "a recovering pane was not reattached exactly once" : "a pane stopped with a notice was reattached on restore");
 }
 
-console.log("unified pane controller tests PASS");
+
+// Inventory reads can resume out of order. A consumer that resumes with an
+// older snapshot must not move the consumed generation back: the next refresh
+// would then accept a snapshot this pane has already shown as new.
+async function consumedGenerationNeverMovesBack(): Promise<void> {
+  const asked: number[] = [];
+  let generation = 1;
+  const fields = {
+    options: Object.freeze({ resolveInventory: async (_signal: AbortSignal, newerThan: number) => {
+      asked.push(newerThan);
+      return Object.freeze({ generation, readOrder: generation, inventory: Object.freeze({ realms: [], detachedAliases: [] }) });
+    } }),
+    snapshotGeneration: 2,
+    disposed: false,
+  };
+  Object.setPrototypeOf(fields, UnifiedPaneController.prototype);
+  const inventory = (fields as unknown as { sessionInventory(refresh: boolean, signal: AbortSignal): Promise<unknown> }).sessionInventory.bind(fields);
+  await inventory(true, new AbortController().signal);
+  assert.equal(fields.snapshotGeneration, 2, "an older snapshot moved the consumed generation back");
+  generation = 3;
+  await inventory(true, new AbortController().signal);
+  assert.equal(asked.join(","), "2,2", "a refresh did not ask for a snapshot newer than the one already shown");
+  assert.equal(fields.snapshotGeneration, 3, "a newer snapshot was not recorded");
+}
+
+void consumedGenerationNeverMovesBack().then(() => console.log("unified pane controller tests PASS"));
