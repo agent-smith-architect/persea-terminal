@@ -1,4 +1,4 @@
-import { COLLAPSE_STORAGE_KEY, HISTORY_CHOICES, adoptFailureMessage, defaultCardLabel, defaultUnavailableMessage, landingAmbiguousMessage, landingBlockedMessage, landingEndedMessage, resumeCardDetail, resumeCardLabel, aliasRequest, assignText, collapseGroupKey, createFailureMessage, effectiveCollapse, formatPreviewMeta, mutationStatus, parseHistoryChoice, parseInventory, parsePreview, previewFailureMessage, previewRequestPath, readCollapsedGroups, RefreshGate, sessionMatchesFilter, terminalURL, unifiedBlockedMessage, unifiedTerminalURL, writeCollapsedGroups } from "../src/dashboard";
+import { COLLAPSE_STORAGE_KEY, HISTORY_CHOICES, adoptFailureMessage, defaultCardLabel, defaultUnavailableMessage, landingAmbiguousMessage, landingBlockedMessage, landingEndedMessage, resumeCardDetail, resumeCardLabel, aliasRequest, assignText, collapseGroupKey, createFailureMessage, effectiveCollapse, formatPreviewMeta, parseHistoryChoice, parseInventory, parsePreview, previewFailureMessage, previewRequestPath, readCollapsedGroups, RefreshGate, sessionMatchesFilter, terminalURL, unifiedBlockedMessage, unifiedTerminalURL, writeCollapsedGroups } from "../src/dashboard";
 import { WorkspaceAPI, WorkspaceAPIError, parseWorkspaceList } from "../src/workspace_api";
 import { leaf } from "../src/workspace_model";
 
@@ -19,14 +19,14 @@ function session(realm: string, server: string, uid: number, name: string, id: s
 const a = authority("local", "private", 1000, "$1");
 const inventory = parseInventory({
   realms: [
-    { name: "local", display_name: "fixture-user-k7m2", servers: [{ label: "private", status: "ok", sessions: [{ ...session("local", "private", 1000, "actual-name", "$1", "opaque +&?"), alias: "Friendly", alias_state: "bound" }] }] },
+    { name: "local", display_name: "fixture-user-k7m2", servers: [{ label: "private", status: "ok", sessions: [{ ...session("local", "private", 1000, "actual-name", "$1", "opaque +&?"), alias: "Friendly", alias_state: "active" }] }] },
     { name: "remote", servers: [{ label: "other", status: "ok", sessions: [session("remote", "other", 2000, "remote-name", "$8", "h2")] }] },
     { name: "failed", error: "broker unavailable", servers: [] },
   ],
   aliases: [
-    { alias_id: "alias/1", display_alias: "Friendly", normalized_alias: "friendly", session_incarnation: a, revision: 7, created_at: "ignored", updated_at: "ignored", state: "bound" },
-    { alias_id: "alias/2", display_alias: "Second", normalized_alias: "second", session_incarnation: { ...a }, revision: 11, created_at: "ignored", updated_at: "ignored", state: "active" },
-    { alias_id: "old", display_alias: "Same name", normalized_alias: "same name", session_incarnation: authority("local", "private", 1000, "$old"), revision: 3, created_at: "ignored", updated_at: "ignored", state: "tombstone" },
+    { alias_id: "alias/1", display_alias: "Friendly", normalized_alias: "friendly", session_incarnation: a, revision: 7, created_at: "ignored", updated_at: "ignored", realm: "local", server: "private", session_name: "actual-name", state: "active" },
+    { alias_id: "alias/2", display_alias: "Second", normalized_alias: "second", session_incarnation: { ...a }, revision: 11, created_at: "ignored", updated_at: "ignored", realm: "local", server: "private", session_name: "actual-name", state: "detached" },
+    { alias_id: "old", display_alias: "Same name", normalized_alias: "same name", session_incarnation: authority("local", "private", 1000, "$old"), revision: 3, created_at: "ignored", updated_at: "ignored", realm: "local", server: "private", session_name: "old-name", state: "detached" },
   ],
 });
 assert.equal(inventory.realms.length, 3);
@@ -36,12 +36,12 @@ assert.equal(inventory.realms[1].displayName, "remote", "missing display_name di
 assert.equal(inventory.realms[1].uid, 2000);
 assert.equal(inventory.realms[2].error, "broker unavailable");
 const projected = inventory.realms[0].servers[0].sessions[0];
-assert.deepEqual({ name: projected.name, id: projected.sessionId, uid: projected.uid, aliases: projected.aliases.map((item) => [item.aliasId, item.displayAlias, item.state, item.revision]) }, { name: "actual-name", id: "$1", uid: 1000, aliases: [["alias/1", "Friendly", "bound", 7], ["alias/2", "Second", "active", 11]] });
+assert.deepEqual({ name: projected.name, id: projected.sessionId, uid: projected.uid, aliases: projected.aliases.map((item) => [item.aliasId, item.displayAlias, item.state, item.revision]) }, { name: "actual-name", id: "$1", uid: 1000, aliases: [["alias/1", "Friendly", "active", 7]] });
 assert.equal("authority" in projected, false, "authority tuple must not escape parser projection");
 assert.equal(projected.draftScope, JSON.stringify(["local", "private", "socket_path", "/tmp/private.sock", "boot-local", "$1", 1000, 42, 100, 200]), "draft scope must be the exact dashboard authority identity");
-assert.deepEqual(inventory.detachedAliases.map((item) => [item.displayAlias, item.state]), [["Same name", "tombstone"]]);
+assert.deepEqual(inventory.detachedAliases.map((item) => [item.displayAlias, item.state]), [["Second", "detached"], ["Same name", "detached"]]);
 const firstLiveRequest = aliasRequest(projected.aliases[0], projected.handles.alias, "Friendly renamed");
-const secondLiveRequest = aliasRequest(projected.aliases[1], projected.handles.alias);
+const secondLiveRequest = aliasRequest(inventory.detachedAliases[0], "");
 assert.equal(firstLiveRequest.url, "/api/aliases/alias%2F1"); assert.equal((firstLiveRequest.init.headers as Record<string, string>)["If-Match"], '"7"');
 assert.equal(secondLiveRequest.url, "/api/aliases/alias%2F2"); assert.equal(secondLiveRequest.init.method, "DELETE"); assert.equal((secondLiveRequest.init.headers as Record<string, string>)["If-Match"], '"11"');
 
@@ -73,9 +73,9 @@ assert.equal(scopedFragment.get("draft_scope"), projected.draftScope, "exact dra
 assert.equal(scopedFragment.get("name"), "same", "display label changed while carrying draft scope");
 const post = aliasRequest(undefined, "fresh", "Desk"); assert.equal(post.url, "/api/aliases"); assert.equal(post.init.method, "POST"); assert.deepEqual(JSON.parse(String(post.init.body)), { display_alias: "Desk", handle: "fresh" });
 const alias = { aliasId: "alias/1", displayAlias: "Desk", revision: 7, state: "bound" };
-const patch = aliasRequest(alias, "unused", "New"); assert.equal(patch.url, "/api/aliases/alias%2F1"); assert.equal(patch.init.method, "PATCH"); assert.equal((patch.init.headers as Record<string, string>)["If-Match"], '"7"'); assert.deepEqual(JSON.parse(String(patch.init.body)), { display_alias: "New", handle: "unused" });
-const del = aliasRequest(alias, "unused"); assert.equal(del.init.method, "DELETE"); assert.deepEqual(JSON.parse(String(del.init.body)), { handle: "unused" }); assert.equal((del.init.headers as Record<string, string>)["If-Match"], '"7"');
-for (const status of [409, 410, 412, 503]) assert.ok(mutationStatus(status)); assert.equal(mutationStatus(400), undefined);
+const patch = aliasRequest(alias, "unused", "New"); assert.equal(patch.url, "/api/aliases/alias%2F1"); assert.equal(patch.init.method, "PATCH"); assert.equal((patch.init.headers as Record<string, string>)["If-Match"], '"7"'); assert.deepEqual(JSON.parse(String(patch.init.body)), { display_alias: "New" });
+const del = aliasRequest(alias, "unused"); assert.equal(del.init.method, "DELETE"); assert.equal(del.init.body, undefined); assert.equal((del.init.headers as Record<string, string>)["If-Match"], '"7"');
+
 const gate = new RefreshGate(); assert.equal(gate.permitsBackgroundRefresh(), true); gate.beginEdit(); assert.equal(gate.permitsBackgroundRefresh(), false); gate.setMutating(true); gate.endEdit(); assert.equal(gate.permitsBackgroundRefresh(), false); gate.setMutating(false); assert.equal(gate.permitsBackgroundRefresh(), true);
 
 {

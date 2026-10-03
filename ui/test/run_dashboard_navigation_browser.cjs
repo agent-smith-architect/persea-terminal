@@ -69,7 +69,7 @@ const INVENTORY = Object.freeze({
     revision: 1,
     created_at: "ignored",
     updated_at: "ignored",
-    state: "bound",
+    realm: "local", server: "private", session_name: "operator session", state: "active",
   }],
 });
 const UNIFIED_HANDLE = Object.freeze({
@@ -874,7 +874,7 @@ async function main() {
     const operatorPreviews = () => previewRequests.filter(request => request.session_id === "$1");
     assert(await waitFor(`(() => {
       const row = [...document.querySelectorAll(".session-card")]
-        .find((card) => card.querySelector(".session-name")?.textContent === "operator session");
+        .find((card) => card.querySelector(".session-name")?.textContent === "Primary alias");
       const button = row?.querySelector(".session-preview-row-button");
       const bounds = row?.querySelector(".session-preview-row-screen")?.getBoundingClientRect();
       const visible = document.visibilityState === "visible" && bounds && bounds.width > 0 && bounds.bottom >= 0 && bounds.top <= innerHeight;
@@ -883,7 +883,7 @@ async function main() {
     const operatorPreviewBaseline = operatorPreviews().length;
     const operatorPreviewWasLoaded = await evaluate(`(() => {
       const row = [...document.querySelectorAll(".session-card")]
-        .find((card) => card.querySelector(".session-name")?.textContent === "operator session");
+        .find((card) => card.querySelector(".session-name")?.textContent === "Primary alias");
       return row?.querySelector(".session-preview-row-button")?.dataset.loaded === "true";
     })()`);
     const loadedPreviewCount = operatorPreviewBaseline + (operatorPreviewWasLoaded ? 0 : 1);
@@ -897,7 +897,7 @@ async function main() {
     };
     const operatorDisclosure = `(() => {
       const row = [...document.querySelectorAll(".session-card")]
-        .find((card) => card.querySelector(".session-name")?.textContent === "operator session");
+        .find((card) => card.querySelector(".session-name")?.textContent === "Primary alias");
       const button = row?.querySelector("button.session-disclosure");
       if (!(button instanceof HTMLButtonElement)) throw new Error("operator session disclosure absent");
       button.click();
@@ -906,7 +906,7 @@ async function main() {
     await evaluate(operatorDisclosure);
     assert(await waitFor(`(() => {
       const row = [...document.querySelectorAll(".session-card")]
-        .find((card) => card.querySelector(".session-name")?.textContent === "operator session");
+        .find((card) => card.querySelector(".session-name")?.textContent === "Primary alias");
       const screen = row?.querySelector(".session-detail .session-preview-screen");
       return Boolean(screen
         && screen.textContent.includes("PREVIEW_MARKER_ONE")
@@ -914,7 +914,7 @@ async function main() {
     })()`), "expanding a row did not render its fetched preview rows");
     const previewRendering = await evaluate(`(() => {
       const row = [...document.querySelectorAll(".session-card")]
-        .find((card) => card.querySelector(".session-name")?.textContent === "operator session");
+        .find((card) => card.querySelector(".session-name")?.textContent === "Primary alias");
       const screen = row.querySelector(".session-detail .session-preview-screen");
       return {
         tag: screen.tagName,
@@ -938,7 +938,7 @@ async function main() {
     `preview changed its identity-only request: ${JSON.stringify(previewRequests)}`);
     await evaluate(`(() => {
       const row = [...document.querySelectorAll(".session-card")]
-        .find((card) => card.querySelector(".session-name")?.textContent === "operator session");
+        .find((card) => card.querySelector(".session-name")?.textContent === "Primary alias");
       row.querySelector("button.session-preview-refresh").click();
     })()`);
     assert(await waitForPreviewCount(loadedPreviewCount + 1),
@@ -949,7 +949,7 @@ async function main() {
       `inventory refresh reloaded the cached preview: ${JSON.stringify(previewRequests)}`);
     assert(await waitFor(`(() => {
       const row = [...document.querySelectorAll(".session-card")]
-        .find((card) => card.querySelector(".session-name")?.textContent === "operator session");
+        .find((card) => card.querySelector(".session-name")?.textContent === "Primary alias");
       const screen = row?.querySelector(".session-detail .session-preview-screen");
       return Boolean(screen && screen.textContent.includes("PREVIEW_MARKER_ONE"));
     })()`), "the re-rendered expanded row lost its preview");

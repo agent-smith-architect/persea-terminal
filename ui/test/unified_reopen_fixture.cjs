@@ -896,8 +896,8 @@ function startFixture(ui, options = {}) {
     const realms = [{ name: "local", display_name: "Local realm", servers: [{ label: "private", status: "ok", can_create: false, can_stage_images: state.imageStaging, sessions: localSessions }] }];
     if (remoteSessions.length > 0) realms.push({ name: "remote", display_name: "Remote realm", servers: [{ label: "private", status: "ok", can_create: false, can_stage_images: state.imageStaging, sessions: remoteSessions }] });
     const aliases = state.terminal_touchSwitcherMetadata ? [
-      { alias_id: "alias-alpha", display_alias: "primary shell", revision: 1, state: "active", session_incarnation: AUTHORITY },
-      { alias_id: "alias-beta", display_alias: "support shell", revision: 1, state: "active", session_incarnation: AUTHORITY_B },
+      { realm: "local", server: "private", session_name: "alpha", alias_id: "alias-alpha", display_alias: "primary shell", revision: 1, state: "active", session_incarnation: AUTHORITY },
+      { realm: "remote", server: "private", session_name: "beta", alias_id: "alias-beta", display_alias: "support shell", revision: 1, state: "active", session_incarnation: AUTHORITY_B },
     ] : [];
     return { image_upload: state.imageStaging, realms, aliases };
   };

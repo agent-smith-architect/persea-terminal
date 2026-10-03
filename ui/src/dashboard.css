@@ -250,3 +250,9 @@ body.dashboard-mode:has(.dashboard) #app { width: min(1180px, 100%); margin-inli
 @keyframes dashboard-tap { from { box-shadow: 0 0 0 .3rem color-mix(in srgb, var(--dashboard-accent) 40%, transparent); } to { box-shadow: 0 0 0 0 transparent; } }
 .dashboard button.persea-tapped, .dashboard .action.persea-tapped { animation: dashboard-tap 240ms ease-out; }
 @media (prefers-reduced-motion: reduce) { .dashboard button.persea-tapped, .dashboard .action.persea-tapped { animation: none; } }
+/* A friendly title keeps the real tmux name available beside it. */
+.session-tmux-name { font-family: ui-monospace, monospace; color: var(--dashboard-muted); overflow-wrap: anywhere; }
+.alias-history-entry { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; padding-block: .5rem; }
+.alias-history-session { color: var(--dashboard-muted); overflow-wrap: anywhere; }
+.alias-history-entry button { min-height: 44px; margin-inline-start: auto; }
+.alias-history-entry output { flex-basis: 100%; }

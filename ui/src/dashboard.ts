@@ -39,7 +39,9 @@ export function parseHistoryChoice(value: string | null): HistoryChoice {
   if (match === undefined) throw new Error(HISTORY_CHOICE_ERROR);
   return match;
 }
-export type DashboardAlias = Readonly<{ aliasId: string; displayAlias: string; revision: number; state: string }>;
+import { csrfToken, parseAliasRecord, saveAlias, type DashboardAlias } from "./alias_client";
+export { csrfToken, aliasRequest } from "./alias_client";
+export type { DashboardAlias } from "./alias_client";
 export type UnifiedSessionProjection =
   | Readonly<{ state: "open"; origin: "birth" | "reconstructed"; detail?: UnifiedInventoryDetail }>
   | Readonly<{ state: "adoptable" }>
@@ -51,7 +53,7 @@ export type DashboardRealm = Readonly<{ name: string; displayName: string; uid?:
 export type DashboardInventory = Readonly<{ realms: readonly DashboardRealm[]; detachedAliases: readonly DashboardAlias[] }>;
 type ObjectValue = Record<string, unknown>;
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-export function csrfToken(cookie=document.cookie): string { const values=cookie.split(";").map(v=>v.trim()).filter(v=>v.startsWith("__Host-persea-terminal-csrf=")); if(values.length!==1)throw new Error("CSRF cookie unavailable");const token=values[0].slice(values[0].indexOf("=")+1);if(!/^[A-Za-z0-9_-]{43}$/.test(token))throw new Error("CSRF cookie malformed");return token; }
+
 
 function object(value: unknown, label: string): ObjectValue { if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(`${label} must be an object`); return value as ObjectValue; }
 function array(value: unknown, label: string): unknown[] { if (!Array.isArray(value)) throw new Error(`${label} must be an array`); return value; }
@@ -61,7 +63,7 @@ function integer(value: unknown, label: string, minimum = 0): number { if (typeo
 function boolean(value: unknown, label: string): boolean { if (value === undefined || value === null) return false; if (typeof value !== "boolean") throw new Error(`${label} must be a boolean`); return value; }
 function optionalString(value: unknown, label: string): string | undefined {return value === undefined ? undefined : string(value, label); }
 
-type ParsedAlias = DashboardAlias & { incarnationKey: string };
+type ParsedAlias = DashboardAlias & { incarnationKey?: string };
 
 function authorityKey(value: unknown, label: string): { key: string; uid: number } {
   const v = object(value, label);
@@ -72,8 +74,10 @@ function authorityKey(value: unknown, label: string): { key: string; uid: number
 }
 
 function parseAlias(value: unknown, label: string): ParsedAlias {
-  const v = object(value, label); const incarnation = authorityKey(v.session_incarnation, `${label}.session_incarnation`);
-  return { aliasId: string(v.alias_id, `${label}.alias_id`), displayAlias: string(v.display_alias, `${label}.display_alias`), revision: integer(v.revision, `${label}.revision`, 1), state: string(v.state, `${label}.state`), incarnationKey: incarnation.key };
+  const v = object(value, label);
+  const record = parseAliasRecord(value);
+  const incarnationKey = record.state === "active" ? authorityKey(v.session_incarnation, `${label}.session_incarnation`).key : undefined;
+  return { ...record, ...(incarnationKey ? { incarnationKey } : {}) };
 }
 
 function parseUnifiedDev(value: unknown, label: string): UnifiedDevLaunch | undefined {
@@ -126,8 +130,15 @@ export function parseInventory(value: unknown): DashboardInventory {
   // no affordance, exactly like can_create.
   const imageUpload = boolean(root.image_upload, "inventory.image_upload");
   const aliases = array(root.aliases, "inventory.aliases").map((item, i) => parseAlias(item, `inventory.aliases[${i}]`));
-  const aliasesByAuthority = new Map<string, ParsedAlias[]>(); const projected = new Set<string>();
-  for (const alias of aliases) { const matches = aliasesByAuthority.get(alias.incarnationKey); if (matches) matches.push(alias); else aliasesByAuthority.set(alias.incarnationKey, [alias]); }
+const aliasesByAuthority = new Map<string, ParsedAlias[]>();
+  const aliasIds = new Set<string>();
+  for (const alias of aliases) {
+    if (aliasIds.has(alias.aliasId)) throw new Error("Duplicate alias ID");
+    aliasIds.add(alias.aliasId);
+    if (!alias.incarnationKey) continue;
+    if (aliasesByAuthority.has(alias.incarnationKey)) throw new Error("Session has multiple active aliases");
+    aliasesByAuthority.set(alias.incarnationKey, [alias]);
+  }
   const realms = array(root.realms, "inventory.realms").map((realmValue, ri): DashboardRealm => {
     const realm = object(realmValue, `inventory.realms[${ri}]`); const name = string(realm.name, `inventory.realms[${ri}].name`); const displayName = optionalString(realm.display_name, `inventory.realms[${ri}].display_name`) ?? name; const error = optionalString(realm.error, `inventory.realms[${ri}].error`); let realmUID: number | undefined;
     const servers = array(realm.servers, `inventory.realms[${ri}].servers`).map((serverValue, si): DashboardServer => {
@@ -138,7 +149,8 @@ export function parseInventory(value: unknown): DashboardInventory {
         if (sessionRealm !== name || sessionServer !== label) throw new Error(`${path} identity does not match its group`);
         if (realmUID !== undefined && realmUID !== authority.uid) throw new Error(`realm ${name} contains inconsistent UIDs`); realmUID = authority.uid;
         const sessionName = string(session.name, `${path}.name`);
-        const matchingAliases = aliasesByAuthority.get(authority.key) ?? []; for (const alias of matchingAliases) projected.add(alias.aliasId);
+const matchingAliases = aliasesByAuthority.get(authority.key) ?? [];
+        if (matchingAliases.some(alias => alias.realm !== sessionRealm || alias.server !== sessionServer || alias.sessionName !== sessionName)) throw new Error(`${path} alias identity does not match its session`);
         const handles=object(session.handles,`${path}.handles`); const unified = parseUnifiedSession(session.unified, `${path}.unified`); return { handles:{alias:string(handles.alias,`${path}.handles.alias`),observe:string(handles.observe,`${path}.handles.observe`),control:string(handles.control,`${path}.handles.control`)}, realm: sessionRealm, uid: authority.uid, server: sessionServer, serverStatus: string(session.server_status, `${path}.server_status`), sessionId: string(session.session_id, `${path}.session_id`), name: sessionName, width: integer(session.width, `${path}.width`, 1), height: integer(session.height, `${path}.height`, 1), attached: integer(session.attached, `${path}.attached`), activity: integer(session.activity, `${path}.activity`), ...(session.output_activity === undefined ? {} : { outputActivity: integer(session.output_activity, `${path}.output_activity`) }), aliases: matchingAliases.map(({ incarnationKey: _key, ...alias }) => alias), draftScope: authority.key, ...(unified ? { unified } : {}), ...(canStageImages ? { canStageImages: true as const } : {}) };
       });
       const unifiedDev = parseUnifiedDev(server.unified_dev, `${sp}.unified_dev`);
@@ -146,7 +158,7 @@ export function parseInventory(value: unknown): DashboardInventory {
     });
     return { name, displayName, ...(realmUID === undefined ? {} : { uid: realmUID }), ...(error ? { error } : {}), servers };
   });
-  return { realms, detachedAliases: aliases.filter((alias) => !projected.has(alias.aliasId)).map(({ incarnationKey: _key, ...alias }) => alias) };
+  return { realms, detachedAliases: aliases.filter((alias) => alias.state === "detached").map(({ incarnationKey: _key, ...alias }) => alias) };
 }
 
 // labels are display-only: they name the session on the page and carry no
@@ -175,11 +187,6 @@ export function unifiedTerminalURL(base: string, handle: string, session: Dashbo
 // workspace_url.ts beside its parser; the dashboard re-exports it so every
 // dashboard entry point composes workspace URLs through the same function.
 export { workspaceURL };
-export function aliasRequest(alias: DashboardAlias | undefined, handle: string, displayAlias?: string): { url: string; init: RequestInit } {
-  if (!alias) return { url: "/api/aliases", init: { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ display_alias: displayAlias ?? "", handle }) } };
-  const url = `/api/aliases/${encodeURIComponent(alias.aliasId)}`; const headers = { "Content-Type": "application/json", "If-Match": `"${alias.revision}"` };
-  return displayAlias === undefined ? { url, init: { method: "DELETE", headers, body: JSON.stringify({ handle }) } } : { url, init: { method: "PATCH", headers, body: JSON.stringify({ display_alias: displayAlias, handle }) } };
-}
 /**
  * Operator wording for a creation refusal. The server sends a code from a closed
  * set and never free text, so an unrecognised code falls back to a neutral
@@ -277,7 +284,7 @@ export function formatPreviewMeta(preview: Pick<SessionPreview, "capturedAt" | "
   const captured = Number.isNaN(date.valueOf()) ? String(preview.capturedAt) : date.toLocaleTimeString();
   return `${preview.width}×${preview.height} · captured ${captured}${preview.truncated ? " · truncated" : ""}`;
 }
-export function mutationStatus(status: number): string | undefined {return ({ 409: "Alias changed elsewhere; refreshed current state.", 410: "Session handle expired; refreshed current state.", 412: "Alias revision is stale; refreshed current state.", 503: "Alias service is unavailable; refreshed current state." } as Record<number, string>)[status]; }
+
 export class RefreshGate { private editing = 0; private mutating = false; beginEdit(): void { this.editing++; } endEdit(): void { this.editing = Math.max(0, this.editing - 1); } setMutating(value: boolean): void { this.mutating = value; } permitsBackgroundRefresh(): boolean { return this.editing === 0 && !this.mutating; } }
 export const COLLAPSE_STORAGE_KEY = "persea_terminal_dashboard_collapse_v1";
 export type CollapseStorage = Pick<Storage, "getItem" | "setItem">;
@@ -913,9 +920,22 @@ export class Dashboard {
     if (this.aliasArchive.dataset.version !== archiveKey) {
       this.aliasArchive.dataset.version = archiveKey;
       const body = element("div", "dashboard-settings-body");
-      body.append(element("p", undefined, "Aliases from ended sessions. Reusing a session name does not reconnect an old alias."));
-      for (const alias of inventory.detachedAliases) body.append(element("p", "alias-record", `${alias.displayAlias} · ${alias.state}`));
-      this.aliasArchive.replaceChildren(element("summary", undefined, `Alias history · ${inventory.detachedAliases.length}`), body);
+      body.append(element("p", undefined, "An alias returns when a session with the same name starts again, for example after a restart."));
+      for (const alias of inventory.detachedAliases) {
+        const row = element("div", "alias-history-entry");
+        const remove = element("button", undefined, "Remove"); remove.type = "button"; remove.setAttribute("aria-label", `Remove alias ${alias.displayAlias}`);
+        const status = element("output"); status.setAttribute("role", "status");
+        remove.addEventListener("click", () => {
+          remove.disabled = true;
+          void saveAlias(alias, "", undefined, this.fetcher).then(async result => {
+            if (result.ok) await this.refresh("mutation");
+            else status.textContent = result.message;
+          }).finally(() => { remove.disabled = false; });
+        });
+        row.append(element("span", undefined, alias.displayAlias), element("code", "alias-history-session", alias.sessionName), remove, status);
+        body.append(row);
+      }
+      this.aliasArchive.replaceChildren(element("summary", undefined, "Aliases of sessions that are not running"), body);
     }
     this.aliasArchive.hidden = inventory.detachedAliases.length === 0;
     this.updateCreateTargets(inventory);
@@ -1212,9 +1232,8 @@ export class Dashboard {
         if (displayAlias) {
           if (!target) { assignText(status, `Created ${name}. Its alias could not be saved yet; your alias is kept in the form.`); return; }
           try {
-            const request = aliasRequest(undefined, target.handles.alias, displayAlias);
-            const saved = await this.fetcher(request.url, { ...request.init, headers: { ...(request.init.headers as Record<string, string>), "X-Persea-CSRF": csrfToken() }, cache: "no-store", credentials: "same-origin" });
-            if (!saved.ok) throw new Error("Alias unavailable");
+            const saved = await saveAlias(undefined, target.handles.alias, displayAlias, this.fetcher);
+            if (!saved.ok) { this.offerCreatedAliasRetry(target, displayAlias, alias, status, saved.message); return; }
             alias.value = ""; await this.refresh("mutation");
           } catch { this.offerCreatedAliasRetry(target, displayAlias, alias, status); return; }
         }
@@ -1234,9 +1253,9 @@ export class Dashboard {
       submit.disabled = input.disabled = alias.disabled = false; this.createTarget.disabled = this.createTargets.size === 0;
     }
   }
-  private offerCreatedAliasRetry(created: DashboardSession, displayAlias: string, input: HTMLInputElement, status: HTMLElement): void {
+  private offerCreatedAliasRetry(created: DashboardSession, displayAlias: string, input: HTMLInputElement, status: HTMLElement, reason = "Aliases are temporarily unavailable."): void {
     const retry = element("button", undefined, "Retry saving alias"); retry.type = "button";
-    status.replaceChildren(element("span", undefined, `Created ${created.name}. The alias could not be saved.`), retry);
+    status.replaceChildren(element("span", undefined, `Created ${created.name}. The alias was not saved. ${reason}`), retry);
     retry.addEventListener("click", () => {
       if (this.creationBusy || !retry.isConnected) return;
       this.creationBusy = true; this.gate.setMutating(true);
@@ -1248,9 +1267,8 @@ export class Dashboard {
           const target = this.inventory?.realms.flatMap(realm => realm.servers.flatMap(server => server.sessions)).find(session => session.draftScope === created.draftScope);
           if (!target) { status.textContent = `Created ${created.name}, but that session is no longer available. The alias was not applied to another session.`; return; }
           if (!target.aliases.some(alias => alias.displayAlias === displayAlias)) {
-            const request = aliasRequest(undefined, target.handles.alias, displayAlias);
-            const response = await this.fetcher(request.url, { ...request.init, headers: { ...(request.init.headers as Record<string, string>), "X-Persea-CSRF": csrfToken() }, cache: "no-store", credentials: "same-origin" });
-            if (!response.ok) throw new Error("Alias unavailable");
+            const response = await saveAlias(undefined, target.handles.alias, displayAlias, this.fetcher);
+            if (!response.ok) { this.offerCreatedAliasRetry(created, displayAlias, input, status, response.message); return; }
             await this.refresh("mutation");
           }
           input.value = ""; status.textContent = `Created ${created.name} as ${displayAlias}.`;
@@ -1445,8 +1463,9 @@ export class Dashboard {
     let aliasVersion = ""; let actionVersion = "";
     const update = (next: DashboardSession): void => {
       session = next;
-      name.textContent = session.name; name.title = session.name;
-      alias.textContent = session.aliases[0]?.displayAlias ?? ""; alias.title = alias.textContent; alias.hidden = !alias.textContent;
+      name.textContent = session.aliases[0]?.displayAlias ?? session.name; name.title = name.textContent;
+      alias.className = "session-tmux-name";
+      alias.textContent = session.aliases.length ? session.name : ""; alias.title = alias.textContent; alias.hidden = !alias.textContent;
       updateSessionMetadata(metadata, session);
       const pinned = this.isFavorite(session.draftScope);
       article.dataset.pinned = String(pinned);
@@ -1459,7 +1478,7 @@ export class Dashboard {
       const reloadAlias = editors.querySelector('[data-reload="true"]') !== null;
       if ((nextAliases !== aliasVersion || reloadAlias) && (reloadAlias || (!hasDraft(editors) && (!editors.contains(document.activeElement) || editors.querySelector('[data-saved="true"]'))))) {
         aliasVersion = nextAliases;
-        editors.replaceChildren(...(session.aliases.length ? session.aliases : [undefined]).map((item, index) => this.renderAliasEditor(session, item, index, () => session)));
+        editors.replaceChildren(this.renderAliasEditor(session, session.aliases[0], () => session));
       }
       const nextActions = JSON.stringify(session.unified ?? null);
       if (nextActions !== actionVersion) {
@@ -1552,11 +1571,11 @@ export class Dashboard {
     button.setAttribute("aria-busy", String(state.pending.includes(session.draftScope)));
   }
 
-  private renderAliasEditor(session: DashboardSession, alias: DashboardAlias | undefined, index: number, currentSession = () => session): HTMLElement {
+  private renderAliasEditor(session: DashboardSession, alias: DashboardAlias | undefined, currentSession = () => session): HTMLElement {
     const form = element("form", "alias-editor");
     const label = element("label", undefined, "Alias");
     const input = element("input"); input.name = "display_alias"; input.type = "text"; input.maxLength = 128; input.autocomplete = "off";
-    input.value = input.defaultValue = alias?.displayAlias ?? ""; input.setAttribute("aria-label", `Alias for ${session.name}${index ? ` ${index + 1}` : ""}`);
+    input.value = input.defaultValue = alias?.displayAlias ?? ""; input.setAttribute("aria-label", `Alias for ${session.name}`);
     label.append(input);
     const save = element("button", undefined, "Save"); save.type = "submit"; save.setAttribute("aria-label", `Save alias for ${session.name}`);
     form.append(label, save);
@@ -1569,23 +1588,27 @@ export class Dashboard {
   private async mutate(session: DashboardSession, alias: DashboardAlias | undefined, displayAlias: string | undefined, form: HTMLFormElement): Promise<void> {
     if (form.dataset.busy === "true") return;
     form.dataset.busy = "true"; this.gate.setMutating(true);
-    form.querySelector<HTMLElement>(".alias-status")!.textContent = "Saving alias…";
+    const status = form.querySelector<HTMLElement>(".alias-status")!;
+    status.textContent = "Saving alias…";
     form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button").forEach(control => { control.disabled = true; });
     try {
-      const request = aliasRequest(alias, session.handles.alias, displayAlias);
-      const response = await this.fetcher(request.url, { ...request.init, headers: { ...(request.init.headers as Record<string,string>), "X-Persea-CSRF": csrfToken() }, cache: "no-store", credentials: "same-origin" });
-      if (!response.ok) {
-        const status = form.querySelector<HTMLElement>(".alias-status")!;
-        status.textContent = mutationStatus(response.status) ?? `Alias request failed (${response.status}).`;
-        if (response.status === 409) {
+      const result = await saveAlias(alias, session.handles.alias, displayAlias, this.fetcher);
+      if (!result.ok) {
+        status.textContent = result.message;
+        if (result.code === "alias_exists" && result.current) {
+          const current = this.renderAliasEditor(session, result.current, () => this.inventory?.realms.flatMap(realm => realm.servers.flatMap(server => server.sessions)).find(item => item.draftScope === session.draftScope) ?? session);
+          current.querySelector<HTMLElement>(".alias-status")!.textContent = result.message;
+          form.replaceWith(current);
+          await this.refresh("mutation");
+          const shownStatus = this.sessionNodes.get(session.draftScope)?.el.querySelector<HTMLElement>(".alias-status");
+          if (shownStatus) shownStatus.textContent = result.message;
+        } else if (result.code === "alias_changed") {
           const reload = element("button", undefined, "Reload saved alias"); reload.type = "button";
-          const keep = element("button", undefined, "Keep editing"); keep.type = "button";
-          keep.addEventListener("click", () => { delete form.dataset.reload; form.querySelector("input")?.focus(); });
           reload.addEventListener("click", () => {
             form.dataset.reload = "true";
             void this.refresh("manual").finally(() => { delete form.dataset.reload; this.sessionNodes.get(session.draftScope)?.el.querySelector<HTMLElement>(".alias-editor input")?.focus(); });
           });
-          status.replaceChildren(element("span", undefined, "This alias changed elsewhere. Your draft is kept."), reload, keep);
+          status.append(reload);
         }
         return;
       }
@@ -1594,7 +1617,6 @@ export class Dashboard {
       await this.refresh("mutation");
       this.sessionNodes.get(session.draftScope)?.el.querySelector<HTMLDialogElement>(".session-alias-dialog")?.close();
       this.status.textContent = displayAlias === undefined ? "Alias cleared." : "Alias saved.";
-    } catch { form.querySelector<HTMLElement>(".alias-status")!.textContent = "Alias request could not be completed. Your draft is kept."; }
-    finally { this.gate.setMutating(false); form.dataset.busy = "false"; form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button").forEach(control => { control.disabled = false; }); }
+    } finally { this.gate.setMutating(false); form.dataset.busy = "false"; form.querySelectorAll<HTMLInputElement | HTMLButtonElement>("input, button").forEach(control => { control.disabled = false; }); }
   }
 }

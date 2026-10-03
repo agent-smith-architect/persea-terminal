@@ -34,7 +34,7 @@ async function start() {
       if (req.method === 'PUT') { let body = ''; for await(const chunk of req) body += chunk; const update = JSON.parse(body); state.workspace = { ...state.workspace, ...update, normalized_name: update.name.toUpperCase(), revision: state.workspace.revision + 1 }; json(res, 200, state.workspace); return true; }
     }
     if (url.pathname.startsWith('/api/session-preview')) { json(res, 200, { rows: ['Synthetic terminal preview.'], ansi_rows: ['Synthetic terminal preview.'], captured_at: Date.now(), width: 127, height: 30, truncated: false }); return true; }
-    if (url.pathname.startsWith('/api/aliases')) { json(res, 409, { error: 'revision_conflict' }); return true; }
+    if (url.pathname.startsWith('/api/aliases')) { res.writeHead(409, { 'Content-Type': 'text/plain' }); res.end('alias_changed'); return true; }
     return false;
   } });
   return { ...server, state };
@@ -86,15 +86,16 @@ async function main() {
       const current = fixture.state.sessions.find(s => s.name === 'qt1'); assert(href.includes(current.handles.control), 'Stable row kept an expired capability instead of the refreshed one');
     });
     await check('alias conflict preserves a draft and offers an explicit reload of the saved alias', async () => {
-      await section('Sessions'); const card = page.locator('.session-card').filter({ has: page.locator('.session-name', { hasText: /^qt1$/ }) });
+      fixture.state.aliases = [{ alias_id: 'fixture-alias', display_alias: 'Saved alias', revision: 1, realm: 'local', server: 'private', session_name: 'qt1', state: 'active', session_incarnation: authority(1) }];
+      await section('Sessions'); await refresh(); const card = page.locator('.session-card').filter({ has: page.locator('.session-name, .session-tmux-name', { hasText: /^qt1$/ }) });
       if (await card.locator('.session-detail').isHidden()) await card.locator('.session-disclosure').click();
       await card.locator('.session-alias-edit').click();
       const input = card.locator('.alias-editor input'); await input.fill('Keep this alias draft');
-      fixture.state.aliases = [{ alias_id: 'fixture-alias', display_alias: 'Saved elsewhere', revision: 2, state: 'active', session_incarnation: authority(1) }];
+      fixture.state.aliases = [{ alias_id: 'fixture-alias', display_alias: 'Saved elsewhere', revision: 2, realm: 'local', server: 'private', session_name: 'qt1', state: 'active', session_incarnation: authority(1) }];
       await page.keyboard.press('Escape'); await refresh(); await card.locator('.session-alias-edit').click();
       assert(await input.inputValue() === 'Keep this alias draft', 'Remote alias change discarded a draft');
       await card.locator('.alias-editor button[type=submit]').click();
-      await card.getByRole('button', { name: 'Keep editing', exact: true }).click(); assert(await input.inputValue() === 'Keep this alias draft', 'Conflict lost the draft');
+      await card.getByRole('button', { name: 'Reload saved alias', exact: true }).waitFor(); assert(await input.inputValue() === 'Keep this alias draft', 'Conflict lost the draft');
       await card.getByRole('button', { name: 'Reload saved alias', exact: true }).click(); await page.waitForTimeout(150);
       assert(await card.locator('.alias-editor input').inputValue() === 'Saved elsewhere', 'Explicit reload failed to adopt the latest alias revision');
       await page.keyboard.press('Escape');
@@ -128,7 +129,7 @@ async function main() {
       await page.locator('.dashboard-empty-results button').click(); assert(await page.locator('.session-card:visible').count() === 12, 'Clear did not restore sessions');
     });
     await check('favorites persist per incarnation; a replacement session does not inherit them', async () => {
-      await section('Sessions'); const card = page.locator('.session-card').filter({ has: page.locator('.session-name', { hasText: /^qt1$/ }) });
+      await section('Sessions'); const card = page.locator('.session-card').filter({ has: page.locator('.session-name, .session-tmux-name', { hasText: /^qt1$/ }) });
       if (await card.locator('.session-detail').isHidden()) await card.locator('.session-disclosure').click();
       await card.locator('.session-pin').click();
       await page.waitForFunction(() => [...document.querySelectorAll('.session-pin')].every(node => node.getAttribute('aria-busy') === 'false'));

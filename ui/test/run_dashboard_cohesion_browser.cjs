@@ -19,7 +19,7 @@ async function main() {
     page.on('pageerror', error => evidence.errors.push({ phase, text: error.message }));
   };
   const page = await context.newPage(); capture(page);
-  const row = (name, realm = 'local', target = page) => target.locator(`.realm-card[data-realm="${realm}"] .session-card`).filter({ has: target.getByRole('heading', { name, exact: true }) });
+  const row = (name, realm = 'local', target = page) => target.locator(`.realm-card[data-realm="${realm}"] .session-card`).filter({ has: target.locator('.session-name, .session-tmux-name').filter({ hasText: new RegExp(`^${name}$`) }) });
   const count = route => fixture.state.requests.filter(request => request.path === route).length;
   const previewsFor = id => fixture.state.requests.filter(request => request.path === '/api/session-previews' && new URLSearchParams(request.query).get('session_id') === id).length;
   const ready = async target => { await target.locator('.session-card').first().waitFor(); await target.waitForFunction(() => !document.querySelector('.session-card .session-pin').disabled); };
@@ -94,13 +94,13 @@ async function main() {
       await editor.getByRole('textbox', { name: 'Alias for qt1', exact: true }).fill('Build worker');
       await editor.getByRole('button', { name: 'Save alias for qt1', exact: true }).click();
       await page.waitForFunction(() => !document.querySelector('.session-alias-dialog').open);
-      assert(await card.locator('.alias-badge').innerText() === 'Build worker', 'Saved alias did not appear beside the session');
-      assert(await card.locator('.session-name').innerText() === 'qt1' && await card.locator('.session-detail').isHidden(), 'Editing an alias renamed tmux or expanded the row');
+      assert(await card.locator('.session-name').innerText() === 'Build worker', 'Saved alias did not become the row title');
+      assert(await card.locator('.session-tmux-name').innerText() === 'qt1' && await card.locator('.session-detail').isHidden(), 'Editing an alias lost the tmux name or expanded the row');
       assert(await card.locator('.session-alias-edit').evaluate(node => document.activeElement === node), 'Alias save lost return focus');
       await card.locator('.session-alias-edit').click();
       await editor.getByRole('button', { name: 'Clear alias for qt1', exact: true }).click();
       await page.waitForFunction(() => !document.querySelector('.session-alias-dialog').open);
-      assert(await card.locator('.alias-badge').isHidden(), 'Clearing an alias did not update the row');
+      assert(await card.locator('.session-tmux-name').isHidden() && await card.locator('.session-name').innerText() === 'qt1', 'Clearing an alias did not restore the tmux title');
     });
 
     await check('row previews and the single information panel reflow beside balanced Resume actions', async () => {
@@ -185,7 +185,7 @@ async function main() {
       assert(count('/api/sessions') === creates + 1, 'Creation was duplicated');
       const request = fixture.state.requests.filter(request => request.path === '/api/sessions').at(-1);
       assert(JSON.stringify(request.body) === JSON.stringify({ realm: 'smith', server: 'default', name: 'cohesion_created' }), 'Creation did not use the selected user or sent extra execution fields');
-      assert((await row('cohesion_created', 'smith').locator('.alias-badge').innerText()) === 'Research notes', 'Optional alias was not applied');
+      assert((await row('cohesion_created', 'smith').locator('.session-name').innerText()) === 'Research notes', 'Optional alias was not applied');
       await page.getByRole('button', { name: 'Close new session form', exact: true }).click();
     });
 
@@ -223,14 +223,15 @@ async function main() {
         await page.getByRole('button', { name: 'New session', exact: true }).click();
         await form.locator('select').selectOption(JSON.stringify(['smith', 'default']));
         const name = `alias_${recovery.replace('-', '_')}`;
+        const displayAlias = `Recovery ${recovery}`;
         await form.locator('input[name="name"]').fill(name);
-        await form.locator('input[name="display_alias"]').fill('Recovery alias');
+        await form.locator('input[name="display_alias"]').fill(displayAlias);
         fixture.state.aliasStatus = recovery === 'lost-reply' ? 200 : 503;
         fixture.state.aliasCommitThenFail = recovery === 'lost-reply';
         const creates = count('/api/sessions');
         await form.getByRole('button', { name: 'Create session', exact: true }).click();
         await form.getByRole('button', { name: 'Retry saving alias', exact: true }).waitFor();
-        assert(count('/api/sessions') === creates + 1 && await form.locator('input[name="display_alias"]').inputValue() === 'Recovery alias', 'Alias failure lost the draft or repeated creation');
+        assert(count('/api/sessions') === creates + 1 && await form.locator('input[name="display_alias"]').inputValue() === displayAlias, 'Alias failure lost the draft or repeated creation');
         const aliasRequests = count('/api/aliases');
         fixture.state.aliasStatus = 200;
         if (recovery === 'replacement') {
@@ -238,10 +239,10 @@ async function main() {
           created.authority = { ...created.authority, session_created: created.authority.session_created + 1 };
         }
         await form.getByRole('button', { name: 'Retry saving alias', exact: true }).click();
-        await page.waitForFunction(replacement => {
+        await page.waitForFunction(({ replacement, displayAlias }) => {
           const text = document.querySelector('.session-create-status').textContent;
-          return text.includes(replacement ? 'no longer available' : 'as Recovery alias');
-        }, recovery === 'replacement');
+          return text.includes(replacement ? 'no longer available' : `as ${displayAlias}`);
+        }, { replacement: recovery === 'replacement', displayAlias });
         assert(count('/api/sessions') === creates + 1, 'Alias retry created another session');
         assert(count('/api/aliases') === aliasRequests + (recovery === 'retry' ? 1 : 0), 'Alias retry duplicated a committed save or wrote to a replacement');
         await page.getByRole('button', { name: 'Close new session form', exact: true }).click();

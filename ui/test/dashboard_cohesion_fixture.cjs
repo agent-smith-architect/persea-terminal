@@ -67,19 +67,25 @@ async function startCohesionFixture(ui = path.resolve(__dirname, '..')) {
     }
     if (url.pathname.startsWith('/api/aliases')) {
       const body = await read(req); request.body = body;
-      if (state.aliasStatus !== 200) { json(res, state.aliasStatus, {}); return true; }
-      const target = [...state.sessions, ...state.others].find(row => row.handles.alias === body.handle);
-      if (!target) { json(res, 410, {}); return true; }
+      const fail = (status, code, record) => { res.writeHead(status, { 'Content-Type': 'text/plain', ...(record ? { 'X-Persea-Alias-Record': JSON.stringify(record) } : {}) }); res.end(code); return true; };
+      if (state.aliasStatus !== 200) return fail(state.aliasStatus, state.aliasStatus === 409 ? 'alias_changed' : 'alias_unavailable');
       if (req.method === 'POST') {
-        state.aliases.push({ alias_id: crypto.randomBytes(16).toString('hex'), display_alias: body.display_alias, revision: 1, state: 'live', session_incarnation: target.authority });
-        if (state.aliasCommitThenFail) { state.aliasCommitThenFail = false; json(res, 503, {}); return true; }
+        const target = [...state.sessions, ...state.others].find(row => row.handles.alias === body.handle);
+        if (!target) return fail(410, 'session_gone');
+        const current = state.aliases.find(alias => alias.state === 'active' && alias.session_incarnation.session_id === target.session_id && alias.realm === target.realm);
+        if (current) return fail(409, 'alias_exists', current);
+        if (state.aliases.some(alias => alias.state === 'active' && alias.display_alias.toLowerCase() === body.display_alias.toLowerCase())) return fail(409, 'alias_in_use');
+        state.aliases = state.aliases.filter(alias => alias.state !== 'detached' || alias.display_alias.toLowerCase() !== body.display_alias.toLowerCase());
+        state.aliases.push({ alias_id: crypto.randomBytes(16).toString('hex'), display_alias: body.display_alias, revision: 1, state: 'active', realm: target.realm, server: target.server, session_name: target.name, session_incarnation: target.authority });
+        if (state.aliasCommitThenFail) { state.aliasCommitThenFail = false; return fail(503, 'alias_unavailable'); }
         json(res, 201, state.aliases[state.aliases.length - 1]); return true;
       }
       const record = state.aliases.find(alias => url.pathname.endsWith(alias.alias_id));
-      if (!record || req.headers['if-match'] !== `"${record.revision}"`) { json(res, 409, {}); return true; }
-      if (req.method === 'DELETE') state.aliases = state.aliases.filter(alias => alias !== record);
-      else { record.display_alias = body.display_alias; record.revision++; }
-      json(res, 200, record); return true;
+      if (!record) return fail(404, 'alias_not_found');
+      if (req.headers['if-match'] !== `"${record.revision}"`) return fail(409, 'alias_changed', record);
+      if (req.method === 'DELETE') { state.aliases = state.aliases.filter(alias => alias !== record); res.writeHead(204); res.end(); }
+      else { record.display_alias = body.display_alias; record.revision++; json(res, 200, record); }
+      return true;
     }
     return false;
   } });
