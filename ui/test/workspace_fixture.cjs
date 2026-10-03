@@ -88,7 +88,7 @@ function startWorkspaceFixture(ui, options = {}) {
     takeoverClaims: [],         // exact offer/source presented to takeover
     attachments: [],            // per WebSocket attachment
     rateLimits: [],             // one-shot 429s: { path, session?, remaining }
-    preferences: { version: 1, theme: "default", font_size: null, composer_font_size: 11, default_session: null, revision: 0, stored: false, available: true },
+    preferences: { version: 1, theme: "default", font_size: null, composer_font_size: 11, terminal_position: "top-center", default_session: null, revision: 0, stored: false, available: true },
     preferencesCorrupt: false,
     counters: { documents: 0, inventory: 0, workspaceReads: 0, workspaceWrites: 0, handleRequests: 0, takeovers: 0, adoptions: 0, websockets: 0, replays: 0, sessionsCreated: 0, favicon: 0, requests: 0, preferencesGet: 0, preferencesPut: 0 },
     requestsByPath: {},
@@ -139,7 +139,7 @@ function startWorkspaceFixture(ui, options = {}) {
     state.rateLimits = [];
     for (const key of Object.keys(state.counters)) state.counters[key] = 0;
     state.requestsByPath = {};
-    state.preferences = { version: 1, theme: "default", font_size: null, composer_font_size: 11, default_session: null, revision: 0, stored: false, available: true };
+    state.preferences = { version: 1, theme: "default", font_size: null, composer_font_size: 11, terminal_position: "top-center", default_session: null, revision: 0, stored: false, available: true };
     state.preferencesCorrupt = false;
     snippets.reset();
     state.holdInventoryMs = 0;
@@ -309,6 +309,15 @@ function startWorkspaceFixture(ui, options = {}) {
     }
     state.counters.requests += 1;
     state.requestsByPath[url.pathname] = (state.requestsByPath[url.pathname] || 0) + 1;
+    // A gate that opens the dashboard beside its panes (Settings) needs the
+    // empty favorites record the front door returns, not a 404.
+    if (request.method === "GET" && url.pathname === "/api/dashboard-preferences") {
+      response.setHeader("Content-Type", "application/json");
+      response.setHeader("Cache-Control", "no-store");
+      response.setHeader("ETag", '"0"');
+      response.end(JSON.stringify({ version: 1, favorites: [], revision: 0, available: true }));
+      return;
+    }
     // Shared factory keyboard defaults for the real mounted panes.
     if (request.method === "GET" && url.pathname === "/api/keyboard-preferences") {
       response.setHeader("Content-Type", "application/json");
@@ -358,12 +367,18 @@ function startWorkspaceFixture(ui, options = {}) {
       if (request.headers["x-persea-csrf"] !== CSRF_TOKEN || !body || body.version !== 1) {
         response.writeHead(403); response.end("forbidden\n"); return;
       }
+      // The front door requires the position: absent, null or unknown is a
+      // malformed record.
+      if (!["top-center", "top-left", "center"].includes(body.terminal_position)) {
+        response.writeHead(400); response.end("invalid preferences request\n"); return;
+      }
       state.preferences = {
         version: 1, theme: body.theme, font_size: body.font_size,
         // An absent composer face is the default, exactly as the front door
         // reads it: the field is a plain integer with a default, so a client
         // that predates it still states a whole record as far as it knows.
         composer_font_size: typeof body.composer_font_size === "number" ? body.composer_font_size : 11,
+        terminal_position: body.terminal_position,
         default_session: body.default_session,
         revision: state.preferences.revision + 1, stored: true, available: true,
       };

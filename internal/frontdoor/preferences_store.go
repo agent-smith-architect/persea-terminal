@@ -44,6 +44,17 @@ var preferenceThemes = map[string]bool{
 	"catppuccin-mocha": true,
 }
 
+// Where a terminal grid smaller than its space sits. Like the theme ids, the
+// browser ships exactly these values (ui/src/terminal_position.ts), so an
+// unknown value is a validation failure, never a fallback.
+const preferenceDefaultTerminalPosition = "top-center"
+
+var preferenceTerminalPositions = map[string]bool{
+	"top-center": true,
+	"top-left":   true,
+	"center":     true,
+}
+
 var errPreferencesConflict = errors.New("preferences revision conflict")
 var errPreferencesValidation = errors.New("invalid preferences")
 var errPreferencesStoreUnavailable = errors.New("preferences store unavailable")
@@ -69,6 +80,7 @@ type Preferences struct {
 	Theme            string          `json:"theme"`
 	FontSize         *int            `json:"font_size"`
 	ComposerFontSize int             `json:"composer_font_size"`
+	TerminalPosition string          `json:"terminal_position"`
 	DefaultSession   *DefaultSession `json:"default_session"`
 }
 
@@ -95,7 +107,11 @@ type preferenceEntry struct {
 	// for records written before the field existed. It is omitted when nil so
 	// a store this release rewrites is byte-identical in shape to what it was
 	// for records it did not touch.
-	ComposerFontSize *int            `json:"composer_font_size,omitempty"`
+	ComposerFontSize *int `json:"composer_font_size,omitempty"`
+	// A pointer for the same reason: nil only for a record written before the
+	// field existed, which reads as the default. Present, it must be one of
+	// the closed values, or the store does not load.
+	TerminalPosition *string         `json:"terminal_position,omitempty"`
 	DefaultSession   *DefaultSession `json:"default_session"`
 	Revision         uint64          `json:"revision"`
 	CreatedAt        time.Time       `json:"created_at"`
@@ -119,7 +135,12 @@ type preferencesStore struct {
 // from the same number chosen deliberately. The nullable field preserves that
 // distinction.
 func defaultPreferences() PreferenceRecord {
-	return PreferenceRecord{Preferences: Preferences{Version: preferencesStoreVersion, Theme: preferenceDefaultTheme, ComposerFontSize: preferenceDefaultComposerFontSize}}
+	return PreferenceRecord{Preferences: Preferences{
+		Version:          preferencesStoreVersion,
+		Theme:            preferenceDefaultTheme,
+		ComposerFontSize: preferenceDefaultComposerFontSize,
+		TerminalPosition: preferenceDefaultTerminalPosition,
+	}}
 }
 
 // composerFontSizeOf resolves the stored pointer: a record written before the
@@ -127,6 +148,15 @@ func defaultPreferences() PreferenceRecord {
 func composerFontSizeOf(v *int) int {
 	if v == nil {
 		return preferenceDefaultComposerFontSize
+	}
+	return *v
+}
+
+// terminalPositionOf resolves the stored pointer the same way: a record written
+// before the field existed reads as the default.
+func terminalPositionOf(v *string) string {
+	if v == nil {
+		return preferenceDefaultTerminalPosition
 	}
 	return *v
 }
@@ -171,7 +201,8 @@ func validComposerFontSize(v int) bool {
 
 func validatePreferences(p Preferences) error {
 	if p.Version != preferencesStoreVersion || !preferenceThemes[p.Theme] || !validFontSize(p.FontSize) ||
-		!validComposerFontSize(p.ComposerFontSize) || !validDefaultSession(p.DefaultSession) {
+		!validComposerFontSize(p.ComposerFontSize) || !preferenceTerminalPositions[p.TerminalPosition] ||
+		!validDefaultSession(p.DefaultSession) {
 		return errPreferencesValidation
 	}
 	return nil
@@ -212,7 +243,7 @@ func (s *preferencesStore) load() error {
 		if _, dup := s.records[e.Operator]; dup {
 			return errors.New("duplicate preferences operator")
 		}
-		if err := validatePreferences(Preferences{Version: preferencesStoreVersion, Theme: e.Theme, FontSize: e.FontSize, ComposerFontSize: composerFontSizeOf(e.ComposerFontSize), DefaultSession: e.DefaultSession}); err != nil {
+		if err := validatePreferences(Preferences{Version: preferencesStoreVersion, Theme: e.Theme, FontSize: e.FontSize, ComposerFontSize: composerFontSizeOf(e.ComposerFontSize), TerminalPosition: terminalPositionOf(e.TerminalPosition), DefaultSession: e.DefaultSession}); err != nil {
 			return errors.New("invalid preferences record")
 		}
 		s.records[e.Operator] = e
@@ -249,6 +280,7 @@ func recordOf(e preferenceEntry) PreferenceRecord {
 		Theme:            e.Theme,
 		FontSize:         copyFontSize(e.FontSize),
 		ComposerFontSize: composerFontSizeOf(e.ComposerFontSize),
+		TerminalPosition: terminalPositionOf(e.TerminalPosition),
 		DefaultSession:   copySession(e.DefaultSession),
 	}, Revision: e.Revision, Stored: true}
 }
@@ -292,7 +324,8 @@ func (s *preferencesStore) put(operator string, p Preferences, revision uint64) 
 		return PreferenceRecord{}, fmt.Errorf("%w: capacity reached", errPreferencesStoreUnavailable)
 	}
 	composerFont := p.ComposerFontSize
-	next := preferenceEntry{Operator: operator, Theme: p.Theme, FontSize: copyFontSize(p.FontSize), ComposerFontSize: &composerFont, DefaultSession: copySession(p.DefaultSession), Revision: revision + 1, CreatedAt: now, UpdatedAt: now}
+	position := p.TerminalPosition
+	next := preferenceEntry{Operator: operator, Theme: p.Theme, FontSize: copyFontSize(p.FontSize), ComposerFontSize: &composerFont, TerminalPosition: &position, DefaultSession: copySession(p.DefaultSession), Revision: revision + 1, CreatedAt: now, UpdatedAt: now}
 	if exists {
 		next.CreatedAt = old.CreatedAt
 	}

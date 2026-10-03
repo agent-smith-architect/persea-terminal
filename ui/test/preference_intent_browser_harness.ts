@@ -60,10 +60,10 @@ class MemoryStorage {
 // front door's: GET reads it, PUT compares If-Match and bumps the revision.
 function preferenceServer() {
   let revision = 0;
-  let record: { theme: string; font_size: number | null; composer_font_size: number } = { theme: "default", font_size: 14, composer_font_size: 13 };
+  let record: { theme: string; font_size: number | null; composer_font_size: number; terminal_position: string } = { theme: "default", font_size: 14, composer_font_size: 13, terminal_position: "top-center" };
   const body = () => JSON.stringify({
     version: 1, theme: record.theme, font_size: record.font_size, composer_font_size: record.composer_font_size,
-    default_session: null, revision, stored: true, available: true,
+    terminal_position: record.terminal_position, default_session: null, revision, stored: true, available: true,
   });
   const headers = () => ({ "Content-Type": "application/json", ETag: `"${revision}"`, "Cache-Control": "no-store" });
   return {
@@ -72,8 +72,8 @@ function preferenceServer() {
       if ((init.method ?? "GET") === "GET") return new Response(body(), { status: 200, headers: headers() });
       const sent = new Headers(init.headers).get("If-Match");
       if (sent !== `"${revision}"`) return new Response(body(), { status: 412, headers: headers() });
-      const patch = JSON.parse(String(init.body)) as { theme: string; font_size: number | null; composer_font_size: number };
-      record = { theme: patch.theme, font_size: patch.font_size, composer_font_size: patch.composer_font_size };
+      const patch = JSON.parse(String(init.body)) as { theme: string; font_size: number | null; composer_font_size: number; terminal_position: string };
+      record = { theme: patch.theme, font_size: patch.font_size, composer_font_size: patch.composer_font_size, terminal_position: patch.terminal_position };
       revision += 1;
       return new Response(body(), { status: 200, headers: headers() });
     },

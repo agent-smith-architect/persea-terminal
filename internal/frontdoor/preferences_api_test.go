@@ -26,7 +26,7 @@ func decodePreferences(t *testing.T, w *httptest.ResponseRecorder) preferencesRe
 }
 
 func preferencesBody(theme string, size int, session string) string {
-	return `{"version":1,"theme":"` + theme + `","font_size":` + strconv.Itoa(size) + `,"default_session":` + session + `}`
+	return `{"version":1,"theme":"` + theme + `","font_size":` + strconv.Itoa(size) + `,"terminal_position":"top-center","default_session":` + session + `}`
 }
 
 func TestPreferencesAPIContract(t *testing.T) {
@@ -110,23 +110,23 @@ func TestPreferencesAPIContract(t *testing.T) {
 		t.Fatalf("HEAD=%d", w.Code)
 	}
 	for name, body := range map[string]string{
-		"unknown_field":           `{"version":1,"theme":"` + preferencesSecret + `","font_size":14,"default_session":null,"extra":true}`,
-		"revision_in_body":        `{"version":1,"theme":"` + preferencesSecret + `","font_size":14,"default_session":null,"revision":2}`,
+		"unknown_field":           `{"version":1,"theme":"` + preferencesSecret + `","font_size":14,"terminal_position":"top-center","default_session":null,"extra":true}`,
+		"revision_in_body":        `{"version":1,"theme":"` + preferencesSecret + `","font_size":14,"terminal_position":"top-center","default_session":null,"revision":2}`,
 		"trailing_garbage":        validBody + ` {"theme":"` + preferencesSecret + `"}`,
 		"trailing_scalar":         validBody + ` 1`,
-		"duplicate_key":           `{"version":1,"theme":"default","theme":"` + preferencesSecret + `","font_size":14,"default_session":null}`,
-		"folded_duplicate_key":    `{"version":1,"theme":"default","THEME":"` + preferencesSecret + `","font_size":14,"default_session":null}`,
-		"missing_default_session": `{"version":1,"theme":"default","font_size":14}`,
-		"missing_theme":           `{"version":1,"font_size":14,"default_session":null}`,
+		"duplicate_key":           `{"version":1,"theme":"default","theme":"` + preferencesSecret + `","font_size":14,"terminal_position":"top-center","default_session":null}`,
+		"folded_duplicate_key":    `{"version":1,"theme":"default","THEME":"` + preferencesSecret + `","font_size":14,"terminal_position":"top-center","default_session":null}`,
+		"missing_default_session": `{"version":1,"theme":"default","font_size":14,"terminal_position":"top-center"}`,
+		"missing_theme":           `{"version":1,"font_size":14,"terminal_position":"top-center","default_session":null}`,
 		"unknown_theme":           preferencesBody(preferencesSecret, 14, "null"),
-		"font_float":              `{"version":1,"theme":"default","font_size":14.0,"default_session":null}`,
-		"font_string":             `{"version":1,"theme":"default","font_size":"14","default_session":null}`,
-		"font_bool":               `{"version":1,"theme":"default","font_size":true,"default_session":null}`,
-		"font_object":             `{"version":1,"theme":"default","font_size":{"px":14},"default_session":null}`,
-		"missing_font":            `{"version":1,"theme":"default","default_session":null}`,
+		"font_float":              `{"version":1,"theme":"default","font_size":14.0,"terminal_position":"top-center","default_session":null}`,
+		"font_string":             `{"version":1,"theme":"default","font_size":"14","terminal_position":"top-center","default_session":null}`,
+		"font_bool":               `{"version":1,"theme":"default","font_size":true,"terminal_position":"top-center","default_session":null}`,
+		"font_object":             `{"version":1,"theme":"default","font_size":{"px":14},"terminal_position":"top-center","default_session":null}`,
+		"missing_font":            `{"version":1,"theme":"default","terminal_position":"top-center","default_session":null}`,
 		"font_too_small":          preferencesBody("default", 8, "null"),
 		"font_too_large":          preferencesBody("default", 25, "null"),
-		"wrong_version":           `{"version":2,"theme":"default","font_size":14,"default_session":null}`,
+		"wrong_version":           `{"version":2,"theme":"default","font_size":14,"terminal_position":"top-center","default_session":null}`,
 		"session_unknown_field":   preferencesBody("default", 14, `{"realm":"r","server":"s","name":"`+preferencesSecret+`","extra":1}`),
 		"session_missing_name":    preferencesBody("default", 14, `{"realm":"r","server":"s"}`),
 		"session_bad_realm":       preferencesBody("default", 14, `{"realm":"bad realm","server":"s","name":"`+preferencesSecret+`"}`),
@@ -138,19 +138,19 @@ func TestPreferencesAPIContract(t *testing.T) {
 		"null_top_level":          `null`,
 		"empty":                   ``,
 		"not_json":                preferencesSecret,
-		"invalid_utf8":            `{"version":1,"theme":"` + string([]byte{0xff}) + `","font_size":14,"default_session":null}`,
+		"invalid_utf8":            `{"version":1,"theme":"` + string([]byte{0xff}) + `","font_size":14,"terminal_position":"top-center","default_session":null}`,
 	} {
 		w := put(`"2"`, body, nil)
 		assertBoundedRefusal(t, name, w, http.StatusBadRequest, preferencesSecret)
 	}
-	oversize := put(`"2"`, `{"version":1,"theme":"`+strings.Repeat("a", preferencesRequestMaxBytes)+`","font_size":14,"default_session":null}`, nil)
+	oversize := put(`"2"`, `{"version":1,"theme":"`+strings.Repeat("a", preferencesRequestMaxBytes)+`","font_size":14,"terminal_position":"top-center","default_session":null}`, nil)
 	assertBoundedRefusal(t, "oversize", oversize, http.StatusRequestEntityTooLarge, "aaaaaaaa")
 	if got := decodePreferences(t, get()); got.Revision != 2 || got.Theme != "one-dark" {
 		t.Fatalf("refusals mutated the record: %+v", got)
 	}
 	// A body inside the limit is accepted: the bound is the reader, not a
 	// smaller hidden one.
-	within := put(`"2"`, `{"version":1,"theme":"default","font_size":14,"default_session":{"realm":"r","server":"s","name":"`+strings.Repeat("n", 100)+`"}}`, nil)
+	within := put(`"2"`, `{"version":1,"theme":"default","font_size":14,"terminal_position":"top-center","default_session":{"realm":"r","server":"s","name":"`+strings.Repeat("n", 100)+`"}}`, nil)
 	if within.Code != http.StatusOK {
 		t.Fatalf("within-limit body=%d %s", within.Code, within.Body.String())
 	}

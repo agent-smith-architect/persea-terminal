@@ -59,13 +59,13 @@ func f1FontRaw(t *testing.T, value any) string {
 }
 
 const (
-	f1AutoRecord      = `{"version":1,"theme":"dracula","font_size":null,"default_session":null}`
-	f1ExplicitRecord  = `{"version":1,"theme":"dracula","font_size":11,"default_session":null}`
-	f1CeilingRecord   = `{"version":1,"theme":"dracula","font_size":24,"default_session":null}`
-	f1BelowFloor      = `{"version":1,"theme":"dracula","font_size":8,"default_session":null}`
-	f1AboveCeiling    = `{"version":1,"theme":"dracula","font_size":25,"default_session":null}`
-	f1AutoOtherTheme  = `{"version":1,"theme":"one-dark","font_size":null,"default_session":null}`
-	f1MissingFontSize = `{"version":1,"theme":"default","default_session":null}`
+	f1AutoRecord      = `{"version":1,"theme":"dracula","font_size":null,"terminal_position":"top-center","default_session":null}`
+	f1ExplicitRecord  = `{"version":1,"theme":"dracula","font_size":11,"terminal_position":"top-center","default_session":null}`
+	f1CeilingRecord   = `{"version":1,"theme":"dracula","font_size":24,"terminal_position":"top-center","default_session":null}`
+	f1BelowFloor      = `{"version":1,"theme":"dracula","font_size":8,"terminal_position":"top-center","default_session":null}`
+	f1AboveCeiling    = `{"version":1,"theme":"dracula","font_size":25,"terminal_position":"top-center","default_session":null}`
+	f1AutoOtherTheme  = `{"version":1,"theme":"one-dark","font_size":null,"terminal_position":"top-center","default_session":null}`
+	f1MissingFontSize = `{"version":1,"theme":"default","terminal_position":"top-center","default_session":null}`
 )
 
 func TestPreferencesStoreFontSizeTriState(t *testing.T) {
@@ -148,7 +148,7 @@ func TestPreferencesStoreReadsPreTriStateRecord(t *testing.T) {
 	}
 	// It keeps its number across a write of an unrelated field, and keeps its
 	// created_at, so nothing of the old shape is lost.
-	next, err := s.put("operator@example.com", f1Preferences(t, `{"version":1,"theme":"one-dark","font_size":16,"default_session":null}`), 3)
+	next, err := s.put("operator@example.com", f1Preferences(t, `{"version":1,"theme":"one-dark","font_size":16,"terminal_position":"top-center","default_session":null}`), 3)
 	if err != nil || f1FontRaw(t, next) != "16" || next.Revision != 4 {
 		t.Fatalf("write over a pre-tri-state record=%s revision=%d err=%v", f1FontRaw(t, next), next.Revision, err)
 	}

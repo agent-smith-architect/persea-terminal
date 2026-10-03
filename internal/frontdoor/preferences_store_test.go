@@ -21,12 +21,12 @@ func fontEqual(a, b *int) bool {
 }
 
 func preferencesFixture(theme string, size int) Preferences {
-	return Preferences{Version: 1, Theme: theme, FontSize: fontPtr(size), ComposerFontSize: preferenceDefaultComposerFontSize, DefaultSession: &DefaultSession{Realm: "desk-a7", Server: "primary", Name: "work"}}
+	return Preferences{Version: 1, Theme: theme, FontSize: fontPtr(size), ComposerFontSize: preferenceDefaultComposerFontSize, TerminalPosition: preferenceDefaultTerminalPosition, DefaultSession: &DefaultSession{Realm: "desk-a7", Server: "primary", Name: "work"}}
 }
 
 // preferencesAuto is the same fixture with the font left on "auto".
 func preferencesAuto(theme string) Preferences {
-	return Preferences{Version: 1, Theme: theme, ComposerFontSize: preferenceDefaultComposerFontSize, DefaultSession: &DefaultSession{Realm: "desk-a7", Server: "primary", Name: "work"}}
+	return Preferences{Version: 1, Theme: theme, ComposerFontSize: preferenceDefaultComposerFontSize, TerminalPosition: preferenceDefaultTerminalPosition, DefaultSession: &DefaultSession{Realm: "desk-a7", Server: "primary", Name: "work"}}
 }
 
 func TestPreferencesStoreLifecycleAndCAS(t *testing.T) {
@@ -50,7 +50,7 @@ func TestPreferencesStoreLifecycleAndCAS(t *testing.T) {
 	if !errors.Is(err, errPreferencesConflict) || current.Revision != 1 || current.Theme != "dracula" {
 		t.Fatalf("stale put returned %+v %v", current, err)
 	}
-	second, err := s.put("operator@example.com", Preferences{Version: 1, Theme: "one-dark", FontSize: fontPtr(12), ComposerFontSize: preferenceDefaultComposerFontSize}, 1)
+	second, err := s.put("operator@example.com", Preferences{Version: 1, Theme: "one-dark", FontSize: fontPtr(12), ComposerFontSize: preferenceDefaultComposerFontSize, TerminalPosition: preferenceDefaultTerminalPosition}, 1)
 	if err != nil || second.Revision != 2 || second.DefaultSession != nil {
 		t.Fatalf("second put=%+v %v", second, err)
 	}

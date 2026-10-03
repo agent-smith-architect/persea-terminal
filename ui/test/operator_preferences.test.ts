@@ -24,6 +24,7 @@ import {
   OperatorPreferencesService,
   type OperatorPreferences,
 } from "../src/operator_preferences";
+import { DEFAULT_TERMINAL_POSITION, TERMINAL_POSITIONS, type TerminalPosition } from "../src/terminal_position";
 
 class MemoryStorage implements Pick<Storage, "getItem" | "setItem" | "removeItem"> {
   readonly values = new Map<string, string>();
@@ -51,6 +52,7 @@ function storedResponse(value: Stored, status = 200): Response {
     theme: value.preferences.theme,
     font_size: value.preferences.fontSize,
     composer_font_size: value.preferences.composerFontSize,
+    terminal_position: value.preferences.terminalPosition,
     default_session: value.preferences.defaultSession,
     revision: value.revision,
     stored: value.stored,
@@ -71,6 +73,7 @@ function server(initial: Stored = {
     theme: current.preferences.theme,
     font_size: current.preferences.fontSize,
     composer_font_size: current.preferences.composerFontSize,
+    terminal_position: current.preferences.terminalPosition,
     default_session: current.preferences.defaultSession,
     revision: current.revision,
     stored: current.stored,
@@ -91,6 +94,7 @@ function server(initial: Stored = {
       assert.equal(init.cache, "no-store");
       assert.equal(init.credentials, "same-origin");
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      if (!TERMINAL_POSITIONS.includes(body.terminal_position as TerminalPosition)) return new Response("invalid preferences request", { status: 400 });
       current = {
         preferences: {
           version: 1,
@@ -99,6 +103,10 @@ function server(initial: Stored = {
           // The server's own rule: a plain number with a default, so a body
           // that omits it means the default rather than a refusal.
           composerFontSize: (body.composer_font_size as number | undefined) ?? DEFAULT_COMPOSER_FONT_SIZE,
+          // Unlike the composer face, the position has no absent-key default:
+          // a body without it is an incomplete record, refused like the
+          // server refuses it.
+          terminalPosition: body.terminal_position as TerminalPosition,
           defaultSession: body.default_session as OperatorPreferences["defaultSession"],
         },
         revision: current.revision + 1,
@@ -115,7 +123,7 @@ async function main(): Promise<void> {
   const storage = new MemoryStorage();
   storage.setItem(OPERATOR_PREFERENCES_HINT_KEY, JSON.stringify({ version: 1, theme: "dracula", font_size: 18, default_session: null }));
   const remote = server({
-    preferences: { version: 1, theme: "rose-pine", fontSize: 16, composerFontSize: DEFAULT_COMPOSER_FONT_SIZE, defaultSession: { realm: "example-realm", server: "default", name: "alpha" } },
+    preferences: { version: 1, theme: "rose-pine", fontSize: 16, composerFontSize: DEFAULT_COMPOSER_FONT_SIZE, terminalPosition: "center", defaultSession: { realm: "example-realm", server: "default", name: "alpha" } },
     revision: 7, stored: true, available: true,
   });
   const service = new OperatorPreferencesService({ storage, fetch: remote.fetch, csrf: () => "csrf-token" });
@@ -132,7 +140,7 @@ async function main(): Promise<void> {
 {
   const displayName = `release shell ${"x".repeat(80)}`;
   const remote = server({ preferences: {
-    version: 1, theme: "default", fontSize: 14, composerFontSize: DEFAULT_COMPOSER_FONT_SIZE,
+    version: 1, theme: "default", fontSize: 14, composerFontSize: DEFAULT_COMPOSER_FONT_SIZE, terminalPosition: DEFAULT_TERMINAL_POSITION,
     defaultSession: { realm: "example-realm", server: "default", name: displayName },
   }, revision: 3, stored: true, available: true });
   const service = new OperatorPreferencesService({ fetch: remote.fetch, csrf: () => "csrf-token" });
@@ -152,7 +160,7 @@ async function main(): Promise<void> {
       const current = remote.current();
       return new Response(JSON.stringify({
         version: 1, theme: current.preferences.theme, font_size: current.preferences.fontSize,
-        composer_font_size: current.preferences.composerFontSize,
+        composer_font_size: current.preferences.composerFontSize, terminal_position: current.preferences.terminalPosition,
         default_session: current.preferences.defaultSession, revision: current.revision, stored: true, available: true,
       }), { status: 412, headers: { ETag: `"${current.revision}"`, "Content-Type": "application/json", "Cache-Control": "no-store" } });
     }
@@ -224,7 +232,7 @@ async function main(): Promise<void> {
   assert.equal(service.snapshot().preferences.theme, "default", "fallible PUT preparation published before it settled");
   if (releasePut === undefined) throw new Error("the gated preference PUT was not reached");
   releasePut(new Response(JSON.stringify({
-    version: 1, theme: "rose-pine-dawn", font_size: 14, composer_font_size: DEFAULT_COMPOSER_FONT_SIZE,
+    version: 1, theme: "rose-pine-dawn", font_size: 14, composer_font_size: DEFAULT_COMPOSER_FONT_SIZE, terminal_position: "top-center",
     default_session: { realm: "example-realm", server: "default", name: "alpha" },
     revision: 1, stored: true, available: true,
   }), { status: 200, headers: { ETag: '"1"', "Content-Type": "application/json", "Cache-Control": "no-store" } }));
@@ -300,7 +308,7 @@ async function main(): Promise<void> {
   const ifMatch: Array<string | null> = [];
   const body = () => JSON.stringify({
     version: 1, theme: stored.theme, font_size: stored.font_size, composer_font_size: stored.composer_font_size,
-    default_session: null, revision, stored: true, available: true,
+    terminal_position: "top-center", default_session: null, revision, stored: true, available: true,
   });
   const headers = () => ({ "Content-Type": "application/json", ETag: `"${revision}"`, "Cache-Control": "no-store" });
   const service = new OperatorPreferencesService({
@@ -349,8 +357,8 @@ async function main(): Promise<void> {
 for (const etag of [null, 'W/"0"', "*", '"0", "1"']) {
   const service = new OperatorPreferencesService({
     fetch: async () => new Response(JSON.stringify({
-      version: 1, theme: "default", font_size: 14, composer_font_size: DEFAULT_COMPOSER_FONT_SIZE, default_session: null,
-      revision: 0, stored: false, available: true,
+      version: 1, theme: "default", font_size: 14, composer_font_size: DEFAULT_COMPOSER_FONT_SIZE, terminal_position: "top-center",
+      default_session: null, revision: 0, stored: false, available: true,
     }), { status: 200, headers: etag === null ? {} : { ETag: etag } }),
     csrf: () => "csrf-token",
   });
@@ -373,7 +381,7 @@ for (const etag of [null, 'W/"0"', "*", '"0", "1"']) {
 {
   // A record the server states carries the face, and it reaches the snapshot.
   const remote = server({
-    preferences: { version: 1, theme: "dracula", fontSize: null, composerFontSize: 18, defaultSession: null },
+    preferences: { version: 1, theme: "dracula", fontSize: null, composerFontSize: 18, terminalPosition: DEFAULT_TERMINAL_POSITION, defaultSession: null },
     revision: 4, stored: true, available: true,
   });
   const service = new OperatorPreferencesService({ fetch: remote.fetch, csrf: () => "csrf-token", storage: new MemoryStorage() });
@@ -395,7 +403,7 @@ for (const etag of [null, 'W/"0"', "*", '"0", "1"']) {
     storage: new MemoryStorage(),
     csrf: () => "csrf-token",
     fetch: async () => new Response(JSON.stringify({
-      version: 1, theme: "dracula", font_size: null, default_session: null, revision: 2, stored: true, available: true,
+      version: 1, theme: "dracula", font_size: null, terminal_position: "top-center", default_session: null, revision: 2, stored: true, available: true,
     }), { status: 200, headers: { "Content-Type": "application/json", ETag: '"2"', "Cache-Control": "no-store" } }),
   });
   await service.load();
@@ -410,10 +418,80 @@ for (const etag of [null, 'W/"0"', "*", '"0", "1"']) {
   assert.equal(service.snapshot().preferences.theme, "gruvbox-dark", "a hint without composer_font_size was discarded whole");
   assert.equal(service.snapshot().preferences.composerFontSize, 11, "a hint without composer_font_size did not read the composer face as the default");
 }
+// The terminal position is one of three closed values, Top center by default.
+// The wire record always states it; the device hint may predate it.
+{
+  assert.equal(DEFAULT_OPERATOR_PREFERENCES.terminalPosition, "top-center", "the shipped position default moved");
+  assert.equal(DEFAULT_TERMINAL_POSITION, "top-center", "the exported position default moved");
+  assert.deepEqual(TERMINAL_POSITIONS, ["top-center", "top-left", "center"], "the closed position set changed");
+  for (const position of TERMINAL_POSITIONS) {
+    const storage = new MemoryStorage();
+    const remote = server({ preferences: { ...DEFAULT_OPERATOR_PREFERENCES, terminalPosition: position }, revision: 3, stored: true, available: true });
+    const service = new OperatorPreferencesService({ fetch: remote.fetch, csrf: () => "csrf-token", storage });
+    await service.load();
+    assert.equal(service.snapshot().status, "ready", `a record with terminal_position ${position} did not parse`);
+    assert.equal(service.snapshot().preferences.terminalPosition, position, `terminal_position ${position} did not reach the snapshot`);
+    assert.equal(await service.update({ theme: "one-dark" }), "saved", `an unrelated write over ${position} failed`);
+    const put = remote.calls.filter((call) => (call.init.method ?? "GET") === "PUT").at(-1);
+    assert.equal(JSON.parse(String(put?.init.body)).terminal_position, position, `an unrelated write dropped terminal_position ${position}`);
+    assert.equal(JSON.parse(String(storage.getItem(OPERATOR_PREFERENCES_HINT_KEY))).terminal_position, position, `the hint did not carry ${position}`);
+  }
+  const remote = server();
+  const service = new OperatorPreferencesService({ fetch: remote.fetch, csrf: () => "csrf-token", storage: new MemoryStorage() });
+  await service.load();
+  const seen: string[] = [];
+  service.subscribe((snapshot) => seen.push(snapshot.preferences.terminalPosition));
+  assert.equal(await service.update({ terminalPosition: "center" }), "saved", "setting the position failed");
+  const put = remote.calls.filter((call) => (call.init.method ?? "GET") === "PUT").at(-1);
+  assert.equal(JSON.parse(String(put?.init.body)).terminal_position, "center", "the PUT body did not carry the position");
+  assert.equal(remote.current().preferences.terminalPosition, "center", "the stored record did not take the position");
+  assert.deepEqual(seen, ["top-center", "center"], "subscribers did not receive exactly the new position");
+  const puts = remote.calls.filter((call) => (call.init.method ?? "GET") === "PUT").length;
+  assert.equal(await service.update({ terminalPosition: "bottom" as TerminalPosition }), "refused", "an unknown position was accepted as a patch");
+  assert.equal(remote.calls.filter((call) => (call.init.method ?? "GET") === "PUT").length, puts, "an unknown position reached the wire");
+  assert.equal(service.snapshot().preferences.terminalPosition, "center", "a refused patch moved the position");
+}
+{
+  // Anything else is not a record, including a record that omits the key.
+  for (const value of ["bottom", "Center", "top_center", " center", "", null, 1, true, {}, undefined]) {
+    const record: Record<string, unknown> = {
+      version: 1, theme: "default", font_size: null, composer_font_size: DEFAULT_COMPOSER_FONT_SIZE, terminal_position: value,
+      default_session: null, revision: 0, stored: false, available: true,
+    };
+    if (value === undefined) delete record.terminal_position;
+    const service = new OperatorPreferencesService({
+      fetch: async () => new Response(JSON.stringify(record), { status: 200, headers: { ETag: '"0"' } }),
+      csrf: () => "csrf-token",
+      storage: new MemoryStorage(),
+    });
+    await service.load();
+    assert.equal(service.snapshot().status, "unavailable", `terminal_position ${JSON.stringify(value)} was accepted`);
+    assert.equal(service.snapshot().preferences.terminalPosition, DEFAULT_TERMINAL_POSITION, `terminal_position ${JSON.stringify(value)} leaked into the snapshot`);
+  }
+}
+{
+  // A hint written before the field keeps its theme and reads the default
+  // position; a hint naming an unknown position is not a hint at all.
+  const older = new MemoryStorage();
+  older.setItem(OPERATOR_PREFERENCES_HINT_KEY, JSON.stringify({ version: 1, theme: "gruvbox-dark", font_size: null, composer_font_size: 13, default_session: null }));
+  const fromOlder = new OperatorPreferencesService({ storage: older, fetch: async () => new Response("", { status: 503 }), csrf: () => "csrf-token" });
+  assert.equal(fromOlder.snapshot().status, "hint", "a hint without terminal_position was discarded whole");
+  assert.equal(fromOlder.snapshot().preferences.theme, "gruvbox-dark");
+  assert.equal(fromOlder.snapshot().preferences.terminalPosition, DEFAULT_TERMINAL_POSITION, "a hint without terminal_position did not read the default");
+  const painted = new MemoryStorage();
+  painted.setItem(OPERATOR_PREFERENCES_HINT_KEY, JSON.stringify({ version: 1, theme: "dracula", font_size: null, composer_font_size: 11, terminal_position: "top-left", default_session: null }));
+  const fromPainted = new OperatorPreferencesService({ storage: painted, fetch: async () => new Response("", { status: 503 }), csrf: () => "csrf-token" });
+  assert.equal(fromPainted.snapshot().preferences.terminalPosition, "top-left", "a hint's position did not paint before load");
+  const invalid = new MemoryStorage();
+  invalid.setItem(OPERATOR_PREFERENCES_HINT_KEY, JSON.stringify({ version: 1, theme: "dracula", font_size: null, composer_font_size: 11, terminal_position: "bottom", default_session: null }));
+  const fromInvalid = new OperatorPreferencesService({ storage: invalid, fetch: async () => new Response("", { status: 503 }), csrf: () => "csrf-token" });
+  assert.equal(fromInvalid.snapshot().status, "loading", "a hint with an unknown position was honoured");
+  assert.deepEqual(fromInvalid.snapshot().preferences, DEFAULT_OPERATOR_PREFERENCES);
+}
 {
   // A record whose font is auto parses, and reads back as auto.
   const remote = server({
-    preferences: { version: 1, theme: "dracula", fontSize: null, composerFontSize: DEFAULT_COMPOSER_FONT_SIZE, defaultSession: null },
+    preferences: { version: 1, theme: "dracula", fontSize: null, composerFontSize: DEFAULT_COMPOSER_FONT_SIZE, terminalPosition: DEFAULT_TERMINAL_POSITION, defaultSession: null },
     revision: 4, stored: true, available: true,
   });
   const service = new OperatorPreferencesService({ fetch: remote.fetch, csrf: () => "csrf-token", storage: new MemoryStorage() });
@@ -425,7 +503,7 @@ for (const etag of [null, 'W/"0"', "*", '"0", "1"']) {
   // Clearing an explicit size must reach the wire as JSON null. A merge that
   // used `??` would read the patch's null as "unchanged" and re-send 16.
   const remote = server({
-    preferences: { version: 1, theme: "dracula", fontSize: 16, composerFontSize: DEFAULT_COMPOSER_FONT_SIZE, defaultSession: null },
+    preferences: { version: 1, theme: "dracula", fontSize: 16, composerFontSize: DEFAULT_COMPOSER_FONT_SIZE, terminalPosition: DEFAULT_TERMINAL_POSITION, defaultSession: null },
     revision: 2, stored: true, available: true,
   });
   const storage = new MemoryStorage();
@@ -452,8 +530,8 @@ for (const etag of [null, 'W/"0"', "*", '"0", "1"']) {
   for (const value of [8, 25, 14.5, "14", true, {}]) {
     const service = new OperatorPreferencesService({
       fetch: async () => new Response(JSON.stringify({
-        version: 1, theme: "default", font_size: value, composer_font_size: DEFAULT_COMPOSER_FONT_SIZE, default_session: null,
-        revision: 0, stored: false, available: true,
+        version: 1, theme: "default", font_size: value, composer_font_size: DEFAULT_COMPOSER_FONT_SIZE, terminal_position: "top-center",
+        default_session: null, revision: 0, stored: false, available: true,
       }), { status: 200, headers: { ETag: '"0"' } }),
       csrf: () => "csrf-token",
       storage: new MemoryStorage(),

@@ -289,7 +289,7 @@ async function main() {
     }
     if (request.method === "GET" && url.pathname === "/api/preferences") {
       response.setHeader("Content-Type", "application/json"); response.setHeader("ETag", '"0"');
-      response.end(JSON.stringify({ version: 1, theme: "default", font_size: null, composer_font_size: 11, default_session: null, revision: 0, stored: false, available: true })); return;
+      response.end(JSON.stringify({ version: 1, theme: "default", font_size: null, composer_font_size: 11, terminal_position: "top-center", default_session: null, revision: 0, stored: false, available: true })); return;
     }
     if (request.method === "GET" && url.pathname === "/api/inventory") {
       response.setHeader("Content-Type", "application/json");

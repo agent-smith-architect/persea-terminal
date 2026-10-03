@@ -39,7 +39,7 @@ func TestPreferencesStoreReadsPreComposerFontRecord(t *testing.T) {
 
 	// A write over it states the face, and every other field survives.
 	next, err := s.put("operator@example.com", Preferences{
-		Version: 1, Theme: "one-dark", FontSize: fontPtr(16), ComposerFontSize: 11,
+		Version: 1, Theme: "one-dark", FontSize: fontPtr(16), ComposerFontSize: 11, TerminalPosition: preferenceDefaultTerminalPosition,
 		DefaultSession: &DefaultSession{Realm: "desk-a7", Server: "primary", Name: "work"},
 	}, 3)
 	if err != nil || next.ComposerFontSize != 11 || next.Revision != 4 {
@@ -70,7 +70,7 @@ func TestPreferencesComposerFontSizeRange(t *testing.T) {
 		size  int
 		valid bool
 	}{{8, false}, {9, true}, {13, true}, {24, true}, {25, false}, {0, false}, {-1, false}} {
-		err := validatePreferences(Preferences{Version: 1, Theme: "default", ComposerFontSize: c.size})
+		err := validatePreferences(Preferences{Version: 1, Theme: "default", ComposerFontSize: c.size, TerminalPosition: preferenceDefaultTerminalPosition})
 		if (err == nil) != c.valid {
 			t.Fatalf("composer face %d -> %v, wanted valid=%v", c.size, err, c.valid)
 		}
@@ -100,7 +100,7 @@ func TestPreferencesAPIComposerFontSize(t *testing.T) {
 		})
 	}
 
-	stated := put(`"0"`, `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":18,"default_session":null}`)
+	stated := put(`"0"`, `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":18,"terminal_position":"top-center","default_session":null}`)
 	if stated.Code != http.StatusOK {
 		t.Fatalf("a PUT stating the composer face was refused: %d %s", stated.Code, stated.Body.String())
 	}
@@ -108,7 +108,7 @@ func TestPreferencesAPIComposerFontSize(t *testing.T) {
 		t.Fatalf("the stored composer face came back as %d", got.ComposerFontSize)
 	}
 
-	absent := put(`"1"`, `{"version":1,"theme":"dracula","font_size":null,"default_session":null}`)
+	absent := put(`"1"`, `{"version":1,"theme":"dracula","font_size":null,"terminal_position":"top-center","default_session":null}`)
 	if absent.Code != http.StatusOK {
 		t.Fatalf("a PUT from a browser that predates the field was refused: %d %s", absent.Code, absent.Body.String())
 	}
@@ -124,13 +124,13 @@ func TestPreferencesAPIComposerFontSize(t *testing.T) {
 	}
 
 	for name, body := range map[string]string{
-		"below the floor": `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":8,"default_session":null}`,
-		"above the top":   `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":25,"default_session":null}`,
-		"not a number":    `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":"14","default_session":null}`,
-		"not an integer":  `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":14.5,"default_session":null}`,
-		"explicitly null": `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":null,"default_session":null}`,
-		"a nested object": `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":{"px":14},"default_session":null}`,
-		"a boolean":       `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":true,"default_session":null}`,
+		"below the floor": `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":8,"terminal_position":"top-center","default_session":null}`,
+		"above the top":   `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":25,"terminal_position":"top-center","default_session":null}`,
+		"not a number":    `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":"14","terminal_position":"top-center","default_session":null}`,
+		"not an integer":  `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":14.5,"terminal_position":"top-center","default_session":null}`,
+		"explicitly null": `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":null,"terminal_position":"top-center","default_session":null}`,
+		"a nested object": `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":{"px":14},"terminal_position":"top-center","default_session":null}`,
+		"a boolean":       `{"version":1,"theme":"dracula","font_size":null,"composer_font_size":true,"terminal_position":"top-center","default_session":null}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			recorder := put(`"2"`, body)

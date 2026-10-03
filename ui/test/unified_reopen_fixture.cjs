@@ -777,7 +777,7 @@ function startFixture(ui, options = {}) {
     lease: null,                   // { holder, attachment }
     leaseB: null,
     attachments: [],               // transcript per WebSocket attachment
-    preferences: { version: 1, theme: "default", font_size: null, composer_font_size: 11, default_session: null, revision: 0, stored: false, available: true },
+    preferences: { version: 1, theme: "default", font_size: null, composer_font_size: 11, terminal_position: "top-center", default_session: null, revision: 0, stored: false, available: true },
     dashboardPreferences: { version: 1, favorites: [], revision: 0, available: true },
     preferenceOperations: [],
     holdPreferencePuts: 0,
@@ -834,7 +834,7 @@ function startFixture(ui, options = {}) {
     state.bindingsExpired = false;
     state.adopted = false;
     state.imageStaging = false;
-    state.preferences = { version: 1, theme: "default", font_size: null, composer_font_size: 11, default_session: null, revision: 0, stored: false, available: true };
+    state.preferences = { version: 1, theme: "default", font_size: null, composer_font_size: 11, terminal_position: "top-center", default_session: null, revision: 0, stored: false, available: true };
     state.dashboardPreferences = { version: 1, favorites: [], revision: 0, available: true };
     state.preferenceOperations = [];
     state.holdPreferencePuts = 0;
@@ -1098,6 +1098,7 @@ function startFixture(ui, options = {}) {
         theme: body?.theme ?? null,
         font_size: body?.font_size ?? null,
         composer_font_size: body?.composer_font_size ?? null,
+        terminal_position: body?.terminal_position ?? null,
         if_match: request.headers["if-match"] ?? null,
         outcome: "pending",
       };
@@ -1121,11 +1122,18 @@ function startFixture(ui, options = {}) {
         operation.outcome = "refused";
         response.writeHead(403); response.end("forbidden\n"); return;
       }
+      // The front door requires the position: absent, null or unknown is a
+      // malformed record.
+      if (!["top-center", "top-left", "center"].includes(body.terminal_position)) {
+        operation.outcome = "refused";
+        response.writeHead(400); response.end("invalid preferences request\n"); return;
+      }
       state.preferences = {
         version: 1, theme: body.theme, font_size: body.font_size,
         // The front door's own rule: a plain number with a default, so an
         // absent key is the default rather than a refusal.
         composer_font_size: body.composer_font_size ?? 11,
+        terminal_position: body.terminal_position,
         default_session: body.default_session,
         revision: state.preferences.revision + 1, stored: true, available: true,
       };
