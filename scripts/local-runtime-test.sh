@@ -90,27 +90,43 @@ function normalizeNonce(body) {
 }
 (async () => { const root = await get('/'); const bundle = await get('/app.js'); const terminal = await get('/terminal'); if (root.status !== 200 || !root.body.includes('id="app"') || bundle.status !== 200 || !bundle.body.includes('/api/inventory') || !bundle.body.includes('/terminal') || terminal.status !== 200 || normalizeNonce(terminal.body) !== normalizeNonce(root.body)) process.exit(1); })().catch(() => process.exit(1));
 NODE
-ALIAS_PROOF=$(node - "$PORT" <<'NODE'
-const http = require('node:http');
-const port = Number(process.argv[2]);
-http.get({host:'127.0.0.1', port, path:'/api/inventory', headers:{Host:`127.0.0.1:${port}`}}, response => {
-  let body=''; response.on('data', chunk => body += chunk); response.on('end', () => {
-    const value=JSON.parse(body); const server=value.realms?.[0]?.servers?.[0];
-    const session=server?.sessions?.[0], alias=value.aliases?.[0];
-    if (response.statusCode === 200 && server?.status === 'ok' && session?.name === 'persea' &&
-        Number.isSafeInteger(session?.authority?.uid) && session.authority.uid === process.getuid() &&
-        ['socket_name','socket_path'].includes(session?.authority?.selector_kind) && typeof session.authority.selector_value === 'string' &&
-        Number.isSafeInteger(session?.authority?.session_created) && session.authority.session_created > 0 &&
-        alias?.display_alias === 'Local' && alias?.state === 'active' && alias?.alias_id) {
-      process.stdout.write(`${alias.alias_id}\t${JSON.stringify(alias.session_incarnation)}`); return;
-    }
-    process.exitCode=1;
-  });
-}).on('error', () => process.exit(1));
+# Sends one alias request with the CSRF cookie that the inventory sets and the
+# live "persea" session's alias handle; prints "<status> <body>".
+alias_request() {
+  node - "$PORT" "$@" <<'NODE'
+const http=require('node:http');const [portText,method,path,displayAlias,ifMatch]=process.argv.slice(2),port=Number(portText);
+http.get({host:'127.0.0.1',port,path:'/api/inventory',headers:{Host:`127.0.0.1:${port}`}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{
+  const v=JSON.parse(b),s=v.realms?.[0]?.servers?.[0]?.sessions?.find(x=>x.name==='persea');
+  const setCookie=[].concat(r.headers['set-cookie']??[]),cookie=setCookie.map(x=>x.split(';',1)[0]).find(x=>x.startsWith('__Host-persea-terminal-csrf='));
+  if(!cookie||!s?.handles?.alias){console.error('alias request prerequisites unavailable');process.exit(1)}
+  const body=JSON.stringify(method==='POST'?{display_alias:displayAlias,handle:s.handles.alias}:{display_alias:displayAlias});
+  const headers={'Content-Type':'application/json','Content-Length':Buffer.byteLength(body),'Cookie':cookie,'Origin':`http://127.0.0.1:${port}`,'Sec-Fetch-Site':'same-origin','X-Persea-CSRF':cookie.slice(cookie.indexOf('=')+1),...(ifMatch?{'If-Match':ifMatch}:{})};
+  const request=http.request({host:'127.0.0.1',port,path,method,headers},reply=>{let out='';reply.on('data',c=>out+=c);reply.on('end',()=>{process.stdout.write(`${reply.statusCode} ${out.trim()}`)})});
+  request.on('error',()=>process.exit(1));request.end(body);
+})}).on('error',()=>process.exit(1));
 NODE
-)
+}
+# Polls the inventory until the predicate holds for v (the inventory) and s (the
+# live "persea" session); extra arguments reach it as args.
+await_inventory() {
+  local failure=$1 predicate=$2 _
+  shift 2
+  for _ in {1..100}; do
+    node - "$PORT" "$predicate" "$@" <<'NODE' && return 0
+const http=require('node:http');const [portText,predicate,...args]=process.argv.slice(2),port=Number(portText),test=new Function('v','s','args',`return (${predicate});`);
+http.get({host:'127.0.0.1',port,path:'/api/inventory',headers:{Host:`127.0.0.1:${port}`}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{let ok=false;try{const v=JSON.parse(b),s=v.realms?.[0]?.servers?.[0]?.sessions?.find(x=>x.name==='persea');ok=r.statusCode===200&&Boolean(test(v,s,args))}catch{}process.exit(ok?0:1)})}).on('error',()=>process.exit(1));
+NODE
+    sleep 0.05
+  done
+  printf '%s\n' "$failure" >&2
+  exit 1
+}
+await_inventory 'canonical session identity missing' "s?.authority?.uid === process.getuid() && ['socket_name','socket_path'].includes(s.authority.selector_kind) && typeof s.authority.selector_value === 'string' && Number.isSafeInteger(s.authority.session_created) && s.authority.session_created > 0 && v.realms[0].servers[0].status === 'ok' && v.aliases.length === 0"
+created=$(alias_request POST /api/aliases Local)
+[[ $created == "201 "* ]] || { printf 'alias creation failed: %s\n' "$created" >&2; exit 1; }
+ALIAS_PROOF=$(node -e 'const a=JSON.parse(process.argv[1]); if (a.display_alias !== "Local" || a.state !== "active" || a.session_name !== "persea" || a.revision !== 1) process.exit(1); process.stdout.write(`${a.alias_id}\t${JSON.stringify(a.session_incarnation)}`)' "${created#201 }")
 IFS=$'\t' read -r ALIAS_ID ALIAS_INCARNATION <<<"$ALIAS_PROOF"
-[[ -n "$ALIAS_ID" ]] || { printf 'canonical identity or seeded durable alias missing\n' >&2; exit 1; }
+[[ -n "$ALIAS_ID" ]] || { printf 'created alias record is not as expected: %s\n' "$created" >&2; exit 1; }
 
 # Restart both product processes against the same tmux source and durable store.
 FRONT_BIN="$RUNTIME_DIR/persea-terminal"
@@ -146,25 +162,13 @@ done
 (( persistence_ready == 1 )) || { printf 'durable alias did not recover after product restart\n' >&2; exit 1; }
 printf 'restart persistence PASS\n'
 
-# Renaming the configured seed causes the next inventory to re-seed Local. Both
-# distinct ACTIVE records must remain byte-exact matches for the live incarnation.
-node - "$PORT" "$ALIAS_ID" <<'NODE'
-const http=require('node:http');const [portText,id]=process.argv.slice(2),port=Number(portText);
-http.get({host:'127.0.0.1',port,path:'/api/inventory'},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const v=JSON.parse(b),s=v.realms?.[0]?.servers?.[0]?.sessions?.[0],setCookie=Array.isArray(r.headers['set-cookie'])?r.headers['set-cookie']:(r.headers['set-cookie']?[r.headers['set-cookie']]:[]),cookie=setCookie.map(x=>x.split(';',1)[0]).find(x=>x.startsWith('__Host-persea-terminal-csrf='));if(!cookie||!s?.handles?.alias){console.error('alias mutation prerequisites unavailable');process.exit(1)}const csrf=cookie.slice(cookie.indexOf('=')+1),body=JSON.stringify({display_alias:'Renamed Local',handle:s.handles.alias});const request=http.request({host:'127.0.0.1',port,path:`/api/aliases/${encodeURIComponent(id)}`,method:'PATCH',headers:{'Content-Type':'application/json','Content-Length':Buffer.byteLength(body),'If-Match':'"1"','Cookie':cookie,'Origin':`http://127.0.0.1:${port}`,'Sec-Fetch-Site':'same-origin','X-Persea-CSRF':csrf}},reply=>{reply.resume();reply.on('end',()=>{if(reply.statusCode!==200)console.error(`alias mutation status ${reply.statusCode}`);process.exit(reply.statusCode===200?0:1)})});request.on('error',()=>process.exit(1));request.end(body)})}).on('error',()=>process.exit(1));
-NODE
-printf 'alias mutation request PASS\n'
-for _ in {1..100}; do
-  node - "$PORT" "$ALIAS_ID" "$ALIAS_INCARNATION" <<'NODE' && break
-const http=require('node:http');const [portText,renamedId,incarnation]=process.argv.slice(2),port=Number(portText);
-http.get({host:'127.0.0.1',port,path:'/api/inventory',headers:{Host:`127.0.0.1:${port}`}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const v=JSON.parse(b),matches=v.aliases?.filter(a=>a?.state==='active'&&JSON.stringify(a?.session_incarnation)===incarnation)??[],renamed=matches.find(a=>a.alias_id===renamedId),seeded=matches.find(a=>a.alias_id!==renamedId&&a.display_alias==='Local'),s=v.realms?.[0]?.servers?.[0]?.sessions?.find(x=>x.name==='persea'),ok=r.statusCode===200&&matches.length===2&&renamed?.display_alias==='Renamed Local'&&renamed?.revision===2&&seeded?.revision===1&&JSON.stringify(s?.authority)===incarnation;if(!ok)console.error(JSON.stringify({status:r.statusCode,match_count:matches.length,renamed_name:renamed?.display_alias,renamed_revision:renamed?.revision,seeded:Boolean(seeded),session_authority_match:JSON.stringify(s?.authority)===incarnation}));process.exit(ok?0:1)})}).on('error',()=>process.exit(1));
-NODE
-  sleep 0.05
-done
-node - "$PORT" "$ALIAS_ID" "$ALIAS_INCARNATION" <<'NODE'
-const http=require('node:http');const [portText,renamedId,incarnation]=process.argv.slice(2),port=Number(portText);
-http.get({host:'127.0.0.1',port,path:'/api/inventory',headers:{Host:`127.0.0.1:${port}`}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const v=JSON.parse(b),matches=v.aliases?.filter(a=>a?.state==='active'&&JSON.stringify(a?.session_incarnation)===incarnation)??[],renamed=matches.find(a=>a.alias_id===renamedId),seeded=matches.find(a=>a.alias_id!==renamedId&&a.display_alias==='Local'),s=v.realms?.[0]?.servers?.[0]?.sessions?.find(x=>x.name==='persea');process.exit(r.statusCode===200&&matches.length===2&&renamed?.display_alias==='Renamed Local'&&renamed?.revision===2&&seeded?.revision===1&&JSON.stringify(s?.authority)===incarnation?0:1)})}).on('error',()=>process.exit(1));
-NODE
-printf 'alias reseed/CAS PASS\n'
+# Renaming changes the text only; a session keeps one alias.
+renamed=$(alias_request PATCH "/api/aliases/$ALIAS_ID" 'Renamed Local' '"1"')
+[[ $renamed == "200 "* ]] || { printf 'alias rename failed: %s\n' "$renamed" >&2; exit 1; }
+second=$(alias_request POST /api/aliases Second)
+[[ $second == "409 alias_exists" ]] || { printf 'a second alias for one session was not refused: %s\n' "$second" >&2; exit 1; }
+await_inventory 'renamed alias is not the one active alias of its session' "v.aliases.length === 1 && v.aliases[0].alias_id === args[0] && v.aliases[0].display_alias === 'Renamed Local' && v.aliases[0].revision === 2 && v.aliases[0].state === 'active' && JSON.stringify(s?.authority) === args[1] && s.alias === 'Renamed Local'" "$ALIAS_ID" "$ALIAS_INCARNATION"
+printf 'alias rename and one alias per session PASS\n'
 if [[ -S "$default_socket" ]]; then default_after=$(stat -Lc '%d:%i:%s:%Y:%Z' "$default_socket"); else default_after=absent; fi
 [[ "$default_before" == "$default_after" ]] || { printf 'default tmux socket changed\n' >&2; exit 1; }
 
@@ -201,21 +205,12 @@ after_reattach_identity=$(timeout -k 2 5 tmux -S "$RUNTIME_DIR/tmux.sock" displa
 timeout -k 2 5 tmux -S "$RUNTIME_DIR/tmux.sock" has-session -t persea
 printf 'control close/reattach PASS\n'
 
-# The test operator replaces the disposable source; the product must not transfer the alias.
+# Replacing the session with one of the same name, as session restore does
+# after a reboot, keeps the alias: it binds to the new incarnation.
 timeout -k 2 5 tmux -S "$RUNTIME_DIR/tmux.sock" kill-session -t persea
 timeout -k 2 5 tmux -S "$RUNTIME_DIR/tmux.sock" new-session -d -x 80 -y 24 -s persea
-for _ in {1..100}; do
-  node - "$PORT" "$ALIAS_ID" "$ALIAS_INCARNATION" <<'NODE' && break
-const http=require('node:http');const [portText,id,oldIncarnation]=process.argv.slice(2),port=Number(portText);
-http.get({host:'127.0.0.1',port,path:'/api/inventory',headers:{Host:`127.0.0.1:${port}`}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const v=JSON.parse(b),a=v.aliases?.find(x=>x.alias_id===id),s=v.realms?.[0]?.servers?.[0]?.sessions?.find(x=>x.name==='persea');process.exit(r.statusCode===200&&a?.state==='tombstone'&&JSON.stringify(a?.session_incarnation)===oldIncarnation&&s&&s.alias!=='Renamed Local'&&JSON.stringify(s.authority)!==oldIncarnation?0:1)})}).on('error',()=>process.exit(1));
-NODE
-  sleep 0.05
-done
-node - "$PORT" "$ALIAS_ID" "$ALIAS_INCARNATION" <<'NODE'
-const http=require('node:http');const [portText,id,oldIncarnation]=process.argv.slice(2),port=Number(portText);
-http.get({host:'127.0.0.1',port,path:'/api/inventory',headers:{Host:`127.0.0.1:${port}`}},r=>{let b='';r.on('data',c=>b+=c);r.on('end',()=>{const v=JSON.parse(b),a=v.aliases?.find(x=>x.alias_id===id),s=v.realms?.[0]?.servers?.[0]?.sessions?.find(x=>x.name==='persea');process.exit(r.statusCode===200&&a?.state==='tombstone'&&JSON.stringify(a?.session_incarnation)===oldIncarnation&&s&&s.alias!=='Renamed Local'&&JSON.stringify(s.authority)!==oldIncarnation?0:1)})}).on('error',()=>process.exit(1));
-NODE
-printf 'source replacement tombstone PASS\n'
+await_inventory 'alias did not follow the replaced session by name' "v.aliases.length === 1 && v.aliases[0].alias_id === args[0] && v.aliases[0].state === 'active' && JSON.stringify(s?.authority) !== args[1] && JSON.stringify(v.aliases[0].session_incarnation) === JSON.stringify(s.authority) && s.alias === 'Renamed Local'" "$ALIAS_ID" "$ALIAS_INCARNATION"
+printf 'source replacement rebind PASS\n'
 
 # A second build/runtime must not invalidate the first runtime's executable identity.
 output2=$("$SCRIPT_DIR/local-start.sh")
