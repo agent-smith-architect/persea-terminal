@@ -14,8 +14,9 @@ Every available session has the same terminal icon and Open control. An open
 session follows a normal same-tab link. An adoptable session performs its one
 adoption only after a trusted click, then opens in the same tab.
 
-Favorites and a preview are always available beside Open. A pencil beside the
-session name opens the alias editor in a focused dialog for both adding and
+Favorites and a preview are always available beside Open. A session's alias is
+its main title, with the tmux name in smaller text beside it. Without an alias,
+the tmux name is the title. A pencil beside the title opens the alias editor in a focused dialog for both adding and
 editing an alias. Saving or clearing it closes the dialog and returns focus to
 the pencil. Its draft, baseline revision and current incarnation remain governed
 by the same refresh and conflict rules. The information button reveals session
@@ -30,7 +31,7 @@ resumable memory and is explicitly described as a default.
 
 The dashboard uses one scoped control and spacing system: 44px minimum targets,
 clear primary actions, a bounded desktop width, and reflow for phones and enlarged
-text. Appearance, Keyboard and Alias history are consistent collapsible Settings
+text. Appearance, Keyboard and aliases of sessions that are not running are collapsible Settings
 panels with inset controls. Dashboard chrome follows the operator's terminal
 palette; these layout rules do not restyle the terminal surface.
 
@@ -112,8 +113,29 @@ are exact incarnation identities persisted per authenticated operator through
 revision checks and intent rebasing preserve unrelated concurrent changes. The
 client reconciles a lost reply before retrying and imports old device pins only
 after the shared save is confirmed. A same-name replacement never inherits a
-favorite. Shared alias history remains in Settings; an unbound alias is never
-silently rebound.
+favorite. Aliases name a session by its realm, server and tmux name. After a
+restart, an alias returns when a session with the same name starts on that
+server. If tmux renames a running session, its alias follows the rename. Each
+running session has at most one alias, and running sessions cannot share alias
+text. Reusing text from a detached alias removes that older entry.
+
+Settings lists aliases of sessions that are not running, with their session
+names and a Remove button. This section is hidden when empty. Removing an
+entry prevents that alias from returning. At the store limit, a new alias
+replaces the oldest detached entry; running aliases are retained.
+
+The terminal tag and page title use the current alias from the session list.
+Opening the tag refreshes that list and offers an Alias field with Save and
+Clear. Revision conflicts preserve a draft and offer Reload saved alias. Name
+conflicts explain that another running session uses the alias. The same wording
+appears in the dashboard and in the optional alias step after session creation.
+
+Alias store version 2 records session names and the last incarnation on which
+each alias was shown. Older stores are replaced with an empty version 2 store
+on load; old records cannot be converted because they do not contain names.
+Configured aliases seed a name only when it has no stored record. Alias text
+updates and removal require the saved revision; only creation needs a live
+session handle. Writes remain atomic and durable.
 
 The dedicated durable `dashboard-preferences.json` file is a sibling of the
 configured appearance preferences store. It preserves that store's closed schema
