@@ -9,13 +9,12 @@
 // — only identity metadata that the authoritative inventory has to confirm
 // before anything is offered.
 //
-// Resolution is EXACT-INCARNATION. The pinned `draftScope` is the dashboard's
-// authority key (`dashboard.ts` parseInventory -> authorityKey), which includes
-// the boot id, server pid/start and session creation time, so a same-named
-// successor of an ended session can never be matched. This module therefore
-// consumes the shared identity resolver (`resolveDraftScope`) rather than
-// re-implementing one; it imports only TYPES from `dashboard.ts` so there is no
-// runtime import cycle.
+// Recording and staging keep the exact incarnation witnessed at COMMIT.
+// Recent resolves that witness against the current inventory; if it has ended,
+// a unique live session with the same realm, server and remembered name may be
+// shown instead. That row stages the new identity only after a trusted Open.
+// The lookup lives in dashboard_recent.ts; this module imports only TYPES from
+// dashboard.ts so there is no runtime import cycle.
 import type { DashboardInventory, DashboardSession, DraftScopeResolution, UnifiedSessionProjection } from "./dashboard";
 
 import { rememberCommittedSession } from "./session_discovery";
@@ -474,7 +473,7 @@ export function createCommittedSessionRecorder(options: Readonly<{
         server: identity.server,
         at,
       }), at) === "written";
-      if (written) rememberCommittedSession(options.storage, identity.draftScope, at);
+      if (written) rememberCommittedSession(options.storage, identity.draftScope, at, identity.name);
     },
     openTransport() { /* arming is explicit; a transport open never binds */ },
     transportClosed(value) { if (mine(value)) drop(); },
@@ -498,7 +497,7 @@ export type UnifiedBlockedState = Exclude<UnifiedSessionProjection, { state: Uni
 
 /**
  * What the remembered identity resolves to against the CURRENT authoritative
- * inventory. `resolution` is the output of the shared `resolveDraftScope`; this
+ * inventory. `resolution` is supplied by the dashboard\'s Recent resolver; this
  * function adds no lookup of its own, so the landing spends no request the
  * dashboard has not already spent.
  */
@@ -585,16 +584,4 @@ export function defaultSessionState(inventory: DashboardInventory | undefined, p
   const state = openState(session);
   if (state === undefined) return Object.freeze({ kind: "blocked", preference, session, blocked: blockedState(session) });
   return Object.freeze({ kind: "open", preference, session, state });
-}
-
-/**
- * Precedence: a remembered identity
- * that still resolves ALWAYS wins, and the default card is not rendered beside
- * it. Only when there is no valid remembered identity — none stored, ended,
- * ambiguous, or blocked — may the default be offered, and then it is labelled
- * as the default, never as a resume. Nothing here ever falls back from a
- * missing remembered session into a same-name default silently.
- */
-export function defaultSessionIsOffered(memory: LandingMemoryState): boolean {
-  return memory.kind !== "resume";
 }

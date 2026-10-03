@@ -11,7 +11,6 @@ import {
   LAST_SESSION_STORAGE_KEY,
   clearLastSession,
   decodeLastSession,
-  defaultSessionIsOffered,
   defaultSessionState,
   encodeLastSession,
   landingMemoryState,
@@ -596,13 +595,6 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
   );
   assert.equal(defaultSessionState(twoNamed, preference).kind, "ambiguous");
 
-  // Precedence: a resumable memory suppresses the default entirely; every other
-  // memory state may offer it, and it is always the DEFAULT card, never a
-  // resume of the ended session.
-  assert.equal(defaultSessionIsOffered(landingMemoryState(goodRecord, resolveDraftScope(liveInventory, goodRecord.draftScope))), false);
-  const successorInventory = inventoryOf(session("local", "private", "ops", "$21", 900, { state: "open", origin: "birth" }));
-  assert.equal(defaultSessionIsOffered(landingMemoryState(goodRecord, resolveDraftScope(successorInventory, goodRecord.draftScope))), true);
-  assert.equal(defaultSessionIsOffered(landingMemoryState(undefined, undefined)), true);
 }
 
 process.stdout.write("session_memory tests PASS\n");
