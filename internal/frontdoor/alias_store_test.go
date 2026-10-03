@@ -43,11 +43,11 @@ func TestAliasStoreDurableLifecycleAndCAS(t *testing.T) {
 		t.Fatal(err)
 	}
 	first := auth(1, "$0")
-	r, err := s.create(" Work ", aliasSession{Authority: first, Name: "he2"})
+	r, err := s.create(" Work ", aliasSession{Authority: first, Name: "tm2"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.create("work", aliasSession{Authority: auth(2, "$1"), Name: "he3"}); !errors.Is(err, errAliasInUse) {
+	if _, err = s.create("work", aliasSession{Authority: auth(2, "$1"), Name: "tm3"}); !errors.Is(err, errAliasInUse) {
 		t.Fatalf("normalization duplicate = %v", err)
 	}
 	r, err = s.update(r.AliasID, "Renamed", r.Revision)
@@ -75,7 +75,7 @@ func TestAliasStoreDurableLifecycleAndCAS(t *testing.T) {
 		t.Fatalf("complete disappearance state=%s", tomb.State)
 	}
 	replacement := auth(2, "$0")
-	if err = reopened.reconcile([]aliasSession{{Authority: replacement, Name: "he2"}}, map[string]bool{"r\x00s": true}); err != nil {
+	if err = reopened.reconcile([]aliasSession{{Authority: replacement, Name: "tm2"}}, map[string]bool{"r\x00s": true}); err != nil {
 		t.Fatal(err)
 	}
 	rebound := reopened.list()[0]
@@ -97,10 +97,10 @@ func TestAliasStoreSimpleFoldAndDuplicateIDs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.create("s", aliasSession{Authority: auth(1, "$0"), Name: "he2"}); err != nil {
+	if _, err = s.create("s", aliasSession{Authority: auth(1, "$0"), Name: "tm2"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err = s.create("ſ", aliasSession{Authority: auth(2, "$1"), Name: "he2"}); !errors.Is(err, errAliasInUse) {
+	if _, err = s.create("ſ", aliasSession{Authority: auth(2, "$1"), Name: "tm2"}); !errors.Is(err, errAliasInUse) {
 		t.Fatalf("SimpleFold-equivalent alias accepted: %v", err)
 	}
 	r := s.list()[0]
@@ -134,7 +134,7 @@ func TestAliasStorePersistenceFailureAlgebra(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			r, err := s.create("before", aliasSession{Authority: auth(1, "$0"), Name: "he2"})
+			r, err := s.create("before", aliasSession{Authority: auth(1, "$0"), Name: "tm2"})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -162,7 +162,7 @@ func TestAliasStorePersistenceFailureAlgebra(t *testing.T) {
 				if got.DisplayAlias != "after" || s.fault == nil {
 					t.Fatalf("post-publication state=%+v fault=%v", got, s.fault)
 				}
-				if _, e := s.create("blocked", aliasSession{Authority: auth(2, "$1"), Name: "he2"}); !errors.Is(e, errAliasStoreUnavailable) {
+				if _, e := s.create("blocked", aliasSession{Authority: auth(2, "$1"), Name: "tm2"}); !errors.Is(e, errAliasStoreUnavailable) {
 					t.Fatalf("faulted store mutation=%v", e)
 				}
 				reopened, e := newAliasStore(path)
@@ -192,7 +192,7 @@ func TestAliasStoreDirectorySyncFaultAndReconcileRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r, err := s.create("live", aliasSession{Authority: auth(1, "$0"), Name: "he2"})
+	r, err := s.create("live", aliasSession{Authority: auth(1, "$0"), Name: "tm2"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,7 +209,7 @@ func TestAliasStoreDirectorySyncFaultAndReconcileRollback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	r2, err := s2.create("live", aliasSession{Authority: auth(1, "$0"), Name: "he2"})
+	r2, err := s2.create("live", aliasSession{Authority: auth(1, "$0"), Name: "tm2"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -271,7 +271,7 @@ func TestAliasStoreStrictFilesystemAndData(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err = store.create("valid", aliasSession{Authority: auth(1, "$0"), Name: "he2"}); err != nil {
+	if _, err = store.create("valid", aliasSession{Authority: auth(1, "$0"), Name: "tm2"}); err != nil {
 		t.Fatal(err)
 	}
 	valid, err := os.ReadFile(utf8Path)

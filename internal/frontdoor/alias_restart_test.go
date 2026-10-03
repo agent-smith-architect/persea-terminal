@@ -31,7 +31,7 @@ func TestAliasRestartOverRealBroker(t *testing.T) {
 		}
 	}
 	t.Cleanup(func() { _ = exec.Command("tmux", "-L", label, "kill-server").Run() })
-	tmux("new-session", "-d", "-s", "he2", "sleep 300")
+	tmux("new-session", "-d", "-s", "tm2", "sleep 300")
 	socket := filepath.Join(shortTestDir(t), "broker.sock")
 	listener, err := net.Listen("unix", socket)
 	if err != nil {
@@ -92,12 +92,12 @@ func TestAliasRestartOverRealBroker(t *testing.T) {
 		}
 		time.Sleep(10 * time.Millisecond)
 	}
-	tmux("new-session", "-d", "-s", "he2", "sleep 300")
+	tmux("new-session", "-d", "-s", "tm2", "sleep 300")
 	second := inventory()
 	if sameAuthority(first.Authority, second.Authority) {
 		t.Fatal("restart did not change authority")
 	}
-	if second.Alias != "Research" || second.AliasState != "active" || s.aliases.list()[0].SessionName != "he2" || !sameAuthority(s.aliases.list()[0].Incarnation, second.Authority) {
+	if second.Alias != "Research" || second.AliasState != "active" || s.aliases.list()[0].SessionName != "tm2" || !sameAuthority(s.aliases.list()[0].Incarnation, second.Authority) {
 		t.Fatalf("restart lost alias: %+v %+v", second, s.aliases.list())
 	}
 }

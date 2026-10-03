@@ -181,7 +181,7 @@ func TestAliasAPIJSONETagAndCAS(t *testing.T) {
 }
 
 func TestAliasConflictHeaderPreservesUnicode(t *testing.T) {
-	current := AliasRecord{AliasID: "id", DisplayAlias: "工作 📖 + 50%", Realm: "r", Server: "s", SessionName: "he2", Incarnation: auth(7, "$0"), State: "active", Revision: 7}
+	current := AliasRecord{AliasID: "id", DisplayAlias: "工作 📖 + 50%", Realm: "r", Server: "s", SessionName: "tm2", Incarnation: auth(7, "$0"), State: "active", Revision: 7}
 	w := httptest.NewRecorder()
 	writeAliasError(w, "alias_exists", http.StatusConflict, current)
 	header := w.Header().Get("X-Persea-Alias-Record")
@@ -230,7 +230,7 @@ func fakeAliasBroker(t *testing.T, inventory proto.ServerInventory) string {
 // the request is unavailable, never "session gone".
 func TestAliasCreateOnIncompleteInventoryIsUnavailable(t *testing.T) {
 	a := auth(7, "$3")
-	socket := fakeAliasBroker(t, proto.ServerInventory{Label: "s", Status: "ok", Error: "inventory session limit reached", Sessions: []proto.Session{{Authority: a, Name: "he2", Width: 80, Height: 24}}})
+	socket := fakeAliasBroker(t, proto.ServerInventory{Label: "s", Status: "ok", Error: "inventory session limit reached", Sessions: []proto.Session{{Authority: a, Name: "tm2", Width: 80, Height: 24}}})
 	s := newServer(config.Front{Realms: []config.Realm{{Name: "r", Socket: socket, BrokerUID: uint32(os.Getuid()), BrokerUIDConfigured: true}}, HandleTTLSeconds: 60, HandleCapacity: 8}, ".", "127.0.0.1:8080")
 	handle, err := s.handles.mint(a)
 	if err != nil {
@@ -248,7 +248,7 @@ func TestAliasCreateOnIncompleteInventoryIsUnavailable(t *testing.T) {
 // the session list.
 func TestAliasStoreFailureKeepsInventory(t *testing.T) {
 	a := auth(7, "$3")
-	socket := fakeAliasBroker(t, proto.ServerInventory{Label: "s", Status: "ok", Sessions: []proto.Session{{Authority: a, Name: "he2", Width: 80, Height: 24}}})
+	socket := fakeAliasBroker(t, proto.ServerInventory{Label: "s", Status: "ok", Sessions: []proto.Session{{Authority: a, Name: "tm2", Width: 80, Height: 24}}})
 	dir := t.TempDir()
 	if err := os.Chmod(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -266,7 +266,7 @@ func TestAliasStoreFailureKeepsInventory(t *testing.T) {
 	for i := 0; i < 2; i++ {
 		w := httptest.NewRecorder()
 		s.handler().ServeHTTP(w, httptest.NewRequest("GET", "http://127.0.0.1:8080/api/inventory", nil))
-		if w.Code != 200 || !strings.Contains(w.Body.String(), `"name":"he2"`) {
+		if w.Code != 200 || !strings.Contains(w.Body.String(), `"name":"tm2"`) {
 			t.Fatalf("store failure hid the inventory: %d %s", w.Code, w.Body.String())
 		}
 	}
