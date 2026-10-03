@@ -397,8 +397,17 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private aliasClear!: HTMLButtonElement;
   private aliasStatus!: HTMLOutputElement;
   private aliasCurrentSession?: DashboardSession;
+  // The newest saved alias known for the current session: from a save's
+  // acknowledgement or a later inventory. Cancel returns to it, absence
+  // included after a Clear.
+  private aliasSaved?: DashboardAlias;
+  // The saved alias a draft is based on; its revision is the save's If-Match.
   private aliasBaseline?: DashboardAlias;
   private aliasBusy = false;
+  // Advances when an alias save starts and when it is acknowledged. An
+  // inventory request sent at an older epoch can predate the save, so its
+  // alias state is not applied and it is not reused for a refresh.
+  private aliasEpoch = 0;
   private readonly insetViewport?: UnifiedViewportInsetSource;
   private readonly keyBar: HTMLDivElement;
   private readonly keyBankToggle: HTMLButtonElement;
@@ -470,6 +479,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private sessionInventory?: SessionSwitcherInventory;
   private sessionInventoryAbort?: AbortController;
   private sessionInventoryRequest?: Promise<void>;
+  private sessionInventoryEpoch = 0;
   private sessionSwitchPending = false;
   private readonly selectOverlay: HTMLElement;
   private readonly selectBody: HTMLElement;
@@ -1883,7 +1893,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.aliasEditing = true; this.aliasStatus.textContent = ""; this.renderAliasControls(); this.aliasInput.focus({ preventScroll: true });
     }, () => !this.closed && !this.aliasEdit.disabled, () => this.keyInteractionGeneration));
     this.cleanupListeners.push(bindGenerationFencedClickActivation(this.aliasCancel, () => {
-      this.aliasBaseline = this.aliasCurrentSession?.aliases[0];
+      this.aliasBaseline = this.aliasSaved;
       this.aliasInput.value = this.aliasInput.defaultValue = this.aliasBaseline?.displayAlias ?? "";
       this.aliasEditing = false; this.aliasStatus.textContent = ""; this.renderAliasControls(); this.aliasEdit.focus({ preventScroll: true });
     }, () => !this.closed && !this.aliasCancel.disabled, () => this.keyInteractionGeneration));
@@ -1925,9 +1935,10 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.aliasCurrentSession = session;
     if (session) {
       this.sessionName = session.name;
-      this.sessionAlias = session.aliases[0]?.displayAlias;
+      this.aliasSaved = session.aliases[0];
+      this.sessionAlias = this.aliasSaved?.displayAlias;
       if (!this.aliasBusy && (!sameSession || this.aliasInput.value === this.aliasInput.defaultValue)) {
-        this.aliasBaseline = session.aliases[0];
+        this.aliasBaseline = this.aliasSaved;
         this.aliasInput.value = this.aliasInput.defaultValue = this.aliasBaseline?.displayAlias ?? "";
       }
     }
@@ -1939,6 +1950,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     const session = this.aliasCurrentSession;
     if (this.closed || this.aliasBusy || !session) return;
     let returnFocus = false;
+    this.aliasEpoch += 1;
     this.aliasBusy = true; this.renderAliasControls(); this.aliasStatus.textContent = "Saving alias…";
     try {
       const result = await saveAlias(this.aliasBaseline, session.handles.alias, displayAlias);
@@ -1946,7 +1958,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       if (!result.ok) {
         this.aliasStatus.textContent = result.message;
         if (result.code === "alias_exists" && result.current) {
-          this.aliasBaseline = result.current;
+          this.aliasSaved = this.aliasBaseline = result.current;
+          this.aliasEpoch += 1;
           this.aliasInput.value = this.aliasInput.defaultValue = result.current.displayAlias;
           this.sessionAlias = result.current.displayAlias;
           this.renderSessionTag();
@@ -1961,7 +1974,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         }
         return;
       }
-      this.aliasBaseline = result.alias;
+      this.aliasSaved = this.aliasBaseline = result.alias;
+      this.aliasEpoch += 1;
       this.sessionAlias = result.alias?.displayAlias;
       this.aliasInput.value = this.aliasInput.defaultValue = result.alias?.displayAlias ?? "";
       returnFocus = this.aliasFields.contains(document.activeElement);
@@ -2013,7 +2027,12 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private async loadSessionInventory(refresh: boolean): Promise<void> {
     const source = this.options.aliasSession ?? this.options.sessionSwitch;
     if (this.closed || !source) return;
-    if (this.sessionInventoryRequest) return this.sessionInventoryRequest;
+    if (this.sessionInventoryRequest) {
+      if (this.sessionInventoryEpoch === this.aliasEpoch) return this.sessionInventoryRequest;
+      // That request was sent before the latest alias save and cannot show it.
+      this.sessionInventoryAbort?.abort();
+    }
+    const epoch = this.sessionInventoryEpoch = this.aliasEpoch;
     const loading = refresh ? "Refreshing sessions…" : "Loading sessions…";
     this.sheetStatus.textContent = loading;
     this.identitySessionStatus.textContent = loading;
@@ -2026,7 +2045,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         if (this.closed || controller.signal.aborted || this.sessionInventoryAbort !== controller) return;
         this.sessionInventory = inventory;
         this.sessionInventoryLoaded = true;
-        this.updateAliasSession(inventory);
+        if (epoch === this.aliasEpoch) this.updateAliasSession(inventory);
         this.sessionSwitcher?.setInventory(inventory);
         this.identitySessionSwitcher?.setInventory(inventory);
         this.sheetStatus.textContent = "";
@@ -3413,7 +3432,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.sessionAlias = value.aliasLabel;
     this.aliasEditing = false;
     this.aliasCurrentSession = undefined;
-    this.aliasBaseline = undefined;
+    this.aliasSaved = this.aliasBaseline = undefined;
     this.aliasInput.value = this.aliasInput.defaultValue = "";
     this.aliasStatus.textContent = "";
     this.renderAliasControls();

@@ -133,14 +133,14 @@ async function run(engine) {
         const list = el.querySelector('.persea-session-switcher__list'), row = list.querySelector('.persea-session-switcher__row');
         el.scrollTop = el.scrollHeight;
         const p = el.getBoundingClientRect(), l = list.getBoundingClientRect(), r = row.getBoundingClientRect();
-        const room = { list: l.height, firstRowBottom: r.bottom - l.top, listBottom: l.bottom, panelBottom: p.bottom, panelTop: p.top, dashboardTop: 0 };
+        const room = { list: l.height, firstRowBottom: r.bottom - l.top, listBottom: l.bottom, panelBottom: p.bottom, panelTop: p.top, dashboardTop: 0, userScrollable: el.scrollHeight <= el.clientHeight || ['auto', 'scroll'].includes(getComputedStyle(el).overflowY) };
         el.scrollTop = 0; room.dashboardTop = el.querySelector('[aria-label="Open the dashboard"]').getBoundingClientRect().top - el.getBoundingClientRect().top;
         return room;
       });
       for (const open of [false, true]) {
         if (open) await page.locator('.persea-unified-identity__current-details > summary').click();
         const room = await listRoom();
-        assert(room.list + 0.5 >= room.firstRowBottom && room.listBottom <= room.panelBottom + 0.5 && room.dashboardTop >= 0 && room.dashboardTop < 16, `${name}: session list squeezed (details ${open ? 'open' : 'closed'}): ${JSON.stringify(room)}`);
+        assert(room.list + 0.5 >= room.firstRowBottom && room.listBottom <= room.panelBottom + 0.5 && room.dashboardTop >= 0 && room.dashboardTop < 16 && room.userScrollable, `${name}: session list squeezed (details ${open ? 'open' : 'closed'}): ${JSON.stringify(room)}`);
         if (open) await page.locator('.persea-unified-identity__current-details > summary').click();
       }
       await shot('terminal-editor');
@@ -172,6 +172,42 @@ async function run(engine) {
         await editor.getByText('Alias saved.', { exact: true }).waitFor();
         assert(!await input.isVisible(), 'Enter save did not collapse the editor');
       }
+      if (name === 'desktop') {
+        const editEnabled = () => page.waitForFunction(() => document.querySelector('[aria-label="Edit alias for current session"]')?.disabled === false);
+        // A: an inventory request sent before a save must not undo the save.
+        // Hold the next inventory response, save while it is pending, then
+        // deliver it; the acknowledged alias must stay.
+        let release, fetched, handled;
+        const held = new Promise(resolve => { release = resolve; });
+        const heldFetched = new Promise(resolve => { fetched = resolve; });
+        const heldHandled = new Promise(resolve => { handled = resolve; });
+        await page.route('**/api/inventory', async route => {
+          try { const response = await route.fetch(); fetched(); await held; await route.fulfill({ response }); } catch { /* the page dropped the request */ } finally { handled(); }
+        }, { times: 1 });
+        await page.locator('.persea-unified-tag').click(); await page.locator('.persea-unified-tag').click();
+        await heldFetched;
+        await edit.click(); await input.fill('Fresh');
+        await editor.getByRole('button', { name: 'Save', exact: true }).click();
+        await editor.getByText('Alias saved.', { exact: true }).waitFor();
+        release(); await heldHandled; await editEnabled();
+        assert(await page.locator('.persea-unified-tag__alias').textContent() === 'Fresh' && await page.title() === 'Fresh · Persea Terminal', 'An inventory sent before the save replaced the saved alias');
+        // B: after a Clear whose refresh fails, Cancel must return to the
+        // cleared state, and the next save must create a new alias.
+        phase = 'inventory-fault';
+        await page.route('**/api/inventory', route => route.abort('failed'), { times: 1 });
+        await edit.click(); await editor.getByRole('button', { name: 'Clear', exact: true }).click();
+        await editor.getByText('Alias cleared.', { exact: true }).waitFor();
+        await page.locator('.persea-unified-identity__session-status', { hasText: 'Inventory unavailable' }).waitFor();
+        await editEnabled();
+        phase = 'terminal';
+        await edit.click(); await editor.getByRole('button', { name: 'Cancel', exact: true }).click(); await edit.click();
+        assert(await input.inputValue() === '' && !await editor.getByRole('button', { name: 'Clear', exact: true }).isVisible(), 'Cancel restored the cleared alias');
+        await input.fill('New');
+        const created = page.waitForResponse(response => response.url().endsWith('/api/aliases') && response.request().method() === 'POST');
+        await editor.getByRole('button', { name: 'Save', exact: true }).click();
+        assert((await created).status() === 201, 'Saving after a cleared alias did not create a new alias');
+        await editor.getByText('Alias saved.', { exact: true }).waitFor();
+      }
       await edit.click(); await shot('terminal-editor-expanded');
       const measurements = await editor.evaluate(el => ({ width: el.getBoundingClientRect().width, targets: [...el.querySelectorAll('button,input')].filter(item => item.getBoundingClientRect().height > 0).map(item => ({ tag: item.tagName, height: item.getBoundingClientRect().height, shadow: getComputedStyle(item).boxShadow, border: getComputedStyle(item).borderTopWidth })), overflow: document.documentElement.scrollWidth > innerWidth }));
       assert(measurements.targets.every(item => item.height >= 44), `${name}: alias editor has a small touch target`);
@@ -189,7 +225,9 @@ async function run(engine) {
       process.stdout.write(`ALIAS_BROWSER ${engine} ${name} passed\n`);
     }
     for (const message of evidence.console) {
-      message.triage = message.phase === 'alias-in-use' && message.type === 'error' && message.url?.endsWith('/api/aliases') && /^Failed to load resource:.*409/.test(message.text) ? 'expected HTTP 409 from the deliberate name conflict' : 'unexpected';
+      message.triage = message.phase === 'alias-in-use' && message.type === 'error' && message.url?.endsWith('/api/aliases') && /^Failed to load resource:.*409/.test(message.text) ? 'expected HTTP 409 from the deliberate name conflict'
+        : message.phase === 'inventory-fault' && ((message.type === 'error' && message.url?.endsWith('/api/inventory') && /^Failed to load resource/.test(message.text)) || (message.type === 'info' && /^Web Inspector blocked \S+\/api\/inventory from loading$/.test(message.text))) ? 'expected failure of the deliberately failed inventory request'
+        : 'unexpected';
     }
     assert(evidence.console.every(message => message.triage !== 'unexpected'), `Unexpected browser messages: ${JSON.stringify(evidence.console)}`);
   } finally {
