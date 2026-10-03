@@ -378,6 +378,17 @@ retry, and a faulted store requires restart. Disabling uploads preserves this
 cleanup. A package rollback preserves durable stores; it does not downgrade
 their schema. Keep the binary, UI, and configuration together when rolling back.
 
+### Appearance preferences and rollback
+
+The appearance record in `preferences.json` carries `terminal_position`
+(`top-center`, `top-left` or `center`). A record written before the field
+existed reads as `top-center` and is not rewritten until the operator saves.
+Earlier releases decode the store strictly and do not know the field: after a
+rollback across it, their preferences store reports unavailable, terminals use
+the default appearance, and Settings cannot save. Before you start the earlier
+release, remove `terminal_position` from each record and keep the file's owner
+and mode.
+
 ### Shared keyboard preferences and rollback
 
 The front stores shared keyboard defaults in `keyboard-v1.json`, alongside
