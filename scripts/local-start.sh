@@ -165,7 +165,7 @@ UNIFIED_OBSERVER=persea-local-observer
 [[ "$SESSION" != "$UNIFIED_OBSERVER" ]] || UNIFIED_OBSERVER=persea-local-observer-2
 mkdir -m 0700 "$RUNTIME_DIR/unified-journal"
 printf '{"realm":"local","front_uid":%s,"servers":[{"label":"private","socket_path":"%s"}],"session_create":{"enabled":true,"servers":["private"]},"unified_terminal_dev":{"enabled":true,"server":"private","session":"%s","observer_session":"%s","runtime_dir":"%s"}}\n' "$CALLER_UID" "$TMUX_SOCKET" "$SESSION" "$UNIFIED_OBSERVER" "$RUNTIME_DIR/unified-journal" >"$BROKER_CONFIG"
-printf '{"ingress":{"socket_path":"%s","peer_uid":%s,"canonical_host":"127.0.0.1:%s","operator_login":"%s","max_connections":64%s},"realms":[{"name":"local","socket":"%s","broker_uid":%s}],"alias_store_path":"%s","handle_ttl_seconds":60,"aliases":[{"alias":"Local","realm":"local","server":"private","session":"%s"}]}\n' "$FRONT_SOCKET" "$CALLER_UID" "$PORT" "$OPERATOR_LOGIN" "$INGRESS_TLS_FIELD" "$BROKER_SOCKET" "$CALLER_UID" "$RUNTIME_DIR/aliases.json" "$SESSION" >"$FRONT_CONFIG"
+printf '{"ingress":{"socket_path":"%s","peer_uid":%s,"canonical_host":"127.0.0.1:%s","operator_login":"%s","max_connections":64%s},"realms":[{"name":"local","socket":"%s","broker_uid":%s}],"alias_store_path":"%s","handle_ttl_seconds":60}\n' "$FRONT_SOCKET" "$CALLER_UID" "$PORT" "$OPERATOR_LOGIN" "$INGRESS_TLS_FIELD" "$BROKER_SOCKET" "$CALLER_UID" "$RUNTIME_DIR/aliases.json" >"$FRONT_CONFIG"
 chmod 0600 "$BROKER_CONFIG" "$FRONT_CONFIG"
 
 (cd "$PROJECT_DIR" && exec nohup setsid "$BIN" broker --socket "$BROKER_SOCKET" --config "$BROKER_CONFIG") >"$RUNTIME_DIR/broker.log" 2>&1 </dev/null &
