@@ -15,6 +15,7 @@ import { ClipboardImages } from "./clipboard_images";
 import { ClipboardPreferencesService } from "./clipboard_preferences";
 import { SnippetService, deviceOrigin } from "./snippet_client";
 import { UNIFIED_THEME_IDS, isUnifiedThemeID, unifiedTheme } from "./unified_themes";
+import { TERMINAL_POSITIONS, TERMINAL_POSITION_LABELS, isTerminalPosition } from "./terminal_position";
 
 // The preferences service validates the terminal font and the composer text
 // in the same 9–24 px range; the Appearance card offers exactly that range.
@@ -577,9 +578,9 @@ export class Dashboard {
     void this.loadDefaultPreference();
     window.addEventListener("pageshow", this.onPageShow); window.addEventListener("hashchange", this.handleFragmentTransition); document.addEventListener("visibilitychange", this.onVisibility); this.periodic = window.setInterval(() => { if (document.visibilityState === "visible") void this.refresh("background"); }, 60_000); void this.refresh("initial");
   }
-  // the appearance preferences (theme, terminal font, composer
-  // text) are operator-wide, so they get a dashboard card. It is collapsed by
-  // default — the dashboard's job is choosing a session — and it renders from
+  // the appearance preferences (theme, terminal font, composer text,
+  // terminal position) are operator-wide, so they get a dashboard card. It is
+  // collapsed by default — the dashboard's job is choosing a session — and it renders from
   // the page's one preferences read. Saves are ordinary preference updates:
   // every open terminal follows through the storage event, and this card
   // follows theirs the same way.
@@ -638,7 +639,26 @@ export class Dashboard {
     // no phone floor — the viewport meta suppresses the iOS focus
     // zoom, so every size 9–24 is the composer's real size on every device.
     const composer = element("select"); for (const size of APPEARANCE_FONT_SIZES) option(composer, String(size), `${size} px`);
-    grid.append(field("Theme", theme, "Terminal theme"), field("Terminal font", font, "Terminal font size"), field("Composer text", composer, "Composer text size"));
+    // Three placements are easier to recognise than to read, so each option
+    // draws the placement it names. The native radio covers its whole option:
+    // the option is the touch target and keeps the platform's keyboard and
+    // screen-reader behaviour.
+    const position = element("fieldset", "dashboard-appearance__position");
+    const positionHint = element("p", "dashboard-position__hint", "Used when a terminal is smaller than its window.");
+    positionHint.id = "dashboard-position-hint";
+    position.setAttribute("aria-describedby", positionHint.id);
+    const positionChoices = element("div", "dashboard-position");
+    const positions = TERMINAL_POSITIONS.map((value) => {
+      const choice = element("label", "dashboard-position__choice");
+      const input = element("input"); input.type = "radio"; input.name = "terminal-position"; input.value = value;
+      const preview = element("span", "dashboard-position__preview"); preview.dataset.position = value; preview.setAttribute("aria-hidden", "true");
+      preview.append(element("span", "dashboard-position__grid"));
+      choice.append(input, preview, element("span", "dashboard-position__label", TERMINAL_POSITION_LABELS[value]));
+      positionChoices.append(choice);
+      return input;
+    });
+    position.append(element("legend", "dashboard-appearance__caption", "Terminal position"), positionChoices, positionHint);
+    grid.append(field("Theme", theme, "Terminal theme"), field("Terminal font", font, "Terminal font size"), field("Composer text", composer, "Composer text size"), position);
     body.append(grid, note, status); card.append(summary, body);
     const service = this.preferences;
     let clearStatus: ReturnType<typeof setTimeout> | undefined;
@@ -655,11 +675,12 @@ export class Dashboard {
     let inFlight = 0;
     const render = (snapshot: OperatorPreferenceSnapshot): void => {
       const editable = snapshot.status === "ready" || snapshot.status === "hint";
-      theme.disabled = font.disabled = composer.disabled = !editable;
+      theme.disabled = font.disabled = composer.disabled = position.disabled = !editable;
       if (inFlight === 0) {
         theme.value = snapshot.preferences.theme;
         font.value = snapshot.preferences.fontSize === null ? "auto" : String(snapshot.preferences.fontSize);
         composer.value = String(snapshot.preferences.composerFontSize);
+        for (const input of positions) input.checked = input.value === snapshot.preferences.terminalPosition;
       }
       if (snapshot.status === "loading") say("Loading…", false);
       else if (inFlight === 0 && (snapshot.status === "unavailable" || snapshot.status === "conflict")) say(snapshot.message, false);
@@ -702,6 +723,10 @@ export class Dashboard {
     theme.addEventListener("change", () => { const id = theme.value; if (isUnifiedThemeID(id)) void save({ theme: id }); });
     font.addEventListener("change", () => void save({ fontSize: font.value === "auto" ? null : Number(font.value) }));
     composer.addEventListener("change", () => void save({ composerFontSize: Number(composer.value) }));
+    position.addEventListener("change", (event) => {
+      const value = (event.target as HTMLInputElement).value;
+      if (isTerminalPosition(value)) void save({ terminalPosition: value });
+    });
     // The dashboard never re-reads preferences on focus or visibility
     // (shared-landing-inventory); another tab's save reaches the card through the `storage`
     // signal, which triggers one authoritative server read — a
