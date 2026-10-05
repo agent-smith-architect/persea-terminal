@@ -104,7 +104,8 @@ Filtering updates the matching count and offers a clear action for no results.
 A failed refresh retains the last good inventory and says when it was read.
 It retries by itself after 2, 4, 8, 16, then every 30 seconds (with jitter)
 while the document is visible, and at once when the network or the window comes
-back. A retry that falls during an edit or a save waits one more delay. There is
+back. A retry that cannot run (a hidden page, an edit or a save in progress)
+waits one more delay. There is
 no ambiguous "Updated just now" timestamp. The visible
 document checks inventory every 60 seconds; a quick window return does not
 repeat a recent read. Manual refresh stays available.

@@ -46,6 +46,10 @@ if (kind === "stall") {
   const dashboard = window.dashboard = new Dashboard(root);
   dashboard.mount();
   window.holdEdit = (held) => dashboard.gate.setMutating(held);
+  window.setHidden = (hidden) => {
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => hidden ? "hidden" : "visible" });
+    document.dispatchEvent(new Event("visibilitychange"));
+  };
 } else {
   // The request token cookie needs HTTPS (a __Host- cookie); this plain HTTP
   // test server does not check it, so the page reads a well-formed one.
@@ -53,7 +57,7 @@ if (kind === "stall") {
   const inventory = new WorkspaceInventory();
   const page = window.page = new WorkspacePage({ root, styleNonce: "AAAAAAAAAAAAAAAAAAAAAA", name: "stall", win: window, inventory, historyRows: 1000 });
   await inventory.snapshot(undefined, -1);
-  await page.open(leaf({ realm: "local", server: "private", name: "missing" }, kind === "create" ? "offer" : "create"));
+  await page.open(leaf({ realm: "local", server: "private", name: "missing" }, kind === "workspace" ? "create" : "offer"));
   window.paneState = () => page.panesSnapshot()[0].state;
 }
 window.ready = true;
@@ -65,7 +69,7 @@ const INVENTORY = JSON.stringify({ image_upload: false, aliases: [], realms: [] 
 async function scenario(browserType, engine) {
   // Per case: what the session list read does ("ok", "stall", "error") and
   // how many requests each path received.
-  const cases = { stall: { inventory: "stall" }, transfer: { inventory: "ok" }, gate: { inventory: "error" }, workspace: { inventory: "ok" }, create: { inventory: "ok" } };
+  const cases = { stall: { inventory: "stall" }, transfer: { inventory: "ok" }, gate: { inventory: "error" }, workspace: { inventory: "ok" }, create: { inventory: "ok" }, created: { inventory: "ok" } };
   for (const state of Object.values(cases)) state.counts = {};
   const held = [];
   const timers = new Set();
@@ -79,7 +83,9 @@ async function scenario(browserType, engine) {
     state.counts[key] = (state.counts[key] || 0) + 1;
     const stall = (url.pathname === "/api/preferences" && state === cases.stall) || (url.pathname === "/api/inventory" && state.inventory === "stall");
     if (stall) { response.setHeader("Content-Type", "application/json"); response.write("{"); held.push(response); return; }
-    // A create whose reply never comes back: no headers at all.
+    // A create whose reply never comes back (no headers at all), or one that
+    // succeeds before the session list read stalls.
+    if (key === "POST /api/sessions" && state === cases.created) { state.inventory = "stall"; response.writeHead(201); response.end("{}"); return; }
     if (key === "POST /api/sessions") { held.push(response); return; }
     if (url.pathname.startsWith("/api/clipboard/images/")) {
       // A file that takes longer than a small read's deadline to arrive.
@@ -149,16 +155,20 @@ async function scenario(browserType, engine) {
     assert.ok(transfer.ms > 11_000, `${engine}: the transfer did not take the paced time: ${JSON.stringify(transfer)}`);
   };
 
-  // A retry that falls while a save is in progress is not lost: it runs once
-  // the save ends, long before the 60 s periodic read.
+  // A retry that falls while the page is hidden and a save is in progress is
+  // not lost, also when the page comes back before the save ends: it runs
+  // once the save ends, long before the 60 s periodic read.
   const gateCase = async () => {
     const page = await open("gate");
     await page.waitForFunction(() => document.querySelector(".dashboard-status")?.textContent.includes("Trying again automatically."), null, { timeout: 5_000 });
-    await page.evaluate(() => window.holdEdit(true));
+    await page.evaluate(() => { window.holdEdit(true); window.setHidden(true); });
     cases.gate.inventory = "ok";
     const blocked = cases.gate.counts["GET /api/inventory"];
-    // The first retry comes within 2.4 s; hold the save past it.
+    // The first retry comes within 2.4 s; stay hidden past it, then return
+    // while the save is still in progress.
     await page.waitForTimeout(3_000);
+    await page.evaluate(() => window.setHidden(false));
+    await page.waitForTimeout(500);
     assert.equal(cases.gate.counts["GET /api/inventory"], blocked, `${engine}: a refresh ran during the save`);
     await page.evaluate(() => window.holdEdit(false));
     await page.waitForFunction(() => document.querySelector(".dashboard-status")?.textContent === "", null, { timeout: 6_000 });
@@ -191,8 +201,18 @@ async function scenario(browserType, engine) {
     assert.equal(cases.create.counts["POST /api/sessions"], 1, `${engine}: the create was sent again`);
   };
 
+  // A create that succeeds, followed by a session list read without a reply,
+  // ends with Retry offered, not at "Finding this session".
+  const createdCase = async () => {
+    const page = await open("created");
+    await page.getByRole("button", { name: "Create session", exact: true }).click();
+    await page.waitForFunction(() => window.paneState().kind === "failed", null, { timeout: 14_000 });
+    assert.deepEqual(await page.evaluate(() => window.paneState()), { kind: "failed", reason: "session_list_unavailable" }, `${engine}: the pane did not report the unread list after a create`);
+    assert.equal(await page.getByRole("button", { name: "Retry", exact: true }).count(), 1, `${engine}: Retry was not offered after a create`);
+  };
+
   try {
-    await Promise.all([stallCase(), transferCase(), gateCase(), workspaceCase(), createCase()]);
+    await Promise.all([stallCase(), transferCase(), gateCase(), workspaceCase(), createCase(), createdCase()]);
     assert.deepEqual(pageErrors, [], `${engine}: page errors`);
     console.log(`${engine}: request stall recovery passed`);
   } finally {
