@@ -14,7 +14,7 @@ import {
 import {
   CLOSE_CLIENT_FAULT, CLOSE_CLIENT_PROTOCOL_FAULT, CLOSE_ORDERLY,
   HISTORY_DEPTH_PENDING_TIMEOUT_MS, MAX_RECONNECT_ATTEMPTS, MAX_RECONNECT_ATTEMPT_MS, MAX_RECONNECT_ELAPSED_MS,
-  OFFLINE_RETRY_MS, OFFLINE_WAKE_SPACING_MS, STABLE_CONNECTION_MS, WebSocketAttachmentTransport,
+  OFFLINE_EARLY_RETRY_MS, OFFLINE_EARLY_WINDOW_MS, OFFLINE_RETRY_MS, OFFLINE_WAKE_SPACING_MS, OPEN_DEADLINE_MS, STABLE_CONNECTION_MS, WebSocketAttachmentTransport,
   type AttachmentWebSocket, type HistoryDepthOutcome, type ReconnectRuntime,
 } from "../src/websocket_attachment_transport";
 import {
@@ -919,9 +919,10 @@ test("reconnect_spends_the_fast_phase_then_keeps_probing_offline_until_detached"
   const clock = new FakeReconnectClock();
   const statuses: string[] = [];
   let attempts = 0;
+  const probes: number[] = [];
   const transport = new WebSocketAttachmentTransport(
     "ws://example.test/ws", () => { throw new Error("socket must not be constructed when inventory is offline"); }, ["persea-handle.consumed"],
-    async () => { attempts += 1; throw new Error("inventory offline"); }, () => 0.5, clock.runtime,
+    async () => { attempts += 1; probes.push(clock.now()); throw new Error("inventory offline"); }, () => 0.5, clock.runtime,
   );
   transport.bind({
     openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: () => {},
@@ -935,17 +936,27 @@ test("reconnect_spends_the_fast_phase_then_keeps_probing_offline_until_detached"
   equal(statuses.at(-1), `OFFLINE:${MAX_RECONNECT_ATTEMPTS}`, "a spent fast phase did not go OFFLINE visibly");
   assert(!statuses.some((status) => status.startsWith("EXHAUSTED")), "ordinary loss was reported as unrecoverable");
   equal(clock.wakeSubscribers(), 1, "OFFLINE did not listen for the network or the page coming back");
-  await clock.advance(OFFLINE_RETRY_MS - 1);
-  equal(attempts, MAX_RECONNECT_ATTEMPTS, "an OFFLINE probe ran before its slow interval");
+  await clock.advance(OFFLINE_EARLY_RETRY_MS - 1);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS, "an OFFLINE probe ran before its interval");
   await clock.advance(1);
   equal(attempts, MAX_RECONNECT_ATTEMPTS + 1, "OFFLINE stopped probing after the fast phase");
-  await clock.advance(OFFLINE_RETRY_MS);
+  await clock.advance(OFFLINE_EARLY_RETRY_MS);
   equal(attempts, MAX_RECONNECT_ATTEMPTS + 2, "OFFLINE probing did not continue");
+  // The early interval lasts for the first minutes of the outage; a long
+  // outage then probes at the slow interval.
+  await clock.advance(OFFLINE_EARLY_WINDOW_MS + 2 * OFFLINE_RETRY_MS);
+  const gaps = probes.slice(MAX_RECONNECT_ATTEMPTS).map((at, index) => at - probes[MAX_RECONNECT_ATTEMPTS - 1 + index]!);
+  equal(gaps[0], OFFLINE_EARLY_RETRY_MS, "the first OFFLINE probe did not use the early interval");
+  equal(gaps.at(-1), OFFLINE_RETRY_MS, "a long outage kept probing at the early interval");
+  assert(gaps.every((gap) => gap === OFFLINE_EARLY_RETRY_MS || gap === OFFLINE_RETRY_MS), `OFFLINE probes drifted: ${gaps.join(",")}`);
+  const early = gaps.filter((gap) => gap === OFFLINE_EARLY_RETRY_MS).length;
+  equal(early, OFFLINE_EARLY_WINDOW_MS / OFFLINE_EARLY_RETRY_MS, "the early window did not last its full length");
   transport.detach();
   equal(clock.pending(), 0, "Detach left a retry timer armed");
   equal(clock.wakeSubscribers(), 0, "Detach left the wake subscription");
+  const attemptsAtDetach = attempts;
   await clock.advance(OFFLINE_RETRY_MS * 4);
-  equal(attempts, MAX_RECONNECT_ATTEMPTS + 2, "a detached transport kept probing");
+  equal(attempts, attemptsAtDetach, "a detached transport kept probing");
 });
 
 test("offline_wake_probes_at_once_and_a_hidden_page_waits_for_it", async () => {
@@ -973,9 +984,9 @@ test("offline_wake_probes_at_once_and_a_hidden_page_waits_for_it", async () => {
   bindTransportSource(transport);
   transport.attachAgain();
   await clock.advance(11_500);
-  equal(statuses.at(-1), `OFFLINE:${OFFLINE_RETRY_MS}`, "fast phase did not settle into visible OFFLINE probing");
+  equal(statuses.at(-1), `OFFLINE:${OFFLINE_EARLY_RETRY_MS}`, "fast phase did not settle into visible OFFLINE probing");
   clock.visibleState = false;
-  await clock.advance(OFFLINE_RETRY_MS);
+  await clock.advance(OFFLINE_EARLY_RETRY_MS);
   equal(attempts, MAX_RECONNECT_ATTEMPTS + 1, "the armed probe did not run");
   equal(statuses.at(-1), "OFFLINE:-", "a hidden page armed a blind probe");
   equal(clock.pending(), 0, "a hidden page kept a probe timer");
@@ -1065,8 +1076,8 @@ test("commit_then_immediate_loss_keeps_its_episode_and_settles_into_offline_prob
   assert(statuses.includes("OFFLINE"), "a commit-then-evict loop never left the fast phase");
   equal(opened.length, MAX_RECONNECT_ATTEMPTS, "the loop ran more fast attempts than one episode allows");
   const socketsAtOffline = sockets.length;
-  await clock.advance(OFFLINE_RETRY_MS - 1);
-  equal(sockets.length, socketsAtOffline, "OFFLINE loop reattached faster than the slow interval");
+  await clock.advance(OFFLINE_EARLY_RETRY_MS - 1);
+  equal(sockets.length, socketsAtOffline, "OFFLINE loop reattached faster than its interval");
   transport.detach();
 });
 
@@ -1227,6 +1238,55 @@ const recordingTransport = (clock: FakeReconnectClock, sockets: TransportFakeSoc
 };
 const freshEndpoint = async () => Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-handle.fresh"]) });
 const takeoverEndpoint = Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-handle.takeover"]) });
+
+test("a_first_connection_that_never_opens_goes_to_recovery_at_its_deadline", async () => {
+  const clock = new FakeReconnectClock();
+  const sockets: TransportFakeSocket[] = [];
+  const closed: string[] = [];
+  const statuses: string[] = [];
+  const transport = new WebSocketAttachmentTransport("ws://example.test/ws", () => {
+    const socket = new TransportFakeSocket(0);
+    sockets.push(socket);
+    return socket as unknown as AttachmentWebSocket;
+  }, ["persea-handle.first"], freshEndpoint, () => 0.5, clock.runtime);
+  transport.bind({
+    openTransport: () => {}, receiveDecoded: () => "ENQUEUED",
+    transportClosed: (_generation, reason) => { closed.push(reason); },
+    reconnectStatus: (status) => { statuses.push(status.state); },
+  });
+  bindTransportSource(transport);
+  transport.connect();
+  await clock.advance(OPEN_DEADLINE_MS - 1);
+  equal(closed.length, 0, "the first connection was given up before its deadline");
+  await clock.advance(1);
+  equal(closed[0], "transport_open_timeout", "a handshake that never completed was not given up");
+  equal(sockets[0]!.closes.length, 1, "the abandoned handshake was not closed");
+  assert(statuses.includes("WAITING"), "giving up the first connection did not start recovery");
+  transport.detach();
+
+  const second = () => {
+    const closes: string[] = [];
+    const next = new WebSocketAttachmentTransport("ws://example.test/ws", () => {
+      const socket = new TransportFakeSocket(0);
+      sockets.push(socket);
+      return socket as unknown as AttachmentWebSocket;
+    }, ["persea-handle.first"], freshEndpoint, () => 0.5, clock.runtime);
+    next.bind({ openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: (_generation, reason) => { closes.push(reason); } });
+    next.connect();
+    return { next, closes };
+  };
+  // A handshake that completed in time is never given up.
+  const opened = second();
+  sockets.at(-1)!.readyState = 1;
+  await clock.advance(OPEN_DEADLINE_MS);
+  equal(opened.closes.length, 0, "a connection that opened in time was given up by the open deadline");
+  opened.next.detach();
+  // Leaving the page before the deadline leaves no timer behind.
+  const left = second();
+  await clock.advance(OPEN_DEADLINE_MS - 1);
+  left.next.detach();
+  equal(clock.pending(), 0, "detach left the open deadline armed");
+});
 
 test("handoff_closes_start_a_fresh_episode", async () => {
   for (const reason of ["generation_refit", "generation_rotated"]) {
@@ -1424,7 +1484,7 @@ test("a_takeover_after_an_offline_probe_leaves_offline", async () => {
   await clock.advance(11_500);
   assert(statuses.at(-1)?.startsWith("OFFLINE:"), "the fast phase did not reach OFFLINE");
   online = true;
-  await clock.advance(OFFLINE_RETRY_MS);
+  await clock.advance(OFFLINE_EARLY_RETRY_MS);
   equal(sockets.length, 1, "the OFFLINE probe did not open a socket");
   sockets[0].emit("close", { code: 1011, reason: "lease_held" });
   transport.takeControl(takeoverEndpoint);
@@ -1446,7 +1506,8 @@ test("waking_after_a_device_sleep_replaces_an_overdue_probe", async () => {
   transport.attachAgain();
   await clock.advance(11_500);
   equal(attempts, MAX_RECONNECT_ATTEMPTS, "fast-phase attempt cap drifted");
-  await clock.advance(5_000);
+  // The device sleeps while the first OFFLINE probe is still pending.
+  await clock.advance(OFFLINE_EARLY_RETRY_MS - 1_000);
   // Ten minutes asleep: the clock moves on while the probe timer is paused.
   clock.suspend(10 * 60_000);
   clock.wake();

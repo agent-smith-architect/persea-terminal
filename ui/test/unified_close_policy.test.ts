@@ -51,7 +51,7 @@ assert.ok(!UNIFIED_REATTACH_REASONS.has("refit_faulted"));
 for (const reason of [
   "websocket_1006", "websocket_1001", "transport_error", "transport_send_unavailable",
   "transport_send_failed", "liveness_unavailable", "liveness_timeout",
-  "reconnect_attempt_failed", "reconnect_attempt_timeout",
+  "reconnect_attempt_failed", "reconnect_attempt_timeout", "transport_open_timeout",
   "broker_unavailable", "broker_deadline",
   // The front door expiring application proof: what a stalled or suspended
   // connection looks like from the server. Loss, not a verdict.
@@ -192,6 +192,7 @@ for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose
     transport_error: "transient", transport_send_failed: "transient",
     transport_send_unavailable: "transient",
     reconnect_attempt_failed: "transient", reconnect_attempt_timeout: "transient",
+    transport_open_timeout: "transient",
     page_closed: "internal", takeover_requested: "internal", session_switch: "internal",
     attach_again_superseded: "internal",
     detached: "internal", client_disconnect: "internal", destroyed: "internal",

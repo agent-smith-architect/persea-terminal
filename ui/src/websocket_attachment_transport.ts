@@ -130,6 +130,14 @@ export const MAX_RECONNECT_ATTEMPTS = 6;
 export const MAX_RECONNECT_ELAPSED_MS = 30_000;
 export const MAX_RECONNECT_ATTEMPT_MS = 5_000;
 export const OFFLINE_RETRY_MS = 15_000;
+// Most drops on a weak link are short, so the first minutes of an OFFLINE
+// period probe more often. Each probe is one small request, and only while
+// the page is visible.
+export const OFFLINE_EARLY_RETRY_MS = 5_000;
+export const OFFLINE_EARLY_WINDOW_MS = 120_000;
+// The first connection has no reconnect attempt around it to bound it: a
+// handshake still pending after this long goes to normal recovery.
+export const OPEN_DEADLINE_MS = 10_000;
 // A wake signal brings the next OFFLINE probe forward, but never closer than
 // this to the previous attempt's start: signals can arrive in bursts (focus,
 // visibility and online together, or a page toggled repeatedly), and each
@@ -201,6 +209,8 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
   private retryToken = 0;
   private retryDisabled = false;
   private offline = false;
+  private offlineSince?: number;
+  private openDeadline?: unknown;
   private committedAt?: number;
   private caughtUpAt?: number;
   private unsubscribeWake?: () => void;
@@ -458,6 +468,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
 
   disconnect(reason = "client_disconnect"): void {
     this.clearPendingHistoryTimer();
+    this.clearOpenDeadline();
     const socket = this.socket;
     if (!socket) return;
     const generation = this.generation;
@@ -486,11 +497,19 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     socket.addEventListener("message", (event) => this.onMessage(socket, generation, event as MessageEvent<unknown>));
     socket.addEventListener("close", (event) => this.onClose(socket, generation, event as CloseEvent));
     socket.addEventListener("error", () => this.closeCurrent(socket, generation, "transport_error", true));
+    if (!attempt && socket.readyState === SOCKET_CONNECTING) {
+      this.clearOpenDeadline();
+      this.openDeadline = this.retryRuntime.setTimeout(() => {
+        this.openDeadline = undefined;
+        if (socket.readyState === SOCKET_CONNECTING) this.closeCurrent(socket, generation, "transport_open_timeout", true);
+      }, OPEN_DEADLINE_MS);
+    }
     return generation;
   }
 
   private onOpen(socket: AttachmentWebSocket, generation: number): void {
     if (this.socket !== socket || generation !== this.generation || this.closedGeneration === generation) return;
+    this.clearOpenDeadline();
     this.cancelLiveness();
     const heartbeat = new TransportLiveness(
       (payload) => socket.send(payload),
@@ -578,6 +597,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
 
   private onClose(socket: AttachmentWebSocket, generation: number, event: CloseEvent): void {
     if (this.socket !== socket || generation !== this.generation) return;
+    this.clearOpenDeadline();
     this.cancelLiveness(socket, generation);
     this.socket = undefined;
     this.recordHistoryDepthFailure(generation);
@@ -603,8 +623,14 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     this.scheduleReconnect();
   }
 
+  private clearOpenDeadline(): void {
+    if (this.openDeadline !== undefined) this.retryRuntime.clearTimeout(this.openDeadline);
+    this.openDeadline = undefined;
+  }
+
   private closeCurrent(socket: AttachmentWebSocket, generation: number, reason: string, retryable: boolean): boolean {
     if (this.socket !== socket || generation !== this.generation) return false;
+    this.clearOpenDeadline();
     this.cancelLiveness(socket, generation);
     this.socket = undefined;
     if (retryable) this.recordHistoryDepthFailure(generation);
@@ -768,6 +794,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
   }
 
   private setOffline(offline: boolean): void {
+    if (offline && !this.offline) this.offlineSince = this.retryRuntime.now();
     this.offline = offline;
     if (offline && !this.unsubscribeWake) {
       this.unsubscribeWake = this.retryRuntime.subscribeWake?.(() => this.onWake());
@@ -864,7 +891,8 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
       this.setOffline(true);
       // A hidden page waits for its wake signal rather than probing blind.
       const visible = this.retryRuntime.visible?.() ?? true;
-      const delay = delayOverride ?? Math.round(OFFLINE_RETRY_MS * this.jitter());
+      const early = this.offlineSince !== undefined && this.retryRuntime.now() - this.offlineSince < OFFLINE_EARLY_WINDOW_MS;
+      const delay = delayOverride ?? Math.round((early ? OFFLINE_EARLY_RETRY_MS : OFFLINE_RETRY_MS) * this.jitter());
       this.sink?.reconnectStatus?.(Object.freeze({ state: "OFFLINE", attempt: this.retryAttempt, ...(visible ? { delayMs: delay } : {}) }));
       if (visible) this.armRetry(token, delay);
       return;
