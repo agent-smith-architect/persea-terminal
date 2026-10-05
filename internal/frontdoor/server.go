@@ -125,6 +125,7 @@ type Server struct {
 	upgrader                websocket.Upgrader
 	limiter                 operatorLimiter
 	previews                *previewStore
+	assets                  assetVersions
 }
 
 var frontLogf = log.Printf
@@ -417,11 +418,15 @@ func newServer(cfg config.Front, staticDir, listen string) *Server {
 	s.dashboardPreferences, s.dashboardPreferencesErr = openDashboardPreferencesStore(cfg.PreferencesStorePath)
 	s.clipboardImages, s.clipboardImageErr = openClipboardImageStore(cfg.SnippetStorePath, cfg.ImageUploadMaxBytes)
 	s.clipboardPreferences, s.clipboardPreferencesErr = openClipboardPreferencesStore(cfg.SnippetStorePath)
+	s.assets = loadAssetVersions(staticDir)
 	return s
 }
 func (s *Server) handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/inventory", s.inventory)
+	// The ingress middleware mints the CSRF cookie on any read that lacks a
+	// valid one; this read exists so a page can get one without the inventory.
+	mux.HandleFunc("GET /api/csrf", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) })
 	mux.HandleFunc("POST /api/attachment-handles", s.attachmentHandle)
 	mux.HandleFunc("POST /api/control-takeovers", s.controlTakeover)
 	mux.HandleFunc("POST /api/sessions", s.createSession)
@@ -468,7 +473,7 @@ func (s *Server) handler() http.Handler {
 	mux.HandleFunc("GET /favicon.ico", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusNoContent)
 	})
-	mux.Handle("GET /", staticAssets(s.staticDir))
+	mux.Handle("GET /", staticAssets(s.staticDir, s.assets))
 	if s.cfg.Ingress.PeerUIDConfigured {
 		return s.secure(mux)
 	}
@@ -486,7 +491,7 @@ func (s *Server) index(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	nonce := base64.RawStdEncoding.EncodeToString(nonceBytes)
-	body := bytes.Replace(template, []byte(styleNoncePlaceholder), []byte(nonce), 1)
+	body := s.assets.versionedDocument(bytes.Replace(template, []byte(styleNoncePlaceholder), []byte(nonce), 1))
 	csp := strings.Replace(baseContentSecurityPolicy, "style-src 'self'", "style-src 'self' 'nonce-"+nonce+"'", 1)
 	// The query string is the CSP capability key and must stay byte-exact. A
 	// workspace document hosts N unified xterm instances and needs exactly

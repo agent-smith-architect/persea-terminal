@@ -47,7 +47,7 @@ func TestStaticAssetCompression(t *testing.T) {
 			r.Header.Set("Accept-Encoding", tc.accept)
 			r.Header.Set("Range", tc.rangeHeader)
 			w := httptest.NewRecorder()
-			staticAssets(dir).ServeHTTP(w, r)
+			staticAssets(dir, nil).ServeHTTP(w, r)
 			if w.Code != tc.status || (w.Header().Get("Content-Encoding") == "gzip") != tc.compressed {
 				t.Fatalf("response: status=%d encoding=%q", w.Code, w.Header().Get("Content-Encoding"))
 			}
@@ -82,7 +82,7 @@ func TestStaticAssetCompression(t *testing.T) {
 	r := httptest.NewRequest("GET", "/app.js", nil)
 	r.Header.Set("Accept-Encoding", "gzip")
 	w := httptest.NewRecorder()
-	staticAssets(dir).ServeHTTP(w, r)
+	staticAssets(dir, nil).ServeHTTP(w, r)
 	if w.Header().Get("Content-Encoding") != "" || !bytes.Equal(w.Body.Bytes(), body) {
 		t.Fatal("nonregular compressed asset did not fall back to the original")
 	}
