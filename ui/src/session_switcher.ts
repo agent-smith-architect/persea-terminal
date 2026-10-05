@@ -130,10 +130,22 @@ export type SessionSwitcherViewOptions = Readonly<{
 // It owns presentation only: the pane-local controller owns inventory and the
 // identity transaction, and trusted tap activation prevents a scrolling row
 // from becoming a switch.
+// Scrolls only the list, and only when the row is not fully in view; the
+// panel around it and the keyboard focus are left alone.
+function centerWithin(list: HTMLElement, row: HTMLElement): void {
+  const box = list.getBoundingClientRect();
+  const target = row.getBoundingClientRect();
+  if (target.top >= box.top && target.bottom <= box.bottom) return;
+  list.scrollTop += target.top + target.height / 2 - (box.top + box.height / 2);
+}
+
 export class SessionSwitcherView {
   readonly search: HTMLInputElement;
   readonly refresh: HTMLButtonElement;
   private readonly list: HTMLDivElement;
+  // Set when the panel opens. The next render that shows the current session
+  // scrolls the list to it, once, so the operator's own scrolling is kept.
+  private revealCurrent = false;
   private inventory: SessionSwitcherInventory = Object.freeze({ sessions: Object.freeze([]) });
   private readonly rowNodes = new Map<string, { button: HTMLButtonElement; update(row: SessionSwitcherRow): void }>();
 
@@ -163,6 +175,10 @@ export class SessionSwitcherView {
   setInventory(inventory: SessionSwitcherInventory): void {
     this.inventory = inventory;
     preserveFocus(() => this.render());
+  }
+
+  revealCurrentOnNextRender(): void {
+    this.revealCurrent = true;
   }
 
   rows(): readonly SessionSwitcherRow[] {
@@ -251,6 +267,12 @@ export class SessionSwitcherView {
     }
     for (const [parent, nodes] of Array.from(children).reverse()) reconcileChildren(parent, nodes);
     reconcileChildren(this.list, Array.from(realms.values()));
+    const current = rows.find(row => row.current);
+    const currentButton = current && this.rowNodes.get(current.session.draftScope)?.button;
+    if (this.revealCurrent && currentButton && this.list.clientHeight > 0) {
+      this.revealCurrent = false;
+      centerWithin(this.list, currentButton);
+    }
     const live = new Set(this.inventory.sessions.map(session => session.draftScope));
     for (const [key, entry] of this.rowNodes) if (!live.has(key)) { entry.button.disabled = true; this.rowNodes.delete(key); }
     if (rows.length === 0) {
