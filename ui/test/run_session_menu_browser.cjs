@@ -16,13 +16,13 @@ const OUT = process.env.PERSEA_DASHBOARD_EVIDENCE || '/tmp/agent_logs/session-me
 const assert = (value, message) => { if (!value) throw Error(message); };
 async function main() {
   fs.mkdirSync(OUT, { recursive: true });
-  const extras = Array.from({ length: 20 }, (_, i) => ({
+  const extraSessions = prefix => Array.from({ length: 20 }, (_, i) => ({
     handles: { alias: crypto.randomBytes(32).toString('base64url'), observe: crypto.randomBytes(32).toString('base64url'), control: crypto.randomBytes(32).toString('base64url') },
-    realm: 'local', server: 'private', server_status: 'ok', session_id: '$' + (i + 100), name: 'qt' + (i + 1), width: 127, height: 30, attached: 1, activity: 1, output_activity: Math.floor(Date.now()/1000) - 70,
+    realm: 'local', server: 'private', server_status: 'ok', session_id: '$' + (i + 100), name: prefix + (i + 1), width: 127, height: 30, attached: 1, activity: 1, output_activity: Math.floor(Date.now()/1000) - 70,
     authority: { realm: 'local', server: 'private', uid: 1000, selector_kind: 'socket_path', selector_value: '/tmp/private.sock', boot_id: 'menu-fixture', server_pid: 42, server_start: 100, session_id: '$' + (i + 100), session_created: 200 + i },
     unified: { state: 'open', origin: 'reconstructed' },
   }));
-  const fixture = await startFixture(UI, { tls: true, playwrightScreenshotStyle: true, extraInventorySessions: extras });
+  const fixture = await startFixture(UI, { tls: true, playwrightScreenshotStyle: true, extraInventorySessions: extraSessions('qt') });
   const control = input => requestJSON(fixture.origin + '/__fixture/control', 'POST', input);
   const browser = await pw[ENGINE].launch({ headless: true, ...(ENGINE === 'chromium' ? { executablePath: require("./browser_path.cjs")(), args: ['--no-sandbox'] } : {}) });
   const result = { engine: ENGINE, checks: [], console: [], errors: [] }; let phase = 'setup';
@@ -76,6 +76,45 @@ async function main() {
       if (width === 390 || width === 1440) { phase = 'screenshot'; await page.screenshot({ path: path.join(OUT, `${ENGINE}-menu-${width}.png`), caret: 'initial', animations: 'allow' }); }
       result.checks.push({ width, height, pass: true, geometry }); await context.close();
     }
+    // Here the current session, alpha, sorts after twenty others. Opening the
+    // panel brings its row into view inside the list; a refresh keeps the
+    // operator's own scroll; opening the panel again brings the row back.
+    phase = 'reveal-current';
+    const revealFixture = await startFixture(UI, { tls: true, extraInventorySessions: extraSessions('aa') });
+    try {
+      const context = await browser.newContext({ viewport: { width: 390, height: 844 }, screen: { width: 390, height: 844 }, isMobile: true, hasTouch: true, ignoreHTTPSErrors: true });
+      const page = await context.newPage(); page.setDefaultTimeout(7000);
+      page.on('console', message => result.console.push({ phase, text: message.text().slice(0,500), type: message.type() })); page.on('pageerror', error => result.errors.push({ phase, text: error.message }));
+      const session = (await requestJSON(revealFixture.origin + '/api/inventory')).realms[0].servers[0].sessions[0];
+      assert(session.name === 'alpha', 'Reveal fixture changed its current session');
+      await page.goto(`${revealFixture.origin}/terminal?engine=unified-dev#${new URLSearchParams({ handle: session.handles.control, mode: 'control', history: '1000', name: session.name, draft_scope: revealFixture.draftScope, engine: 'unified-dev' })}`);
+      await page.waitForFunction(() => document.querySelector('.xterm-rows')?.textContent.includes('fixture-live'));
+      const menu = page.locator('.persea-unified-identity__details');
+      const currentInView = () => menu.evaluate(node => {
+        const list = node.querySelector('.persea-session-switcher__list'), row = node.querySelector('.persea-session-switcher__row[aria-current="true"]');
+        if (!list || !row) return { scroll: -1, visible: false };
+        const a = list.getBoundingClientRect(), b = row.getBoundingClientRect();
+        // Rows sit at fractional positions; a sub-pixel overlap is still in view.
+        return { scroll: list.scrollTop, visible: b.top >= a.top - 1 && b.bottom <= a.bottom + 1 };
+      });
+      await page.locator('.persea-unified-tag').click();
+      await menu.locator('.persea-session-switcher__row[aria-current="true"]').waitFor();
+      await page.waitForTimeout(150);
+      let state = await currentInView();
+      assert(state.visible && state.scroll > 0, `Opening the panel did not show the current session: ${JSON.stringify(state)}`);
+      await menu.locator('.persea-session-switcher__list').evaluate(node => { node.scrollTop = 0; });
+      const refreshed = page.waitForResponse(response => response.url().endsWith('/api/inventory'));
+      await menu.getByRole('button', { name: 'Refresh sessions', exact: true }).click(); await refreshed; await page.waitForTimeout(150);
+      state = await currentInView();
+      assert(state.scroll === 0, `A refresh undid the operator's scroll: ${JSON.stringify(state)}`);
+      await page.locator('.persea-unified-tag').click();
+      await page.locator('.persea-unified-tag').click();
+      await page.waitForTimeout(300);
+      state = await currentInView();
+      assert(state.visible && state.scroll > 0, `Reopening the panel did not show the current session: ${JSON.stringify(state)}`);
+      result.checks.push({ reveal: true, pass: true });
+      await context.close();
+    } finally { await revealFixture.close(); }
     result.unexpectedConsole = result.console.filter(item => !(item.phase === 'screenshot' && /Content Security Policy|CSP|style-src/.test(item.text)));
     assert(result.errors.length === 0 && result.unexpectedConsole.length === 0, 'Menu browser console must be clean'); result.pass = true;
   } catch(error) { result.pass = false; result.failure = String(error); throw error; }
