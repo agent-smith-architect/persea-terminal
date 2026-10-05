@@ -67,6 +67,14 @@ async function main(): Promise<void> {
     await outcome(boundedFetchWithin(5_000, fetcher)("/api/inventory", { signal: caller.signal }));
     assert(seen[0]!.aborted, "an already cancelled caller started a live request");
   }
+  {
+    // A Request carries its own signal; cancelling it cancels the request.
+    const { fetcher, seen } = server("complete");
+    const caller = new AbortController();
+    caller.abort();
+    await outcome(boundedFetchWithin(5_000, fetcher)(new Request("http://localhost/api/inventory", { signal: caller.signal })));
+    assert(seen[0]!.aborted, "a cancelled Request started a live request");
+  }
   console.log("bounded fetch tests passed");
 }
 

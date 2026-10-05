@@ -15,7 +15,7 @@
 // RESIZE_REQUEST; it puts no capability, handle, socket, or incarnation key
 // into the tree model; it consumes the page's focus hook as a veto only.
 import { installTapFeedback } from "./tap_feedback";
-import { boundedFetch } from "./bounded_fetch";
+import { boundedFetch, RequestTimeoutError } from "./bounded_fetch";
 import "./workspace_page.css";
 import { csrfToken } from "./csrf_refresh";
 import { filterSessionList, unifiedBlockedMessage, unifiedTerminalURL, type DashboardInventory, type DashboardSession, type HistoryChoice } from "./dashboard";
@@ -703,9 +703,9 @@ export class WorkspacePage {
         pane.identity = undefined;
         pane.live = false;
         pane.cell.setState(Object.freeze({ kind: "resolving" }));
-        const snapshot = await this.inventory.snapshot(undefined, this.inventory.latest()?.generation ?? -1);
+        const snapshot = await this.paneSnapshot(pane);
         const entry = leafEntries(this.view?.tree() ?? pane.leaf).find((candidate) => candidate.key === cell.key);
-        if (entry) await this.attachLeaf(entry, snapshot);
+        if (snapshot && entry) await this.attachLeaf(entry, snapshot);
         return;
       }
       case "take_control": {
@@ -727,8 +727,12 @@ export class WorkspacePage {
         headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrfToken() },
         body: JSON.stringify({ realm: session.realm, server: session.server, name: session.name }),
       });
-    } catch {
-      pane.cell.setState(Object.freeze({ kind: "create_failed", code: "unreachable", status: 0 }));
+    } catch (error) {
+      // A lost reply says nothing about the outcome. Retry only reads the
+      // session list; creating again stays an explicit choice.
+      pane.cell.setState(error instanceof RequestTimeoutError
+        ? Object.freeze({ kind: "failed", reason: "create_outcome_unknown" })
+        : Object.freeze({ kind: "create_failed", code: "unreachable", status: 0 }));
       return;
     }
     if (response.status !== 201) {
@@ -737,9 +741,21 @@ export class WorkspacePage {
       return;
     }
     // One shared snapshot refresh; every other unresolved leaf may reuse it.
-    const snapshot = await this.inventory.snapshot(undefined, this.inventory.latest()?.generation ?? -1);
+    const snapshot = await this.paneSnapshot(pane);
     const entry = leafEntries(this.view?.tree() ?? pane.leaf).find((candidate) => candidate.key === pane.cell.key);
-    if (entry) await this.attachLeaf(entry, snapshot);
+    if (snapshot && entry) await this.attachLeaf(entry, snapshot);
+  }
+
+  // A fresh session list for a pane action. When it cannot be read (no reply
+  // on a bad link), the pane offers Retry instead of staying at "Finding
+  // this session".
+  private async paneSnapshot(pane: PaneRuntime): Promise<InventorySnapshot | undefined> {
+    try {
+      return await this.inventory.snapshot(undefined, this.inventory.latest()?.generation ?? -1);
+    } catch {
+      if (!this.torndown && this.panes.get(pane.cell.key) === pane) pane.cell.setState(Object.freeze({ kind: "failed", reason: "session_list_unavailable" }));
+      return undefined;
+    }
   }
 
   private retire(cell: WorkspaceCell): void {

@@ -430,7 +430,7 @@ export class Dashboard {
   private workspaceCreate?: HTMLElement;
   private readonly onPageShow = (): void => { this.syncScrollbackPreference(); void this.refresh("return"); };
   private readonly onVisibility = (): void => { if (document.visibilityState === "visible") { this.syncScrollbackPreference(); void this.refresh("return"); } };
-  private readonly onOnline = (): void => { if (this.refreshFailures > 0) void this.refresh("retry"); };
+  private readonly onOnline = (): void => { if (this.refreshFailures > 0 && document.visibilityState === "visible") void this.refresh("retry"); };
   private readonly clipboard: ClipboardPanel;
   private readonly gate = new RefreshGate(); private readonly status = element("p", "dashboard-status"); private readonly content = element("div", "dashboard-content"); private requestSerial = 0; private periodic?: number; private navigationReloadPending = false;
   private readonly workspacePanel = element("section", "workspace-panel");
@@ -473,18 +473,20 @@ export class Dashboard {
   // One preferences service per page: the default-session read and the
   // Appearance card share its single load (shared-landing-inventory).
   private readonly preferences: OperatorPreferencesService;
-  constructor(
-    private readonly root: HTMLElement,
-    private readonly fetcher: FetchLike = boundedFetch,
-    preferences: OperatorPreferencesService = new OperatorPreferencesService({ fetch: (input, init) => fetcher(input, init) }),
-  ) {
-    this.workspaceAPI = new WorkspaceAPI(fetcher);
-    this.favorites = new DashboardFavorites((input, init) => fetcher(input, init));
-    this.preferences = preferences;
+  private readonly fetcher: FetchLike;
+  // An injected fetch (a test) reaches every client. Otherwise each client
+  // keeps its own default request budget: an image transfer gets longer than
+  // a small read, and appearance preferences shorter.
+  constructor(private readonly root: HTMLElement, injected?: FetchLike, preferences?: OperatorPreferencesService) {
+    const fetch = injected && ((input: string, init: RequestInit) => injected(input, init));
+    this.fetcher = injected ?? boundedFetch;
+    this.workspaceAPI = new WorkspaceAPI(injected);
+    this.favorites = new DashboardFavorites(fetch);
+    this.preferences = preferences ?? new OperatorPreferencesService({ fetch });
     this.clipboard = new ClipboardPanel({
-      text: new SnippetService({ fetch: (input, init) => fetcher(input, init), origin: deviceOrigin(window) }),
-      images: new ClipboardImages({ fetch: (input, init) => fetcher(input, init), origin: deviceOrigin(window) }),
-      preferences: new ClipboardPreferencesService({ fetch: (input, init) => fetcher(input, init) }),
+      text: new SnippetService({ fetch, origin: deviceOrigin(window) }),
+      images: new ClipboardImages({ fetch, origin: deviceOrigin(window) }),
+      preferences: new ClipboardPreferencesService({ fetch }),
     });
   }
   mount(): void {
@@ -753,6 +755,18 @@ export class Dashboard {
     this.renderLanding();
   }
   destroy(): void { this.destroyed = true; this.requestSerial += 1; this.workspaceSerial += 1; window.removeEventListener("pageshow", this.onPageShow); document.removeEventListener("visibilitychange", this.onVisibility); window.removeEventListener("online", this.onOnline); window.removeEventListener("hashchange", this.handleFragmentTransition); if (this.periodic !== undefined) window.clearInterval(this.periodic); window.clearTimeout(this.refreshRetry); for (const dispose of this.cleanup.splice(0)) dispose(); for (const rows of [this.sessionNodes, this.recentNodes]) { for (const row of rows.values()) row.dispose(); rows.clear(); } this.clipboard.dispose(); this.favorites.dispose(); }
+  // One retry timer. A hidden page waits for its return, which retries at
+  // once. An edit or a save in progress keeps the list still, so the retry
+  // waits for the same delay again instead of being lost.
+  private scheduleRefreshRetry(delay: number): void {
+    window.clearTimeout(this.refreshRetry);
+    this.refreshRetry = window.setTimeout(() => {
+      this.refreshRetry = undefined;
+      if (document.visibilityState !== "visible") return;
+      if (this.gate.permitsBackgroundRefresh()) void this.refresh("retry");
+      else this.scheduleRefreshRetry(delay);
+    }, delay);
+  }
   async refresh(reason: "initial" | "manual" | "return" | "background" | "mutation" | "retry"): Promise<void> {
     if (this.destroyed) return;
     const automatic = reason === "background" || reason === "return" || reason === "retry";
@@ -782,9 +796,8 @@ export class Dashboard {
       const age = this.lastUpdated ? ` Showing saved results from ${new Date(this.lastUpdated).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.` : "";
       this.status.textContent = `${this.refreshError}${age} Trying again automatically.`;
       this.refreshFailures += 1;
-      // 2, 4, 8, 16, then 30 s, each ±20 %. A hidden page waits for its return.
-      const delay = Math.min(30_000, 1_000 * 2 ** this.refreshFailures) * (0.8 + Math.random() * 0.4);
-      this.refreshRetry = window.setTimeout(() => { this.refreshRetry = undefined; if (document.visibilityState === "visible") void this.refresh("retry"); }, delay);
+      // 2, 4, 8, 16, then 30 s, each ±20 %.
+      this.scheduleRefreshRetry(Math.min(30_000, 1_000 * 2 ** this.refreshFailures) * (0.8 + Math.random() * 0.4));
     } finally {
       if (serial === this.requestSerial) {
         this.refreshPending = false;
