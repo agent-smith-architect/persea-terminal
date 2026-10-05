@@ -42,6 +42,8 @@ type freshnessClient struct {
 	prepared terminal.Frame
 	frames   uint64
 	data     strings.Builder
+	effects  *UnifiedDevPaneEffects
+	key      unifiedjournal.PaneKey
 }
 
 func (c *freshnessClient) read() (proto.Frame, terminal.Frame) {
@@ -104,6 +106,31 @@ func (c *freshnessClient) controlError() string {
 	}
 }
 
+// diagnose logs, for a failed expectation, what the broker requires the page to
+// have consumed now, what it last published, and the frames this client has
+// not read, so a refusal can be traced to the event that caused it.
+func (c *freshnessClient) diagnose() {
+	c.t.Helper()
+	required, known := c.effects.requiredConsumption(c.key)
+	c.effects.subscriberMu.Lock()
+	published := c.effects.publishedSequence[c.key]
+	c.effects.subscriberMu.Unlock()
+	c.t.Logf("freshness: required=%d (known %v) published=%d frames read=%d", required, known, published, c.frames)
+	for {
+		_ = c.conn.SetReadDeadline(time.Now().Add(500 * time.Millisecond))
+		raw, err := proto.ReadFrame(c.conn)
+		if err != nil {
+			return
+		}
+		if raw.Type != proto.FrameAttachment {
+			c.t.Logf("unread frame %v %q", raw.Type, raw.Payload)
+			continue
+		}
+		frame, _ := attachmentwire.Decode(raw.Payload, attachmentwire.ServerToBrowser)
+		c.t.Logf("unread attachment frame %s %q", frame.Type, frame.Data)
+	}
+}
+
 // readUntil reads until the terminal output contains want.
 func (c *freshnessClient) readUntil(want string) {
 	c.t.Helper()
@@ -114,7 +141,8 @@ func (c *freshnessClient) readUntil(want string) {
 
 func openFreshnessClient(t *testing.T, f *adoptionFixture, session string) *freshnessClient {
 	t.Helper()
-	if _, err := f.effects.AdoptSession(context.Background(), session); err != nil {
+	adoption, err := f.effects.AdoptSession(context.Background(), session)
+	if err != nil {
 		t.Fatal(err)
 	}
 	listener, err := net.Listen("unix", filepath.Join(shortTempDir(t), "broker.sock"))
@@ -143,7 +171,7 @@ func openFreshnessClient(t *testing.T, f *adoptionFixture, session string) *fres
 	if attached := unifiedE2E1Control(t, conn, proto.Control{Type: "attach", Mode: "control", Engine: "unified-dev", Authority: &authority, HistoryLimit: &history}); attached.Type != "attach_ok" {
 		t.Fatalf("attach: %+v", attached)
 	}
-	c := &freshnessClient{t: t, conn: conn}
+	c := &freshnessClient{t: t, conn: conn, effects: f.effects, key: adoption.Key}
 	if _, c.prepared = c.read(); c.prepared.Type != terminal.FramePrepare {
 		t.Fatalf("first frame %s, want PREPARE", c.prepared.Type)
 	}
@@ -173,6 +201,7 @@ func TestUnifiedInputIsPausedUntilThePageHasConsumedRecentOutput(t *testing.T) {
 		deadline := time.Now().Add(10 * time.Second)
 		for !strings.Contains(f.capture(t, "fresh-gate"), want) {
 			if time.Now().After(deadline) {
+				client.diagnose()
 				t.Fatalf("%q never reached the pane", want)
 			}
 			time.Sleep(20 * time.Millisecond)
