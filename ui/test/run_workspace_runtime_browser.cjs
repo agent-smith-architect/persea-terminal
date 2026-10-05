@@ -361,10 +361,9 @@ async function main() {
   const fail = (id, message, detail) => { failures.push(`${id}: ${message} ${JSON.stringify(detail)}`); console.error(`FAIL ${id}: ${message}`, JSON.stringify(detail)); };
   const check = (id, condition, message, detail) => { if (!condition) fail(id, message, detail); return condition; };
   const begin = (id) => console.log(`scenario ${id}`);
-  // The product's handle/takeover helpers each precede their POST with one
-  // CSRF-refresh GET of /api/inventory; workspace snapshot fetches are the
-  // inventory GETs that remain once those are subtracted.
-  const snapshotFetches = (snap) => snap.counters.inventory - snap.counters.handleRequests - snap.counters.takeovers;
+  // Handle and takeover requests use the CSRF cookie the document set; they
+  // never read the inventory. Every inventory GET is a workspace snapshot.
+  const snapshotFetches = (snap) => snap.counters.inventory;
 
   const openTab = async (name) => { const tab = await Tab.open(name, debugPort, origin); tabs.push(tab); await tab.emulate(DESKTOP, false); return tab; };
   // Seeds the tab's sessionStorage arrangement (a restored tab), then lands

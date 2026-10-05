@@ -15,6 +15,7 @@
 // RESIZE_REQUEST; it puts no capability, handle, socket, or incarnation key
 // into the tree model; it consumes the page's focus hook as a veto only.
 import { installTapFeedback } from "./tap_feedback";
+import { boundedFetch } from "./bounded_fetch";
 import "./workspace_page.css";
 import { csrfToken } from "./csrf_refresh";
 import { filterSessionList, unifiedBlockedMessage, unifiedTerminalURL, type DashboardInventory, type DashboardSession, type HistoryChoice } from "./dashboard";
@@ -193,10 +194,18 @@ export async function bootWorkspace(options: WorkspaceBootOptions): Promise<void
   const name = verdict.name;
   const posture = workspacePosture(stablePostureEnvironment(win));
   const inventory = new WorkspaceInventory();
-  const workspaceAPI = new WorkspaceAPI((input, init) => win.fetch(input, init));
+  const workspaceAPI = new WorkspaceAPI();
+  // The saved workspaces, the session list and the appearance preferences are
+  // independent reads: start them together, so a slow link pays one round trip
+  // instead of three. Each is still checked before anything opens.
+  const listing = workspaceAPI.list();
+  const reading = inventory.snapshot(undefined, -1);
+  reading.catch(() => undefined);
+  const preferences = posture === "phone" ? undefined : new OperatorPreferencesService();
+  void preferences?.load();
   let record: WorkspaceRecord;
   try {
-    const list = await workspaceAPI.list();
+    const list = await listing;
     const match = list.items.filter((candidate) => candidate.name === name);
     if (match.length !== 1) throw new WorkspaceAPIError(match.length === 0 ? "not_found" : "unavailable", match.length === 0 ? 404 : 503);
     record = match[0]!;
@@ -210,7 +219,7 @@ export async function bootWorkspace(options: WorkspaceBootOptions): Promise<void
   document.body.classList.add("ws-document");
   let snapshot: InventorySnapshot;
   try {
-    snapshot = await inventory.snapshot(undefined, -1);
+    snapshot = await reading;
   } catch {
     renderWorkspaceUnavailable(root, Object.freeze({ headline: "This workspace cannot be opened", detail: "The current sessions could not be read. Retry from the dashboard.", code: "inventory_unavailable" }));
     return;
@@ -219,7 +228,7 @@ export async function bootWorkspace(options: WorkspaceBootOptions): Promise<void
     renderPhone(root, record.name, arrangement, snapshot, win);
     return;
   }
-  const page = new WorkspacePage({ root, styleNonce, name: record.name, win, inventory, historyRows: options.historyRows ?? readScrollbackRows(), record, workspaceAPI });
+  const page = new WorkspacePage({ root, styleNonce, name: record.name, win, inventory, preferences, historyRows: options.historyRows ?? readScrollbackRows(), record, workspaceAPI });
   page.landing(arrangement, snapshot);
 }
 
@@ -271,6 +280,7 @@ export type WorkspacePageOptions = Readonly<{
   historyRows: HistoryChoice;
   record?: WorkspaceRecord;
   workspaceAPI?: WorkspaceAPI;
+  preferences?: OperatorPreferencesService;
 }>;
 
 const ADOPT_MAX_ATTEMPTS = 6;
@@ -317,7 +327,7 @@ export class WorkspacePage {
     // The service itself probes localStorage defensively. Accessing the getter
     // here would let a browser privacy refusal abort the whole workspace before
     // the server/default fallback can render.
-    this.preferences = new OperatorPreferencesService();
+    this.preferences = options.preferences ?? new OperatorPreferencesService();
     // Preferences saved in another tab (the dashboard's Appearance card)
     // reach every pane of this workspace without a reload.
     this.preferences.watchExternalChanges({ refetchOnForeground: true });
@@ -559,7 +569,7 @@ export class WorkspacePage {
       pane.adoptAttempts += 1;
       let status = 0;
       try {
-        const response = await this.win.fetch("/api/session-adoptions", {
+        const response = await boundedFetch("/api/session-adoptions", {
           method: "POST", cache: "no-store", credentials: "same-origin",
           headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrfToken() },
           body: JSON.stringify({ realm: identity.selector.realm, server: identity.selector.server, session_id: identity.sessionId, history_rows: ADOPTION_HISTORY_ROWS }),
@@ -712,7 +722,7 @@ export class WorkspacePage {
     pane.cell.setState(Object.freeze({ kind: "resolving" }));
     let response: Response;
     try {
-      response = await this.win.fetch("/api/sessions", {
+      response = await boundedFetch("/api/sessions", {
         method: "POST", cache: "no-store", credentials: "same-origin",
         headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrfToken() },
         body: JSON.stringify({ realm: session.realm, server: session.server, name: session.name }),

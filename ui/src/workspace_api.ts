@@ -1,4 +1,5 @@
 import { csrfToken } from "./csrf_refresh";
+import { boundedFetch } from "./bounded_fetch";
 import { parseWorkspaceTree, serializeWorkspace, WORKSPACE_STORE_VERSION, type WorkspaceNode } from "./workspace_model";
 import { boundedWorkspaceName } from "./workspace_url";
 
@@ -93,7 +94,7 @@ async function failure(response: Response): Promise<WorkspaceAPIError> {
 }
 
 export class WorkspaceAPI {
-  constructor(private readonly fetcher: FetchLike = (input, init) => window.fetch(input, init)) {}
+  constructor(private readonly fetcher: FetchLike = boundedFetch) {}
 
   async list(signal?: AbortSignal): Promise<WorkspaceList> {
     const response = await this.fetcher("/api/workspaces", { cache: "no-store", credentials: "same-origin", signal });

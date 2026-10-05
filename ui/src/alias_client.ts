@@ -1,3 +1,5 @@
+import { boundedFetch } from "./bounded_fetch";
+
 export type DashboardAlias = Readonly<{
   aliasId: string; displayAlias: string; revision: number; state: string;
   realm?: string; server?: string; sessionName?: string;
@@ -51,7 +53,7 @@ type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Respo
 export type AliasOutcome = Readonly<{ ok: true; alias?: DashboardAlias }>
   | Readonly<{ ok: false; code: AliasErrorCode; message: string; current?: DashboardAlias }>;
 
-export async function saveAlias(alias: DashboardAlias | undefined, handle: string, displayAlias?: string, fetcher: FetchLike = fetch): Promise<AliasOutcome> {
+export async function saveAlias(alias: DashboardAlias | undefined, handle: string, displayAlias?: string, fetcher: FetchLike = boundedFetch): Promise<AliasOutcome> {
   try {
     const request = aliasRequest(alias, handle, displayAlias);
     const response = await fetcher(request.url, { ...request.init,

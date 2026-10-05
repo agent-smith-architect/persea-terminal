@@ -1,4 +1,5 @@
 import { ImageStagingError, type ComposerStagedImage, type ImageStagingFailureKind } from "./composer_attachments";
+import { boundedTransfer } from "./bounded_fetch";
 import { csrfToken, refreshCSRFToken } from "./csrf_refresh";
 
 // Browser client for POST /api/session-images. Same code shape as the
@@ -75,7 +76,7 @@ export async function stageSessionImage(
   realm: string,
   file: File,
   signal: AbortSignal,
-  fetcher: ImageStagingFetch = (input, init) => window.fetch(input, init),
+  fetcher: ImageStagingFetch = boundedTransfer,
   csrf: CSRFSource = defaultCSRF,
 ): Promise<ComposerStagedImage> {
   const post = (token: string): Promise<ImageStagingResponse> => fetcher(

@@ -1723,14 +1723,14 @@ test("reconnect_without_a_broker_prepare_source_never_calls_the_handle_provider"
   equal(statuses.at(-1), "EXHAUSTED:source_binding_unavailable", "missing PREPARE source was not reported fail-closed");
 });
 
-test("csrf_refresh_bootstraps_an_expired_terminal_page_with_one_safe_same_origin_get", async () => {
+test("csrf_refresh_uses_the_cookie_and_bootstraps_an_expired_page_with_one_small_safe_get", async () => {
   const controller = new AbortController();
   const token = "C".repeat(43);
-  let cookie = "";
+  let cookie = `__Host-persea-terminal-csrf=${token}`;
   let calls = 0;
-  const refreshed = await refreshCSRFToken(controller.signal, async (input, init) => {
+  const fetcher = async (input: string, init: RequestInit) => {
     calls += 1;
-    equal(input, "/api/inventory");
+    equal(input, "/api/csrf");
     equal(init.cache, "no-store");
     equal(init.credentials, "same-origin");
     assert(init.signal === controller.signal, "CSRF refresh lost cancellation ownership");
@@ -1738,12 +1738,16 @@ test("csrf_refresh_bootstraps_an_expired_terminal_page_with_one_safe_same_origin
     assert(init.body === undefined && init.headers === undefined, "CSRF bootstrap carried mutation material");
     cookie = `fixture=1; __Host-persea-terminal-csrf=${token}`;
     return Object.freeze({ ok: true });
-  }, () => cookie);
-  equal(refreshed, token);
+  };
+  equal(await refreshCSRFToken(controller.signal, fetcher, () => cookie), token);
+  equal(calls, 0, "a page that holds its cookie made a request for it");
+  cookie = "";
+  equal(await refreshCSRFToken(controller.signal, fetcher, () => cookie), token);
   equal(calls, 1, "CSRF bootstrap issued duplicate safe requests");
   equal(parseCSRFCookie(`__Host-persea-terminal-csrf=${token}`), token);
 
   let rejected = false;
+  cookie = "";
   try {
     await refreshCSRFToken(controller.signal, async () => Object.freeze({ ok: false }), () => cookie);
   } catch {
@@ -2275,7 +2279,7 @@ test("production_document_preserves_nonce_and_source_bound_csrf_contracts", () =
   assert(endpoints.includes('this.transport.detach("page_hidden");'), "suspend no longer detaches the attachment");
   assert(endpoints.includes('credentials: "same-origin", signal'), "fresh handle acquisition lost cancelable same-origin ownership");
   assert(endpoints.includes("const csrf = await refreshCSRFToken(signal)")
-    && endpoints.indexOf("refreshCSRFToken(signal)") < endpoints.indexOf('window.fetch("/api/attachment-handles"'),
+    && endpoints.indexOf("refreshCSRFToken(signal)") < endpoints.indexOf('boundedFetch("/api/attachment-handles"'),
   "long-lived terminal mutation does not refresh its bounded CSRF cookie before POST");
   assert(endpoints.includes('"/api/attachment-handles"') && !app.includes("targetFromFragment") && !endpoints.includes("targetFromFragment"), "browser target metadata became a handle-minting authority");
   assert(transport.includes('if (frame.type === "PREPARE") this.recordPreparedSource(generation, frame.source)'), "transport lost server PREPARE source ownership");

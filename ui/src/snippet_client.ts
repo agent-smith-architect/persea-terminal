@@ -19,6 +19,7 @@
 // site in this module, and no other module in the UI speaks to /api/snippets.
 
 import { csrfToken } from "./csrf_refresh";
+import { boundedFetch } from "./bounded_fetch";
 import { isClipboardRetentionSeconds, type ClipboardRetentionSeconds } from "./clipboard_retention";
 
 // --- Wire records ------------------------------------------------------------
@@ -392,7 +393,7 @@ export class SnippetService implements SnippetServicePort {
   };
 
   constructor(options: SnippetServiceOptions = {}) {
-    this.fetcher = options.fetch ?? ((input, init) => window.fetch(input, init));
+    this.fetcher = options.fetch ?? boundedFetch;
     this.csrf = options.csrf ?? csrfToken;
     this.clipboard = options.clipboard;
     this.origin = sanitizeSnippetOrigin(options.origin ?? "");

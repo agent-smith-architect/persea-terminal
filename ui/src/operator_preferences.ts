@@ -7,6 +7,7 @@
 // always replaces that hint before a pane is constructed by the production
 // boot paths.
 import { csrfToken } from "./csrf_refresh";
+import { boundedFetchWithin } from "./bounded_fetch";
 import { DEFAULT_UNIFIED_THEME, isUnifiedThemeID, type UnifiedThemeID } from "./unified_themes";
 import { DEFAULT_TERMINAL_POSITION, isTerminalPosition, type TerminalPosition } from "./terminal_position";
 
@@ -248,14 +249,14 @@ export class OperatorPreferencesService implements OperatorPreferencePort {
   private readonly fetcher: (input: string, init: RequestInit) => Promise<Response>;
   private readonly csrf: () => string;
   private readonly storage: OperatorPreferencesServiceOptions["storage"];
-  private readonly requestTimeoutMs: number;
   private readonly counters = { gets: 0, puts: 0, conflicts: 0, publications: 0 };
 
   constructor(options: OperatorPreferencesServiceOptions = {}) {
-    this.fetcher = options.fetch ?? ((input, init) => window.fetch(input, init));
+    // The terminal waits for these before its first fit, so they get a short
+    // budget that covers the body too; past it the page uses its defaults.
+    this.fetcher = options.fetch ?? boundedFetchWithin(options.requestTimeoutMs ?? 5_000);
     this.csrf = options.csrf ?? csrfToken;
     this.storage = options.storage ?? browserStorage();
-    this.requestTimeoutMs = options.requestTimeoutMs ?? 5_000;
     const hint = readHint(this.storage);
     const record = Object.freeze({
       preferences: hint ?? DEFAULT_OPERATOR_PREFERENCES,
@@ -499,22 +500,7 @@ export class OperatorPreferencesService implements OperatorPreferencePort {
     }
   }
 
-  private async request(init: RequestInit): Promise<Response> {
-    const controller = new AbortController();
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<Response>((_resolve, reject) => {
-      timer = setTimeout(() => {
-        controller.abort();
-        reject(new Error("preferences request timed out"));
-      }, this.requestTimeoutMs);
-    });
-    try {
-      return await Promise.race([
-        this.fetcher("/api/preferences", { ...init, signal: controller.signal }),
-        timeout,
-      ]);
-    } finally {
-      if (timer !== undefined) clearTimeout(timer);
-    }
+  private request(init: RequestInit): Promise<Response> {
+    return this.fetcher("/api/preferences", init);
   }
 }

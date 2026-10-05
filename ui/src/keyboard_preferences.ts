@@ -1,4 +1,5 @@
 import { csrfToken } from "./csrf_refresh";
+import { boundedFetch } from "./bounded_fetch";
 import { DEFAULT_KEY_PREFERENCES, KEY_PREFERENCES_KEY, prefixSequence, resolveAction, validPrefixName, validateKeyPreferences } from "./terminal_actions";
 
 export type KeyboardLayout = Readonly<{ bar: readonly string[]; favorites: readonly string[] }>;
@@ -94,7 +95,7 @@ export class KeyboardPreferencesService {
   private stopWatching?: () => void;
   constructor(private readonly options: Options = {}) {
     this.storage = options.storage === null ? undefined : options.storage ?? browserStorage();
-    this.fetcher = options.fetch ?? ((url, init) => window.fetch(url, init));
+    this.fetcher = options.fetch ?? boundedFetch;
     const { device, message } = this.readDevice(true);
     this.current = Object.freeze({ shared: DEFAULT_KEYBOARD_PREFERENCES, device, effective: effectiveKeyboardPreferences(DEFAULT_KEYBOARD_PREFERENCES, device), revision: 0, available: false, stored: false, loaded: false, generation: 0, message });
   }

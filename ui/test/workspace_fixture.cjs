@@ -97,7 +97,7 @@ function startWorkspaceFixture(ui, options = {}) {
     rateLimits: [],             // one-shot 429s: { path, session?, remaining }
     preferences: { version: 1, theme: "default", font_size: null, composer_font_size: 11, terminal_position: "top-center", default_session: null, revision: 0, stored: false, available: true },
     preferencesCorrupt: false,
-    counters: { documents: 0, inventory: 0, workspaceReads: 0, workspaceWrites: 0, handleRequests: 0, takeovers: 0, adoptions: 0, websockets: 0, replays: 0, sessionsCreated: 0, favicon: 0, requests: 0, preferencesGet: 0, preferencesPut: 0 },
+    counters: { documents: 0, inventory: 0, csrf: 0, workspaceReads: 0, workspaceWrites: 0, handleRequests: 0, takeovers: 0, adoptions: 0, websockets: 0, replays: 0, sessionsCreated: 0, favicon: 0, requests: 0, preferencesGet: 0, preferencesPut: 0 },
     requestsByPath: {},
     holdInventoryMs: 0,
   };
@@ -412,6 +412,15 @@ function startWorkspaceFixture(ui, options = {}) {
       response.setHeader("Cache-Control", "no-store"); response.setHeader("Content-Type", "application/json");
       response.end(JSON.stringify({ realm: REALM, server: SERVER, session_id: session.sessionId,
         rows: ["Fixture workspace session preview."], ansi_rows: ["Fixture workspace session preview."], width: session.columns, height: session.rows, captured_at: Date.now(), truncated: false }));
+      return;
+    }
+    // The real front door mints the CSRF cookie on this small read.
+    if (request.method === "GET" && url.pathname === "/api/csrf") {
+      state.counters.csrf += 1;
+      response.setHeader("Cache-Control", "no-store");
+      response.setHeader("Set-Cookie", `__Host-persea-terminal-csrf=${CSRF_TOKEN}; Path=/; Secure; SameSite=Strict`);
+      response.writeHead(204);
+      response.end();
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/inventory") {

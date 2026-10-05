@@ -1,4 +1,5 @@
 import { csrfToken } from "./csrf_refresh";
+import { boundedFetch } from "./bounded_fetch";
 import { readSessionDiscovery, saveSessionDiscovery } from "./session_discovery";
 import { sessionScopeIdentity } from "./session_memory";
 
@@ -38,7 +39,7 @@ export class DashboardFavorites {
   private epoch = 0;
   private disposed = false;
 
-  constructor(private readonly fetcher: FetchPort = (input, init) => fetch(input, init), private readonly csrf = csrfToken) {}
+  constructor(private readonly fetcher: FetchPort = boundedFetch, private readonly csrf = csrfToken) {}
 
   snapshot(): DashboardFavoritesSnapshot {
     return Object.freeze({ ...this.current, loaded: this.loaded, pending: Object.freeze([...this.pending]), message: this.message });

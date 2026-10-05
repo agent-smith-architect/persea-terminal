@@ -42,6 +42,7 @@ export function parseHistoryChoice(value: string | null): HistoryChoice {
   return match;
 }
 import { csrfToken, parseAliasRecord, saveAlias, type DashboardAlias } from "./alias_client";
+import { boundedFetch, RequestTimeoutError } from "./bounded_fetch";
 export { csrfToken, aliasRequest } from "./alias_client";
 export type { DashboardAlias } from "./alias_client";
 export type UnifiedSessionProjection =
@@ -372,6 +373,10 @@ export class Dashboard {
   private lastUpdated?: number;
   private refreshPending = false;
   private refreshError = "";
+  // Consecutive failed refreshes. While above zero the list is stale: a timer
+  // retries with backoff, and a returning page or network retries at once.
+  private refreshFailures = 0;
+  private refreshRetry?: number;
   private readonly resultStatus = element("p", "dashboard-results");
   private readonly emptyResults = element("div", "dashboard-empty-results");
   private readonly sessionsPanel = element("section", "dashboard-sessions");
@@ -425,6 +430,7 @@ export class Dashboard {
   private workspaceCreate?: HTMLElement;
   private readonly onPageShow = (): void => { this.syncScrollbackPreference(); void this.refresh("return"); };
   private readonly onVisibility = (): void => { if (document.visibilityState === "visible") { this.syncScrollbackPreference(); void this.refresh("return"); } };
+  private readonly onOnline = (): void => { if (this.refreshFailures > 0) void this.refresh("retry"); };
   private readonly clipboard: ClipboardPanel;
   private readonly gate = new RefreshGate(); private readonly status = element("p", "dashboard-status"); private readonly content = element("div", "dashboard-content"); private requestSerial = 0; private periodic?: number; private navigationReloadPending = false;
   private readonly workspacePanel = element("section", "workspace-panel");
@@ -469,7 +475,7 @@ export class Dashboard {
   private readonly preferences: OperatorPreferencesService;
   constructor(
     private readonly root: HTMLElement,
-    private readonly fetcher: FetchLike = (input, init) => window.fetch(input, init),
+    private readonly fetcher: FetchLike = boundedFetch,
     preferences: OperatorPreferencesService = new OperatorPreferencesService({ fetch: (input, init) => fetcher(input, init) }),
   ) {
     this.workspaceAPI = new WorkspaceAPI(fetcher);
@@ -576,7 +582,7 @@ export class Dashboard {
     // neither is authority, and neither can act on its own.
     this.landingFocusPending = new URLSearchParams(window.location.search).get("resume") === "1";
     void this.loadDefaultPreference();
-    window.addEventListener("pageshow", this.onPageShow); window.addEventListener("hashchange", this.handleFragmentTransition); document.addEventListener("visibilitychange", this.onVisibility); this.periodic = window.setInterval(() => { if (document.visibilityState === "visible") void this.refresh("background"); }, 60_000); void this.refresh("initial");
+    window.addEventListener("pageshow", this.onPageShow); window.addEventListener("hashchange", this.handleFragmentTransition); document.addEventListener("visibilitychange", this.onVisibility); window.addEventListener("online", this.onOnline); this.periodic = window.setInterval(() => { if (document.visibilityState === "visible") void this.refresh("background"); }, 60_000); void this.refresh("initial");
   }
   // the appearance preferences (theme, terminal font, composer text,
   // terminal position) are operator-wide, so they get a dashboard card. It is
@@ -746,15 +752,17 @@ export class Dashboard {
     this.defaultPreference = snapshot.status === "ready" ? snapshot.preferences.defaultSession ?? undefined : undefined;
     this.renderLanding();
   }
-  destroy(): void { this.destroyed = true; this.requestSerial += 1; this.workspaceSerial += 1; window.removeEventListener("pageshow", this.onPageShow); document.removeEventListener("visibilitychange", this.onVisibility); window.removeEventListener("hashchange", this.handleFragmentTransition); if (this.periodic !== undefined) window.clearInterval(this.periodic); for (const dispose of this.cleanup.splice(0)) dispose(); for (const rows of [this.sessionNodes, this.recentNodes]) { for (const row of rows.values()) row.dispose(); rows.clear(); } this.clipboard.dispose(); this.favorites.dispose(); }
-  async refresh(reason: "initial" | "manual" | "return" | "background" | "mutation"): Promise<void> {
+  destroy(): void { this.destroyed = true; this.requestSerial += 1; this.workspaceSerial += 1; window.removeEventListener("pageshow", this.onPageShow); document.removeEventListener("visibilitychange", this.onVisibility); window.removeEventListener("online", this.onOnline); window.removeEventListener("hashchange", this.handleFragmentTransition); if (this.periodic !== undefined) window.clearInterval(this.periodic); window.clearTimeout(this.refreshRetry); for (const dispose of this.cleanup.splice(0)) dispose(); for (const rows of [this.sessionNodes, this.recentNodes]) { for (const row of rows.values()) row.dispose(); rows.clear(); } this.clipboard.dispose(); this.favorites.dispose(); }
+  async refresh(reason: "initial" | "manual" | "return" | "background" | "mutation" | "retry"): Promise<void> {
     if (this.destroyed) return;
-    if ((reason === "background" || reason === "return") && (this.refreshPending || !this.gate.permitsBackgroundRefresh())) return;
+    const automatic = reason === "background" || reason === "return" || reason === "retry";
+    if (automatic && (this.refreshPending || !this.gate.permitsBackgroundRefresh())) return;
     if (reason === "return") { this.readDeviceHints(); preserveFocus(() => this.renderLanding()); }
     void this.favorites.load(reason === "manual").then(() => {
       try { if (!this.destroyed) void this.favorites.migrateDevicePins(window.localStorage); } catch { /* device migration is optional */ }
     });
-    if ((reason === "background" || reason === "return") && this.lastUpdated && Date.now() - this.lastUpdated < 55_000) return;
+    if (automatic && this.refreshFailures === 0 && this.lastUpdated && Date.now() - this.lastUpdated < 55_000) return;
+    window.clearTimeout(this.refreshRetry); this.refreshRetry = undefined;
     const serial = ++this.requestSerial;
     this.refreshPending = true;
     for (const button of [this.refreshButton, this.workspaceRefresh]) { button.disabled = true; button.setAttribute("aria-busy", "true"); }
@@ -764,15 +772,19 @@ export class Dashboard {
       if (!response.ok) throw new Error(`Session refresh failed (${response.status}).`);
       const inventory = parseInventory(await response.json());
       if (serial !== this.requestSerial || this.destroyed) return;
-      this.workspaceInventory = inventory; this.lastUpdated = Date.now(); this.refreshError = "";
+      this.workspaceInventory = inventory; this.lastUpdated = Date.now(); this.refreshError = ""; this.refreshFailures = 0;
       preserveFocus(() => this.render(inventory));
       if (reason === "initial" || reason === "manual" || reason === "mutation" || !this.workspacePanel.hidden) void this.refreshWorkspaces();
       this.status.textContent = "";
     } catch (error) {
       if (serial !== this.requestSerial || this.destroyed) return;
-      this.refreshError = error instanceof Error ? error.message : "Session refresh failed.";
+      this.refreshError = error instanceof RequestTimeoutError ? "No reply from the server." : error instanceof Error ? error.message : "Session refresh failed.";
       const age = this.lastUpdated ? ` Showing saved results from ${new Date(this.lastUpdated).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.` : "";
-      this.status.textContent = `${this.refreshError}${age} Use Refresh to retry.`;
+      this.status.textContent = `${this.refreshError}${age} Trying again automatically.`;
+      this.refreshFailures += 1;
+      // 2, 4, 8, 16, then 30 s, each ±20 %. A hidden page waits for its return.
+      const delay = Math.min(30_000, 1_000 * 2 ** this.refreshFailures) * (0.8 + Math.random() * 0.4);
+      this.refreshRetry = window.setTimeout(() => { this.refreshRetry = undefined; if (document.visibilityState === "visible") void this.refresh("retry"); }, delay);
     } finally {
       if (serial === this.requestSerial) {
         this.refreshPending = false;
@@ -1117,7 +1129,7 @@ export class Dashboard {
       const openId = this.stageSessionIdentity(session);
       window.location.assign(unifiedTerminalURL(window.location.href, session.handles.control, session, openId, this.scrollbackRows));
     } catch (error) {
-      assignText(status, error instanceof Error ? error.message : "The session could not be opened.");
+      assignText(status, error instanceof RequestTimeoutError ? "No reply from the server. Check your connection and try again." : error instanceof Error ? error.message : "The session could not be opened.");
       this.landingActionPending = false;
       if (row) delete row.dataset.openPending;
       this.gate.setMutating(false);
@@ -1286,8 +1298,12 @@ export class Dashboard {
       // The response body carries a closed-set code, never broker text, so the
       // operator-facing wording lives here where it can be reviewed.
       assignText(status, createFailureMessage(await response.text().catch(() => ""), response.status));
-    } catch {
-      assignText(status, "The request could not be completed.");
+    } catch (error) {
+      if (error instanceof RequestTimeoutError) {
+        // The session may exist: a lost reply says nothing about the outcome.
+        assignText(status, `No reply from the server. Check the list for ${name} before you create it again.`);
+        void this.refresh("mutation");
+      } else assignText(status, "The request could not be completed.");
     } finally {
       this.gate.setMutating(false);
       this.creationBusy = false;
@@ -1370,11 +1386,11 @@ export class Dashboard {
       refresh.setAttribute("aria-busy", String(busy));
       if (preview) { assignText(meta, formatPreviewMeta(preview)); if (modalMeta) assignText(modalMeta, formatPreviewMeta(preview)); }
     };
-    const load = (force = false): void => {
-      if (busy || disposed || this.destroyed || !block.isConnected || preview && !force) return;
+    const load = (force = false): Promise<void> => {
+      if (busy || disposed || this.destroyed || !block.isConnected || preview && !force) return Promise.resolve();
       busy = true; notice.textContent = ""; sync();
       controller = new AbortController();
-      void (async () => {
+      return (async () => {
         try {
           const response = await this.fetcher(previewRequestPath(currentSession()), { cache: "no-store", credentials: "same-origin", signal: controller!.signal });
           if (disposed || !block.isConnected || this.destroyed) return;
@@ -1397,7 +1413,7 @@ export class Dashboard {
         }
       })();
     };
-    refresh.addEventListener("click", () => load(true));
+    refresh.addEventListener("click", () => void load(true));
     const enlarge = (trigger: HTMLButtonElement): void => {
       if (disposed || !block.isConnected) return;
       this.previewDialog?.close();
@@ -1411,7 +1427,7 @@ export class Dashboard {
       if (!preview) modalScreen.textContent = "Loading preview…";
       modalMeta = element("p", "session-preview-meta");
       modalNotice = element("output", "session-preview-notice"); modalNotice.setAttribute("role", "status");
-      modalRefresh = element("button", "session-preview-refresh", "↻ Refresh preview"); modalRefresh.type = "button"; modalRefresh.addEventListener("click", () => load(true));
+      modalRefresh = element("button", "session-preview-refresh", "↻ Refresh preview"); modalRefresh.type = "button"; modalRefresh.addEventListener("click", () => void load(true));
       const footer = element("div", "session-preview-dialog-footer"); footer.append(modalMeta, modalRefresh);
       const explanation = element("p", "session-preview-explanation", "A snapshot of recent output. It stays still until you refresh it.");
       dialog.append(heading, modalScreen, explanation, footer, modalNotice);
@@ -1427,7 +1443,7 @@ export class Dashboard {
         if (trigger.isConnected && !disposed && !this.previewDialog) trigger.focus({ preventScroll: true });
       });
       this.root.append(dialog); dialog.showModal(); paint(modalScreen); sync(); close.focus();
-      load();
+      void load();
     };
     thumbnail.addEventListener("click", () => enlarge(thumbnail));
     rowButton.addEventListener("click", () => enlarge(rowButton));
@@ -1446,9 +1462,9 @@ export class Dashboard {
         if (disposed || this.destroyed || preview) return;
         const bounds = rowScreen.getBoundingClientRect();
         if (document.visibilityState !== "visible" || !bounds.width || bounds.bottom < 0 || bounds.top > window.innerHeight) { observer.observe(rowScreen); return; }
-        load();
-        // Keep passive captures below the server's two-per-second budget.
-        await new Promise<void>(resolve => window.setTimeout(resolve, 550));
+        // One passive capture at a time, and below the server's two-per-second
+        // budget: on a slow link, captures never pile up behind each other.
+        await Promise.all([load(), new Promise<void>(resolve => window.setTimeout(resolve, 550))]);
       });
     });
     if (passive) observer.observe(rowScreen);
