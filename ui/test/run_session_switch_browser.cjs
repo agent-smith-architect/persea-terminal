@@ -511,7 +511,9 @@ async function main() {
     // claimed; the stale A capability remains unconsumed.
     for (const race of [
       { name: "source-remint-authority", holdAdoptionMs: 1_800, holdHandleMs: 2_200, holdInventoryMs: 0, holdInventoryAfter: 0, bindingsExpired: false, holdLeaseRefusalMs: 8_000 },
-      { name: "identity-remint-authority", holdAdoptionMs: 5_000, holdHandleMs: 0, holdInventoryMs: 8_000, holdInventoryAfter: 1, bindingsExpired: true, holdLeaseRefusalMs: 12_000 },
+      // The request token comes from the cookie, so A's identity remint is the
+      // first session list read after the switch and is the one held.
+      { name: "identity-remint-authority", holdAdoptionMs: 5_000, holdHandleMs: 0, holdInventoryMs: 8_000, holdInventoryAfter: 0, bindingsExpired: true, holdLeaseRefusalMs: 12_000 },
     ]) {
       const scenario = await openScenario({ sessionBState: "adoptable", holdAdoptionMs: race.holdAdoptionMs });
       await scenario.openList();
