@@ -22,7 +22,7 @@ export type Fetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Re
 export function boundedFetchWithin(deadlineMs: number, fetcher: Fetch = (input, init) => globalThis.fetch(input, init)): Fetch {
   return async (input, init = {}) => {
     const controller = new AbortController();
-    const parent = init.signal ?? undefined;
+    const parent = init.signal ?? (input instanceof Request ? input.signal : undefined);
     let timedOut = false;
     const timer = setTimeout(() => { timedOut = true; controller.abort(); }, deadlineMs);
     const relay = () => controller.abort(parent?.reason);

@@ -104,15 +104,17 @@ Filtering updates the matching count and offers a clear action for no results.
 A failed refresh retains the last good inventory and says when it was read.
 It retries by itself after 2, 4, 8, 16, then every 30 seconds (with jitter)
 while the document is visible, and at once when the network or the window comes
-back. There is no ambiguous "Updated just now" timestamp. The visible
+back. A retry that falls during an edit or a save waits one more delay. There is
+no ambiguous "Updated just now" timestamp. The visible
 document checks inventory every 60 seconds; a quick window return does not
 repeat a recent read. Manual refresh stays available.
 
-Every request of the page ends within a deadline that covers the response body:
-10 seconds, 5 for the appearance preferences a terminal waits for, and 120 for
-image uploads and downloads. On a link that stops passing data without closing,
-nothing stays busy for longer. A create request without a reply says the outcome
-is unknown and refreshes the list; the page never sends it again by itself. Reads are deduplicated and
+Each request of the page ends within a deadline that covers the response body:
+10 seconds, 5 for appearance preferences, and 120 for image uploads and
+downloads. The deadline applies per request while the page is active, so an
+action made of several requests can take longer. A create request without a
+reply says the outcome is unknown and refreshes the list; the page never sends
+it again by itself. Reads are deduplicated and
 do not replace connected row controls. Hidden documents do not poll. Destruction
 retires outstanding reads and removes listeners.
 

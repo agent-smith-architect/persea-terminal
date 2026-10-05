@@ -221,6 +221,9 @@ const NOTICES: Readonly<Record<string, UnifiedCloseNotice>> = Object.freeze({
   // session is fine; this attachment is not, and reopening re-establishes it
   // at whatever geometry the host now holds.
   attachment_failed: Object.freeze({ headline: "This attachment ended", detail: "The session host ended this attachment. The session is still running; reopen it from the dashboard." }),
+  // Workspace pane actions whose request got no usable reply.
+  session_list_unavailable: Object.freeze({ headline: "The session list could not be read", detail: "Check your connection, then retry." }),
+  create_outcome_unknown: Object.freeze({ headline: "No reply from the server", detail: "The session may have been created. Retry checks the session list." }),
 });
 
 // Notices a fresh attachment on the same identity can genuinely clear: the
