@@ -2,6 +2,32 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
+## 0.1.15 — 2026-10-05
+
+### Fixed
+
+- On a connection that stops passing data without closing, such as Wi-Fi with no internet behind it, every page request now ends within a time limit, including the reply body. Before, the dashboard could keep Refresh disabled for minutes, a terminal could wait for its appearance settings, and a workspace pane could wait behind a session list read that never ended.
+- The first connection of a terminal now stops after 10 seconds when it cannot open, and the terminal then recovers as after any other lost connection. Before, it could stay at "Connecting" until the browser gave up.
+
+### Changed
+
+- After a failed refresh, the dashboard tries again by itself with increasing delays (up to 30 seconds), and at once when the device comes back online. The status line says it will try again. A session that was being created when the server stopped answering is shown as possibly created, and the list is read again.
+- A workspace pane whose session list cannot be read offers Retry. When a pane creates a session and gets no reply, it says the session may have been created; Retry reads the session list and does not create it again.
+- When the connection is lost, the terminal tries to reconnect every 5 seconds for the first two minutes, then every 15 seconds.
+- The terminal tag stays at "Connecting" until the terminal has received its history. When this takes more than a second, the status line says "Loading history…".
+- The session list scrolls to the current session when it opens, from the terminal tag or from quick actions.
+- Dashboard previews load one at a time.
+- The browser keeps the app's code and styles between visits and reloads. A page load after the first one downloads only the small page document. The server names each file by its content, so a new release is always loaded fresh.
+- A terminal or workspace starts its session list, settings and workspace reads at the same time. Reconnecting no longer reads the session list only to renew the request token.
+
+### Upgrade notes
+
+- A page that was open before the update keeps the earlier behavior until it is reloaded.
+
+### Testing notes
+
+- A test server holds replies open after the first byte. In Chromium and WebKit, the tests check that the dashboard, the appearance settings and the shared session list read end at their time limits and recover by themselves when the server answers again, also when the device comes back online. Other new tests cover the cached file headers and the request token (Go), the first-connection limit and the reconnect timing, the "Loading history…" state, and the session list scroll. Each new test was shown to fail without the change it checks. Not tested on a real iPhone.
+
 ## 0.1.14 — 2026-10-03
 
 ### Fixed
