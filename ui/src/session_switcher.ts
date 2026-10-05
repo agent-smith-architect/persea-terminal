@@ -130,22 +130,28 @@ export type SessionSwitcherViewOptions = Readonly<{
 // It owns presentation only: the pane-local controller owns inventory and the
 // identity transaction, and trusted tap activation prevents a scrolling row
 // from becoming a switch.
-// Scrolls only the list, and only when the row is not fully in view; the
-// panel around it and the keyboard focus are left alone.
-function centerWithin(list: HTMLElement, row: HTMLElement): void {
-  const box = list.getBoundingClientRect();
+// Brings the row into view by scrolling the nearest box that scrolls it: the
+// list in the tag panel, the sheet around the list in quick actions. Nothing
+// else moves (not the page, not the terminal), the keyboard focus stays, and
+// a row already fully in view is left where it is.
+function revealRow(list: HTMLElement, row: HTMLElement): void {
+  let scroller: HTMLElement | null = list;
+  while (scroller && scroller !== document.body && !(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
+  if (!scroller || scroller === document.body) return;
+  const box = scroller.getBoundingClientRect();
   const target = row.getBoundingClientRect();
   if (target.top >= box.top && target.bottom <= box.bottom) return;
-  list.scrollTop += target.top + target.height / 2 - (box.top + box.height / 2);
+  scroller.scrollTop += target.top + target.height / 2 - (box.top + box.height / 2);
 }
 
 export class SessionSwitcherView {
   readonly search: HTMLInputElement;
   readonly refresh: HTMLButtonElement;
   private readonly list: HTMLDivElement;
-  // Set when the panel opens. The next render that shows the current session
-  // scrolls the list to it, once, so the operator's own scrolling is kept.
-  private revealCurrent = false;
+  // Set when the panel opens. The first render that shows the current session
+  // in a visible list brings it into view, once, so the operator's own
+  // scrolling is kept.
+  private revealPending = false;
   private inventory: SessionSwitcherInventory = Object.freeze({ sessions: Object.freeze([]) });
   private readonly rowNodes = new Map<string, { button: HTMLButtonElement; update(row: SessionSwitcherRow): void }>();
 
@@ -177,8 +183,11 @@ export class SessionSwitcherView {
     preserveFocus(() => this.render());
   }
 
-  revealCurrentOnNextRender(): void {
-    this.revealCurrent = true;
+  // Call once the surface is shown. The rows already held are rendered at
+  // once, so the reveal does not wait for the network.
+  revealCurrent(): void {
+    this.revealPending = true;
+    if (this.inventory.sessions.length > 0) preserveFocus(() => this.render());
   }
 
   rows(): readonly SessionSwitcherRow[] {
@@ -269,9 +278,9 @@ export class SessionSwitcherView {
     reconcileChildren(this.list, Array.from(realms.values()));
     const current = rows.find(row => row.current);
     const currentButton = current && this.rowNodes.get(current.session.draftScope)?.button;
-    if (this.revealCurrent && currentButton && this.list.clientHeight > 0) {
-      this.revealCurrent = false;
-      centerWithin(this.list, currentButton);
+    if (this.revealPending && currentButton && this.list.clientHeight > 0) {
+      this.revealPending = false;
+      revealRow(this.list, currentButton);
     }
     const live = new Set(this.inventory.sessions.map(session => session.draftScope));
     for (const [key, entry] of this.rowNodes) if (!live.has(key)) { entry.button.disabled = true; this.rowNodes.delete(key); }
