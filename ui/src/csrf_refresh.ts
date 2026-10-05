@@ -1,3 +1,5 @@
+import { boundedFetch } from "./bounded_fetch";
+
 export type CSRFFetch = (
   input: string,
   init: RequestInit,
@@ -15,12 +17,16 @@ export function csrfToken(): string {
   return parseCSRFCookie(document.cookie);
 }
 
+// The token for a request about to be sent. The cookie is used while the
+// browser still holds it (it lives ten minutes); otherwise one small request
+// has the server mint a new one. Nothing else is read for it.
 export async function refreshCSRFToken(
   signal: AbortSignal,
-  fetcher: CSRFFetch = (input, init) => window.fetch(input, init),
+  fetcher: CSRFFetch = boundedFetch,
   cookieReader: () => string = () => document.cookie,
 ): Promise<string> {
-  const response = await fetcher("/api/inventory", {
+  try { return parseCSRFCookie(cookieReader()); } catch { /* absent or expired: mint one */ }
+  const response = await fetcher("/api/csrf", {
     cache: "no-store",
     credentials: "same-origin",
     signal,

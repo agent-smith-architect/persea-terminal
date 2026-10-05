@@ -1,4 +1,5 @@
 import { csrfToken } from "./csrf_refresh";
+import { boundedFetch } from "./bounded_fetch";
 import { isClipboardRetentionSeconds, type ClipboardRetentionSeconds } from "./clipboard_retention";
 
 export type ClipboardPreferencesSnapshot = Readonly<{
@@ -39,7 +40,7 @@ export class ClipboardPreferencesService {
   };
 
   constructor(options: ClipboardPreferencesOptions = {}) {
-    this.fetcher = options.fetch ?? ((input, init) => fetch(input, init));
+    this.fetcher = options.fetch ?? boundedFetch;
     this.csrf = options.csrf ?? csrfToken;
     this.visibilityDocument = options.document ?? (typeof document === "undefined" ? undefined : document);
     this.visibilityDocument?.addEventListener("visibilitychange", this.foreground);

@@ -17,6 +17,7 @@
 // pinned key that no longer resolves is `session_gone`, never a same-name
 // substitute (B2).
 import { csrfToken, refreshCSRFToken } from "./csrf_refresh";
+import { boundedFetch } from "./bounded_fetch";
 import { ADOPTION_HISTORY_ROWS, readTerminalScrollbackRows } from "./scrollback_preferences";
 import { adoptFailureMessage, parseInventory, resolveDraftScope, unifiedBlockedMessage, type AttachmentMode, type DashboardInventory, type DashboardSession, type HistoryChoice } from "./dashboard";
 import type { ComposerStagedImage } from "./composer_attachments";
@@ -68,7 +69,7 @@ function parseFreshHandle(value: unknown): string {
 
 export async function freshHandle(source: string, purpose: AttachmentMode, signal: AbortSignal): Promise<string> {
   const csrf = await refreshCSRFToken(signal);
-  const response = await window.fetch("/api/attachment-handles", {
+  const response = await boundedFetch("/api/attachment-handles", {
     method: "POST", cache: "no-store", credentials: "same-origin", signal,
     headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrf },
     body: JSON.stringify({ source, purpose }),
@@ -85,7 +86,7 @@ export async function freshEndpoint(mode: AttachmentMode, historyRows: HistoryCh
 export async function takeoverEndpoint(claim: Readonly<{ offer: string } | { source: string }>, historyRows: HistoryChoice, signal: AbortSignal, engine: UnifiedEngine): Promise<AttachmentEndpoint> {
   const requestID = randomRequestID();
   const csrf = await refreshCSRFToken(signal);
-  const response = await window.fetch("/api/control-takeovers", {
+  const response = await boundedFetch("/api/control-takeovers", {
     method: "POST", cache: "no-store", credentials: "same-origin", signal,
     headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrf },
     body: JSON.stringify({ request_id: requestID, ...claim }),
@@ -109,7 +110,7 @@ export async function takeoverEndpoint(claim: Readonly<{ offer: string } | { sou
 // every identity re-mint reads the current inventory, exactly as before the
 // extraction. A workspace supplies its own single-flight resolver instead.
 export async function fetchInventory(signal: AbortSignal): Promise<DashboardInventory> {
-  const response = await window.fetch("/api/inventory", { cache: "no-store", credentials: "same-origin", signal });
+  const response = await boundedFetch("/api/inventory", { cache: "no-store", credentials: "same-origin", signal });
   if (!response.ok) throw new Error("inventory unavailable");
   return parseInventory(await response.json());
 }
@@ -419,7 +420,7 @@ export class UnifiedPaneController {
       if (this.disposed || operationToken !== this.operationToken || identity !== this.currentIdentity.incarnationKey || source !== this.currentSource) {
         return Object.freeze({ ok: false, message: "Width refit was superseded", disposition: "refused", successorSource: "" });
       }
-      const response = await window.fetch("/api/session-refits", {
+      const response = await boundedFetch("/api/session-refits", {
         method: "POST", cache: "no-store", credentials: "same-origin",
         headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrf },
         body: JSON.stringify({ source, columns, operation, ...(rows === undefined ? {} : { rows }) }), signal: abort.signal,
@@ -693,7 +694,7 @@ export class UnifiedPaneController {
     try {
       if (session.unified.state === "adoptable") {
         this.counters.adoptions += 1;
-        const response = await window.fetch("/api/session-adoptions", {
+        const response = await boundedFetch("/api/session-adoptions", {
           method: "POST", cache: "no-store", credentials: "same-origin",
           headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrfToken() },
           body: JSON.stringify({ realm: session.realm, server: session.server, session_id: session.sessionId, history_rows: ADOPTION_HISTORY_ROWS }),
@@ -817,7 +818,7 @@ export class UnifiedPaneController {
     const session = resolution.session;
     if (session.unified?.state === "adoptable") {
       this.counters.adoptions += 1;
-      const adopt = await window.fetch("/api/session-adoptions", {
+      const adopt = await boundedFetch("/api/session-adoptions", {
         method: "POST", cache: "no-store", credentials: "same-origin",
         headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrfToken() },
         body: JSON.stringify({ realm: session.realm, server: session.server, session_id: session.sessionId, history_rows: ADOPTION_HISTORY_ROWS }), signal,

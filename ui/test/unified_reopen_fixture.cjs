@@ -791,7 +791,7 @@ function startFixture(ui, options = {}) {
     geometryA: { columns: 80, rows: 24 },
     geometryB: { columns: 100, rows: 30 },
     refitOperations: [],
-    counters: { documents: 0, inventory: 0, handleRequests: 0, takeovers: 0, adoptions: 0, refits: 0, websockets: 0, replays: 0, preferencesGet: 0, preferencesPut: 0, keyboardPreferencesGet: 0, keyboardPreferencesPut: 0 },
+    counters: { documents: 0, inventory: 0, csrf: 0, handleRequests: 0, takeovers: 0, adoptions: 0, refits: 0, websockets: 0, replays: 0, preferencesGet: 0, preferencesPut: 0, keyboardPreferencesGet: 0, keyboardPreferencesPut: 0 },
   };
   // The /api/snippets store double (clipboard). It is front-door state like the
   // handles and the lease, not a browser concern.
@@ -1214,6 +1214,15 @@ function startFixture(ui, options = {}) {
       response.setHeader("Cache-Control", "no-store"); response.setHeader("Content-Type", "application/json");
       response.end(JSON.stringify({ realm: session.realm, server: session.server, session_id: session.session_id,
         rows: ["Fixture session preview."], ansi_rows: ["Fixture session preview."], width: session.width, height: session.height, captured_at: Date.now(), truncated: false }));
+      return;
+    }
+    // The real front door mints the CSRF cookie on this small read.
+    if (request.method === "GET" && url.pathname === "/api/csrf") {
+      state.counters.csrf += 1;
+      response.setHeader("Cache-Control", "no-store");
+      response.setHeader("Set-Cookie", `__Host-persea-terminal-csrf=${CSRF_TOKEN}; Path=/; Secure; SameSite=Strict`);
+      response.writeHead(204);
+      response.end();
       return;
     }
     if (request.method === "GET" && url.pathname === "/api/inventory") {
