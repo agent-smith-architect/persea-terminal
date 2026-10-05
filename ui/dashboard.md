@@ -101,17 +101,26 @@ uses the existing revision precondition. Deletion removes the saved layout; it
 does not close any terminal session. Phone workspace limitations are unchanged.
 
 Filtering updates the matching count and offers a clear action for no results.
-A failed refresh retains the last good inventory with an explicit retry
-instruction. There is no ambiguous "Updated just now" timestamp. The visible
+A failed refresh retains the last good inventory and says when it was read.
+It retries by itself after 2, 4, 8, 16, then every 30 seconds (with jitter)
+while the document is visible, and at once when the network or the window comes
+back. There is no ambiguous "Updated just now" timestamp. The visible
 document checks inventory every 60 seconds; a quick window return does not
-repeat a recent read. Manual refresh stays available. Reads are deduplicated and
+repeat a recent read. Manual refresh stays available.
+
+Every request of the page ends within a deadline that covers the response body:
+10 seconds, 5 for the appearance preferences a terminal waits for, and 120 for
+image uploads and downloads. On a link that stops passing data without closing,
+nothing stays busy for longer. A create request without a reply says the outcome
+is unknown and refreshes the list; the page never sends it again by itself. Reads are deduplicated and
 do not replace connected row controls. Hidden documents do not poll. Destruction
 retires outstanding reads and removes listeners.
 
 ## Output snapshots
 
 Wide rows load one snapshot when their small thumbnail enters the viewport.
-Passive first captures are staggered below the server's two-per-second budget.
+Passive first captures load one at a time, staggered below the server's
+two-per-second budget.
 Narrow rows show an eye button and load on demand. Opening information or the
 preview dialog also loads it if necessary. The row, information panel and dialog
 share that capture. Inventory refresh, returning to the window, reopening
