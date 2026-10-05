@@ -92,8 +92,10 @@ server's list incomplete.
 
 An open page treats an unavailable or truncated inventory as temporary. It reports
 that a session ended only when a complete inventory from its healthy server omits
-the pinned identity. After its fast retries, a visible page continues slower
-Offline probes; there is no finite total retry count.
+the pinned identity. After its fast retries, a visible page continues with
+Offline probes, every 5 seconds for the first two minutes and then every 15;
+there is no finite total retry count. A first connection that does not open
+within 10 seconds enters the same recovery.
 
 Each serving realm requires the Unified terminal's
 closed manifest block `unified_terminal_dev`. Its required fields are
@@ -155,6 +157,12 @@ configured tmux socket or sessions. A manifest edit without installation is
 reported as drift and has no implicit runtime effect.
 
 ## Candidate, install, verify, rollback
+
+The document names `app.js`, `app.css` and `xterm.css` by content
+(`?v=` and the first 128 bits of their SHA-256), and the browser keeps those
+responses. The document itself is never cached, so after an install or a
+rollback the next page load uses that release's assets. A page that is already
+open keeps the code it loaded until it reloads.
 
 Generate a side-effect-free review candidate from any regular fixture:
 
