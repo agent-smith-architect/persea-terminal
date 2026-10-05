@@ -120,6 +120,9 @@ export function sessionSwitcherRows(
 
 export type SessionSwitcherViewOptions = Readonly<{
   root: HTMLElement;
+  // The panel or sheet that holds root; revealing a row scrolls nothing
+  // outside it.
+  surface: HTMLElement;
   currentDraftScope(): string | null;
   blockedMessage(session: DashboardSession): string;
   select(session: DashboardSession): void;
@@ -130,18 +133,18 @@ export type SessionSwitcherViewOptions = Readonly<{
 // It owns presentation only: the pane-local controller owns inventory and the
 // identity transaction, and trusted tap activation prevents a scrolling row
 // from becoming a switch.
-// Brings the row into view by scrolling the nearest box that scrolls it: the
-// list in the tag panel, the sheet around the list in quick actions. Nothing
-// else moves (not the page, not the terminal), the keyboard focus stays, and
-// a row already fully in view is left where it is.
-function revealRow(list: HTMLElement, row: HTMLElement): void {
-  let scroller: HTMLElement | null = list;
-  while (scroller && scroller !== document.body && !(scroller.scrollHeight > scroller.clientHeight && /auto|scroll/.test(getComputedStyle(scroller).overflowY))) scroller = scroller.parentElement;
-  if (!scroller || scroller === document.body) return;
-  const box = scroller.getBoundingClientRect();
-  const target = row.getBoundingClientRect();
-  if (target.top >= box.top && target.bottom <= box.bottom) return;
-  scroller.scrollTop += target.top + target.height / 2 - (box.top + box.height / 2);
+// Brings the row into view in each box that scrolls it, from the list out to
+// the surface (the tag panel, or the quick-actions sheet in which the list
+// grows), innermost first. Nothing outside the surface moves, not the page
+// and not the terminal; the keyboard focus stays; a box that already shows
+// the whole row is left where it is.
+function revealRow(row: HTMLElement, list: HTMLElement, surface: HTMLElement): void {
+  for (let box: HTMLElement | null = list; box; box = box === surface ? null : box.parentElement) {
+    if (box.scrollHeight <= box.clientHeight || !/auto|scroll/.test(getComputedStyle(box).overflowY)) continue;
+    const bounds = box.getBoundingClientRect();
+    const target = row.getBoundingClientRect();
+    if (target.top < bounds.top || target.bottom > bounds.bottom) box.scrollTop += target.top + target.height / 2 - (bounds.top + bounds.height / 2);
+  }
 }
 
 export class SessionSwitcherView {
@@ -280,7 +283,7 @@ export class SessionSwitcherView {
     const currentButton = current && this.rowNodes.get(current.session.draftScope)?.button;
     if (this.revealPending && currentButton && this.list.clientHeight > 0) {
       this.revealPending = false;
-      revealRow(this.list, currentButton);
+      revealRow(currentButton, this.list, this.options.surface);
     }
     const live = new Set(this.inventory.sessions.map(session => session.draftScope));
     for (const [key, entry] of this.rowNodes) if (!live.has(key)) { entry.button.disabled = true; this.rowNodes.delete(key); }

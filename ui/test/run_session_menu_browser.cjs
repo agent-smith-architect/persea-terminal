@@ -126,7 +126,7 @@ async function main() {
       // In quick actions the list grows and the sheet around it scrolls: the
       // sheet brings the row into view; nothing else on the page moves.
       const sheet = page.locator('.persea-unified-sheet');
-      const otherScroll = () => page.evaluate(() => [...document.querySelectorAll('*')].filter(node => node.scrollHeight > node.clientHeight && !node.closest('.persea-unified-sheet')).map(node => [node.className, node.scrollTop]).concat([['page', scrollY]]));
+      const otherScroll = () => page.evaluate(() => [...document.querySelectorAll('*')].filter(node => (node.scrollTop !== 0 || node.scrollLeft !== 0) && !node.closest('.persea-unified-sheet')).map(node => [node.className, node.scrollTop, node.scrollLeft]).concat([['page', scrollX, scrollY]]));
       await page.getByRole('button', { name: 'Quick actions', exact: true }).click();
       const before = await otherScroll();
       await page.getByRole('button', { name: 'Choose another session', exact: true }).click();
@@ -140,8 +140,39 @@ async function main() {
       assert(inSheet.visible && inSheet.scroll > 0, `Opening the session list in quick actions did not show the current session: ${JSON.stringify(inSheet)}`);
       const after = await otherScroll();
       assert(JSON.stringify(after) === JSON.stringify(before), `Showing the current session scrolled something outside the sheet: ${JSON.stringify({ before, after })}`);
-      result.checks.push({ reveal: true, pass: true });
       await context.close();
+      // On a phone in landscape the tag panel scrolls as well as its list:
+      // reopening it, from held rows while the read fails, shows the whole
+      // current row inside the panel; nothing outside the panel moves.
+      const landscape = await browser.newContext({ viewport: { width: 844, height: 390 }, screen: { width: 844, height: 390 }, isMobile: true, hasTouch: true, ignoreHTTPSErrors: true });
+      const wide = await landscape.newPage(); wide.setDefaultTimeout(7000);
+      wide.on('console', message => result.console.push({ phase, text: message.text().slice(0,500), type: message.type() })); wide.on('pageerror', error => result.errors.push({ phase, text: error.message }));
+      // A handle opens one page; this page reads a fresh one.
+      const fresh = (await requestJSON(revealFixture.origin + '/api/inventory')).realms[0].servers[0].sessions[0];
+      await wide.goto(`${revealFixture.origin}/terminal?engine=unified-dev#${new URLSearchParams({ handle: fresh.handles.control, mode: 'control', history: '1000', name: fresh.name, draft_scope: revealFixture.draftScope, engine: 'unified-dev' })}`);
+      await wide.waitForFunction(() => document.querySelector('.xterm-rows')?.textContent.includes('fixture-live'));
+      const panel = wide.locator('.persea-unified-identity__details');
+      const shownInPanel = () => panel.evaluate(node => {
+        const list = node.querySelector('.persea-session-switcher__list'), row = node.querySelector('.persea-session-switcher__row[aria-current="true"]');
+        const a = list.getBoundingClientRect(), p = node.getBoundingClientRect(), b = row.getBoundingClientRect();
+        const top = Math.max(a.top, p.top, 0), bottom = Math.min(a.bottom, p.bottom, innerHeight);
+        return { visible: b.top >= top - 1 && b.bottom <= bottom + 1, row: [b.top, b.bottom], shown: [top, bottom] };
+      });
+      const outsidePanel = () => wide.evaluate(() => [...document.querySelectorAll('*')].filter(node => (node.scrollTop !== 0 || node.scrollLeft !== 0) && !node.closest('.persea-unified-identity__details')).map(node => [node.className, node.scrollTop, node.scrollLeft]).concat([['page', scrollX, scrollY]]));
+      await wide.locator('.persea-unified-tag').click();
+      await panel.locator('.persea-session-switcher__row[aria-current="true"]').waitFor();
+      await panel.evaluate(node => { node.scrollTop = 0; node.querySelector('.persea-session-switcher__list').scrollTop = 0; });
+      await wide.locator('.persea-unified-tag').click();
+      await wide.route('**/api/inventory', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+      const still = await outsidePanel();
+      await wide.locator('.persea-unified-tag').click();
+      await wide.waitForTimeout(300);
+      const shown = await shownInPanel();
+      assert(shown.visible, `In landscape the reopened panel did not show the whole current row: ${JSON.stringify(shown)}`);
+      const moved = await outsidePanel();
+      assert(JSON.stringify(moved) === JSON.stringify(still), `Showing the current session scrolled something outside the panel: ${JSON.stringify({ still, moved })}`);
+      await landscape.close();
+      result.checks.push({ reveal: true, pass: true });
     } finally { await revealFixture.close(); }
     result.unexpectedConsole = result.console.filter(item => !(item.phase === 'screenshot' && /Content Security Policy|CSP|style-src/.test(item.text)));
     assert(result.errors.length === 0 && result.unexpectedConsole.length === 0, 'Menu browser console must be clean'); result.pass = true;

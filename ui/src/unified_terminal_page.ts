@@ -1177,6 +1177,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.identitySessionList.append(list);
       const switcher = new SessionSwitcherView({
         root: list,
+        surface: this.identityDetails,
         currentDraftScope: () => this.options.sessionSwitch?.currentDraftScope() ?? null,
         blockedMessage: (session) => this.options.sessionSwitch?.blockedMessage(session) ?? "Unified terminal unavailable",
         select: (session) => { void this.selectSession(session, "tag"); },
@@ -1816,6 +1817,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       bind(switchTile, () => { void this.openSessionSwitcher(false); }); sessionTiles.push(switchTile);
       sessionSwitcher = new SessionSwitcherView({
         root: sessionList,
+        surface: sheet,
         currentDraftScope: () => this.options.sessionSwitch?.currentDraftScope() ?? null,
         blockedMessage: (session) => this.options.sessionSwitch?.blockedMessage(session) ?? "Unified terminal unavailable",
         select: (session) => { void this.selectSession(session, "sheet"); },

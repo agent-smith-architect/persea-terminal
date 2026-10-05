@@ -75,6 +75,14 @@ async function main(): Promise<void> {
     await outcome(boundedFetchWithin(5_000, fetcher)(new Request("http://localhost/api/inventory", { signal: caller.signal })));
     assert(seen[0]!.aborted, "a cancelled Request started a live request");
   }
+  {
+    // A signal given in init, even null, replaces the Request's own.
+    const { fetcher, seen } = server("complete");
+    const cancelled = new AbortController();
+    cancelled.abort();
+    const response = await boundedFetchWithin(5_000, fetcher)(new Request("http://localhost/api/inventory", { signal: cancelled.signal }), { signal: null });
+    assert(response.status === 200 && !seen[0]!.aborted, "an explicit null signal did not replace the Request's");
+  }
   console.log("bounded fetch tests passed");
 }
 

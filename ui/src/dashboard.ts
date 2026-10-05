@@ -755,15 +755,14 @@ export class Dashboard {
     this.renderLanding();
   }
   destroy(): void { this.destroyed = true; this.requestSerial += 1; this.workspaceSerial += 1; window.removeEventListener("pageshow", this.onPageShow); document.removeEventListener("visibilitychange", this.onVisibility); window.removeEventListener("online", this.onOnline); window.removeEventListener("hashchange", this.handleFragmentTransition); if (this.periodic !== undefined) window.clearInterval(this.periodic); window.clearTimeout(this.refreshRetry); for (const dispose of this.cleanup.splice(0)) dispose(); for (const rows of [this.sessionNodes, this.recentNodes]) { for (const row of rows.values()) row.dispose(); rows.clear(); } this.clipboard.dispose(); this.favorites.dispose(); }
-  // One retry timer. A hidden page waits for its return, which retries at
-  // once. An edit or a save in progress keeps the list still, so the retry
-  // waits for the same delay again instead of being lost.
+  // One retry timer, kept until a refresh starts. A retry that cannot run now
+  // (a hidden page, an edit or a save in progress) waits the same delay again
+  // instead of being lost; a visible return retries at once when it can.
   private scheduleRefreshRetry(delay: number): void {
     window.clearTimeout(this.refreshRetry);
     this.refreshRetry = window.setTimeout(() => {
       this.refreshRetry = undefined;
-      if (document.visibilityState !== "visible") return;
-      if (this.gate.permitsBackgroundRefresh()) void this.refresh("retry");
+      if (document.visibilityState === "visible" && this.gate.permitsBackgroundRefresh()) void this.refresh("retry");
       else this.scheduleRefreshRetry(delay);
     }, delay);
   }
