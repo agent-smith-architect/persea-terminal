@@ -60,6 +60,11 @@ const MAX_CATCH_UP_FAILURES = 3;
 const MAX_AUTO_TAKEOVERS = 3;
 const INPUT_SATURATED_NOTICE = "Input not sent — the connection is busy";
 const INPUT_CATCHING_UP_NOTICE = "Input not sent — history is still loading";
+// The history backlog follows COMMIT and the first MODE marks its end. On a
+// slow link that takes long enough to notice, so the strip says so before a
+// refused keystroke has to.
+const HISTORY_LOADING_NOTICE = "Loading history…";
+const HISTORY_LOADING_NOTICE_DELAY_MS = 1_000;
 const TERMINAL_LONG_PRESS_MS = 500;
 const TERMINAL_LONG_PRESS_MOVE_PX = 12;
 const ANSI_THEME_KEYS = Object.freeze([
@@ -358,6 +363,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // grant means the history backlog is still arriving, not that control was
   // taken away.
   private modeReceived = false;
+  private historyNoticeTimer?: number;
   // Consecutive evictions before a first MODE; see MAX_CATCH_UP_FAILURES.
   private catchUpFailures = 0;
   // The reattach burst limiter. A broker input_refused recovers by
@@ -3078,6 +3084,13 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.options.onCommit?.(generation);
       this.hideFailureNotice();
       this.connectionStatus.textContent = "";
+      window.clearTimeout(this.historyNoticeTimer);
+      this.historyNoticeTimer = window.setTimeout(() => {
+        this.historyNoticeTimer = undefined;
+        if (this.closed || this.modeReceived || !this.committed || this.connectionStatus.textContent !== "") return;
+        this.connectionStatus.textContent = HISTORY_LOADING_NOTICE;
+        this.renderSessionTag();
+      }, HISTORY_LOADING_NOTICE_DELAY_MS);
       this.updateGeometryControl();
       this.options.port.connectionCommitted?.(generation);
       // Ask for the control grant BEFORE focusing the terminal. focus() can
@@ -3108,6 +3121,9 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.controlGranted = frame.mode === "CONTROL";
       if (!this.modeReceived) {
         // The first MODE follows the whole history backlog: the view caught up.
+        window.clearTimeout(this.historyNoticeTimer);
+        this.historyNoticeTimer = undefined;
+        if (this.connectionStatus.textContent === HISTORY_LOADING_NOTICE) this.connectionStatus.textContent = "";
         this.catchUpFailures = 0;
         this.options.port.connectionCaughtUp?.(generation);
       }
@@ -3548,6 +3564,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     // closed; disclosure cleanup must run before the page becomes unavailable.
     this.closePresentationOverlays();
     this.closed = true;
+    window.clearTimeout(this.historyNoticeTimer);
+    this.historyNoticeTimer = undefined;
     this.endpointOperation += 1;
     this.takeoverController?.abort();
     this.takeoverController = undefined;
@@ -3726,7 +3744,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     if (this.closed) return "down";
     if (!this.noticePanel.hidden) return "down";
     if (this.connectionStatus.textContent !== "") return "pending";
-    if (this.prepared !== undefined && this.committed && !this.replaying) return "live";
+    if (this.prepared !== undefined && this.committed && !this.replaying && this.modeReceived) return "live";
     return "pending";
   }
 
