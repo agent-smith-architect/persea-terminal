@@ -1317,7 +1317,9 @@ async function main() {
       clipboard.f6.fence = { offenders, fetchSites, rawFetch, sendSites: (client.match(/this\.send\(/g) || []).length };
       if (offenders.length !== 0) fail("clipboard-malformed-request", "a module outside snippet_client.ts names /api/snippets", offenders);
       if (fetchSites !== 1) fail("clipboard-malformed-request", "snippet_client.ts does not have exactly one transport call site", clipboard.f6.fence);
-      if (rawFetch !== 1) fail("clipboard-malformed-request", "snippet_client.ts reaches window.fetch outside its injected default", clipboard.f6.fence);
+      const boundedDefault = client.includes("this.fetcher = options.fetch ?? boundedFetch;");
+      clipboard.f6.fence.boundedDefault = boundedDefault;
+      if (rawFetch !== 0 || !boundedDefault) fail("clipboard-malformed-request", "snippet_client.ts reaches the network outside its injected fetcher, whose default is the bounded request", clipboard.f6.fence);
     }
 
     // --- clipboard-osc-parser / clipboard-osc-budget: the OSC 52 parser and its economics ---------------
