@@ -190,7 +190,7 @@ async function main() {
     await check('failed refresh keeps data with a clear retry and no false fresh claim', async () => {
       await section('Sessions'); fixture.state.inventoryStatus = 503; await refresh();
       assert(await page.locator('.dashboard-content .session-card').count() === 12, 'Failure removed the last good inventory');
-      const text = await page.locator('.dashboard-status').innerText(); assert(/Showing saved results/.test(text) && /retry/.test(text) && !/Updated just now/.test(text), 'Failure did not explain stale results');
+      const text = await page.locator('.dashboard-status').innerText(); assert(/Showing saved results/.test(text) && /Trying again automatically\./.test(text) && !/Updated just now/.test(text), 'Failure did not explain stale results and the automatic retry');
       fixture.state.inventoryStatus = 200;
     });
     evidence.unexpectedConsole = evidence.console.filter(item => !(item.text.includes('503') && /failure|failed refresh/.test(item.phase)) && !(item.text.includes('409') && item.phase.startsWith('alias conflict')) && !(item.phase === 'screenshot' && /Content Security Policy|CSP|style-src/.test(item.text)));

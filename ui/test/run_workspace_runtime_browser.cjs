@@ -473,8 +473,10 @@ async function main() {
       begin(id);
       const tab = await openTab("strict_route");
       const landings = [];
-      // (a) direct navigation with no durable record fails visibly before
-      // inventory/attachment work. Durable workspace loading never falls back to sessionStorage.
+      // (a) direct navigation with no durable record fails visibly before any
+      // attachment work. The session list read starts together with the
+      // workspace read (one round trip on a slow link) and is the only other
+      // request. Durable workspace loading never falls back to sessionStorage.
       let inventoryBefore = (await snapshot()).counters.inventory;
       let s = await landOn(tab, workspaceURL(), "resume");
       await delay(300);
@@ -501,7 +503,7 @@ async function main() {
       check(id, snap.counters.websockets === 0 && snap.counters.adoptions === 0 && snap.counters.takeovers === 0 && snap.counters.handleRequests === 0 && snap.counters.sessionsCreated === 0
         && snap.attachments.length === 0 && snap.sessions.every((x) => x.handlesConsumed === 0),
       "landing consumed a capability or performed a mutation before any trusted tap", snap.counters);
-      check(id, landings[0].inventoryFetches === 0 && landings[1].inventoryFetches === 0 && landings[2].inventoryFetches === 1, "durable failure/load inventory budget", landings);
+      check(id, landings.every((landing) => landing.inventoryFetches === 1), "durable failure/load inventory budget", landings);
       check(id, s.xtermCount === 0 && s.cells.length === 0 && s.landing === "resume" && s.landingBoxes.filter((b) => b.checked).length === 6, "resume landing shape", { xterms: s.xtermCount, cells: s.cells.length, landing: s.landing });
       // (c) the dashboard document and a query the dashboard refuses: no capability either.
       for (const url of [`${origin}/`, `${origin}/?resume=1`]) {
