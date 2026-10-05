@@ -118,7 +118,7 @@ assert(source.includes("private requestWidthRefit(columns: number, rows?: number
   && (source.match(/this\.requestWidthRefit\(/g) ?? []).length === 2, "only Fit width and Apply may request a width refit");
 assert(source.includes('const request = this.options.refitWidth') && source.includes('const attempt = request(columns, rows)') && source.includes('void attempt.result.then') && !source.includes('type: "RESIZE_REQUEST", version: 1, source: active.source, epoch: active.epoch,\n      columns,'), "width must use the out-of-band refit owner, never a column resize frame");
 assert(controller.includes("...(rows === undefined ? {} : { rows })"), "the refit request must carry typed rows only when the operator changed them");
-assert(controller.includes('window.fetch("/api/session-refits"') && controller.includes("operationToken = ++this.operationToken"), "width refit is not bound to the exact controller operation");
+assert(controller.includes('boundedFetch("/api/session-refits"') && controller.includes("operationToken = ++this.operationToken"), "width refit is not bound to the exact controller operation");
 assert(controller.includes("private currentSource: string | null = null") && controller.includes("this.currentSource = source")
   && controller.includes("const source = this.currentSource") && controller.includes("identity !== this.currentIdentity.incarnationKey || source !== this.currentSource"),
   "width refit must present the current PREPARE source while settling against stable incarnation plus operation token");
