@@ -2014,7 +2014,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     }
     this.sessionSwitcherOpen = true;
     root.hidden = false;
-    if (!refresh) this.sessionSwitcher.revealCurrentOnNextRender();
+    if (!refresh) this.sessionSwitcher.revealCurrent();
     await this.loadSessionInventory(refresh);
   }
 
@@ -3807,10 +3807,10 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     if (open && !coordinated) this.claimPopover("tag");
     if (open) {
       this.renderIdentityDetails(this.connectionPhase());
-      this.identitySessionSwitcher?.revealCurrentOnNextRender();
       if (this.options.aliasSession || this.options.sessionSwitch) void this.loadSessionInventory(true);
     }
     this.identityDetails.hidden = !open;
+    if (open) this.identitySessionSwitcher?.revealCurrent();
     this.identityTag.setAttribute("aria-expanded", open ? "true" : "false");
     if (!open && this.popoverOwner === "tag") this.popoverOwner = "none";
   }

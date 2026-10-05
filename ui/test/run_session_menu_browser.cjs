@@ -112,6 +112,34 @@ async function main() {
       await page.waitForTimeout(300);
       state = await currentInView();
       assert(state.visible && state.scroll > 0, `Reopening the panel did not show the current session: ${JSON.stringify(state)}`);
+      // The rows the panel already holds are shown at once: the reveal does
+      // not wait for a session list read, here one that fails.
+      await menu.locator('.persea-session-switcher__list').evaluate(node => { node.scrollTop = 0; });
+      await page.locator('.persea-unified-tag').click();
+      await page.route('**/api/inventory', route => route.fulfill({ status: 200, contentType: 'application/json', body: '{}' }));
+      await page.locator('.persea-unified-tag').click();
+      await page.waitForTimeout(300);
+      state = await currentInView();
+      assert(state.visible && state.scroll > 0, `A reopened panel waited for the network to show the current session: ${JSON.stringify(state)}`);
+      await page.unroute('**/api/inventory');
+      await page.locator('.persea-unified-tag').click();
+      // In quick actions the list grows and the sheet around it scrolls: the
+      // sheet brings the row into view; nothing else on the page moves.
+      const sheet = page.locator('.persea-unified-sheet');
+      const otherScroll = () => page.evaluate(() => [...document.querySelectorAll('*')].filter(node => node.scrollHeight > node.clientHeight && !node.closest('.persea-unified-sheet')).map(node => [node.className, node.scrollTop]).concat([['page', scrollY]]));
+      await page.getByRole('button', { name: 'Quick actions', exact: true }).click();
+      const before = await otherScroll();
+      await page.getByRole('button', { name: 'Choose another session', exact: true }).click();
+      await sheet.locator('.persea-session-switcher__row[aria-current="true"]').waitFor();
+      await page.waitForTimeout(300);
+      const inSheet = await sheet.evaluate(node => {
+        const row = node.querySelector('.persea-session-switcher__row[aria-current="true"]');
+        const a = node.getBoundingClientRect(), b = row.getBoundingClientRect();
+        return { scroll: node.scrollTop, visible: b.top >= Math.max(a.top, 0) - 1 && b.bottom <= Math.min(a.bottom, innerHeight) + 1 };
+      });
+      assert(inSheet.visible && inSheet.scroll > 0, `Opening the session list in quick actions did not show the current session: ${JSON.stringify(inSheet)}`);
+      const after = await otherScroll();
+      assert(JSON.stringify(after) === JSON.stringify(before), `Showing the current session scrolled something outside the sheet: ${JSON.stringify({ before, after })}`);
       result.checks.push({ reveal: true, pass: true });
       await context.close();
     } finally { await revealFixture.close(); }
