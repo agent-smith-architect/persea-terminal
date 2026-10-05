@@ -130,6 +130,21 @@ async function main() {
     await admit(false);
     const observed = await page.evaluate(() => window.__loading_state.modeAll("OBSERVE"));
     assert(JSON.stringify(observed.modeRequests) === '["OBSERVE"]' && JSON.stringify(observed.caughtUp) === "[1]" && observed.inputFrames === 0, `observe admission did not learn its catch-up: ${JSON.stringify(observed)}`);
+    // Between COMMIT and the first MODE the history backlog is still arriving:
+    // the tag is not yet attached, and after a second the strip says why.
+    await page.evaluate(() => window.__loading_state.reset(1));
+    const backlog = await admit(false);
+    assert(backlog.after.panes[0].phase === "pending" && backlog.after.panes[0].connectionText === "", `COMMIT claimed the view caught up: ${JSON.stringify(backlog.after.panes[0])}`);
+    await page.waitForFunction(() => document.querySelector(".persea-unified-connection")?.textContent === "Loading history…", null, { timeout: 3_000 });
+    assert((await page.evaluate(() => window.__loading_state.snapshot())).panes[0].phase === "pending", "a loading backlog showed the session attached");
+    const caughtUpView = await page.evaluate(() => window.__loading_state.modeAll("CONTROL"));
+    assert(caughtUpView.panes[0].phase === "live" && caughtUpView.panes[0].connectionText === "", `the first MODE did not end the loading state: ${JSON.stringify(caughtUpView.panes[0])}`);
+    // A backlog that ends at once never shows the notice.
+    await page.evaluate(() => window.__loading_state.reset(1));
+    await admit(false);
+    await page.evaluate(() => window.__loading_state.modeAll("CONTROL"));
+    await page.waitForTimeout(1_300);
+    assert((await page.evaluate(() => window.__loading_state.snapshot())).panes[0].connectionText === "", "a short backlog showed a late loading notice");
     // A view evicted for lag before it caught up keeps retrying; the third
     // failed catch-up in a row stops with a notice. Each page below sees at
     // most three evictions, which the reattach burst limiter allows, so only

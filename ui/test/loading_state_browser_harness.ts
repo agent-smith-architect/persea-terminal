@@ -54,6 +54,8 @@ function snapshot(): Record<string, unknown> {
       noticeHeadline: root.querySelector<HTMLElement>(".persea-unified-notice__headline")?.textContent ?? "",
       reconnectVisible: visible(root.querySelector<HTMLElement>(".persea-unified-notice__reconnect")),
       rendered: root.querySelector<HTMLElement>(".xterm-rows")?.textContent ?? "",
+      connectionText: root.querySelector<HTMLElement>(".persea-unified-connection")?.textContent ?? "",
+      phase: root.querySelector<HTMLElement>(".persea-unified-tag__dot")?.dataset.state ?? "",
       toolbar: rect ? { x: rect.x, y: rect.y, width: rect.width, height: rect.height } : null,
     };
   });
