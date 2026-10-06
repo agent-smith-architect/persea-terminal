@@ -2,6 +2,25 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
+## 0.1.18 — 2026-10-06
+
+### Changed
+
+- After a short connection loss, the terminal now receives only the output it missed instead of its whole history. On a slow link this makes a reconnect take about as long as the missed output needs, not as long as the history. The terminal keeps its screen, scroll position and selection. When the page cannot continue exactly where it stopped, the server sends the whole history, as before. This happens after a server restart or a width change, when you switch sessions, and when you reload the history. A reconnect that must first take control back from the page's own lost connection also resumes, which is the usual case when a phone changes network.
+
+### Fixed
+
+- A size change that arrived while the terminal was still drawing earlier output could apply before that output, so the output wrapped at the wrong width. A size change and a reconnect's reset now wait until the earlier output is drawn.
+- After a connection was lost in the middle of a control sequence, the first characters of the history replayed on the next connection could be lost. The replay now starts clean.
+
+### Upgrade notes
+
+- A terminal page that was open during the upgrade cannot reconnect, because the server now sends stream positions it does not know. Reload it once.
+
+### Testing notes
+
+- Server tests resume from the position after every frame of a stream that has small records, a record larger than one frame, and size changes. Each resume shows exactly what a page that never lost the connection shows. Other server tests check that a position from another stream or outside the stream gets the whole history, and that everything missed is sent before COMMIT. In Chromium and WebKit, a test checks the order of output and size changes, when the page offers a position, that it refuses a resumed admission it did not offer or that does not continue its screen, that connections which overlap never make it receive output twice, and that a history replay after a connection lost inside a control sequence starts clean. A test with a real tmux server over a slow link drops the connection while the shell prints, once seen by both ends and once by the browser only, where the page must take its control back first. After the reconnect, the screen must equal tmux's screen, every attempt must offer the page's position, and less than one sixteenth of the history may cross the link. Each new test was shown to fail without the change it checks. Not tested on a real iPhone.
+
 ## 0.1.17 — 2026-10-06
 
 ### Fixed
