@@ -5,6 +5,10 @@ export type UInt64 = bigint;
 export type Mode = "OBSERVE" | "CONTROL";
 export type CutKind = "INITIAL" | "RECONNECT" | "ONGOING" | "RESIZE" | "HISTORY";
 export type Base = Readonly<{ version: 1; source: string; epoch: UInt64 }>;
+// Where the page stands in its journal generation's committed stream after a
+// frame: every record through seq applied in full and offset output bytes
+// applied. The page resumes a dropped connection from the last one it applied.
+export type StreamPosition = Readonly<{ seq: number; offset: number }>;
 type PrepareBase = Base & Readonly<{
   type: "PREPARE";
   cut: UInt64;
@@ -13,6 +17,11 @@ type PrepareBase = Base & Readonly<{
   history: readonly string[];
   truncated: boolean;
   replay: Uint8Array;
+  // An admission names the stream it starts (absent: not resumable) and
+  // says whether it continues the page's terminal instead of replaying it.
+  stream?: string;
+  resumed?: true;
+  position?: StreamPosition;
 }>;
 export type Prepare =
   | PrepareBase & Readonly<{ kind: Exclude<CutKind, "HISTORY"> }>
@@ -20,7 +29,7 @@ export type Prepare =
 export type Ready = Base & Readonly<{ type: "READY"; cut: UInt64 }>;
 export type Defer = Base & Readonly<{ type: "DEFER"; cut: UInt64; reason: ReconciliationDeferReason }>;
 export type Commit = Base & Readonly<{ type: "COMMIT"; cut: UInt64 }>;
-export type Live = Base & Readonly<{ type: "LIVE"; cut: UInt64; data: Uint8Array }>;
+export type Live = Base & Readonly<{ type: "LIVE"; cut: UInt64; data: Uint8Array; position?: StreamPosition }>;
 export type ModeRequest = Base & Readonly<{ type: "MODE_REQUEST"; mode: Mode }>;
 export type ModeFrame = Base & Readonly<{ type: "MODE"; mode: Mode; reason?: string }>;
 export type Input = Base & Readonly<{ type: "INPUT"; data: Uint8Array }>;
@@ -119,6 +128,33 @@ function uint64(value: unknown, name: string): UInt64 {
   return value;
 }
 
+export const STREAM_PATTERN = /^[A-Z2-7]{26}$/;
+
+function streamPosition(value: unknown): StreamPosition {
+  const source = record(value);
+  exactKeys(source, ["seq", "offset"]);
+  const count = (field: unknown, name: string): number => {
+    if (typeof field !== "number" || !Number.isSafeInteger(field) || field < 0) fail(`${name} must be a safe non-negative integer`);
+    return field;
+  };
+  return Object.freeze({ seq: count(source.seq, "seq"), offset: count(source.offset, "offset") });
+}
+
+// The optional resume fields of a server frame, validated where they may occur.
+function resumeFields(source: Record<string, unknown>, admission: boolean): { stream?: string; resumed?: true; position?: StreamPosition } {
+  const fields: { stream?: string; resumed?: true; position?: StreamPosition } = {};
+  if (Object.hasOwn(source, "stream")) {
+    if (!admission || typeof source.stream !== "string" || !STREAM_PATTERN.test(source.stream)) fail("stream is invalid");
+    fields.stream = source.stream;
+  }
+  if (Object.hasOwn(source, "resumed")) {
+    if (source.resumed !== true || fields.stream === undefined) fail("resumed is invalid");
+    fields.resumed = true;
+  }
+  if (Object.hasOwn(source, "position")) fields.position = streamPosition(source.position);
+  return fields;
+}
+
 function geometry(value: unknown, name: string): number {
   if (typeof value !== "number" || !Number.isSafeInteger(value) || value <= 0 || value > MAX_GEOMETRY_CELLS) fail(`${
     name
@@ -183,9 +219,9 @@ export function validateDecodedAttachmentFrame(value: unknown, direction: FrameD
     case "PREPARE": {
       const kind = cutKind(source.kind);
       const historyFields = kind === "HISTORY" ? ["request", "effectiveHistoryRows"] : [];
-      exactKeys(source, [...common, "cut", "kind", "columns", "rows", "history", "truncated", "replay", ...historyFields]);
+      exactKeys(source, [...common, "cut", "kind", "columns", "rows", "history", "truncated", "replay", ...historyFields], ["stream", "resumed", "position"]);
       if (typeof source.truncated !== "boolean") fail("truncated must be boolean");
-      const commonPrepare = { ...b, type: "PREPARE" as const, cut: uint64(source.cut, "cut"), columns: geometry(source.columns, "columns"), rows: geometry(source.rows, "rows"), history: history(source.history), truncated: source.truncated, replay: bytes(source.replay, "replay", 0, MAX_REPLAY_BYTES) };
+      const commonPrepare = { ...b, type: "PREPARE" as const, cut: uint64(source.cut, "cut"), columns: geometry(source.columns, "columns"), rows: geometry(source.rows, "rows"), history: history(source.history), truncated: source.truncated, replay: bytes(source.replay, "replay", 0, MAX_REPLAY_BYTES), ...resumeFields(source, kind === "INITIAL" || kind === "RECONNECT") };
       return kind === "HISTORY"
         ? Object.freeze({ ...commonPrepare, kind, request: uint64(source.request, "request"), effectiveHistoryRows: historyRows(source.effectiveHistoryRows) })
         : Object.freeze({ ...commonPrepare, kind });
@@ -203,8 +239,9 @@ export function validateDecodedAttachmentFrame(value: unknown, direction: FrameD
       exactKeys(source, [...common, "cut"]);
       return Object.freeze({ ...b, type: "COMMIT", cut: uint64(source.cut, "cut") });
     case "LIVE":
-      exactKeys(source, [...common, "cut", "data"]);
-      return Object.freeze({ ...b, type: "LIVE", cut: uint64(source.cut, "cut"), data: bytes(source.data, "data", 1, MAX_LIVE_BYTES) });
+      exactKeys(source, [...common, "cut", "data"], ["position"]);
+      if (Object.hasOwn(source, "stream") || Object.hasOwn(source, "resumed")) fail("LIVE carries no stream");
+      return Object.freeze({ ...b, type: "LIVE", cut: uint64(source.cut, "cut"), data: bytes(source.data, "data", 1, MAX_LIVE_BYTES), ...resumeFields(source, false) });
     case "MODE_REQUEST":
       exactKeys(source, [...common, "mode"]);
       return Object.freeze({ ...b, type: "MODE_REQUEST", mode: mode(source.mode) });

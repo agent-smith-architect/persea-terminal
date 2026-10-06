@@ -121,6 +121,16 @@ func Encode(frame terminal.Frame, direction Direction) ([]byte, error) {
 		value["reason"] = frame.Reason
 	}
 
+	if frame.Stream != "" {
+		value["stream"] = frame.Stream
+	}
+	if frame.Resumed {
+		value["resumed"] = true
+	}
+	if frame.Position != nil {
+		value["seq"] = strconv.FormatUint(frame.Position.Sequence, 10)
+		value["offset"] = strconv.FormatUint(frame.Position.Offset, 10)
+	}
 	raw, err := json.Marshal(value)
 	if err != nil {
 		return nil, malformed("encode: %v", err)
@@ -231,6 +241,32 @@ func Decode(raw []byte, direction Direction) (terminal.Frame, error) {
 		frame.Request, err = parseUint64(requestText, "request")
 		if err != nil {
 			return terminal.Frame{}, err
+		}
+	}
+	if _, ok := object["seq"]; ok {
+		position := terminal.StreamPosition{}
+		for key, target := range map[string]*uint64{"seq": &position.Sequence, "offset": &position.Offset} {
+			text, err := requiredString(object, key)
+			if err != nil {
+				return terminal.Frame{}, err
+			}
+			if *target, err = parseCount(text, key); err != nil {
+				return terminal.Frame{}, err
+			}
+		}
+		frame.Position = &position
+	}
+	if _, ok := object["stream"]; ok {
+		if frame.Stream, err = requiredString(object, "stream"); err != nil {
+			return terminal.Frame{}, err
+		}
+	}
+	if _, ok := object["resumed"]; ok {
+		if err = decodeField(object, "resumed", &frame.Resumed); err != nil {
+			return terminal.Frame{}, err
+		}
+		if !frame.Resumed {
+			return terminal.Frame{}, malformed("resumed is present only when true")
 		}
 	}
 	switch frameType {
@@ -356,9 +392,10 @@ func decodeObject(raw []byte) (map[string]json.RawMessage, error) {
 	}
 	object := make(map[string]json.RawMessage)
 	for decoder.More() {
-		// PREPARE with a history request is the largest schema (13 fields).
-		// Reject excess fields before allocating an unbounded malformed index.
-		if len(object) == 13 {
+		// PREPARE is the largest schema: 13 fields with a history request,
+		// plus stream, resumed, seq and offset. Reject excess fields before
+		// allocating an unbounded malformed index.
+		if len(object) == 17 {
 			return nil, malformed("too many wire fields")
 		}
 		keyToken, err := decoder.Token()
@@ -400,6 +437,7 @@ func validateKeys(object map[string]json.RawMessage, frameType terminal.FrameTyp
 		if terminal.CutKind(kind) == terminal.CutHistory {
 			required = append(required, "request", "effective_history_rows")
 		}
+		optional = append(optional, "stream", "resumed")
 	case terminal.FrameReady, terminal.FrameCommit:
 		required = append(required, "cut")
 	case terminal.FrameDefer:
@@ -421,6 +459,15 @@ func validateKeys(object map[string]json.RawMessage, frameType terminal.FrameTyp
 		required = append(required, "reason")
 	default:
 		return malformed("unknown frame type %q", frameType)
+	}
+	if frameType == terminal.FramePrepare || frameType == terminal.FrameLive {
+		// A position is both fields or neither.
+		_, seq := object["seq"]
+		_, offset := object["offset"]
+		if seq != offset {
+			return malformed("position needs seq and offset")
+		}
+		optional = append(optional, "seq", "offset")
 	}
 	allowed := make(map[string]bool, len(required)+len(optional))
 	for _, key := range append(required, optional...) {
@@ -471,6 +518,14 @@ func requiredInt(object map[string]json.RawMessage, key string) (int, error) {
 		return 0, err
 	}
 	return value, nil
+}
+
+// parseCount is parseUint64 that also accepts zero.
+func parseCount(value, name string) (uint64, error) {
+	if value == "0" {
+		return 0, nil
+	}
+	return parseUint64(value, name)
 }
 
 func parseUint64(value, name string) (uint64, error) {

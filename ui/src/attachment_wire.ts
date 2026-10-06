@@ -62,6 +62,11 @@ function toWire(frame: DecodedAttachmentFrame): Record<string, unknown> {
   }
   if (frame.type === "LIVE") value.data = frame.data.byteLength;
   if (frame.type === "INPUT") value.data = encodeBase64(frame.data);
+  if ((frame.type === "PREPARE" || frame.type === "LIVE") && frame.position !== undefined) {
+    delete value.position;
+    value.seq = frame.position.seq.toString(10);
+    value.offset = frame.position.offset.toString(10);
+  }
   return value;
 }
 
@@ -98,7 +103,7 @@ function rejectNoncanonicalFields(payload: string): void {
           if (typeof key !== "string") fail("object key is not a string");
           if (keys.has(key)) fail(`duplicate field ${key}`);
           keys.add(key);
-          if (keys.size > 13) fail("too many wire fields");
+          if (keys.size > 17) fail("too many wire fields");
           capturingKey = false;
           expectingKey = false;
         }
@@ -146,6 +151,16 @@ function decode(payload: string, bytes?: Uint8Array): Record<string, unknown> {
     } else if (bytes.byteLength !== 0) fail("unexpected byte payload");
   } else {
     if (Object.hasOwn(source, "data")) value.data = decodeBase64(source.data, "data");
+  }
+  if (Object.hasOwn(source, "position")) fail("noncanonical position field");
+  if (Object.hasOwn(source, "seq") || Object.hasOwn(source, "offset")) {
+    const count = (field: unknown, name: string): number => {
+      if (typeof field !== "string" || !/^(0|[1-9][0-9]{0,15})$/.test(field) || !Number.isSafeInteger(Number(field))) fail(`${name} is not a safe decimal count`);
+      return Number(field);
+    };
+    value.position = { seq: count(source.seq, "seq"), offset: count(source.offset, "offset") };
+    delete value.seq;
+    delete value.offset;
   }
   if (Object.hasOwn(source, "effective_history_rows")) {
     value.effectiveHistoryRows = source.effective_history_rows;

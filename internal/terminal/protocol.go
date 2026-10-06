@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"strings"
 	"unicode/utf8"
 )
@@ -44,6 +45,30 @@ const (
 	CutHistory   CutKind = "HISTORY"
 )
 
+// StreamPosition is where the browser stands in its generation's committed
+// stream after a frame: every record through Sequence applied in full, and
+// Offset output bytes applied (the end of record Sequence, or a byte inside
+// the next record when the frame ended there). Only the unified attachment
+// writer sets it; a page resumes from the last one it applied.
+type StreamPosition struct {
+	Sequence uint64 `json:"sequence"`
+	Offset   uint64 `json:"offset"`
+}
+
+// ValidStream reports whether stream has the shape of a journal generation's
+// stream name (crypto/rand.Text: 26 base32 characters).
+func ValidStream(stream string) bool {
+	if len(stream) != 26 {
+		return false
+	}
+	for _, c := range []byte(stream) {
+		if (c < 'A' || c > 'Z') && (c < '2' || c > '7') {
+			return false
+		}
+	}
+	return true
+}
+
 type Frame struct {
 	Version              int       `json:"version"`
 	Type                 FrameType `json:"type"`
@@ -62,6 +87,13 @@ type Frame struct {
 	EffectiveHistoryRows int       `json:"effective_history_rows,omitempty"`
 	Truncated            bool      `json:"truncated,omitempty"`
 	Reason               string    `json:"reason,omitempty"`
+	// Stream names the committed stream an admission PREPARE starts, empty
+	// when the page cannot resume from it. Resumed marks an admission that
+	// continues the page's terminal from its resume position instead of
+	// replaying the stream from its start.
+	Stream   string          `json:"stream,omitempty"`
+	Resumed  bool            `json:"resumed,omitempty"`
+	Position *StreamPosition `json:"position,omitempty"`
 }
 
 // Explicit vertical Fit policy. The generic 1..1000 frame ceiling is a protocol
@@ -194,6 +226,13 @@ func (f Frame) Validate() error {
 		return ErrMalformed
 	}
 	if f.Type != FrameDefer && f.Type != FrameEnd && f.Type != FrameMode && f.Reason != "" {
+		return ErrMalformed
+	}
+	admission := f.Type == FramePrepare && (f.Kind == CutInitial || f.Kind == CutReconnect)
+	if f.Stream != "" && (!admission || !ValidStream(f.Stream)) || f.Resumed && f.Stream == "" {
+		return ErrMalformed
+	}
+	if f.Position != nil && (f.Type != FramePrepare && f.Type != FrameLive || f.Position.Offset > math.MaxInt64 || f.Position.Sequence > math.MaxInt64) {
 		return ErrMalformed
 	}
 	return nil
