@@ -36,10 +36,32 @@ async function main() {
       assert(titles.join(',') === 'Build,Shell,Tasks', `${shape.name}: Recent order or alias titles changed: ${titles}`);
       assert(await recent.first().locator('.session-open-action').evaluate(el => document.activeElement === el), `${shape.name}: resume launch did not focus the first Recent Open action`);
       assert(!fixture.state.requests.some(r => r.method === 'POST' && /session-adoptions|sessions$/.test(r.path)), `${shape.name}: passive Recent performed an authority action`);
-      for (const mode of ['Favorites', 'Recent', 'All']) {
+      for (const mode of ['Favorites', 'Recent', 'Output', 'All']) {
         await page.locator('.dashboard-list-modes').getByRole('button', { name: mode, exact: true }).click();
         assert(await page.locator('.dashboard-toolbar').evaluate(el => el.getBoundingClientRect().right <= innerWidth && document.documentElement.scrollWidth <= innerWidth), `${shape.name}: ${mode} toolbar overflows`);
       }
+      phase = `${shape.name}:output`;
+      // Output lists every session, latest output first; unknown time last. A
+      // refresh re-sorts from the new inventory without any other request.
+      const listed = () => page.locator('.dashboard-content .session-card').evaluateAll(cards => cards.map(card => card.querySelector('.session-tmux-name')?.textContent || card.querySelector('.session-name')?.textContent));
+      const now = Math.floor(Date.now() / 1000);
+      [300, 5, 7200, 60, undefined, 30].forEach((ago, i) => { if (ago === undefined) delete fixture.state.sessions[i].output_activity; else fixture.state.sessions[i].output_activity = now - ago; });
+      await page.evaluate(() => document.querySelector('.dashboard-refresh').click());
+      await page.waitForFunction(() => document.querySelector('.session-card .session-metadata')?.textContent.includes('Output 5m ago'));
+      // A row moved into view still loads its one passive preview, as on scroll.
+      const reads = () => fixture.state.requests.filter(r => r.path !== '/api/session-previews').length, beforeSwitch = reads();
+      await page.locator('.dashboard-list-modes').getByRole('button', { name: 'Output', exact: true }).click();
+      await page.waitForTimeout(300);
+      assert(reads() === beforeSwitch, `${shape.name}: Output made a request of its own`);
+      assert((await listed()).join(',') === 'tm3,tm7,tm5,tm2,tm4,tm6', `${shape.name}: Output order is not latest first: ${await listed()}`);
+      assert(await page.locator('.dashboard-results').textContent() === '6 live sessions', `${shape.name}: Output is not a full list`);
+      fixture.state.sessions[2].output_activity = now;
+      await page.evaluate(() => document.querySelector('.dashboard-refresh').click());
+      await page.waitForFunction(() => document.querySelector('.dashboard-content .session-card .session-tmux-name')?.textContent === 'tm4');
+      assert((await listed()).join(',') === 'tm4,tm3,tm7,tm5,tm2,tm6', `${shape.name}: Output did not re-sort after a refresh: ${await listed()}`);
+      await page.locator('.dashboard-list-modes').getByRole('button', { name: 'All', exact: true }).click();
+      assert((await listed()).join(',') === 'tm2,tm3,tm4,tm5,tm6,tm7', `${shape.name}: All lost name order after Output`);
+      fixture.state.sessions.forEach(s => { s.output_activity = now - 70; });
       const favorite = recent.first().locator('.session-pin');
       await favorite.click();
       await page.waitForFunction(() => [...document.querySelectorAll('.session-card')].filter(card => card.querySelector('.session-tmux-name')?.textContent === 'tm2').every(card => card.querySelector('.session-pin')?.getAttribute('aria-pressed') === 'true'));

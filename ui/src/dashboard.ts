@@ -49,6 +49,10 @@ export type UnifiedSessionProjection =
   | Readonly<{ state: "open"; origin: "birth" | "reconstructed"; detail?: UnifiedInventoryDetail }>
   | Readonly<{ state: "adoptable" }>
   | Readonly<{ state: "blocked_alt_screen" | "blocked_multi_pane" | "blocked_multi_window" | "blocked_foreign_server" | "slots_exhausted" | "unavailable" }>;
+// Presentation filters of the session list. Output shows every session with
+// the latest output first; it reads the same inventory as the others.
+const LIST_MODES = [["all", "All"], ["pinned", "Favorites"], ["recent", "Recent"], ["output", "Output"]] as const;
+type ListMode = typeof LIST_MODES[number][0];
 export type DashboardSession = Readonly<{ handles: Readonly<{ alias: string; observe: string; control: string }>; realm: string; uid: number; server: string; serverStatus: string; sessionId: string; name: string; width: number; height: number; attached: number; activity: number; outputActivity?: number; aliases: readonly DashboardAlias[]; draftScope: string; unified?: UnifiedSessionProjection; canStageImages?: true }>;
 export type UnifiedDevLaunch = Readonly<{ state: "create"; name: string }>;
 export type DashboardServer = Readonly<{ realm: string; label: string; status: string; error?: string; canCreate: boolean; sessions: readonly DashboardSession[]; unifiedDev?: UnifiedDevLaunch }>;
@@ -385,7 +389,7 @@ export class Dashboard {
   private discovery: SessionDiscovery = { pinned: [], recent: [] };
   private readonly favorites: DashboardFavorites;
   private readonly favoritesStatus = element("p", "dashboard-favorites-status");
-  private listMode: "all" | "pinned" | "recent" = "all";
+  private listMode: ListMode = "all";
   private readonly listModes = element("div", "dashboard-list-modes");
   private readonly newSession = element("button", "dashboard-create-shortcut", "+ New session");
   private readonly refreshButton = element("button", "dashboard-refresh dashboard-icon-button", "↻");
@@ -518,8 +522,9 @@ export class Dashboard {
     reset.addEventListener("click", () => { this.listMode = "all"; clear.click(); });
     this.emptyResults.append(element("p", undefined, "No sessions match this filter."), reset);
     this.listModes.setAttribute("aria-label", "Session lists");
-    for (const mode of ["all", "pinned", "recent"] as const) {
-      const button = element("button", undefined, mode === "all" ? "All" : mode === "pinned" ? "Favorites" : "Recent"); button.type = "button"; button.dataset.mode = mode;
+    for (const [mode, label] of LIST_MODES) {
+      const button = element("button", undefined, label); button.type = "button"; button.dataset.mode = mode;
+      if (mode === "output") button.title = "All sessions, latest output first";
       button.addEventListener("click", () => { this.listMode = mode; if (this.inventory) preserveFocus(() => this.render(this.inventory!)); });
       this.listModes.append(button);
     }
@@ -1152,6 +1157,8 @@ export class Dashboard {
   // rendered inventory and never change what was fetched or parsed. Applying them
   // to existing nodes (rather than re-rendering) preserves in-progress edits.
   private applyPresentation(): void {
+    // Favorites and Recent show a subset; All and Output show every session.
+    const subset = this.listMode === "pinned" || this.listMode === "recent";
     const presentation = sessionListPresentation(
       this.view.map((realm) => ({ hasError: realm.hasError, servers: realm.servers.map((server) => ({ key: server.key, hasError: server.hasError, sessions: server.sessions.map((item) => item.session) })) })),
       this.filterQuery,
@@ -1163,10 +1170,10 @@ export class Dashboard {
         const serverPresentation = realmPresentation.servers[si];
         server.sessions.forEach((item, xi) => {
           const scope = item.el.dataset.sessionScope ?? "";
-          const included = this.listMode === "all" || (this.listMode === "pinned" ? this.isFavorite(scope) : this.recentAt(scope) > 0);
+          const included = this.listMode === "pinned" ? this.isFavorite(scope) : this.listMode === "recent" ? this.recentAt(scope) > 0 : true;
           item.el.hidden = !serverPresentation.sessions[xi] || !included;
         });
-        server.el.hidden = !server.hasError && (normalizeSessionFilter(this.filterQuery) !== "" || this.listMode !== "all") && server.sessions.every(item => item.el.hidden);
+        server.el.hidden = !server.hasError && (normalizeSessionFilter(this.filterQuery) !== "" || subset) && server.sessions.every(item => item.el.hidden);
         server.body.hidden = serverPresentation.collapsed;
         server.toggle.setAttribute("aria-expanded", String(!serverPresentation.collapsed));
         assignText(server.toggle, serverPresentation.collapsed ? "▸" : "▾");
@@ -1175,9 +1182,9 @@ export class Dashboard {
     });
     const total = this.inventory?.realms.reduce((sum, realm) => sum + realm.servers.reduce((n, server) => n + server.sessions.length, 0), 0) ?? 0;
     const matched = this.view.reduce((sum, realm) => sum + realm.servers.reduce((n, server) => n + server.sessions.filter(item => !item.el.hidden).length, 0), 0);
-    const label = normalizeSessionFilter(this.filterQuery) || this.listMode !== "all" ? `${matched} of ${total} sessions` : `${total} live session${total === 1 ? "" : "s"}`;
+    const label = normalizeSessionFilter(this.filterQuery) || subset ? `${matched} of ${total} sessions` : `${total} live session${total === 1 ? "" : "s"}`;
     if (this.resultStatus.textContent !== label) this.resultStatus.textContent = label;
-    this.emptyResults.hidden = (!normalizeSessionFilter(this.filterQuery) && this.listMode === "all") || matched > 0;
+    this.emptyResults.hidden = (!normalizeSessionFilter(this.filterQuery) && !subset) || matched > 0;
     const emptyText = this.emptyResults.querySelector("p");
     if (emptyText) emptyText.textContent = normalizeSessionFilter(this.filterQuery) ? "No sessions match this filter." : this.listMode === "pinned" ? "No favorites are live. Use the star beside Open to save a session across your devices." : "No recent sessions are live on this device yet.";
     for (const button of Array.from(this.listModes.children)) if ((button as HTMLElement).dataset.mode) button.setAttribute("aria-pressed", String((button as HTMLElement).dataset.mode === this.listMode));
@@ -1207,6 +1214,7 @@ export class Dashboard {
       if (this.listMode === "recent") {
         return this.recentAt(b.draftScope) - this.recentAt(a.draftScope) || compareSessionNames(a, b);
       }
+      if (this.listMode === "output") return (b.outputActivity ?? 0) - (a.outputActivity ?? 0) || compareSessionNames(a, b);
       return Number(this.isFavorite(b.draftScope)) - Number(this.isFavorite(a.draftScope)) || compareSessionNames(a, b);
     }).map(session => ({ el: this.renderSession(session), session }));
     reconcileChildren(grid, sessions.length ? sessions.map(item => item.el) : [element("p", "empty", "No live sessions")]);
