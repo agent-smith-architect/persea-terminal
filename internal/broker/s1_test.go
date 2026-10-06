@@ -2,6 +2,9 @@ package broker
 
 import (
 	"bytes"
+	"io"
+	"os/exec"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -75,7 +78,7 @@ func TestSnapshotTailBufferAndBoundsPreserveTailLineBoundary(t *testing.T) {
 	if n, err := tail.Write(input); err != nil || n != len(input) || !tail.truncated {
 		t.Fatalf("tail write failed: n=%d err=%v truncated=%v", n, err, tail.truncated)
 	}
-	out, truncated := boundHistory(tail.Bytes(), SnapshotLineLimit, 40)
+	out, truncated := boundHistory([]byte(tail.String()), SnapshotLineLimit, 40)
 	if !truncated || !bytes.HasSuffix(out, []byte("FINAL\n")) || (len(out) > 0 && out[0] == 'x') {
 		t.Fatalf("snapshot tail bound failed: %q truncated=%v", out, truncated)
 	}
@@ -100,5 +103,29 @@ func TestEffectiveSnapshotDepthDefaultsAndClamps(t *testing.T) {
 		if got := effectiveSnapshotDepth(tc.in); got != tc.want {
 			t.Fatalf("depth %d => %d, want %d", tc.in, got, tc.want)
 		}
+	}
+}
+
+// exec copies a non-file Stdout with io.Copy, which prefers a ReaderFrom over
+// Write. The caps must hold on that path, not only for direct Write calls.
+func TestTmuxOutputBuffersKeepTheirCapsBehindExec(t *testing.T) {
+	const produced = 3 << 20
+	run := func(stdout io.Writer) {
+		t.Helper()
+		cmd := exec.Command("head", "-c", strconv.Itoa(produced), "/dev/zero")
+		cmd.Stdout = stdout
+		if err := cmd.Run(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	limited := limitedBuffer{max: 1 << 20}
+	run(&limited)
+	if !limited.overflow || len(limited.String()) != limited.max {
+		t.Fatalf("limited buffer kept %d of %d bytes, overflow=%v", len(limited.String()), produced, limited.overflow)
+	}
+	tail := tailLimitedBuffer{max: 1 << 20}
+	run(&tail)
+	if !tail.truncated || len(tail.String()) != tail.max {
+		t.Fatalf("tail buffer kept %d of %d bytes, truncated=%v", len(tail.String()), produced, tail.truncated)
 	}
 }

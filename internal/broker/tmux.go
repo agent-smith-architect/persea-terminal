@@ -289,8 +289,11 @@ func parseSnapshotCapture(out string, truncated bool, want proto.Authority, sent
 	return snapshotCapture{Output: out[:dataEnd], Truncated: truncated, PaneID: fields[1], Width: width, Height: height, Alternate: fields[4] == "1", HistorySize: historySize}, nil
 }
 
+// The buffers below are io.Writers only. Embedding bytes.Buffer would also
+// promote its ReadFrom, which io.Copy (used by exec for a non-file Stdout)
+// prefers over Write, so a cap enforced in Write would never apply.
 type tailLimitedBuffer struct {
-	bytes.Buffer
+	buf       bytes.Buffer
 	max       int
 	truncated bool
 }
@@ -298,42 +301,46 @@ type tailLimitedBuffer struct {
 func (b *tailLimitedBuffer) Write(p []byte) (int, error) {
 	n := len(p)
 	if n >= b.max {
-		b.Buffer.Reset()
-		_, _ = b.Buffer.Write(p[n-b.max:])
+		b.buf.Reset()
+		_, _ = b.buf.Write(p[n-b.max:])
 		b.truncated = true
 		return n, nil
 	}
-	if b.Len()+n > b.max {
-		drop := b.Len() + n - b.max
-		kept := append([]byte(nil), b.Bytes()[drop:]...)
-		b.Buffer.Reset()
-		_, _ = b.Buffer.Write(kept)
+	if b.buf.Len()+n > b.max {
+		drop := b.buf.Len() + n - b.max
+		kept := append([]byte(nil), b.buf.Bytes()[drop:]...)
+		b.buf.Reset()
+		_, _ = b.buf.Write(kept)
 		b.truncated = true
 	}
-	_, _ = b.Buffer.Write(p)
+	_, _ = b.buf.Write(p)
 	return n, nil
 }
 
+func (b *tailLimitedBuffer) String() string { return b.buf.String() }
+
 type limitedBuffer struct {
-	bytes.Buffer
+	buf      bytes.Buffer
 	max      int
 	overflow bool
 }
 
 func (b *limitedBuffer) Write(p []byte) (int, error) {
 	n := len(p)
-	remaining := b.max - b.Len()
+	remaining := b.max - b.buf.Len()
 	if remaining > 0 {
 		if remaining > n {
 			remaining = n
 		}
-		_, _ = b.Buffer.Write(p[:remaining])
+		_, _ = b.buf.Write(p[:remaining])
 	}
 	if n > remaining {
 		b.overflow = true
 	}
 	return n, nil
 }
+
+func (b *limitedBuffer) String() string { return b.buf.String() }
 
 func readIncarnation(s config.TmuxServer) (proto.Authority, error) {
 	out, err := tmuxOutput(s, "display-message", "-p", "#{pid}")
