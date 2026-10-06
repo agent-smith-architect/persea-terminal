@@ -7,6 +7,8 @@ import (
 	"io"
 	"path/filepath"
 	"strings"
+
+	"persea-terminal/internal/terminal"
 )
 
 const (
@@ -161,15 +163,20 @@ type Control struct {
 	Rows         int               `json:"rows,omitempty"`
 	InputMax     int               `json:"input_max,omitempty"`
 	HistoryLimit *int              `json:"history_limit,omitempty"`
-	Depth        int               `json:"depth,omitempty"`
-	HistoryRows  *int              `json:"history_rows,omitempty"`
-	Width        int               `json:"width,omitempty"`
-	Height       int               `json:"height,omitempty"`
-	Pane         string            `json:"pane,omitempty"`
-	FrozenAt     int64             `json:"frozen_at,omitempty"`
-	Truncated    bool              `json:"truncated,omitempty"`
-	Alternate    bool              `json:"alternate_on,omitempty"`
-	Code         string            `json:"code,omitempty"`
+	// Resume asks an attach to continue the page's terminal from where its
+	// last connection left it, instead of replaying the whole stream. The
+	// broker honours it only when it names the attached session's current
+	// stream and a position in it; otherwise the attach replays as usual.
+	Resume      *Resume `json:"resume,omitempty"`
+	Depth       int     `json:"depth,omitempty"`
+	HistoryRows *int    `json:"history_rows,omitempty"`
+	Width       int     `json:"width,omitempty"`
+	Height      int     `json:"height,omitempty"`
+	Pane        string  `json:"pane,omitempty"`
+	FrozenAt    int64   `json:"frozen_at,omitempty"`
+	Truncated   bool    `json:"truncated,omitempty"`
+	Alternate   bool    `json:"alternate_on,omitempty"`
+	Code        string  `json:"code,omitempty"`
 	// Frames is a consumption receipt's cumulative count of the attachment
 	// frames the page has written into its terminal.
 	Frames     uint64            `json:"frames,omitempty"`
@@ -262,8 +269,8 @@ func DecodeClientControl(payload []byte) (Control, error) {
 			return Control{}, fmt.Errorf("invalid consumption receipt")
 		}
 	case "attach":
-		allowed["authority"], allowed["mode"], allowed["history_limit"], allowed["engine"] = true, true, true, true
-		if c.Authority == nil || !c.Authority.Valid() || (c.Mode != "observe" && c.Mode != "control") || c.HistoryLimit == nil || !validHistoryLimit(*c.HistoryLimit) || (c.Engine != "" && c.Engine != "unified-dev") {
+		allowed["authority"], allowed["mode"], allowed["history_limit"], allowed["engine"], allowed["resume"] = true, true, true, true, true
+		if c.Authority == nil || !c.Authority.Valid() || (c.Mode != "observe" && c.Mode != "control") || c.HistoryLimit == nil || !validHistoryLimit(*c.HistoryLimit) || (c.Engine != "" && c.Engine != "unified-dev") || c.Resume != nil && (c.Engine != "unified-dev" || !c.Resume.Valid()) {
 			return Control{}, fmt.Errorf("invalid attach mode")
 		}
 	case "create":
@@ -323,4 +330,16 @@ func DecodeClientControl(payload []byte) (Control, error) {
 		}
 	}
 	return c, nil
+}
+
+// Resume is a page's position in a journal generation's committed stream; see
+// terminal.StreamPosition.
+type Resume struct {
+	Stream   string `json:"stream"`
+	Sequence int64  `json:"sequence"`
+	Offset   int64  `json:"offset"`
+}
+
+func (r Resume) Valid() bool {
+	return terminal.ValidStream(r.Stream) && r.Sequence >= 0 && r.Offset >= 0
 }

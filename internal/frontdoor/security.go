@@ -9,11 +9,14 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"persea-terminal/internal/config"
+	"persea-terminal/internal/proto"
 	"persea-terminal/internal/terminal"
 )
 
@@ -294,6 +297,24 @@ type wsAuthority struct {
 	engine             string
 	history            int
 	historySet         bool
+	// resume is the page's position from its previous connection; the broker
+	// decides whether it still names one (see proto.Control.Resume).
+	resume *proto.Resume
+}
+
+// resumeProtocolRE is persea-resume.<stream>.<sequence>.<offset>: a journal
+// stream name and two canonical decimal counts that fit an int64.
+var resumeProtocolRE = regexp.MustCompile(`^persea-resume\.([A-Z2-7]{26})\.(0|[1-9][0-9]{0,17})\.(0|[1-9][0-9]{0,17})$`)
+
+func resumeProtocolValue(protocol string) (*proto.Resume, bool) {
+	match := resumeProtocolRE.FindStringSubmatch(protocol)
+	if match == nil {
+		return nil, false
+	}
+	sequence, sequenceErr := strconv.ParseInt(match[2], 10, 64)
+	offset, offsetErr := strconv.ParseInt(match[3], 10, 64)
+	resume := &proto.Resume{Stream: match[1], Sequence: sequence, Offset: offset}
+	return resume, sequenceErr == nil && offsetErr == nil && resume.Valid()
 }
 
 func historyProtocolValue(protocol string) (int, bool) {
@@ -394,6 +415,14 @@ func parseWSAuthorityPolicy(r *http.Request, requireHistory bool) (wsAuthority, 
 					return a, false
 				}
 				a.historySet = true
+			case strings.HasPrefix(p, "persea-resume."):
+				if a.resume != nil {
+					return a, false
+				}
+				var valid bool
+				if a.resume, valid = resumeProtocolValue(p); !valid {
+					return a, false
+				}
 			case strings.HasPrefix(p, "persea-engine."):
 				if engineSet || p != "persea-engine.unified-dev" {
 					return a, false

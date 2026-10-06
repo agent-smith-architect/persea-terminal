@@ -90,6 +90,10 @@ type unifiedAttachmentFrameWriter struct {
 	// fresh gates Control input on what the page has consumed; see
 	// input_freshness.go.
 	fresh inputFreshness
+	// resume is the page's position from its previous connection, if it
+	// offered one; admission honours it when it still names a position in
+	// the session's current stream.
+	resume *proto.Resume
 }
 
 // A committed journal geometry is not yet proof that this attachment's resize
@@ -308,24 +312,30 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 			}()
 			return nil
 		}
-		events, initial, tail, cancel, err := writer.provider.openSnapshotTailWithLease(writer.session, writer.lease, true)
+		opening, err := writer.provider.openStream(writer.session, writer.lease, true, writer.resume)
 		if err != nil {
 			return err
 		}
+		events, tail := opening.events, opening.tail
+		writer.delivered = opening.from
 		if len(events) != 0 {
 			last := events[len(events)-1]
 			writer.delivered = unifiedjournal.CommittedCursor{Sequence: last.Sequence, Offset: last.End}
 		}
-		writer.prepared, writer.tail, writer.cancel = true, tail, cancel
+		writer.prepared, writer.tail, writer.cancel = true, tail, opening.cancel
 		writer.ended = make(chan struct{})
 		writer.source, writer.epochID, writer.cut = frame.Source, frame.Epoch, frame.Cut
 		// Registration starts the verdict lifetime, including a blocked PREPARE.
 		go writer.watchVerdict(tail, writer.ended)
-		// Replay starts at the generation's birth geometry, never at the current
-		// one: the committed events that follow re-derive the current geometry in
-		// the same order the live session produced it.
-		frame.Columns, frame.Rows = initial.Columns, initial.Rows
+		// Replay starts at the geometry in force where it starts, never at the
+		// current one: the committed events that follow re-derive the current
+		// geometry in the same order the live session produced it. A whole
+		// stream starts at the generation's birth; a resumed page keeps what it
+		// shows and receives only what follows its position.
+		frame.Columns, frame.Rows = opening.initial.Columns, opening.initial.Rows
+		frame.Stream, frame.Resumed = opening.stream, opening.resumed
 		replay := make([]byte, 0, unifiedAdmissionReplayBytes)
+		at := terminal.StreamPosition{Sequence: uint64(opening.from.Sequence), Offset: uint64(opening.from.Offset)}
 		rest := events
 		for index, event := range events {
 			if event.Kind != unifiedjournal.RecordOutput {
@@ -337,6 +347,7 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 				break
 			}
 			replay = append(replay, event.Payload...)
+			at = *positionWithin(event, 0)
 			rest = events[index+1:]
 		}
 		// The snapshot already owns its event index. Keeping its suffix avoids
@@ -344,6 +355,7 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 		writer.backlog = rest
 		frame.History = []string{}
 		frame.Replay = replay
+		frame.Position = &at
 		frame.Truncated = false
 		encoded, err := attachmentwire.Encode(frame, attachmentwire.ServerToBrowser)
 		if err != nil {
@@ -475,9 +487,9 @@ func (writer *unifiedAttachmentFrameWriter) catchUp(tail *unifiedDevSubscriber) 
 // other attachment frames interleave between frames exactly as with the live
 // queue, and a typed verdict is checked before every frame.
 func (writer *unifiedAttachmentFrameWriter) writeCatchUp(tail *unifiedDevSubscriber, events []unifiedjournal.Event) error {
-	var run []byte
+	var run liveRun
 	flush := func() error {
-		if len(run) == 0 {
+		if len(run.data) == 0 {
 			return nil
 		}
 		select {
@@ -488,10 +500,10 @@ func (writer *unifiedAttachmentFrameWriter) writeCatchUp(tail *unifiedDevSubscri
 		writer.mu.Lock()
 		err := terminal.ErrClosed
 		if !writer.closing {
-			err = writer.writeLiveLocked(run)
+			err = writer.writeLiveLocked(run.data, run.at)
 		}
 		writer.mu.Unlock()
-		run = run[:0]
+		run.data = run.data[:0]
 		return err
 	}
 	for _, event := range events {
@@ -504,21 +516,49 @@ func (writer *unifiedAttachmentFrameWriter) writeCatchUp(tail *unifiedDevSubscri
 			}
 			continue
 		}
-		for payload := event.Payload; len(payload) != 0; {
-			if run == nil {
-				run = make([]byte, 0, unifiedLiveFrameBytes)
-			}
-			take := min(unifiedLiveFrameBytes-len(run), len(payload))
-			run = append(run, payload[:take]...)
-			payload = payload[take:]
-			if len(run) == unifiedLiveFrameBytes {
-				if err := flush(); err != nil {
-					return err
-				}
-			}
+		if err := run.add(event, flush); err != nil {
+			return err
 		}
 	}
 	return flush()
+}
+
+// liveRun packs consecutive output events into LIVE frames of at most
+// unifiedLiveFrameBytes, and knows the stream position after its last byte,
+// which every frame carries so the page can resume from where it ended.
+type liveRun struct {
+	data []byte
+	at   terminal.StreamPosition
+}
+
+// add appends event's output to the run, calling flush whenever it is full.
+func (run *liveRun) add(event unifiedjournal.Event, flush func() error) error {
+	for payload := event.Payload; len(payload) != 0; {
+		if run.data == nil {
+			run.data = make([]byte, 0, unifiedLiveFrameBytes)
+		}
+		take := min(unifiedLiveFrameBytes-len(run.data), len(payload))
+		run.data = append(run.data, payload[:take]...)
+		payload = payload[take:]
+		run.at = *positionWithin(event, len(payload))
+		if len(run.data) == unifiedLiveFrameBytes {
+			if err := flush(); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+// positionWithin is the stream position after event's bytes except its last
+// remaining ones. A frame that ends inside a record leaves the page at the
+// end of the record before it, plus the bytes it has of this one.
+func positionWithin(event unifiedjournal.Event, remaining int) *terminal.StreamPosition {
+	sequence := event.Sequence
+	if remaining > 0 {
+		sequence--
+	}
+	return &terminal.StreamPosition{Sequence: uint64(sequence), Offset: uint64(event.End - int64(remaining))}
 }
 
 // watchVerdict is the bounded close path a typed subscriber verdict takes
@@ -609,6 +649,7 @@ func (writer *unifiedAttachmentFrameWriter) writeEventLocked(event unifiedjourna
 			Version: terminal.ProtocolVersion, Type: terminal.FramePrepare, Source: writer.source,
 			Epoch: writer.epochID, Cut: writer.cut, Kind: terminal.CutResize,
 			Columns: event.Geometry.Columns, Rows: event.Geometry.Rows, History: []string{},
+			Position: positionWithin(event, 0),
 		}
 		encoded, err := attachmentwire.Encode(frame, attachmentwire.ServerToBrowser)
 		if err != nil {
@@ -618,16 +659,17 @@ func (writer *unifiedAttachmentFrameWriter) writeEventLocked(event unifiedjourna
 	}
 	for payload := event.Payload; len(payload) != 0; {
 		chunkBytes := min(len(payload), unifiedLiveFrameBytes)
-		if err := writer.writeLiveLocked(payload[:chunkBytes]); err != nil {
+		chunk := payload[:chunkBytes]
+		payload = payload[chunkBytes:]
+		if err := writer.writeLiveLocked(chunk, *positionWithin(event, len(payload))); err != nil {
 			return err
 		}
-		payload = payload[chunkBytes:]
 	}
 	return nil
 }
 
-func (writer *unifiedAttachmentFrameWriter) writeLiveLocked(data []byte) error {
-	frame := terminal.Frame{Version: terminal.ProtocolVersion, Type: terminal.FrameLive, Source: writer.source, Epoch: writer.epochID, Cut: writer.cut, Data: data}
+func (writer *unifiedAttachmentFrameWriter) writeLiveLocked(data []byte, at terminal.StreamPosition) error {
+	frame := terminal.Frame{Version: terminal.ProtocolVersion, Type: terminal.FrameLive, Source: writer.source, Epoch: writer.epochID, Cut: writer.cut, Data: data, Position: &at}
 	encoded, err := attachmentwire.Encode(frame, attachmentwire.ServerToBrowser)
 	if err != nil {
 		return err
@@ -644,16 +686,16 @@ func (writer *unifiedAttachmentFrameWriter) writeLiveLocked(data []byte) error {
 // so it keeps its exact position between output bytes. stopped reports a
 // typed verdict and is checked before every frame, as before every event.
 func (writer *unifiedAttachmentFrameWriter) writeBacklogLocked(stopped func() bool) error {
-	var run []byte
+	var run liveRun
 	flush := func() error {
-		if len(run) == 0 {
+		if len(run.data) == 0 {
 			return nil
 		}
 		if stopped() {
 			return terminal.ErrClosed
 		}
-		err := writer.writeLiveLocked(run)
-		run = run[:0]
+		err := writer.writeLiveLocked(run.data, run.at)
+		run.data = run.data[:0]
 		return err
 	}
 	for _, event := range writer.backlog {
@@ -669,18 +711,8 @@ func (writer *unifiedAttachmentFrameWriter) writeBacklogLocked(stopped func() bo
 			}
 			continue
 		}
-		for payload := event.Payload; len(payload) != 0; {
-			if run == nil {
-				run = make([]byte, 0, unifiedLiveFrameBytes)
-			}
-			take := min(unifiedLiveFrameBytes-len(run), len(payload))
-			run = append(run, payload[:take]...)
-			payload = payload[take:]
-			if len(run) == unifiedLiveFrameBytes {
-				if err := flush(); err != nil {
-					return err
-				}
-			}
+		if err := run.add(event, flush); err != nil {
+			return err
 		}
 	}
 	return flush()
@@ -2292,7 +2324,7 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 	var unifiedWriter *unifiedAttachmentFrameWriter
 	if ctrl.Engine == "unified-dev" {
 		unifiedWriter = &unifiedAttachmentFrameWriter{
-			downstream: &attachmentFrameWriter{wire: writer}, provider: s.unified, session: d.ID, lease: readerLease,
+			downstream: &attachmentFrameWriter{wire: writer}, provider: s.unified, session: d.ID, lease: readerLease, resume: ctrl.Resume,
 			// A typed subscriber close ends the attachment from the tail
 			// goroutine: the loop below is parked in ReadFrame, and closing the
 			// connection is what returns it into the same teardown every
