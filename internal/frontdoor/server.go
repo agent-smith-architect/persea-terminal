@@ -119,7 +119,11 @@ type Server struct {
 	inventoryEffectsTurn uint64
 	// sessionNames maps each session of the inventories (authorityKey) to its
 	// tmux name, so a new favorite records the name of its session. A server
-	// whose latest list is incomplete keeps its earlier names.
+	// whose latest list is incomplete keeps its earlier names. sessionNamesMu
+	// is taken last and held for nothing else: a favorite PUT looks a name up
+	// while it holds the favorites store, which inventory effects take after
+	// inventoryEffectsMu.
+	sessionNamesMu          sync.Mutex
 	sessionNames            map[string]inventorySessionName
 	snippets                *snippetStore
 	snippetErr              error
@@ -791,6 +795,8 @@ type inventorySessionName struct {
 // rememberSessionNames records the names of an inventory's sessions. Runs
 // under inventoryEffectsMu.
 func (s *Server) rememberSessionNames(live []aliasSession, complete map[string]bool) {
+	s.sessionNamesMu.Lock()
+	defer s.sessionNamesMu.Unlock()
 	names := make(map[string]inventorySessionName, len(live))
 	for key, entry := range s.sessionNames {
 		if !complete[entry.server] {
@@ -808,8 +814,8 @@ func (s *Server) inventorySessionName(scope string) string {
 	if !ok {
 		return ""
 	}
-	s.inventoryEffectsMu.Lock()
-	defer s.inventoryEffectsMu.Unlock()
+	s.sessionNamesMu.Lock()
+	defer s.sessionNamesMu.Unlock()
 	return s.sessionNames[authorityKey(a)].name
 }
 

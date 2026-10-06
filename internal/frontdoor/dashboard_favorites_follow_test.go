@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -303,6 +304,87 @@ func TestInventoryEffectsFollowObservationOrder(t *testing.T) {
 	s.inventoryEffects(6, operator, nil, complete)
 	if s.inventorySessionName(otherScope) != "" {
 		t.Fatal("a complete list kept the name of a session it no longer has")
+	}
+}
+
+// A favorite PUT looks its session's name up while it holds the favorites
+// store; an inventory reconciles favorites while it holds the inventory
+// effects. Neither may wait for the other.
+func TestFavoritePutAndInventoryDoNotDeadlock(t *testing.T) {
+	cfg := ergoFrontConfig(t)
+	s := newServer(cfg, ".", cfg.Ingress.CanonicalHost)
+	if s.dashboardPreferencesErr != nil || s.aliasErr != nil {
+		t.Fatal(s.dashboardPreferencesErr, s.aliasErr)
+	}
+	a := favoriteAuthority("$1", 42, 201)
+	scope, _ := dashboardScope(a)
+	lookingUp, lookUp := make(chan struct{}), make(chan struct{})
+	put, inventory := make(chan error, 1), make(chan struct{})
+	go func() {
+		_, err := s.dashboardPreferences.put("operator", dashboardPreferences{Version: 1, Favorites: []string{scope}}, 0, func(scope string) string {
+			close(lookingUp)
+			<-lookUp
+			return s.inventorySessionName(scope)
+		})
+		put <- err
+	}()
+	<-lookingUp
+	go func() {
+		s.inventoryEffects(1, "operator", []aliasSession{{Authority: a, Name: "shell"}}, map[string]bool{"local\x00private": true})
+		close(inventory)
+	}()
+	// The inventory now holds its effects and waits for the store.
+	for deadline := time.Now().Add(5 * time.Second); s.inventoryEffectsMu.TryLock(); {
+		s.inventoryEffectsMu.Unlock()
+		if time.Now().After(deadline) {
+			t.Fatal("the inventory did not take its effects")
+		}
+		runtime.Gosched()
+	}
+	close(lookUp)
+	select {
+	case err := <-put:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("the favorite PUT blocked")
+	}
+	select {
+	case <-inventory:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the inventory blocked")
+	}
+}
+
+// A favorite not on an incomplete list may be running under a new name, so a
+// newer favorite holding its old name does not drop it; the next complete
+// list shows both.
+func TestFavoriteMissingFromAnIncompleteListStays(t *testing.T) {
+	cfg := ergoFrontConfig(t)
+	s := newServer(cfg, ".", cfg.Ingress.CanonicalHost)
+	if s.dashboardPreferencesErr != nil || s.aliasErr != nil {
+		t.Fatal(s.dashboardPreferencesErr, s.aliasErr)
+	}
+	complete := map[string]bool{"local\x00private": true}
+	renamed, other := favoriteAuthority("$1", 42, 201), favoriteAuthority("$2", 42, 202)
+	renamedScope, _ := dashboardScope(renamed)
+	otherScope, _ := dashboardScope(other)
+	s.inventoryEffects(1, "operator", []aliasSession{{Authority: renamed, Name: "shell"}}, complete)
+	if _, err := s.dashboardPreferences.put("operator", dashboardPreferences{Version: 1, Favorites: []string{renamedScope}}, 0, s.inventorySessionName); err != nil {
+		t.Fatal(err)
+	}
+	revision, _ := s.inventoryEffects(2, "operator", []aliasSession{{Authority: other, Name: "shell"}}, map[string]bool{})
+	if _, err := s.dashboardPreferences.put("operator", dashboardPreferences{Version: 1, Favorites: []string{renamedScope, otherScope}}, revision, s.inventorySessionName); err != nil {
+		t.Fatal(err)
+	}
+	s.inventoryEffects(3, "operator", []aliasSession{{Authority: other, Name: "shell"}}, map[string]bool{})
+	partial, _ := s.dashboardPreferences.get("operator")
+	s.inventoryEffects(4, "operator", []aliasSession{{Authority: renamed, Name: "renamed"}, {Authority: other, Name: "shell"}}, complete)
+	record, _ := s.dashboardPreferences.get("operator")
+	want := []string{renamedScope, otherScope}
+	if !reflect.DeepEqual(partial.Favorites, want) || !reflect.DeepEqual(record.Favorites, want) || record.Names[renamedScope] != "renamed" {
+		t.Fatalf("an incomplete list dropped a favorite: after it %q, after a complete list %q %v", partial.Favorites, record.Favorites, record.Names)
 	}
 }
 
