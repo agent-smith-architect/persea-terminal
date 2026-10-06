@@ -78,7 +78,7 @@ type Session struct {
 	Height    int       `json:"height"`
 	Attached  int       `json:"attached"`
 	Activity  int64     `json:"activity"`
-	// Last output in the active window. Session Activity measures client interaction.
+	// Latest output in any window of the session. Activity measures client interaction.
 	OutputActivity int64                `json:"output_activity,omitempty"`
 	Unified        *UnifiedSessionState `json:"unified,omitempty"`
 }
