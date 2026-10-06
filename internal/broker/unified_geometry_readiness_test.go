@@ -154,6 +154,11 @@ func testUnifiedGeometryReadinessWaitsForActualReady(t *testing.T, path, outcome
 			if frame := geometryReadinessReceive(t, frames, "Control grant"); frame.Type != terminal.FrameMode {
 				t.Fatalf("mode: %+v", frame)
 			}
+			// The tail starts catching up from PREPARE, and publication skips it
+			// until it rejoins the live queue. The queue path publishes records it
+			// never commits, so a skipped one is lost rather than read back; both
+			// paths start from the live queue.
+			pollUntil(t, 5*time.Second, "tail joining the live queue", func() bool { return !writer.tail.data.isCatchingUp() })
 			readyEntered, tailWaiting := make(chan struct{}), make(chan struct{})
 			var waitingOnce sync.Once
 			writer.mu.Lock()
