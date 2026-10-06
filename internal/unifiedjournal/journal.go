@@ -5,6 +5,7 @@ package unifiedjournal
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/binary"
 	"encoding/hex"
@@ -255,7 +256,10 @@ type Recovery struct {
 }
 
 type paneJournal struct {
-	key                      PaneKey
+	key PaneKey
+	// stream names this generation's committed byte stream for the life of
+	// the broker that created it; see Stream.
+	stream                   string
 	file                     *os.File
 	end                      int64
 	committed                int64
@@ -875,7 +879,7 @@ func (realm *Realm) createPaneWithHeader(key PaneKey, initial *Geometry, origin 
 		return nil, ErrUnsafeRuntime
 	}
 	file := os.NewFile(uintptr(fd), name)
-	pane := &paneJournal{key: key, file: file, state: EligibilityContinuous, stored: int64(len(header)), origin: origin,
+	pane := &paneJournal{key: key, stream: rand.Text(), file: file, state: EligibilityContinuous, stored: int64(len(header)), origin: origin,
 		headerSize: int64(len(header)), headerHash: sha256.Sum256(header)}
 	// Charged before the write. A header that fails to write still leaves
 	// whatever landed on the filesystem: the file is removed, and the charge
@@ -1906,6 +1910,48 @@ func (realm *Realm) InitialGeometry(key PaneKey) (Geometry, error) {
 	return pane.initial, nil
 }
 
+// Stream names the generation's committed byte stream: random, minted when
+// the generation is created, never stored. A position a reader holds in one
+// stream is meaningless in any other, including a later generation with the
+// same key. A generation reopened at scan has no stream, so no position
+// survives a broker restart.
+func (realm *Realm) Stream(key PaneKey) (string, error) {
+	pane, err := realm.committedEventsPane(key)
+	if err != nil {
+		return "", err
+	}
+	return pane.stream, nil
+}
+
+// GeometryAt is the geometry in force after record sequence: the newest
+// committed geometry record at or before it, else the birth geometry.
+func (realm *Realm) GeometryAt(key PaneKey, sequence int64) (Geometry, error) {
+	pane, err := realm.committedEventsPane(key)
+	if err != nil {
+		return Geometry{}, err
+	}
+	if sequence < 0 || sequence > pane.committedSequence {
+		return Geometry{}, ErrCursorMismatch
+	}
+	for page := pane.verified.view; page != nil; page = page.previous {
+		if page.event.Sequence <= sequence && page.event.Kind == RecordGeometry {
+			return page.event.Geometry, nil
+		}
+	}
+	return realm.InitialGeometry(key)
+}
+
+// ValidCursor reports whether cursor is a position in the committed
+// projection; see CommittedCursor.
+func (realm *Realm) ValidCursor(key PaneKey, cursor CommittedCursor) error {
+	pane, err := realm.committedEventsPane(key)
+	if err != nil {
+		return err
+	}
+	_, _, _, err = committedSuffix(pane, cursor, 0)
+	return err
+}
+
 // ReadCommittedEvents is the committed event projection. Initial snapshot and
 // live tail are built from this one representation, so they cannot drift.
 func (realm *Realm) ReadCommittedEvents(key PaneKey) ([]Event, error) {
@@ -1930,17 +1976,26 @@ func (realm *Realm) ReadCommittedEvents(key PaneKey) ([]Event, error) {
 }
 
 // CommittedCursor is a reader's position in one generation's committed
-// projection: the last sequence it has consumed and the byte offset that
-// sequence ends at. The sequence orders geometry records, which share their
-// byte offset with a neighbour; the offset locates the payload.
+// projection: the last sequence it has consumed in full and the number of
+// output bytes it has consumed. The sequence orders geometry records, which
+// share their byte offset with a neighbour; the offset locates the payload.
+// Offset is where record Sequence ends, or a byte inside the next record when
+// that record is output a reader has consumed in part: a browser frame can
+// end inside a record, and a page resumes from where its last frame ended.
 type CommittedCursor struct {
 	Sequence int64
 	Offset   int64
 }
 
-// ErrCursorMismatch reports a cursor that is not a record boundary of the
-// committed projection it was presented to.
-var ErrCursorMismatch = errors.New("journal cursor is not a committed record boundary")
+// ErrCursorMismatch reports a cursor that is not a position in the committed
+// projection it was presented to.
+var ErrCursorMismatch = errors.New("journal cursor is not a committed position")
+
+// continuesAt reports whether a reader whose cursor offset is offset, having
+// consumed every record before this one, continues inside or at this record.
+func (event Event) continuesAt(offset int64) bool {
+	return offset == event.Start || event.Kind == RecordOutput && event.Start < offset && offset < event.End
+}
 
 // committedSuffix selects the records one bounded read after cursor returns:
 // the longest run whose payload plus event index stays within maxBytes, and
@@ -1969,7 +2024,7 @@ func committedSuffix(pane *paneJournal, after CommittedCursor, maxBytes int64) (
 		}
 		first = page
 	}
-	if first == nil || first.event.Sequence != after.Sequence+1 || first.event.Start != after.Offset {
+	if first == nil || first.event.Sequence != after.Sequence+1 || !first.event.continuesAt(after.Offset) {
 		return nil, 0, 0, ErrCursorMismatch
 	}
 	return last, last.event.Sequence - after.Sequence, last.event.End - after.Offset, nil
@@ -1978,7 +2033,9 @@ func committedSuffix(pane *paneJournal, after CommittedCursor, maxBytes int64) (
 // ReadCommittedEventsAfter is the committed projection after cursor, bounded
 // by maxBytes as committedSuffix describes. Like ReadCommittedEvents it returns
 // caller-owned copies in one payload allocation, and SuffixAllocation, read
-// under the same journal serialization, describes both allocations first.
+// under the same journal serialization, describes both allocations first. A
+// cursor inside an output record returns the rest of that record first, with
+// Start at the cursor's offset.
 func (realm *Realm) ReadCommittedEventsAfter(key PaneKey, after CommittedCursor, maxBytes int64) ([]Event, error) {
 	pane, err := realm.committedEventsPane(key)
 	if err != nil {
@@ -1993,9 +2050,11 @@ func (realm *Realm) ReadCommittedEventsAfter(key PaneKey, after CommittedCursor,
 	for page := last; page != nil && page.event.Sequence > after.Sequence; page = page.previous {
 		event := page.event
 		if event.Kind == RecordOutput {
+			skip := max(after.Offset-event.Start, 0)
+			event.Start += skip
 			start, end := event.Start-after.Offset, event.End-after.Offset
 			event.Payload = payload[start:end:end]
-			copyEventPayload(event.Payload, page)
+			copyEventPayloadFrom(event.Payload, page, int(skip))
 		}
 		events[event.Sequence-after.Sequence-1] = event
 	}

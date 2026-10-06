@@ -257,8 +257,21 @@ func (realm *Realm) ProjectionUsage(key PaneKey) (payload, metadata, records int
 }
 
 func copyEventPayload(destination []byte, page *eventPage) {
+	copyEventPayloadFrom(destination, page, 0)
+}
+
+// copyEventPayloadFrom copies the record's bytes from skip on: destination
+// holds the record's last len(record)-skip bytes.
+func copyEventPayloadFrom(destination []byte, page *eventPage, skip int) {
 	for payload := page.payload; payload != nil; payload = payload.previous {
-		copy(destination[payload.start:], payload.data)
+		data, start := payload.data, payload.start
+		if start < skip {
+			if start+len(data) <= skip {
+				continue
+			}
+			data, start = data[skip-start:], skip
+		}
+		copy(destination[start-skip:], data)
 	}
 }
 
