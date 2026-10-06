@@ -2,6 +2,22 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
+## 0.1.17 — 2026-10-06
+
+### Fixed
+
+- A favorite now follows its session when tmux restarts, as an alias does. The server keeps the session name of each favorite. When the session is gone, the favorite moves to the running session with the same name on the same server, if that server's session list was read completely and no other favorite already holds the session. When two saved favorites have the same name, the newer one moves, and the older one is removed once its server's session list shows it is gone. The dashboard shows the moved favorite at its next refresh.
+- When you remove a favorite at the same moment the server moves it to a restarted session, the dashboard now says that favorites changed and asks you to refresh. Before, it reported success and the restarted session kept its star.
+- The size limits on tmux command output now apply. Before, a reply of any size was kept in full in server memory.
+
+### Upgrade notes
+
+- An earlier release cannot read the favorites saved by this release. Before a rollback, see "Favorites and rollback" in `deploy/README.md`.
+
+### Testing notes
+
+- A test with a real tmux server checks that a favorite follows a restarted session. A test runs a command the way tmux commands are run and checks that output larger than the limit keeps exactly the bytes the limit allows. Server tests check the order of inventory passes, servers that cannot be reached, same-name favorites, and storage faults. In Chromium and WebKit, a test checks that the dashboard reads favorites again when a refresh reports a newer revision during a read, and that a removal that meets a moved favorite is reported. Each new test was shown to fail without the change it checks. Not tested on a real iPhone.
+
 ## 0.1.16 — 2026-10-06
 
 ### Added
