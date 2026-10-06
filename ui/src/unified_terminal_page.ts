@@ -3706,6 +3706,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         if (this.closed) return;
         if (generation !== this.generation) {
           this.applyTerminalGeometry(frame.columns, frame.rows);
+          this.advanceResume(generation, frame.position, 0);
           return;
         }
         this.applyCommittedGeometry(frame);
@@ -3751,6 +3752,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       // all stay.
       const anchor = this.captureAnchor();
       const stream = frame.stream!, at = frame.position!;
+      // Until the replay is parsed the terminal is between two positions.
+      this.resumePoint = undefined;
       this.resumeOffer = undefined;
       this.inOrder(generation, "REPLAY_FAILED", frame.replay, () => {
         this.replaying = false;
@@ -3771,8 +3774,9 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     // has been parsed, then size to the generation's birth geometry. Replay
     // re-derives the current geometry from the committed events that follow,
     // in the order the live session produced them, so a reload wraps its
-    // lines the same way the live screen did.
-    this.inOrder(generation, "REPLAY_FAILED", "", () => {
+    // lines the same way the live screen did. reset() keeps xterm's parser
+    // state, so CAN first ends any sequence a lost connection cut short.
+    this.inOrder(generation, "REPLAY_FAILED", "\x18", () => {
       if (this.prepared !== frame || this.closed) return;
       this.terminal.reset();
       this.applyTerminalGeometry(frame.columns, frame.rows);

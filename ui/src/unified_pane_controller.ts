@@ -48,8 +48,8 @@ export function attachmentProtocols(handle: string, mode: AttachmentMode, histor
   return ["persea-terminal.v3", `persea-handle.${handle}`, `persea-mode.${mode}`, `persea-csrf.${csrfToken()}`, `persea-history.${historyRows}`, `persea-engine.${engine}`, ...(resume ? [resume] : [])];
 }
 
-function takeoverProtocols(handle: string, historyRows: number, engine: UnifiedEngine): string[] {
-  return [...attachmentProtocols(handle, "control", historyRows, engine), "persea-takeover.v1"];
+function takeoverProtocols(handle: string, historyRows: number, engine: UnifiedEngine, resume?: string): string[] {
+  return [...attachmentProtocols(handle, "control", historyRows, engine, resume), "persea-takeover.v1"];
 }
 
 function randomRequestID(): string {
@@ -85,9 +85,11 @@ export async function freshEndpoint(mode: AttachmentMode, historyRows: HistoryCh
   return Object.freeze({ url: attachmentURL(handle, mode), protocols: Object.freeze(attachmentProtocols(handle, mode, historyRows, engine)) });
 }
 
-// A takeover never resumes: the page's own socket can still be delivering
-// output while the new one opens, so no position it offered would hold.
-export async function takeoverEndpoint(claim: Readonly<{ offer: string } | { source: string }>, historyRows: HistoryChoice, signal: AbortSignal, engine: UnifiedEngine): Promise<AttachmentEndpoint> {
+// resume is read once the claim is granted, as the endpoint is built: a page
+// claims control when its own connection has ended (most often a drop the
+// server has not noticed yet, so its lease is still held), and the socket swap
+// that follows runs in the same task, so the page can resume across it.
+export async function takeoverEndpoint(claim: Readonly<{ offer: string } | { source: string }>, historyRows: HistoryChoice, signal: AbortSignal, engine: UnifiedEngine, resume?: () => string | undefined): Promise<AttachmentEndpoint> {
   const requestID = randomRequestID();
   const csrf = await refreshCSRFToken(signal);
   const response = await boundedFetch("/api/control-takeovers", {
@@ -107,7 +109,7 @@ export async function takeoverEndpoint(claim: Readonly<{ offer: string } | { sou
     throw new Error(code);
   }
   const handle = parseFreshHandle(await response.json());
-  return Object.freeze({ url: attachmentURL(handle, "control"), protocols: Object.freeze(takeoverProtocols(handle, historyRows, engine)) });
+  return Object.freeze({ url: attachmentURL(handle, "control"), protocols: Object.freeze(takeoverProtocols(handle, historyRows, engine, resume?.())) });
 }
 
 // Fetches one inventory snapshot directly. The single terminal's resolver:
@@ -360,7 +362,7 @@ export class UnifiedPaneController {
         if (!claim) throw new Error("takeover_unavailable");
         this.counters.takeovers += 1;
         this.options.observer?.takeoverClaim?.(source ? "source" : "offer");
-        const endpoint = await takeoverEndpoint(claim, this.page.currentScrollbackRows(), signal, engine);
+        const endpoint = await takeoverEndpoint(claim, this.page.currentScrollbackRows(), signal, engine, () => this.page.resumeProtocol());
         this.observeAuthorityResult("takeover", "resolved", operation, identity);
         if (operation !== this.operationToken || this.disposed) {
           this.observeAuthorityResult("takeover", "discarded", operation, identity);

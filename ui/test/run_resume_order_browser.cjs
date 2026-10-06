@@ -75,6 +75,16 @@ async function main() {
       assert(refused.offer === null && refused.ready === 0, `${variant}: ${JSON.stringify(refused)}`);
     }
 
+    const superseded = await run("supersededGeometry");
+    assert(superseded.offer === `persea-resume.${STREAM}.3.8`, `superseded geometry offer ${superseded.offer}`);
+    assert(superseded.resumed.finalized.length === 0 && superseded.resumed.ready === 1 && superseded.resumed.columns === 120, `superseded geometry: ${JSON.stringify(superseded.resumed)}`);
+
+    const replay = await run("resumedReplaySuperseded");
+    assert(replay.accepted && replay.offer === null, `a resumed replay parsed after its connection ended: ${JSON.stringify(replay)}`);
+    same(replay.lines, ["first-a-b"], "a resumed replay parsed after its connection ended");
+
+    for (const cut of ["csi", "osc", "utf-8"]) same((await run("cutShortThenWholeStream", cut)).lines, ["HELLO", "WORLD"], `whole stream after a connection lost inside ${cut}`);
+
     const offer = await run("offerWaitsForTheRenderer");
     assert(offer.queued === null && offer.drained === `persea-resume.${STREAM}.2.10`, `offer while output is queued: ${JSON.stringify(offer)}`);
 
@@ -84,7 +94,7 @@ async function main() {
 
     assert(errors.length === 0, `browser errors: ${JSON.stringify(errors)}`);
     await context.close();
-    console.log(`resume order ${ENGINE}: PASS (geometry between output, ordered reset, resumed admission, 7 refused resumes, offer timing, position gap)`);
+    console.log(`resume order ${ENGINE}: PASS (geometry between output, ordered reset, resumed admission, 7 refused resumes, superseded geometry and replay, cut-short sequences, offer timing, position gap)`);
   } finally {
     await browser?.close();
     await new Promise((resolve) => server.close(resolve));
