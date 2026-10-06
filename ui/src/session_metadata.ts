@@ -13,7 +13,7 @@ export function sessionMetadata(session: Pick<DashboardSession, "width" | "heigh
   return `${session.width}×${session.height} · ${session.attached} attached · ${outputActivityLabel(session.outputActivity, now)}`;
 }
 
-export const SESSION_METADATA_HELP = "Size in columns × rows. Attached counts tmux clients. Output time is the last output in the active window (or its creation if it has not produced output). It does not indicate whether a task is running or finished.";
+export const SESSION_METADATA_HELP = "Size in columns × rows. Attached counts tmux clients. Output time is the latest output in any of the session's windows (a window without output counts from its creation). It does not indicate whether a task is running or finished.";
 
 export function compareSessionNames(a: Pick<DashboardSession, "name">, b: Pick<DashboardSession, "name">): number {
   return a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: "base" }) || a.name.localeCompare(b.name);

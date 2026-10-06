@@ -37,6 +37,11 @@ Settings has a Sessions card with “Recent sessions on the Sessions tab”: Off
 Recent. Default scrollback is in the same card. Refresh is the ↻ button beside the
 filter; the live count follows the All, Favorites and Recent filters.
 
+Output lists every live session with the latest output first in each server
+group; a session whose output time is unknown comes last. It sorts the inventory
+the list already reads (every minute while visible, and on Refresh), so it adds
+no request and no polling.
+
 Recent first looks for the exact session previously opened. After a restart, it
 can show a single running session with the same name in the same realm and server.
 It never chooses between multiple matches. Ended, ambiguous and blocked sessions
@@ -65,8 +70,9 @@ Session rows share their metadata wording with the terminal's session menu:
 - Size is columns × rows of the active tmux window.
 - Attached counts tmux clients; it is not an agent or task status.
 - **Output … ago** uses the optional `output_activity` inventory field, taken
-  from tmux's `window_activity`. This is active-window output activity; tmux also
-  initializes it when a window is created. Unknown, zero or implausibly future
+  from tmux's `window_activity`: the newest value over all the session's windows,
+  read in the same `list-sessions` call. tmux also initializes it when a window is
+  created. Unknown, zero or implausibly future
   values are reported as unknown. The older `activity` field still carries
   session interaction time and remains available in Details.
 
@@ -143,7 +149,7 @@ terminal commands. Preview reads do not attach, resize or send input.
 
 ## Shared favorites and device history
 
-All, Favorites and Recent are presentation filters. Favorites sort first, then
+All, Favorites, Recent and Output are presentation filters. In All, favorites sort first, then
 natural sorting handles names such as `session1`, `session2`, `session10`. Up to 128 favorites
 are exact incarnation identities persisted per authenticated operator through
 `/api/dashboard-preferences`, shared across that operator's devices. ETag/If-Match
