@@ -156,3 +156,59 @@ func TestEncodeCoreJSONReusesTerminalFrameValidation(t *testing.T) {
 		t.Fatal("invalid core frame bypassed terminal validation")
 	}
 }
+
+// Stream, resumed and position survive the wire on the frames that may carry
+// them, zero included, and are refused anywhere else or half present.
+func TestWireCarriesResumeFieldsExactly(t *testing.T) {
+	const stream = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	frames := []terminal.Frame{
+		{Version: 1, Type: terminal.FramePrepare, Source: "source", Epoch: 1, Cut: 9, Kind: terminal.CutReconnect, Columns: 80, Rows: 24, History: []string{}, Replay: []byte("x"), Stream: stream, Resumed: true, Position: &terminal.StreamPosition{Sequence: 0, Offset: 0}},
+		{Version: 1, Type: terminal.FramePrepare, Source: "source", Epoch: 1, Cut: 9, Kind: terminal.CutResize, Columns: 90, Rows: 30, History: []string{}, Position: &terminal.StreamPosition{Sequence: 7, Offset: 1 << 40}},
+		{Version: 1, Type: terminal.FrameLive, Source: "source", Epoch: 1, Cut: 9, Data: []byte("y"), Position: &terminal.StreamPosition{Sequence: 3, Offset: 12}},
+		{Version: 1, Type: terminal.FrameLive, Source: "source", Epoch: 1, Cut: 9, Data: []byte("z")},
+	}
+	for _, want := range frames {
+		raw, err := Encode(want, ServerToBrowser)
+		if err != nil {
+			t.Fatalf("Encode(%s): %v", want.Type, err)
+		}
+		got, err := Decode(raw, ServerToBrowser)
+		if err != nil {
+			t.Fatalf("Decode(%s): %v", want.Type, err)
+		}
+		if got.Stream != want.Stream || got.Resumed != want.Resumed || (got.Position == nil) != (want.Position == nil) || got.Position != nil && *got.Position != *want.Position {
+			t.Fatalf("%s: got stream=%q resumed=%v position=%v, want %q %v %v", want.Type, got.Stream, got.Resumed, got.Position, want.Stream, want.Resumed, want.Position)
+		}
+	}
+	for name, frame := range map[string]terminal.Frame{
+		"stream on a resize":   {Version: 1, Type: terminal.FramePrepare, Source: "s", Epoch: 1, Cut: 1, Kind: terminal.CutResize, Columns: 80, Rows: 24, Stream: stream},
+		"malformed stream":     {Version: 1, Type: terminal.FramePrepare, Source: "s", Epoch: 1, Cut: 1, Kind: terminal.CutInitial, Columns: 80, Rows: 24, Stream: "abcdefghijklmnopqrstuvwxyz"},
+		"resumed, no stream":   {Version: 1, Type: terminal.FramePrepare, Source: "s", Epoch: 1, Cut: 1, Kind: terminal.CutInitial, Columns: 80, Rows: 24, Resumed: true},
+		"position on a COMMIT": {Version: 1, Type: terminal.FrameCommit, Source: "s", Epoch: 1, Cut: 1, Position: &terminal.StreamPosition{}},
+	} {
+		if _, err := Encode(frame, ServerToBrowser); err == nil {
+			t.Errorf("%s: encoded", name)
+		}
+	}
+	live, _ := Encode(frames[2], ServerToBrowser)
+	header := int(binary.BigEndian.Uint32(live))
+	for name, edit := range map[string][2]string{
+		"seq alone":        {`,"offset":"12"`, ``},
+		"offset alone":     {`,"seq":"3"`, ``},
+		"padded offset":    {`"offset":"12"`, `"offset":"012"`},
+		"numeric seq":      {`"seq":"3"`, `"seq":3`},
+		"resumed false":    {`"offset":"12"`, `"offset":"12","resumed":false`},
+		"stream on a LIVE": {`"offset":"12"`, `"offset":"12","stream":"` + stream + `"`},
+	} {
+		text := string(live[4 : 4+header])
+		if !strings.Contains(text, edit[0]) {
+			t.Fatalf("%s: %q not in %s", name, edit[0], text)
+		}
+		text = strings.Replace(text, edit[0], edit[1], 1)
+		raw := binary.BigEndian.AppendUint32(nil, uint32(len(text)))
+		raw = append(append(raw, text...), live[4+header:]...)
+		if _, err := Decode(raw, ServerToBrowser); err == nil {
+			t.Errorf("%s: decoded %s", name, text)
+		}
+	}
+}

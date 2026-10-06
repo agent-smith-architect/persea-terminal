@@ -124,4 +124,36 @@ for (const [before, after] of [
   ['"effective_history_rows":1000', '"effective_history_rows":999'],
   ['"effective_history_rows":1000', '"effectiveHistoryRows":1000'],
 ]) rejects(binaryTestFrame(prepareHeader.replace(before, after)), after);
-console.log("PASS binary attachment codec: arbitrary bytes, maximum PREPARE, Go layout, malformed envelopes and fields");
+
+// Resume fields: a stream position round-trips on PREPARE and LIVE (zero
+// included); stream and resumed only on an admission; anything else fails.
+{
+  const stream = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+  const base = { version: 1 as const, source: "s", epoch: 1n, cut: 2n };
+  const admission: ServerFrame = { ...base, type: "PREPARE", kind: "RECONNECT", columns: 80, rows: 24, history: [], truncated: false, replay: new Uint8Array(), stream, resumed: true, position: { seq: 0, offset: 0 } };
+  const live: ServerFrame = { ...base, type: "LIVE", data: Uint8Array.of(65), position: { seq: 9, offset: 2 ** 40 } };
+  for (const frame of [admission, live]) {
+    const decoded = decodeServerFrame(encodeServerFrame(frame));
+    assert(JSON.stringify(decoded.type === "PREPARE" || decoded.type === "LIVE" ? decoded.position : null) === JSON.stringify(frame.type === "PREPARE" || frame.type === "LIVE" ? frame.position : null), `${frame.type} position did not round-trip`);
+    if (decoded.type === "PREPARE") assert(decoded.stream === stream && decoded.resumed === true, "admission stream did not round-trip");
+  }
+  const liveHeader = binaryHeader(encodeServerFrame(live));
+  const liveBytes = Uint8Array.of(65);
+  for (const [name, header] of [
+    ["seq alone", liveHeader.replace(/,"offset":"[0-9]+"/, "")],
+    ["padded seq", liveHeader.replace('"seq":"9"', '"seq":"09"')],
+    ["numeric offset", liveHeader.replace(/"offset":"([0-9]+)"/, '"offset":$1')],
+    ["unsafe offset", liveHeader.replace(/"offset":"[0-9]+"/, '"offset":"9007199254740993"')],
+    ["stream on LIVE", liveHeader.replace('"seq"', `"stream":"${stream}","seq"`)],
+    ["object position", liveHeader.replace(/"seq":"9","offset":"[0-9]+"/, '"position":{"seq":9,"offset":1}')],
+  ] as const) {
+    assert(header !== liveHeader, `${name}: edit did not apply`);
+    rejects(binaryTestFrame(header, liveBytes), name);
+  }
+  const { stream: _stream, resumed: _resumed, ...plain } = admission as Extract<ServerFrame, { type: "PREPARE" }>;
+  const resize = binaryHeader(encodeServerFrame({ ...plain, kind: "RESIZE" }));
+  rejects(binaryTestFrame(resize.replace('"seq"', `"stream":"${stream}","seq"`)), "stream on a resize");
+  rejects(binaryTestFrame(binaryHeader(encodeServerFrame({ ...plain, stream })).replace('"seq"', '"resumed":false,"seq"')), "resumed false");
+  rejects(binaryTestFrame(binaryHeader(encodeServerFrame(plain)).replace('"seq"', '"resumed":true,"seq"')), "resumed without stream");
+}
+console.log("PASS binary attachment codec: arbitrary bytes, maximum PREPARE, Go layout, malformed envelopes and fields, resume positions");
