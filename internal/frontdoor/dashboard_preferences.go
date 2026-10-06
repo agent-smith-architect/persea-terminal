@@ -1,14 +1,20 @@
 package frontdoor
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"net/http"
 	"path/filepath"
+	"slices"
 	"sort"
+	"strings"
 	"sync"
 	"unicode/utf8"
+
+	"persea-terminal/internal/proto"
 )
 
 const dashboardFavoritesLimit = 128
@@ -28,11 +34,47 @@ type dashboardPreferences struct {
 type dashboardPreferenceRecord struct {
 	dashboardPreferences
 	Revision uint64 `json:"revision"`
+	// Names keeps the tmux session name last seen for each favorite. After a
+	// tmux restart it lets the favorite follow a session with the same name,
+	// as an alias does. It stays on the server; pages receive scopes only.
+	Names map[string]string `json:"-"`
+}
+
+type dashboardFavoriteName struct {
+	Scope string `json:"scope"`
+	Name  string `json:"name"`
 }
 
 type dashboardPreferenceEntry struct {
 	dashboardPreferenceRecord
-	Operator string `json:"operator"`
+	Operator      string                  `json:"operator"`
+	FavoriteNames []dashboardFavoriteName `json:"favorite_names,omitempty"`
+}
+
+// fileEntry lists a record's names in favorites order: the store file only
+// allows identifier keys, so names cannot be an object keyed by scope.
+func fileEntry(operator string, record dashboardPreferenceRecord) dashboardPreferenceEntry {
+	entry := dashboardPreferenceEntry{dashboardPreferenceRecord: record, Operator: operator}
+	for _, scope := range record.Favorites {
+		if name, ok := record.Names[scope]; ok {
+			entry.FavoriteNames = append(entry.FavoriteNames, dashboardFavoriteName{Scope: scope, Name: name})
+		}
+	}
+	return entry
+}
+
+func (entry dashboardPreferenceEntry) record() (dashboardPreferenceRecord, bool) {
+	record := copyDashboardRecord(entry.dashboardPreferenceRecord)
+	for _, named := range entry.FavoriteNames {
+		if _, duplicate := record.Names[named.Scope]; duplicate {
+			return record, false
+		}
+		if record.Names == nil {
+			record.Names = map[string]string{}
+		}
+		record.Names[named.Scope] = named.Name
+	}
+	return record, validDashboardRecord(record)
 }
 
 type dashboardPreferencesFile struct {
@@ -52,7 +94,51 @@ func emptyDashboardPreferences() dashboardPreferenceRecord {
 
 func copyDashboardRecord(record dashboardPreferenceRecord) dashboardPreferenceRecord {
 	record.Favorites = append([]string{}, record.Favorites...)
+	record.Names = maps.Clone(record.Names)
 	return record
+}
+
+// dashboardScopeAuthority reads the session identity a page used as a
+// favorite scope: the JSON array the dashboard builds from an inventory row.
+func dashboardScopeAuthority(scope string) (proto.Authority, bool) {
+	if !validDashboardScope(scope) {
+		return proto.Authority{}, false
+	}
+	var parts []json.RawMessage
+	if json.Unmarshal([]byte(scope), &parts) != nil {
+		return proto.Authority{}, false
+	}
+	var a proto.Authority
+	targets := []any{&a.Realm, &a.Server, &a.SelectorKind, &a.SelectorValue, &a.BootID, &a.SessionID, &a.UID, &a.ServerPID, &a.ServerStart, &a.SessionCreated}
+	for i, target := range targets {
+		if json.Unmarshal(parts[i], target) != nil {
+			return proto.Authority{}, false
+		}
+	}
+	return a, true
+}
+
+// dashboardScope builds the scope the dashboard computes for a session
+// (JSON.stringify of the same ten fields). It refuses an identity whose JSON
+// form would differ between Go and JavaScript, so a rebound favorite always
+// matches the page's own scope.
+func dashboardScope(a proto.Authority) (string, bool) {
+	var b bytes.Buffer
+	encoder := json.NewEncoder(&b)
+	encoder.SetEscapeHTML(false)
+	if encoder.Encode([]any{a.Realm, a.Server, a.SelectorKind, a.SelectorValue, a.BootID, a.SessionID, a.UID, a.ServerPID, a.ServerStart, a.SessionCreated}) != nil {
+		return "", false
+	}
+	scope := strings.TrimSuffix(b.String(), "\n")
+	if strings.Contains(scope, `\u2028`) || strings.Contains(scope, `\u2029`) || !validDashboardScope(scope) {
+		return "", false
+	}
+	parsed, ok := dashboardScopeAuthority(scope)
+	return scope, ok && authorityKey(parsed) == authorityKey(a)
+}
+
+func validDashboardSessionName(name string) bool {
+	return name != "" && len(name) <= 1024 && utf8.ValidString(name)
 }
 
 func validDashboardScope(scope string) bool {
@@ -79,6 +165,18 @@ func validDashboardScope(scope string) bool {
 			if string(part) == "null" || json.Unmarshal(part, &value) != nil || value > dashboardRevisionLimit {
 				return false
 			}
+		}
+	}
+	return true
+}
+
+func validDashboardRecord(record dashboardPreferenceRecord) bool {
+	if !validDashboardPreferences(record.dashboardPreferences) {
+		return false
+	}
+	for scope, name := range record.Names {
+		if !validDashboardSessionName(name) || !slices.Contains(record.Favorites, scope) {
+			return false
 		}
 	}
 	return true
@@ -115,11 +213,12 @@ func openDashboardPreferencesStore(preferencesPath string) (*dashboardPreference
 		} else {
 			for _, entry := range wire.Operators {
 				_, duplicate := s.records[entry.Operator]
-				if duplicate || !validOperatorLogin(entry.Operator) || entry.Revision == 0 || entry.Revision > dashboardRevisionLimit || !validDashboardPreferences(entry.dashboardPreferences) {
+				record, valid := entry.record()
+				if duplicate || !validOperatorLogin(entry.Operator) || entry.Revision == 0 || entry.Revision > dashboardRevisionLimit || !valid {
 					err = errDashboardPreferencesUnavailable
 					break
 				}
-				s.records[entry.Operator] = copyDashboardRecord(entry.dashboardPreferenceRecord)
+				s.records[entry.Operator] = record
 			}
 		}
 	}
@@ -139,7 +238,9 @@ func (s *dashboardPreferencesStore) get(operator string) (dashboardPreferenceRec
 	return emptyDashboardPreferences(), s.file.fault == nil
 }
 
-func (s *dashboardPreferencesStore) put(operator string, preferences dashboardPreferences, revision uint64) (dashboardPreferenceRecord, error) {
+// put stores a page's whole favorites list. A favorite keeps its known name;
+// a new one takes the name the latest inventory reported for that scope.
+func (s *dashboardPreferencesStore) put(operator string, preferences dashboardPreferences, revision uint64, sessionName func(scope string) string) (dashboardPreferenceRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.file.fault != nil {
@@ -155,17 +256,37 @@ func (s *dashboardPreferencesStore) put(operator string, preferences dashboardPr
 	if revision != current.Revision {
 		return copyDashboardRecord(current), errDashboardPreferencesConflict
 	}
-	if revision >= dashboardRevisionLimit || !exists && len(s.records) >= 256 {
+	next := dashboardPreferenceRecord{dashboardPreferences: preferences}
+	for _, scope := range preferences.Favorites {
+		name, known := current.Names[scope]
+		if !known && sessionName != nil {
+			name = sessionName(scope)
+		}
+		if validDashboardSessionName(name) {
+			if next.Names == nil {
+				next.Names = map[string]string{}
+			}
+			next.Names[scope] = name
+		}
+	}
+	return s.commitLocked(operator, next)
+}
+
+// commitLocked persists next as the operator's record with the next revision.
+func (s *dashboardPreferencesStore) commitLocked(operator string, next dashboardPreferenceRecord) (dashboardPreferenceRecord, error) {
+	current, exists := s.records[operator]
+	if current.Revision >= dashboardRevisionLimit || !exists && len(s.records) >= 256 {
 		return dashboardPreferenceRecord{}, errDashboardPreferencesUnavailable
 	}
-	next := copyDashboardRecord(dashboardPreferenceRecord{dashboardPreferences: preferences, Revision: revision + 1})
+	next = copyDashboardRecord(next)
+	next.Revision = current.Revision + 1
 	entries := make([]dashboardPreferenceEntry, 0, len(s.records)+1)
 	for name, record := range s.records {
 		if name != operator {
-			entries = append(entries, dashboardPreferenceEntry{dashboardPreferenceRecord: record, Operator: name})
+			entries = append(entries, fileEntry(name, record))
 		}
 	}
-	entries = append(entries, dashboardPreferenceEntry{dashboardPreferenceRecord: next, Operator: operator})
+	entries = append(entries, fileEntry(operator, next))
 	sort.Slice(entries, func(i, j int) bool { return entries[i].Operator < entries[j].Operator })
 	body, err := json.Marshal(dashboardPreferencesFile{Version: 1, Operators: entries})
 	if err == nil {
@@ -176,6 +297,73 @@ func (s *dashboardPreferencesStore) put(operator string, preferences dashboardPr
 	}
 	s.records[operator] = next
 	return copyDashboardRecord(next), nil
+}
+
+// reconcile applies the alias rule to one operator's favorites after an
+// inventory read: a favorite whose session is live records its current name;
+// a favorite whose session is gone moves to the live session with the same
+// realm, server and name, when that server's list is complete and no other
+// favorite holds that session. The newest favorite wins a name. It returns
+// the record's revision, which changes only when something moved.
+func (s *dashboardPreferencesStore) reconcile(operator string, live []aliasSession, complete map[string]bool) (uint64, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	current, exists := s.records[operator]
+	if !exists || s.file.fault != nil {
+		return current.Revision, nil
+	}
+	byIncarnation := map[string]aliasSession{}
+	byName := map[string]aliasSession{}
+	for _, target := range live {
+		a := target.Authority
+		if !a.Valid() || !validDashboardSessionName(target.Name) {
+			continue
+		}
+		byIncarnation[authorityKey(a)] = target
+		if complete[a.Realm+"\x00"+a.Server] {
+			byName[a.Realm+"\x00"+a.Server+"\x00"+target.Name] = target
+		}
+	}
+	next := copyDashboardRecord(current)
+	held := map[string]bool{}
+	stale := []int{}
+	for i, scope := range next.Favorites {
+		a, ok := dashboardScopeAuthority(scope)
+		if target, running := byIncarnation[authorityKey(a)]; ok && running {
+			held[authorityKey(a)] = true
+			if next.Names == nil {
+				next.Names = map[string]string{}
+			}
+			next.Names[scope] = target.Name
+		} else if ok {
+			stale = append(stale, i)
+		}
+	}
+	for j := len(stale) - 1; j >= 0; j-- {
+		i := stale[j]
+		scope := next.Favorites[i]
+		a, _ := dashboardScopeAuthority(scope)
+		name, known := next.Names[scope]
+		target, found := byName[a.Realm+"\x00"+a.Server+"\x00"+name]
+		if !known || !found || held[authorityKey(target.Authority)] {
+			continue
+		}
+		moved, ok := dashboardScope(target.Authority)
+		if !ok || slices.Contains(next.Favorites, moved) {
+			continue
+		}
+		held[authorityKey(target.Authority)] = true
+		delete(next.Names, scope)
+		next.Favorites[i], next.Names[moved] = moved, target.Name
+	}
+	if slices.Equal(current.Favorites, next.Favorites) && maps.Equal(current.Names, next.Names) {
+		return current.Revision, nil
+	}
+	saved, err := s.commitLocked(operator, next)
+	if err != nil {
+		return current.Revision, err
+	}
+	return saved.Revision, nil
 }
 
 func (s *Server) currentDashboardPreferences(operator string) (dashboardPreferenceRecord, bool) {
@@ -190,9 +378,11 @@ func writeDashboardPreferences(w http.ResponseWriter, status int, record dashboa
 	w.Header().Set("ETag", fmt.Sprintf("\"%d\"", record.Revision))
 	w.WriteHeader(status)
 	_ = json.NewEncoder(w).Encode(struct {
-		dashboardPreferenceRecord
-		Available bool `json:"available"`
-	}{record, available})
+		Version   int      `json:"version"`
+		Favorites []string `json:"favorites"`
+		Revision  uint64   `json:"revision"`
+		Available bool     `json:"available"`
+	}{record.Version, record.Favorites, record.Revision, available})
 }
 
 func (s *Server) dashboardPreferencesAPI(w http.ResponseWriter, r *http.Request) {
@@ -241,7 +431,7 @@ func (s *Server) dashboardPreferencesAPI(w http.ResponseWriter, r *http.Request)
 		http.Error(w, "dashboard preferences unavailable", http.StatusServiceUnavailable)
 		return
 	}
-	record, err := s.dashboardPreferences.put(operator, preferences, revision)
+	record, err := s.dashboardPreferences.put(operator, preferences, revision, s.inventorySessionName)
 	if errors.Is(err, errDashboardPreferencesConflict) {
 		writeDashboardPreferences(w, http.StatusPreconditionFailed, record, true)
 		return

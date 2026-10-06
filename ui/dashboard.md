@@ -154,12 +154,23 @@ terminal commands. Preview reads do not attach, resize or send input.
 
 All, Favorites, Recent and Output are presentation filters. In All, favorites sort first, then
 natural sorting handles names such as `session1`, `session2`, `session10`. Up to 128 favorites
-are exact incarnation identities persisted per authenticated operator through
+are session identities persisted per authenticated operator through
 `/api/dashboard-preferences`, shared across that operator's devices. ETag/If-Match
 revision checks and intent rebasing preserve unrelated concurrent changes. The
 client reconciles a lost reply before retrying and imports old device pins only
-after the shared save is confirmed. A same-name replacement never inherits a
-favorite. Aliases name a session by its realm, server and tmux name. After a
+after the shared save is confirmed.
+
+Favorites follow their sessions by the alias rule. The server keeps each
+favorite's tmux session name (pages receive identities only). Each inventory
+read records the current name of a running favorite, so a tmux rename is
+followed. When a favorite's session no longer exists and its server's session
+list is complete, the favorite moves to the running session with the same realm,
+server and name, unless that session is already a favorite; the newest favorite
+wins a name. The inventory reply carries the favorites revision, and the page
+reads the favorites at once when it is newer than its own. The page itself never
+moves a favorite.
+
+Aliases name a session by its realm, server and tmux name. After a
 restart, an alias returns when a session with the same name starts on that
 server. If tmux renames a running session, its alias follows the rename. Each
 running session has at most one alias, and running sessions cannot share alias

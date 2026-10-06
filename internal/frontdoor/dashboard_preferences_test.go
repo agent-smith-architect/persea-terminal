@@ -44,7 +44,7 @@ func TestDashboardPreferencesDurabilityCASAndIsolation(t *testing.T) {
 		t.Fatalf("initial: %+v", initial)
 	}
 	first := dashboardPreferences{Version: 1, Favorites: []string{dashboardTestScope(1)}}
-	saved, err := store.put("operator", first, 0)
+	saved, err := store.put("operator", first, 0, nil)
 	if err != nil || saved.Revision != 1 {
 		t.Fatalf("save: %+v %v", saved, err)
 	}
@@ -54,7 +54,7 @@ func TestDashboardPreferencesDurabilityCASAndIsolation(t *testing.T) {
 	if current.Favorites[0] != dashboardTestScope(1) {
 		t.Fatal("caller mutated durable state through a slice")
 	}
-	stale, err := store.put("operator", dashboardPreferences{Version: 1, Favorites: []string{dashboardTestScope(2)}}, 0)
+	stale, err := store.put("operator", dashboardPreferences{Version: 1, Favorites: []string{dashboardTestScope(2)}}, 0, nil)
 	if !errors.Is(err, errDashboardPreferencesConflict) || !reflect.DeepEqual(stale, current) {
 		t.Fatal("stale device overwrote favorites")
 	}
@@ -79,7 +79,7 @@ func TestDashboardPreferencesDurabilityCASAndIsolation(t *testing.T) {
 	}
 	// Persistence failure cannot publish an in-memory favorite that will vanish.
 	_ = store.file.fs.(rootAliasFS).root.Close()
-	if _, err := store.put("operator", dashboardPreferences{Version: 1, Favorites: []string{}}, 1); err == nil {
+	if _, err := store.put("operator", dashboardPreferences{Version: 1, Favorites: []string{}}, 1, nil); err == nil {
 		t.Fatal("closed store accepted a save")
 	}
 	after, _ := store.get("operator")

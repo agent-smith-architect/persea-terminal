@@ -171,7 +171,18 @@ async function main() {
       const oldScope = scope(fixture.state.sessions[0]);
       fixture.state.sessions[0] = session('local', 1, { authority: { ...fixture.state.sessions[0].authority, session_created: 99999 } });
       await refresh();
-      assert(await row('qt1').locator('.session-pin').getAttribute('aria-pressed') === 'false' && fixture.state.favorites.favorites.includes(oldScope), 'A replacement session inherited an old favorite');
+      assert(await row('qt1').locator('.session-pin').getAttribute('aria-pressed') === 'false' && fixture.state.favorites.favorites.includes(oldScope), 'The page moved a favorite by itself');
+      // The server moves a favorite with its session (the fixture stands in for
+      // its inventory pass); the inventory's favorites revision makes the page
+      // read favorites at once, not at the next minute.
+      const replacement = scope(fixture.state.sessions[0]);
+      fixture.state.favorites = { ...fixture.state.favorites, favorites: fixture.state.favorites.favorites.map(item => item === oldScope ? replacement : item), revision: fixture.state.favorites.revision + 1 };
+      const favoriteReads = count('/api/dashboard-preferences');
+      await page.clock.fastForward(56_000);
+      const automatic = page.waitForResponse(response => response.url().endsWith('/api/inventory'));
+      await page.evaluate(() => document.dispatchEvent(new Event('visibilitychange'))); await automatic;
+      await page.waitForFunction(() => [...document.querySelectorAll('.realm-card[data-realm="local"] .session-card')].some(card => /^qt1$/.test(card.querySelector('.session-tmux-name, .session-name')?.textContent ?? '') && card.querySelector('.session-pin')?.getAttribute('aria-pressed') === 'true'), undefined, { timeout: 5_000 });
+      assert(count('/api/dashboard-preferences') === favoriteReads + 1, `A moved favorite needed ${count('/api/dashboard-preferences') - favoriteReads} favorites reads`);
     });
 
     await check('one creation form explicitly selects a user and saves name plus optional alias', async () => {
