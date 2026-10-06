@@ -63,21 +63,24 @@ async function main() {
       assert(reads() === beforeSwitch, `${shape.name}: Output made a request of its own`);
       assert((await listed()).join(',') === 'tm3,tm7,tm2,tm5,tm4,tm6', `${shape.name}: Output order is not latest first: ${await listed()}`);
       assert(await page.locator('.dashboard-results').textContent() === '6 live sessions', `${shape.name}: Output is not a full list`);
-      phase = `${shape.name}:output-alias`;
-      fixture.state.inventoryDelay = 800;
-      fixture.state.sessions[4].output_activity = now;
-      const moved = refreshed();
-      const tm6 = page.locator('.dashboard-content .session-card').filter({ has: page.getByRole('button', { name: 'Edit alias for tm6', exact: true }) });
-      await tm6.getByRole('button', { name: 'Edit alias for tm6', exact: true }).click();
-      const draft = tm6.getByRole('textbox', { name: 'Alias for tm6', exact: true });
-      await draft.fill('Moving draft');
-      await moved;
-      fixture.state.inventoryDelay = 0;
-      assert((await listed()).join(',') === 'tm6,tm3,tm7,tm2,tm5,tm4', `${shape.name}: Output did not re-sort after a refresh: ${await listed()}`);
-      assert(await tm6.locator('.session-alias-dialog').evaluate(el => el.open && el.matches(':modal')), `${shape.name}: moving the row ended the alias editor's modal state`);
-      assert(await draft.inputValue() === 'Moving draft' && await draft.evaluate(el => document.activeElement === el), `${shape.name}: moving the row lost the alias draft or its focus`);
-      await page.keyboard.press('Escape');
-      assert(!await tm6.locator('.session-alias-dialog').evaluate(el => el.open), `${shape.name}: Escape did not close the moved alias editor`);
+      // The edited row moves to the top, then (another row) down past a neighbour.
+      for (const [index, name, ago, order] of [[4, 'tm6', 0, 'tm6,tm3,tm7,tm2,tm5,tm4'], [0, 'tm2', 100, 'tm6,tm3,tm7,tm5,tm2,tm4']]) {
+        phase = `${shape.name}:output-alias-${name}`;
+        fixture.state.inventoryDelay = 800;
+        fixture.state.sessions[index].output_activity = now - ago;
+        const moved = refreshed();
+        const row = page.locator('.dashboard-content .session-card').filter({ has: page.getByRole('button', { name: `Edit alias for ${name}`, exact: true }) });
+        await row.getByRole('button', { name: `Edit alias for ${name}`, exact: true }).click();
+        const draft = row.getByRole('textbox', { name: `Alias for ${name}`, exact: true });
+        await draft.fill('Moving draft');
+        await moved;
+        fixture.state.inventoryDelay = 0;
+        assert((await listed()).join(',') === order, `${shape.name}: Output did not re-sort after a refresh: ${await listed()}`);
+        assert(await row.locator('.session-alias-dialog').evaluate(el => el.open && el.matches(':modal')), `${shape.name}: moving ${name} ended the alias editor's modal state`);
+        assert(await draft.inputValue() === 'Moving draft' && await draft.evaluate(el => document.activeElement === el), `${shape.name}: moving ${name} lost the alias draft or its focus`);
+        await page.keyboard.press('Escape');
+        assert(!await row.locator('.session-alias-dialog').evaluate(el => el.open), `${shape.name}: Escape did not close the moved alias editor of ${name}`);
+      }
       await page.locator('.dashboard-list-modes').getByRole('button', { name: 'All', exact: true }).click();
       assert((await listed()).join(',') === 'tm2,tm3,tm4,tm5,tm6,tm7', `${shape.name}: All lost name order after Output`);
       fixture.state.sessions.forEach(s => { s.output_activity = now - 70; });
