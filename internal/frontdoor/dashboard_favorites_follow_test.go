@@ -2,6 +2,7 @@ package frontdoor
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"os"
@@ -85,8 +86,9 @@ func TestDashboardFavoritesFollowTheirSessionsLikeAliases(t *testing.T) {
 		t.Fatalf("persisted record: %+v", record)
 	}
 
-	// Two old favorites with one name: only the newer moves. A session that is
-	// already a favorite is never taken by an old one.
+	// Two old favorites with one name: the newer moves, and the older, a dead
+	// duplicate of a name a favorite now holds, is dropped — or it would take
+	// the session back once the operator removed that star.
 	oldA, oldB := favoriteAuthority("$1", 11, 301), favoriteAuthority("$2", 11, 302)
 	scopeA, _ := dashboardScope(oldA)
 	scopeB, _ := dashboardScope(oldB)
@@ -96,18 +98,53 @@ func TestDashboardFavoritesFollowTheirSessionsLikeAliases(t *testing.T) {
 	}
 	shell := favoriteAuthority("$9", 77, 950)
 	shellScope, _ := dashboardScope(shell)
-	if _, err := reopened.reconcile("operator", []aliasSession{{Authority: restarted, Name: "build-2"}, {Authority: shell, Name: "shell"}}, complete); err != nil {
+	live = []aliasSession{{Authority: restarted, Name: "build-2"}, {Authority: shell, Name: "shell"}}
+	revision, err = reopened.reconcile("operator", live, complete)
+	if err != nil {
 		t.Fatal(err)
 	}
 	record, _ = reopened.get("operator")
-	if !reflect.DeepEqual(record.Favorites, []string{scopeA, restartedScope, shellScope}) || record.Names[scopeA] != "shell" || record.Names[shellScope] != "shell" {
-		t.Fatalf("newest favorite must take the name: %+v", record)
+	if !reflect.DeepEqual(record.Favorites, []string{restartedScope, shellScope}) || !reflect.DeepEqual(record.Names, map[string]string{restartedScope: "build-2", shellScope: "shell"}) {
+		t.Fatalf("newest favorite must take the name and the older one go: %+v", record)
 	}
-	if _, err := reopened.reconcile("operator", []aliasSession{{Authority: restarted, Name: "build-2"}, {Authority: shell, Name: "shell"}}, complete); err != nil {
+	if _, err := reopened.put("operator", dashboardPreferences{Version: 1, Favorites: []string{restartedScope}}, revision, nil); err != nil {
 		t.Fatal(err)
 	}
-	if again, _ := reopened.get("operator"); !reflect.DeepEqual(again.Favorites, record.Favorites) {
-		t.Fatalf("an older favorite took a session that is already a favorite: %+v", again)
+	if _, err := reopened.reconcile("operator", live, complete); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := reopened.get("operator"); !reflect.DeepEqual(again.Favorites, []string{restartedScope}) {
+		t.Fatalf("a removed star came back: %+v", again)
+	}
+
+	// A favorite saved while its session was live owns its name the same way:
+	// an old favorite with that name is dropped, not left to reclaim it.
+	if _, err := reopened.put("operator", dashboardPreferences{Version: 1, Favorites: []string{scopeA, shellScope}}, revision+1, func(scope string) string { return names[scope] }); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reopened.reconcile("operator", live, complete); err != nil {
+		t.Fatal(err)
+	}
+	if again, _ := reopened.get("operator"); !reflect.DeepEqual(again.Favorites, []string{shellScope}) {
+		t.Fatalf("an old duplicate survived beside the live favorite: %+v", again)
+	}
+}
+
+// A name in Go's JSON is the page's only when both write it the same way:
+// literal text that merely looks like an escape is fine, actual line and
+// paragraph separators are not.
+func TestDashboardScopeRefusesOnlyRealSeparators(t *testing.T) {
+	literal := favoriteAuthority("$1", 42, 201)
+	literal.SelectorValue = `/tmp/literal\u2028.sock`
+	if scope, ok := dashboardScope(literal); !ok || !strings.Contains(scope, `literal\\u2028`) {
+		t.Fatalf("literal backslash-u text refused or changed: %q ok=%v", scope, ok)
+	}
+	for _, separator := range []string{"\u2028", "\u2029"} {
+		real := favoriteAuthority("$1", 42, 201)
+		real.SelectorValue = "/tmp/a" + separator + ".sock"
+		if _, ok := dashboardScope(real); ok {
+			t.Fatalf("a real %U separator was accepted", []rune(separator)[0])
+		}
 	}
 }
 
@@ -219,5 +256,75 @@ func TestDashboardFavoriteFollowsATmuxRestartOverRealBroker(t *testing.T) {
 	moved, _ := dashboardScope(after["tm2"])
 	if got := favorites(); revision != 2 || !reflect.DeepEqual(got, []string{moved}) {
 		t.Fatalf("favorite did not follow tm2 across the restart: revision=%d favorites=%q want %q", revision, got, moved)
+	}
+}
+
+// Inventory side effects follow the order in which inventories observed the
+// sessions: one that read an old list before a newer inventory finished
+// changes nothing, so it cannot move a favorite back to a dead session. A
+// server whose latest list is incomplete keeps the names it had, so a star
+// added meanwhile still records its session's name.
+func TestInventoryEffectsFollowObservationOrder(t *testing.T) {
+	cfg := ergoFrontConfig(t)
+	s := newServer(cfg, ".", cfg.Ingress.CanonicalHost)
+	if s.dashboardPreferencesErr != nil || s.aliasErr != nil {
+		t.Fatal(s.dashboardPreferencesErr, s.aliasErr)
+	}
+	const operator = "operator@example.com"
+	complete := map[string]bool{"local\x00private": true}
+	old, replacement := favoriteAuthority("$1", 42, 201), favoriteAuthority("$5", 77, 900)
+	oldScope, _ := dashboardScope(old)
+	replacementScope, _ := dashboardScope(replacement)
+	if _, ok := s.inventoryEffects(1, operator, []aliasSession{{Authority: old, Name: "shell"}}, complete); !ok {
+		t.Fatal("favorites unavailable")
+	}
+	if _, err := s.dashboardPreferences.put(operator, dashboardPreferences{Version: 1, Favorites: []string{oldScope}}, 0, s.inventorySessionName); err != nil {
+		t.Fatal(err)
+	}
+	newer, _ := s.inventoryEffects(3, operator, []aliasSession{{Authority: replacement, Name: "shell"}}, complete)
+	late, _ := s.inventoryEffects(2, operator, []aliasSession{{Authority: old, Name: "shell"}}, complete)
+	record, _ := s.dashboardPreferences.get(operator)
+	if late != newer || !reflect.DeepEqual(record.Favorites, []string{replacementScope}) {
+		t.Fatalf("a late inventory moved the favorite back: revision %d after %d, favorites %q", late, newer, record.Favorites)
+	}
+	if s.inventorySessionName(oldScope) != "" || s.inventorySessionName(replacementScope) != "shell" {
+		t.Fatal("a late inventory replaced the session names")
+	}
+
+	other := favoriteAuthority("$6", 77, 901)
+	otherScope, _ := dashboardScope(other)
+	s.inventoryEffects(4, operator, []aliasSession{{Authority: replacement, Name: "shell"}, {Authority: other, Name: "logs"}}, complete)
+	s.inventoryEffects(5, operator, nil, map[string]bool{})
+	record, _ = s.dashboardPreferences.get(operator)
+	saved, err := s.dashboardPreferences.put(operator, dashboardPreferences{Version: 1, Favorites: []string{replacementScope, otherScope}}, record.Revision, s.inventorySessionName)
+	if err != nil || saved.Names[otherScope] != "logs" {
+		t.Fatalf("a star added while its server's list was incomplete lost its name: %+v %v", saved, err)
+	}
+	s.inventoryEffects(6, operator, nil, complete)
+	if s.inventorySessionName(otherScope) != "" {
+		t.Fatal("a complete list kept the name of a session it no longer has")
+	}
+}
+
+// A store whose file faulted stays unavailable: reconciliation reports it,
+// so the inventory never logs it as recovered.
+func TestDashboardFavoritesReconcileReportsALatchedFault(t *testing.T) {
+	directory := t.TempDir()
+	if err := os.Chmod(directory, 0700); err != nil {
+		t.Fatal(err)
+	}
+	store, err := openDashboardPreferencesStore(filepath.Join(directory, "appearance.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	scope, _ := dashboardScope(favoriteAuthority("$1", 42, 201))
+	if _, err := store.put("operator", dashboardPreferences{Version: 1, Favorites: []string{scope}}, 0, nil); err != nil {
+		t.Fatal(err)
+	}
+	store.file.fault = errors.New("directory sync failed")
+	for range 2 {
+		if _, err := store.reconcile("operator", nil, nil); !errors.Is(err, errDashboardPreferencesUnavailable) {
+			t.Fatalf("faulted store reconciled: %v", err)
+		}
 	}
 }

@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"io"
 	"os/exec"
-	"strconv"
 	"strings"
 	"testing"
 
@@ -109,23 +108,46 @@ func TestEffectiveSnapshotDepthDefaultsAndClamps(t *testing.T) {
 // exec copies a non-file Stdout with io.Copy, which prefers a ReaderFrom over
 // Write. The caps must hold on that path, not only for direct Write calls.
 func TestTmuxOutputBuffersKeepTheirCapsBehindExec(t *testing.T) {
-	const produced = 3 << 20
+	const capBytes = 1 << 20
+	// Patterned output larger than the cap, arriving in many pipe writes, so
+	// the kept bytes show which end of the output was kept.
+	full, err := exec.Command("seq", "1", "400000").Output()
+	if err != nil || len(full) <= 2*capBytes {
+		t.Fatalf("seq produced %d bytes: %v", len(full), err)
+	}
 	run := func(stdout io.Writer) {
 		t.Helper()
-		cmd := exec.Command("head", "-c", strconv.Itoa(produced), "/dev/zero")
+		cmd := exec.Command("seq", "1", "400000")
 		cmd.Stdout = stdout
 		if err := cmd.Run(); err != nil {
 			t.Fatal(err)
 		}
 	}
-	limited := limitedBuffer{max: 1 << 20}
+	limited := limitedBuffer{max: capBytes}
 	run(&limited)
-	if !limited.overflow || len(limited.String()) != limited.max {
-		t.Fatalf("limited buffer kept %d of %d bytes, overflow=%v", len(limited.String()), produced, limited.overflow)
+	if !limited.overflow || limited.String() != string(full[:capBytes]) {
+		t.Fatalf("limited buffer kept %d of %d bytes (overflow=%v), want the first %d", len(limited.String()), len(full), limited.overflow, capBytes)
 	}
-	tail := tailLimitedBuffer{max: 1 << 20}
+	tail := tailLimitedBuffer{max: capBytes}
 	run(&tail)
-	if !tail.truncated || len(tail.String()) != tail.max {
-		t.Fatalf("tail buffer kept %d of %d bytes, truncated=%v", len(tail.String()), produced, tail.truncated)
+	if !tail.truncated || tail.String() != string(full[len(full)-capBytes:]) {
+		t.Fatalf("tail buffer kept %d of %d bytes (truncated=%v), want the last %d", len(tail.String()), len(full), tail.truncated, capBytes)
+	}
+	// Exact boundaries: output that fills the cap is whole; one byte more is not.
+	for _, writes := range [][]int{{capBytes}, {capBytes - 1, 1}, {capBytes, 1}, {capBytes + 1}, {3, capBytes - 3, 2}, {capBytes - 2, 5, capBytes}} {
+		limited, tail := limitedBuffer{max: capBytes}, tailLimitedBuffer{max: capBytes}
+		total := 0
+		for _, n := range writes {
+			_, _ = limited.Write(full[total : total+n])
+			_, _ = tail.Write(full[total : total+n])
+			total += n
+		}
+		over := total > capBytes
+		if limited.overflow != over || limited.String() != string(full[:min(total, capBytes)]) {
+			t.Fatalf("writes %v: limited kept %d bytes overflow=%v", writes, len(limited.String()), limited.overflow)
+		}
+		if tail.truncated != over || tail.String() != string(full[max(0, total-capBytes):total]) {
+			t.Fatalf("writes %v: tail kept %d bytes truncated=%v", writes, len(tail.String()), tail.truncated)
+		}
 	}
 }

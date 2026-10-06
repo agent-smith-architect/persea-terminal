@@ -109,10 +109,18 @@ type Server struct {
 	dashboardPreferences    *dashboardPreferencesStore
 	dashboardPreferencesErr error
 	favoritesDegraded       atomic.Bool
-	// sessionNames maps each session of the latest inventory (authorityKey)
-	// to its tmux name, so a new favorite records the name of its session.
-	sessionNamesMu          sync.Mutex
-	sessionNames            map[string]string
+	// inventoryTurn numbers inventory requests as they start. Their side
+	// effects (alias and favorite reconciliation, sessionNames) run under
+	// inventoryEffectsMu, and only for a request newer than the last one that
+	// ran them: an inventory that read its sessions before a newer one
+	// finished must not undo what the newer observation recorded.
+	inventoryTurn        atomic.Uint64
+	inventoryEffectsMu   sync.Mutex
+	inventoryEffectsTurn uint64
+	// sessionNames maps each session of the inventories (authorityKey) to its
+	// tmux name, so a new favorite records the name of its session. A server
+	// whose latest list is incomplete keeps its earlier names.
+	sessionNames            map[string]inventorySessionName
 	snippets                *snippetStore
 	snippetErr              error
 	clipboardImages         *clipboardImageStore
@@ -637,6 +645,7 @@ func fetchRealmInventory(realm config.Realm) realmInventoryResult {
 
 func (s *Server) inventory(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
+	turn := s.inventoryTurn.Add(1)
 	results := make([]realmInventoryResult, len(s.cfg.Realms))
 	var wg sync.WaitGroup
 	wg.Add(len(s.cfg.Realms))
@@ -733,18 +742,8 @@ func (s *Server) inventory(w http.ResponseWriter, r *http.Request) {
 	for _, v := range all {
 		live = append(live, aliasSession{Authority: v.authority, Name: v.Name})
 	}
-	// Aliases are display names: a store that cannot record a change must not
-	// hide the sessions. The list keeps the aliases as last saved.
-	if err := s.aliases.reconcile(live, complete); err != nil {
-		if !s.aliasDegraded.Swap(true) {
-			frontLogf("component=frontdoor event=alias_store_degraded error=%q", err.Error())
-		}
-	} else if s.aliasDegraded.Swap(false) {
-		frontLogf("component=frontdoor event=alias_store_recovered")
-	}
-	s.rememberSessionNames(live)
 	response := map[string]any{"realms": views, "snapshot_expires_at": expires, "image_upload": s.cfg.ImageUploadMaxBytes > 0}
-	if revision, ok := s.reconcileFavorites(operator, live, complete); ok {
+	if revision, ok := s.inventoryEffects(turn, operator, live, complete); ok {
 		response["favorites_revision"] = revision
 	}
 	records := s.aliases.list()
@@ -761,14 +760,47 @@ func (s *Server) inventory(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(response)
 }
 
-func (s *Server) rememberSessionNames(live []aliasSession) {
-	names := make(map[string]string, len(live))
-	for _, session := range live {
-		names[authorityKey(session.Authority)] = session.Name
+// inventoryEffects records what an inventory observed — alias and favorite
+// reconciliation and the session names — unless a newer inventory already
+// did, and returns the operator's favorites revision.
+func (s *Server) inventoryEffects(turn uint64, operator string, live []aliasSession, complete map[string]bool) (uint64, bool) {
+	s.inventoryEffectsMu.Lock()
+	defer s.inventoryEffectsMu.Unlock()
+	if turn <= s.inventoryEffectsTurn {
+		record, available := s.currentDashboardPreferences(operator)
+		return record.Revision, available && operator != ""
 	}
-	s.sessionNamesMu.Lock()
+	s.inventoryEffectsTurn = turn
+	// Aliases are display names: a store that cannot record a change must not
+	// hide the sessions. The list keeps the aliases as last saved.
+	if err := s.aliases.reconcile(live, complete); err != nil {
+		if !s.aliasDegraded.Swap(true) {
+			frontLogf("component=frontdoor event=alias_store_degraded error=%q", err.Error())
+		}
+	} else if s.aliasDegraded.Swap(false) {
+		frontLogf("component=frontdoor event=alias_store_recovered")
+	}
+	s.rememberSessionNames(live, complete)
+	return s.reconcileFavorites(operator, live, complete)
+}
+
+type inventorySessionName struct {
+	name, server string
+}
+
+// rememberSessionNames records the names of an inventory's sessions. Runs
+// under inventoryEffectsMu.
+func (s *Server) rememberSessionNames(live []aliasSession, complete map[string]bool) {
+	names := make(map[string]inventorySessionName, len(live))
+	for key, entry := range s.sessionNames {
+		if !complete[entry.server] {
+			names[key] = entry
+		}
+	}
+	for _, session := range live {
+		names[authorityKey(session.Authority)] = inventorySessionName{session.Name, session.Authority.Realm + "\x00" + session.Authority.Server}
+	}
 	s.sessionNames = names
-	s.sessionNamesMu.Unlock()
 }
 
 func (s *Server) inventorySessionName(scope string) string {
@@ -776,9 +808,9 @@ func (s *Server) inventorySessionName(scope string) string {
 	if !ok {
 		return ""
 	}
-	s.sessionNamesMu.Lock()
-	defer s.sessionNamesMu.Unlock()
-	return s.sessionNames[authorityKey(a)]
+	s.inventoryEffectsMu.Lock()
+	defer s.inventoryEffectsMu.Unlock()
+	return s.sessionNames[authorityKey(a)].name
 }
 
 // reconcileFavorites moves the operator's favorites with their sessions and
