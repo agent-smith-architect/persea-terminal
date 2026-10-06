@@ -125,16 +125,19 @@ func TestCommittedSuffixBoundsARunOfGeometryByItsIndex(t *testing.T) {
 	}
 }
 
-// A cursor that is not a committed record boundary is refused, never read
-// from: a byte offset alone cannot order geometry, and a stale or foreign
-// cursor must not silently skip or repeat records.
-func TestCommittedSuffixRefusesACursorThatIsNotARecordBoundary(t *testing.T) {
+// A cursor that is not a committed position is refused, never read from: a
+// byte offset alone cannot order geometry, and a stale or foreign cursor must
+// not silently skip or repeat records.
+func TestCommittedSuffixRefusesACursorThatIsNotAPosition(t *testing.T) {
 	realm, key, all := suffixFixture(t)
 	frontier := int64(len(all))
 	for name, cursor := range map[string]CommittedCursor{
 		"beyond the frontier":         {Sequence: frontier + 1, Offset: all[frontier-1].End},
 		"frontier at a wrong offset":  {Sequence: frontier, Offset: all[frontier-1].End - 1},
-		"inside an output record":     {Sequence: 2, Offset: all[1].End - 1},
+		"inside its own last record":  {Sequence: 2, Offset: all[1].End - 1},
+		"past the next output record": {Sequence: 2, Offset: all[2].End},
+		"after geometry, inside next": {Sequence: 3, Offset: all[3].Start + 1},
+		"inside a record two ahead":   {Sequence: 2, Offset: all[5].Start + 1},
 		"geometry run at next offset": {Sequence: 4, Offset: all[5].End},
 		"negative sequence":           {Sequence: -1},
 	} {
@@ -189,5 +192,96 @@ func TestCommittedSuffixAllocatesOnlyTheSuffix(t *testing.T) {
 	}
 	if allocated := after.TotalAlloc - before.TotalAlloc; allocated > 256<<10 {
 		t.Fatalf("a %d-byte suffix after 4 MiB of history allocated %d bytes", len("suffix"), allocated)
+	}
+}
+
+// A page whose last frame ended inside an output record resumes from that
+// byte: the read returns the rest of the record, then the projection after it,
+// and SuffixAllocation charges exactly that.
+func TestCommittedSuffixResumesInsideAnOutputRecord(t *testing.T) {
+	realm, key, all := suffixFixture(t)
+	for _, next := range all {
+		if next.Kind != RecordOutput {
+			continue
+		}
+		for _, offset := range []int64{next.Start + 1, (next.Start + next.End) / 2, next.End - 1} {
+			cursor := CommittedCursor{Sequence: next.Sequence - 1, Offset: offset}
+			if err := realm.ValidCursor(key, cursor); err != nil {
+				t.Fatalf("%+v: %v", cursor, err)
+			}
+			got, err := realm.ReadCommittedEventsAfter(key, cursor, 1<<20)
+			if err != nil || int64(len(got)) != int64(len(all))-cursor.Sequence {
+				t.Fatalf("%+v: %d records err=%v", cursor, len(got), err)
+			}
+			rest := next.Payload[offset-next.Start:]
+			if got[0].Sequence != next.Sequence || got[0].Start != offset || got[0].End != next.End || !bytes.Equal(got[0].Payload, rest) || cap(got[0].Payload) != len(rest) {
+				t.Fatalf("%+v: first = %+v, want the rest of record %d", cursor, got[0], next.Sequence)
+			}
+			payload := int64(len(rest))
+			for index, event := range got[1:] {
+				if !sameEvent(event, all[next.Sequence+int64(index)]) {
+					t.Fatalf("%+v: record %d = %+v", cursor, index+1, event)
+				}
+				payload += int64(len(event.Payload))
+			}
+			charge, records, err := realm.SuffixAllocation(key, cursor, 1<<20)
+			want := AllocationCharge(int64(len(got))*int64(unsafe.Sizeof(Event{}))+8) + AllocationCharge(payload)
+			if err != nil || records != int64(len(got)) || charge != want {
+				t.Fatalf("%+v: allocation %d/%d err=%v, want %d/%d", cursor, charge, records, err, want, len(got))
+			}
+		}
+	}
+}
+
+// Each generation names its stream afresh, so a position from one is refused
+// by any other generation, even one with the same key; a generation reopened
+// by a later broker has none, so no position outlives the broker.
+func TestCommittedStreamIsFreshForEveryGeneration(t *testing.T) {
+	options := rotationOptions(t)
+	realm, err := OpenRealm(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := rotationKey("$stream", 1)
+	if err := realm.AdmitPane(key, Geometry{Columns: 80, Rows: 24}); err != nil {
+		t.Fatal(err)
+	}
+	verifiedOutput(t, realm, key, []byte("alpha"))
+	first, err := realm.Stream(key)
+	if err != nil || len(first) < 26 {
+		t.Fatalf("stream %q err=%v", first, err)
+	}
+	other, otherKey, _ := suffixFixture(t)
+	if second, err := other.Stream(otherKey); err != nil || second == first || len(second) != len(first) {
+		t.Fatalf("another generation's stream %q (first %q) err=%v", second, first, err)
+	}
+	if err := realm.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := OpenRealm(options)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer reopened.Close()
+	if stream, err := reopened.Stream(key); err == nil && stream != "" {
+		t.Fatalf("a reopened generation kept a stream: %q", stream)
+	}
+}
+
+// GeometryAt is the geometry a reader has applied after a record: the newest
+// geometry at or before it, else the birth geometry.
+func TestGeometryAtFollowsTheProjection(t *testing.T) {
+	realm, key, all := suffixFixture(t)
+	want := Geometry{Columns: 80, Rows: 24}
+	for sequence := int64(0); sequence <= int64(len(all)); sequence++ {
+		if sequence > 0 && all[sequence-1].Kind == RecordGeometry {
+			want = all[sequence-1].Geometry
+		}
+		if got, err := realm.GeometryAt(key, sequence); err != nil || got != want {
+			t.Fatalf("after %d: %+v err=%v, want %+v", sequence, got, err, want)
+		}
+	}
+	if _, err := realm.GeometryAt(key, int64(len(all))+1); !errors.Is(err, ErrCursorMismatch) {
+		t.Fatalf("beyond the frontier: %v", err)
 	}
 }
