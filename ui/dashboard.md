@@ -38,9 +38,12 @@ Recent. Default scrollback is in the same card. Refresh is the ↻ button beside
 filter; the live count follows the All, Favorites and Recent filters.
 
 Output lists every live session with the latest output first in each server
-group; a session whose output time is unknown comes last. It sorts the inventory
-the list already reads (every minute while visible, and on Refresh), so it adds
-no request and no polling.
+group; a session whose output time is unknown (absent, or in the future) comes
+last. It sorts the inventory the list already reads (every minute while visible,
+and on Refresh), so it adds no inventory requests or polling. A row that the new
+order brings into view loads its one preview, as when scrolling. A row whose
+alias editor is open keeps its place in the page while the other rows move
+around it, so the editor stays open and modal.
 
 Recent first looks for the exact session previously opened. After a restart, it
 can show a single running session with the same name in the same realm and server.

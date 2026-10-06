@@ -1,6 +1,6 @@
 import { installTapFeedback } from "./tap_feedback";
 import { hasDraft, preserveFocus, reconcileChildren } from "./dashboard_dom";
-import { compareSessionNames, sessionMetadata, SESSION_METADATA_HELP } from "./session_metadata";
+import { compareSessionNames, knownOutputTime, sessionMetadata, SESSION_METADATA_HELP } from "./session_metadata";
 import { readSessionDiscovery, type SessionDiscovery } from "./session_discovery";
 import { RECENT_SESSION_COUNT_KEY, RECENT_SESSION_COUNTS, readRecentSessionCount, saveRecentSessionCount, recentSessionResolution, recentSessions, type RecentSession, type RecentSessionCount } from "./dashboard_recent";
 import { DashboardFavorites } from "./dashboard_favorites";
@@ -1210,11 +1210,12 @@ export class Dashboard {
       const current = row.current();
       if (row.el.dataset.openPending === "true" && current.realm === server.realm && current.server === server.label && !live.some(session => session.draftScope === current.draftScope)) live.push(current);
     }
+    const now = Date.now();
     const sessions = live.sort((a, b) => {
       if (this.listMode === "recent") {
         return this.recentAt(b.draftScope) - this.recentAt(a.draftScope) || compareSessionNames(a, b);
       }
-      if (this.listMode === "output") return (b.outputActivity ?? 0) - (a.outputActivity ?? 0) || compareSessionNames(a, b);
+      if (this.listMode === "output") return (knownOutputTime(b.outputActivity, now) ?? 0) - (knownOutputTime(a.outputActivity, now) ?? 0) || compareSessionNames(a, b);
       return Number(this.isFavorite(b.draftScope)) - Number(this.isFavorite(a.draftScope)) || compareSessionNames(a, b);
     }).map(session => ({ el: this.renderSession(session), session }));
     reconcileChildren(grid, sessions.length ? sessions.map(item => item.el) : [element("p", "empty", "No live sessions")]);

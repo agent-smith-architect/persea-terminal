@@ -41,24 +41,43 @@ async function main() {
         assert(await page.locator('.dashboard-toolbar').evaluate(el => el.getBoundingClientRect().right <= innerWidth && document.documentElement.scrollWidth <= innerWidth), `${shape.name}: ${mode} toolbar overflows`);
       }
       phase = `${shape.name}:output`;
-      // Output lists every session, latest output first; unknown time last. A
-      // refresh re-sorts from the new inventory without any other request.
+      // Output lists every session, latest output first; ties by name; absent or
+      // future (shown as unknown) times last. A refresh re-sorts from the new
+      // inventory, and an open alias editor stays modal while its row moves.
       const listed = () => page.locator('.dashboard-content .session-card').evaluateAll(cards => cards.map(card => card.querySelector('.session-tmux-name')?.textContent || card.querySelector('.session-name')?.textContent));
+      const refreshed = async () => {
+        const from = fixture.state.requests.length;
+        await page.evaluate(() => document.querySelector('.dashboard-refresh').click());
+        await page.waitForFunction(() => !document.querySelector('.dashboard-refresh').hasAttribute('aria-busy'), undefined, { timeout: 10_000 });
+        for (const deadline = Date.now() + 5_000; !fixture.state.requests.slice(from).some(r => r.path === '/api/workspaces');) {
+          assert(Date.now() < deadline, `${shape.name}: manual refresh did not read workspaces`); await page.waitForTimeout(25);
+        }
+      };
       const now = Math.floor(Date.now() / 1000);
-      [300, 5, 7200, 60, undefined, 30].forEach((ago, i) => { if (ago === undefined) delete fixture.state.sessions[i].output_activity; else fixture.state.sessions[i].output_activity = now - ago; });
-      await page.evaluate(() => document.querySelector('.dashboard-refresh').click());
-      await page.waitForFunction(() => document.querySelector('.session-card .session-metadata')?.textContent.includes('Output 5m ago'));
+      [60, 5, -3600, 60, undefined, 30].forEach((ago, i) => { if (ago === undefined) delete fixture.state.sessions[i].output_activity; else fixture.state.sessions[i].output_activity = now - ago; });
+      await refreshed();
       // A row moved into view still loads its one passive preview, as on scroll.
       const reads = () => fixture.state.requests.filter(r => r.path !== '/api/session-previews').length, beforeSwitch = reads();
       await page.locator('.dashboard-list-modes').getByRole('button', { name: 'Output', exact: true }).click();
       await page.waitForTimeout(300);
       assert(reads() === beforeSwitch, `${shape.name}: Output made a request of its own`);
-      assert((await listed()).join(',') === 'tm3,tm7,tm5,tm2,tm4,tm6', `${shape.name}: Output order is not latest first: ${await listed()}`);
+      assert((await listed()).join(',') === 'tm3,tm7,tm2,tm5,tm4,tm6', `${shape.name}: Output order is not latest first: ${await listed()}`);
       assert(await page.locator('.dashboard-results').textContent() === '6 live sessions', `${shape.name}: Output is not a full list`);
-      fixture.state.sessions[2].output_activity = now;
-      await page.evaluate(() => document.querySelector('.dashboard-refresh').click());
-      await page.waitForFunction(() => document.querySelector('.dashboard-content .session-card .session-tmux-name')?.textContent === 'tm4');
-      assert((await listed()).join(',') === 'tm4,tm3,tm7,tm5,tm2,tm6', `${shape.name}: Output did not re-sort after a refresh: ${await listed()}`);
+      phase = `${shape.name}:output-alias`;
+      fixture.state.inventoryDelay = 800;
+      fixture.state.sessions[4].output_activity = now;
+      const moved = refreshed();
+      const tm6 = page.locator('.dashboard-content .session-card').filter({ has: page.getByRole('button', { name: 'Edit alias for tm6', exact: true }) });
+      await tm6.getByRole('button', { name: 'Edit alias for tm6', exact: true }).click();
+      const draft = tm6.getByRole('textbox', { name: 'Alias for tm6', exact: true });
+      await draft.fill('Moving draft');
+      await moved;
+      fixture.state.inventoryDelay = 0;
+      assert((await listed()).join(',') === 'tm6,tm3,tm7,tm2,tm5,tm4', `${shape.name}: Output did not re-sort after a refresh: ${await listed()}`);
+      assert(await tm6.locator('.session-alias-dialog').evaluate(el => el.open && el.matches(':modal')), `${shape.name}: moving the row ended the alias editor's modal state`);
+      assert(await draft.inputValue() === 'Moving draft' && await draft.evaluate(el => document.activeElement === el), `${shape.name}: moving the row lost the alias draft or its focus`);
+      await page.keyboard.press('Escape');
+      assert(!await tm6.locator('.session-alias-dialog').evaluate(el => el.open), `${shape.name}: Escape did not close the moved alias editor`);
       await page.locator('.dashboard-list-modes').getByRole('button', { name: 'All', exact: true }).click();
       assert((await listed()).join(',') === 'tm2,tm3,tm4,tm5,tm6,tm7', `${shape.name}: All lost name order after Output`);
       fixture.state.sessions.forEach(s => { s.output_activity = now - 70; });

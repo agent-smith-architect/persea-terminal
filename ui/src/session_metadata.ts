@@ -1,8 +1,15 @@
 import type { DashboardSession } from "./dashboard";
 
+// The output time in seconds, or undefined when it is absent, invalid or in
+// the future. The label and the Output order use this same rule.
+export function knownOutputTime(activity: number | undefined, now = Date.now()): number | undefined {
+  return activity === undefined || !Number.isSafeInteger(activity) || activity <= 0 || activity * 1000 > now + 60_000 ? undefined : activity;
+}
+
 export function outputActivityLabel(activity: number | undefined, now = Date.now()): string {
-  if (activity === undefined || !Number.isSafeInteger(activity) || activity <= 0 || activity * 1000 > now + 60_000) return "Output time unknown";
-  const seconds = Math.max(0, Math.floor(now / 1000) - activity);
+  const known = knownOutputTime(activity, now);
+  if (known === undefined) return "Output time unknown";
+  const seconds = Math.max(0, Math.floor(now / 1000) - known);
   if (seconds < 60) return "Output just now";
   if (seconds < 3600) return `Output ${Math.floor(seconds / 60)}m ago`;
   if (seconds < 86_400) return `Output ${Math.floor(seconds / 3600)}h ago`;
