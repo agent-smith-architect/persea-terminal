@@ -2,6 +2,25 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
+## 0.1.16 — 2026-10-06
+
+### Added
+
+- **Output** in the dashboard's session filters, beside All, Favorites and Recent. It shows every running session with the most recent output first, so you can see which sessions printed something lately. It sorts the session list the dashboard already reads, so it adds no session list requests and no polling. A row that comes into view loads its preview, as when scrolling. A session whose output time is unknown comes last.
+
+### Fixed
+
+- A session's output time now counts output in all of its windows. Before, only the window shown in tmux counted.
+- When a dashboard refresh moved a row whose alias editor was open, the editor stayed on screen but no longer blocked the page, and Escape did not close it. The row now keeps its place in the page while the other rows move around it.
+
+### Upgrade notes
+
+- A page that was open before the update shows the earlier filters until it is reloaded.
+
+### Testing notes
+
+- A test with a real tmux server checks that output in a window other than the current one updates the session's output time. In Chromium and WebKit, at phone, landscape and desktop sizes, a test checks the Output order (ties by name, unknown and future times last), that a refresh sorts it again, that switching to it does not read the session list again, that an alias editor stays open and modal while its row moves up or down, and that the filter row fits the screen. Each new test was shown to fail without the change it checks. Not tested on a real iPhone.
+
 ## 0.1.15 — 2026-10-05
 
 ### Fixed
