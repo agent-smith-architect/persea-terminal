@@ -57,7 +57,9 @@ export type DashboardSession = Readonly<{ handles: Readonly<{ alias: string; obs
 export type UnifiedDevLaunch = Readonly<{ state: "create"; name: string }>;
 export type DashboardServer = Readonly<{ realm: string; label: string; status: string; error?: string; canCreate: boolean; sessions: readonly DashboardSession[]; unifiedDev?: UnifiedDevLaunch }>;
 export type DashboardRealm = Readonly<{ name: string; displayName: string; uid?: number; error?: string; servers: readonly DashboardServer[] }>;
-export type DashboardInventory = Readonly<{ realms: readonly DashboardRealm[]; detachedAliases: readonly DashboardAlias[] }>;
+// favoritesRevision is the revision of this operator's favorites after the
+// inventory moved them with their sessions (absent when favorites are unavailable).
+export type DashboardInventory = Readonly<{ realms: readonly DashboardRealm[]; detachedAliases: readonly DashboardAlias[]; favoritesRevision?: number }>;
 type ObjectValue = Record<string, unknown>;
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -168,7 +170,8 @@ const matchingAliases = aliasesByAuthority.get(authority.key) ?? [];
     });
     return { name, displayName, ...(realmUID === undefined ? {} : { uid: realmUID }), ...(error ? { error } : {}), servers };
   });
-  return { realms, detachedAliases: aliases.filter((alias) => alias.state === "detached").map(({ incarnationKey: _key, ...alias }) => alias) };
+  const favoritesRevision = root.favorites_revision === undefined ? undefined : integer(root.favorites_revision, "inventory.favorites_revision");
+  return { realms, detachedAliases: aliases.filter((alias) => alias.state === "detached").map(({ incarnationKey: _key, ...alias }) => alias), ...(favoritesRevision === undefined ? {} : { favoritesRevision }) };
 }
 
 // labels are display-only: they name the session on the page and carry no
@@ -792,6 +795,9 @@ export class Dashboard {
       if (serial !== this.requestSerial || this.destroyed) return;
       this.workspaceInventory = inventory; this.lastUpdated = Date.now(); this.refreshError = ""; this.refreshFailures = 0;
       preserveFocus(() => this.render(inventory));
+      // The inventory just moved favorites with their sessions (a tmux restart):
+      // read them now instead of at the next minute.
+      if (inventory.favoritesRevision !== undefined && inventory.favoritesRevision > this.favorites.snapshot().revision) void this.favorites.load(true);
       if (reason === "initial" || reason === "manual" || reason === "mutation" || !this.workspacePanel.hidden) void this.refreshWorkspaces();
       this.status.textContent = "";
     } catch (error) {

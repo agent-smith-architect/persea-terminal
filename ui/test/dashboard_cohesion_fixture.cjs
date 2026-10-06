@@ -33,7 +33,7 @@ async function startCohesionFixture(ui = path.resolve(__dirname, '..')) {
       json(res, state.inventoryStatus, state.inventoryStatus === 200 ? { realms: [
         { name: 'local', display_name: 'local_operator', servers: [{ label: 'default', status: state.stoppedRealms.includes('local') ? 'no_server' : 'ok', can_create: !state.stoppedRealms.includes('local'), unified_dev: { state: 'create', name: 'dev_launch' }, sessions: state.stoppedRealms.includes('local') ? [] : state.sessions }] },
         { name: 'smith', display_name: 'other_operator', servers: [{ label: 'default', status: state.stoppedRealms.includes('smith') ? 'no_server' : 'ok', can_create: !state.stoppedRealms.includes('smith'), sessions: state.stoppedRealms.includes('smith') ? [] : state.others }] },
-      ], aliases: state.aliases } : {}); return true;
+      ], aliases: state.aliases, ...(state.favoritesStatus === 200 && state.favorites.available ? { favorites_revision: state.favorites.revision } : {}) } : {}); return true;
     }
     if (url.pathname === '/api/dashboard-preferences') {
       if (state.favoriteDelay) await wait(state.favoriteDelay);

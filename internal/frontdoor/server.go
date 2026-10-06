@@ -108,6 +108,11 @@ type Server struct {
 	keyboardPreferencesErr  error
 	dashboardPreferences    *dashboardPreferencesStore
 	dashboardPreferencesErr error
+	favoritesDegraded       atomic.Bool
+	// sessionNames maps each session of the latest inventory (authorityKey)
+	// to its tmux name, so a new favorite records the name of its session.
+	sessionNamesMu          sync.Mutex
+	sessionNames            map[string]string
 	snippets                *snippetStore
 	snippetErr              error
 	clipboardImages         *clipboardImageStore
@@ -737,6 +742,11 @@ func (s *Server) inventory(w http.ResponseWriter, r *http.Request) {
 	} else if s.aliasDegraded.Swap(false) {
 		frontLogf("component=frontdoor event=alias_store_recovered")
 	}
+	s.rememberSessionNames(live)
+	response := map[string]any{"realms": views, "snapshot_expires_at": expires, "image_upload": s.cfg.ImageUploadMaxBytes > 0}
+	if revision, ok := s.reconcileFavorites(operator, live, complete); ok {
+		response["favorites_revision"] = revision
+	}
 	records := s.aliases.list()
 	for _, record := range records {
 		for _, v := range all {
@@ -746,8 +756,49 @@ func (s *Server) inventory(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	response["aliases"] = records
 	w.Header().Set("Content-Type", "application/json")
-	_ = json.NewEncoder(w).Encode(map[string]any{"realms": views, "aliases": records, "snapshot_expires_at": expires, "image_upload": s.cfg.ImageUploadMaxBytes > 0})
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func (s *Server) rememberSessionNames(live []aliasSession) {
+	names := make(map[string]string, len(live))
+	for _, session := range live {
+		names[authorityKey(session.Authority)] = session.Name
+	}
+	s.sessionNamesMu.Lock()
+	s.sessionNames = names
+	s.sessionNamesMu.Unlock()
+}
+
+func (s *Server) inventorySessionName(scope string) string {
+	a, ok := dashboardScopeAuthority(scope)
+	if !ok {
+		return ""
+	}
+	s.sessionNamesMu.Lock()
+	defer s.sessionNamesMu.Unlock()
+	return s.sessionNames[authorityKey(a)]
+}
+
+// reconcileFavorites moves the operator's favorites with their sessions and
+// returns the favorites revision for the page. Like aliases, a store that
+// cannot record a change never hides the sessions.
+func (s *Server) reconcileFavorites(operator string, live []aliasSession, complete map[string]bool) (uint64, bool) {
+	if operator == "" || s.dashboardPreferences == nil || s.dashboardPreferencesErr != nil {
+		return 0, false
+	}
+	revision, err := s.dashboardPreferences.reconcile(operator, live, complete)
+	if err != nil {
+		if !s.favoritesDegraded.Swap(true) {
+			frontLogf("component=frontdoor event=favorites_store_degraded error=%q", err.Error())
+		}
+		return revision, true
+	}
+	if s.favoritesDegraded.Swap(false) {
+		frontLogf("component=frontdoor event=favorites_store_recovered")
+	}
+	return revision, true
 }
 
 const aliasRequestMaxBytes = 4096

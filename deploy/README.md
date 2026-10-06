@@ -397,6 +397,14 @@ the default appearance, and Settings cannot save. Before you start the earlier
 release, remove `terminal_position` from each record and keep the file's owner
 and mode.
 
+### Favorites and rollback
+
+`dashboard-preferences.json` records each favorite's tmux session name in
+`favorite_names`. Earlier releases decode the file strictly and do not know the
+field: after a rollback across it, favorites report unavailable. Before you
+start the earlier release, remove `favorite_names` from each operator entry and
+keep the file's owner and mode.
+
 ### Shared keyboard preferences and rollback
 
 The front stores shared keyboard defaults in `keyboard-v1.json`, alongside
