@@ -53,8 +53,9 @@ it, at the geometry in force there, and the PREPARE carries `resumed: true`;
 COMMIT still follows the whole of it. Any other offer gets the whole stream.
 A page accepts a resumed admission only for the exact position it offered
 with nothing queued to its terminal, and otherwise ends the attachment and
-offers nothing next time. Takeovers, session switches and history reloads never
-offer a position.
+offers nothing next time. A page that claims its own control lease back (the
+server had not yet noticed its lost connection) offers its position too;
+session switches and history reloads never do.
 
 Browser attachment requests remain WebSocket text JSON. INPUT uses canonical
 padded base64. Liveness, refusal and flow transport messages retain their

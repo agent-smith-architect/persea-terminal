@@ -112,7 +112,9 @@ function writeJSON(file: string, value: unknown): void {
 // closes after its last frame is read to the end, so the close frame is never
 // stranded unread behind a paused read when a late acknowledgement fails.
 // Whatever the link has taken still crosses it after the front door closes.
-const shapedLink = { rate: 0, delayMs: 0, pairs: new Set<{ drop: () => void }>() };
+const shapedLink = { rate: 0, delayMs: 0, pairs: new Set<{ drop: (serverNotices: boolean) => void }>() };
+// What each terminal WebSocket upgrade through the proxy offered.
+const upgradeOffers: Array<{ resume: boolean; takeover: boolean }> = [];
 const SHAPED_LINK_BUFFER_BYTES = 256 << 10;
 const SHAPED_LINK_TICK_MS = 50;
 
@@ -141,8 +143,10 @@ function shapeLink(browserSocket: any, upstream: any): { push(chunk: any): void;
     }
     if (queued < SHAPED_LINK_BUFFER_BYTES && upstream.isPaused()) upstream.resume();
   }, SHAPED_LINK_TICK_MS);
-  // A drop is a network loss, not a close: both ends are reset at once.
-  const pair = { drop: () => { browserSocket.resetAndDestroy(); upstream.destroy(); } };
+  // A drop is a network loss, not a close. The browser's end is reset; the
+  // front door's end too when the server notices at once, or else it stays
+  // open, as when a phone changes network and only the page knows.
+  const pair = { drop: (serverNotices: boolean) => { browserSocket.resetAndDestroy(); if (serverNotices) upstream.destroy(); } };
   function stop() { clearInterval(timer); shapedLink.pairs.delete(pair); }
   shapedLink.pairs.add(pair);
   browserSocket.on("close", stop);
@@ -178,6 +182,10 @@ function startTrustedProxy(frontSocket: string, canonicalHost: () => string, sch
       const header = [request, "Host: localhost", `X-Forwarded-Host: ${canonicalHost()}`, `X-Forwarded-Proto: ${scheme}`, "Tailscale-User-Login: operator@example.test", `Connection: ${upgrade ? "Upgrade" : "close"}`, ...kept, "", ""].join("\r\n");
       chargeOperatorBudget();
       if (proxyRequests++ < 5) emit("trusted-proxy-request", { request, authority: canonicalHost(), headers: header.split("\r\n").slice(0, 10) });
+      if (upgrade) {
+        const offered = lines.find((line: string) => /^sec-websocket-protocol:/i.test(line)) ?? "";
+        upgradeOffers.push({ resume: /persea-resume\./.test(offered), takeover: /persea-takeover\./.test(offered) });
+      }
       if (upgrade && shapedLink.rate > 0) shaper = shapeLink(browserSocket, upstream);
       const forwardedRequest = Buffer.concat([Buffer.from(header, "latin1"), pending.subarray(boundary + 4)]);
       if (shaper) shaper.send(forwardedRequest); else upstream.write(forwardedRequest);
@@ -728,11 +736,15 @@ async function main(): Promise<void> {
       measurements.push({ ...opened.measured, livenessRoundTripsMs: [...opened.record.rtts] });
       if (rate === 32 << 10) measurements.push(await burstWhileBehind(`burst while behind at ${rate}`, opened.record, rate));
 
-      // The link drops; the page reconnects by itself, once, through the same
-      // slow link, and resumes. The shell is quiet first and prints while the
-      // page is away, so the drop lies on screen afterwards: the screen must
-      // then equal tmux's, which it cannot if the resume sent a byte twice or
-      // lost one.
+      // The link drops; the page reconnects by itself through the same slow
+      // link and resumes. The shell is quiet first and prints while the page
+      // is away, so the drop lies on screen afterwards: the screen must then
+      // equal tmux's, which it cannot if the resume sent a byte twice or lost
+      // one. At the first rate both ends see the drop. At the second only the
+      // browser does: the server still holds the page's control lease and
+      // refuses its first attempt (lease_held), and the page claims its own
+      // lease back. Every attempt offers the page's position.
+      const serverNotices = rate === 32 << 10;
       const visibleLines = (text: string) => {
         const lines = text.replace(/\u00a0/g, " ").split("\n").map((line) => line.trimEnd());
         while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
@@ -742,17 +754,21 @@ async function main(): Promise<void> {
       command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, "kill %1", "Enter"]);
       await until(`quiet screen before the drop at ${rate}`, screenMatchesTmux, 60_000);
       assert(shapedLink.pairs.size === 1, `expected one shaped terminal link, found ${shapedLink.pairs.size}`);
-      const reconnectIndex = attachments.length;
+      const reconnectIndex = attachments.length, offersBefore = upgradeOffers.length;
       const droppedAt = Date.now();
-      for (const pair of [...shapedLink.pairs]) pair.drop();
+      for (const pair of [...shapedLink.pairs]) pair.drop(serverNotices);
       const gap = `GAP${rate}`;
       command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, `printf '${gap}-%02d\\n' $(seq 1 8)`, "Enter"]);
-      const reconnected = await attach("reconnect", reconnectIndex, droppedAt, rate, true);
+      const admitted = serverNotices ? reconnectIndex : reconnectIndex + 1;
+      const reconnected = await attach("reconnect", admitted, droppedAt, rate, true);
       await until(`screen after the resumed reconnect at ${rate}`, async () => (await pageState()).rows.includes(`${gap}-08`) && await screenMatchesTmux(), 20_000);
       command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, steadyLoop, "Enter"]);
       await until(`steady output again at ${rate}`, () => capture().includes("STEADY-000001"));
       await steady(`steady after reconnect at ${rate}`, reconnected.record);
-      assert(attachments.length === reconnectIndex + 1, `reconnect at ${rate} opened ${attachments.length - reconnectIndex} attachments`);
+      assert(attachments.length === admitted + 1, `reconnect at ${rate} opened ${attachments.length - reconnectIndex} attachments`);
+      const offers = upgradeOffers.slice(offersBefore);
+      assert(offers.length === admitted + 1 - reconnectIndex && offers.every((offer) => offer.resume) && offers.filter((offer) => offer.takeover).length === (serverNotices ? 0 : 1),
+        `reconnect at ${rate}: the attempts offered ${JSON.stringify(offers)}`);
       measurements.push({ ...reconnected.measured, livenessRoundTripsMs: [...reconnected.record.rtts] });
       shapedLink.rate = 0;
     }

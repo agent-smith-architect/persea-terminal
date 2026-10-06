@@ -76,13 +76,26 @@ function drained(): Promise<void> {
   return new Promise((resolve) => (mounted() as any).terminal.write("", () => setTimeout(resolve, 0)));
 }
 
+// A new connection's socket opens; the old one has ended.
+function open(): void {
+  generation += 1;
+  cut += 1n;
+  mounted().openTransport(generation);
+}
+
+function close(): void {
+  mounted().transportClosed(generation, "websocket_1006");
+}
+
+function prepare(admission: Record<string, unknown>): void {
+  mounted().receiveDecoded(generation, frame({ type: "PREPARE", cut, kind: "INITIAL", history: [], truncated: false, ...admission }));
+}
+
 // A connection: its PREPARE, the replay's READY, COMMIT and the control grant.
 async function admit(admission: Record<string, unknown>): Promise<Record<string, unknown>> {
   const current = mounted();
-  generation += 1;
-  cut += 1n;
-  current.openTransport(generation);
-  current.receiveDecoded(generation, frame({ type: "PREPARE", cut, kind: "INITIAL", history: [], truncated: false, ...admission }));
+  open();
+  prepare(admission);
   await drained();
   if (finalized.length === 0) {
     current.receiveDecoded(generation, frame({ type: "COMMIT", cut }));
@@ -92,8 +105,8 @@ async function admit(admission: Record<string, unknown>): Promise<Record<string,
   return state();
 }
 
-function live(text: string, position?: Position): void {
-  mounted().receiveDecoded(generation, frame({ type: "LIVE", cut, data: encoder.encode(text), ...(position ? { position } : {}) }));
+function live(text: string | Uint8Array, position?: Position): void {
+  mounted().receiveDecoded(generation, frame({ type: "LIVE", cut, data: typeof text === "string" ? encoder.encode(text) : text, ...(position ? { position } : {}) }));
 }
 
 function geometry(columns: number, rows: number, position?: Position): void {
@@ -171,6 +184,50 @@ function whole(): Promise<Record<string, unknown>> {
     const queued = mounted().resumeProtocol() ?? null;
     await drained();
     return { queued, drained: mounted().resumeProtocol() ?? null };
+  },
+  // A geometry of a connection that ended before xterm parsed it still moves
+  // the point, so the next offer names the geometry the screen has.
+  async supersededGeometry() {
+    mount();
+    await whole();
+    live("\r\nX", { seq: 2, offset: 8 });
+    geometry(120, 30, { seq: 3, offset: 8 });
+    close();
+    open();
+    await drained();
+    close();
+    const offer = mounted().resumeProtocol() ?? null;
+    const resumed = await admit({ columns: 120, rows: 30, replay: new Uint8Array(), stream: STREAM, resumed: true, position: { seq: 3, offset: 8 } });
+    return { offer, resumed };
+  },
+  // A resumed admission whose connection ends before its replay is parsed:
+  // the replay still reaches the screen, so the page must not offer the
+  // position before it, or the next resume would send the replay again.
+  async resumedReplaySuperseded() {
+    mount();
+    await whole();
+    live("-a", { seq: 2, offset: 7 });
+    await drained();
+    mounted().resumeProtocol();
+    close();
+    open();
+    prepare({ columns: 80, rows: 24, replay: encoder.encode("-b"), stream: STREAM, resumed: true, position: { seq: 3, offset: 9 } });
+    const accepted = finalized.length === 0;
+    close();
+    open();
+    await drained();
+    close();
+    return { accepted, offer: mounted().resumeProtocol() ?? null, ...state() };
+  },
+  // A connection lost inside an escape sequence or a UTF-8 character: the
+  // next full replay starts clean.
+  async cutShortThenWholeStream(cut: string) {
+    mount();
+    await whole();
+    live(cut === "utf-8" ? new Uint8Array([0xc3]) : cut === "osc" ? "\x1b]0;tit" : "\x1b[", { seq: 2, offset: 6 });
+    await drained();
+    close();
+    return await admit({ columns: 80, rows: 24, replay: encoder.encode("HELLO\r\nWORLD"), stream: OTHER_STREAM, position: { seq: 1, offset: 12 } });
   },
   // A frame whose position does not follow the point leaves the screen as
   // it is but drops the point.
