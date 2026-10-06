@@ -310,10 +310,12 @@ func (s *dashboardPreferencesStore) commitLocked(operator string, next dashboard
 // a favorite whose session is gone moves to the live session with the same
 // realm, server and name, when that server's list is complete and no other
 // favorite holds that session. The newest favorite wins a name, and the
-// others waiting for it are dropped: a name on one tmux server belongs to one
-// session at a time, so they are dead duplicates that would otherwise take
-// the session back after the operator removed its star. It returns the
-// record's revision, which changes only when something changed.
+// others waiting for it on a server whose list is complete are dropped: a
+// name on one tmux server belongs to one session at a time, so they are dead
+// duplicates that would otherwise take the session back after the operator
+// removed its star. On an incomplete list a favorite that is not seen may
+// still be running under another name, so it stays. It returns the record's
+// revision, which changes only when something changed.
 func (s *dashboardPreferencesStore) reconcile(operator string, live []aliasSession, complete map[string]bool) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -364,7 +366,9 @@ func (s *dashboardPreferencesStore) reconcile(operator string, live []aliasSessi
 			continue
 		}
 		if owned[nameKey(a, name)] {
-			dropped[scope] = true
+			if complete[a.Realm+"\x00"+a.Server] {
+				dropped[scope] = true
+			}
 			continue
 		}
 		target, found := byName[nameKey(a, name)]
