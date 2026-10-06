@@ -1840,8 +1840,9 @@ func (s *Server) readInventoryServer(server config.TmuxServer, budget int) inven
 	// Measured on tmux 3.4: under `list-sessions -F` the window/pane formats
 	// expand against each session's active window and pane, which is exactly
 	// sufficient for the closed eligibility class (single window, single pane,
-	// primary screen).
-	format := "#{session_id}\t#{session_name}\t#{window_width}\t#{window_height}\t#{session_attached}\t#{session_activity}\t#{session_created}\t#{alternate_on}\t#{window_panes}\t#{session_windows}\t#{window_activity}\t" + shadowMarkerFlags
+	// primary screen). Field 10 loops over every window instead: output in an
+	// inactive window is still the session's latest output.
+	format := "#{session_id}\t#{session_name}\t#{window_width}\t#{window_height}\t#{session_attached}\t#{session_activity}\t#{session_created}\t#{alternate_on}\t#{window_panes}\t#{session_windows}\t#{W:#{window_activity} }\t" + shadowMarkerFlags
 	args := []string{"list-sessions", "-F", format}
 	if budget <= 0 {
 		// Only the selected server needs hidden-row metadata. Avoid expanding
@@ -1911,10 +1912,7 @@ func (s *Server) projectInventoryServer(server config.TmuxServer, limit int, sna
 		a.SessionID = d.ID
 		a.SessionCreated = d.Created
 		row := proto.Session{Authority: a, Name: d.Name, Width: d.Width, Height: d.Height, Attached: d.Attached, Activity: d.Activity}
-		// An absent or malformed optional timestamp is unknown, never "active".
-		if activity, err := strconv.ParseInt(p[10], 10, 64); err == nil && activity > 0 {
-			row.OutputActivity = activity
-		}
+		row.OutputActivity = latestOutput(p[10])
 		if s.unified != nil {
 			row.Unified = s.unified.projectSession(server.Label, d.ID, parseUnifiedSessionFacts(p[7], p[8], p[9]))
 		}
@@ -1926,6 +1924,20 @@ func (s *Server) projectInventoryServer(server config.TmuxServer, limit int, sna
 	}
 	r.CanCreate = s.config.SessionCreate.AllowsServer(server.Label)
 	return r
+}
+
+// latestOutput returns the newest of a session's per-window output times. An
+// absent or malformed time is unknown (0), never "active".
+func latestOutput(windows string) int64 {
+	var latest int64
+	for _, field := range strings.Fields(windows) {
+		activity, err := strconv.ParseInt(field, 10, 64)
+		if err != nil {
+			return 0
+		}
+		latest = max(latest, activity)
+	}
+	return latest
 }
 
 // parseUnifiedSessionFacts turns one inventory row's eligibility fields into
