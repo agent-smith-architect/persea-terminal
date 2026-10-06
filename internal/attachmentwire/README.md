@@ -35,6 +35,27 @@ copies. Existing typed bounds still apply: 2 MiB history, 10,000 history rows,
 8 KiB per row, 256 KiB replay, and 512 KiB LIVE. Ordinary broker output is
 chunked at 16 KiB; the larger LIVE bound is the generic protocol ceiling.
 
+## Resume
+
+A journal generation's committed output is one byte stream; geometry records
+sit between its bytes. Each new generation gets a random 26-character base32
+`stream` name, which an admission PREPARE (INITIAL or RECONNECT) carries.
+Admission PREPARE, geometry PREPARE and LIVE carry `seq` and `offset`, canonical
+decimal strings from `0` through 2^63 − 1, sent together: the position after
+the frame's last byte. `offset` counts stream bytes; `seq` is the last record
+the frame completed, so a frame that ends inside an output record names the
+record before it. A geometry keeps the offset and advances the sequence.
+
+A page that has parsed every frame it received offers its position with the
+subprotocol `persea-resume.<stream>.<seq>.<offset>`. When the position is in
+the session's current stream, the broker admits only the committed output after
+it, at the geometry in force there, and the PREPARE carries `resumed: true`;
+COMMIT still follows the whole of it. Any other offer gets the whole stream.
+A page accepts a resumed admission only for the exact position it offered
+with nothing queued to its terminal, and otherwise ends the attachment and
+offers nothing next time. Takeovers, session switches and history reloads never
+offer a position.
+
 Browser attachment requests remain WebSocket text JSON. INPUT uses canonical
 padded base64. Liveness, refusal and flow transport messages retain their
 reserved text namespaces. Flow ACKs count attachment frames after consumption,

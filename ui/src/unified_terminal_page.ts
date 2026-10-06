@@ -6,7 +6,7 @@ import type { CopyToClipsResult, UnifiedPopoverOwner, UnifiedExplainerTopic, Scr
 import { Terminal } from "@xterm/xterm";
 import type { FinalizeCause, PortSendResult } from "./attachment_port";
 import type { AttachmentTransportSink, ReconnectStatus } from "./websocket_attachment_transport";
-import { MAX_FIT_CELLS, MAX_FIT_ROWS, MIN_FIT_ROWS, validVerticalFit, validateServerFrame, type BrowserFrame, type Prepare, type ServerFrame } from "./attachment_protocol";
+import { MAX_FIT_CELLS, MAX_FIT_ROWS, MIN_FIT_ROWS, validVerticalFit, validateServerFrame, type BrowserFrame, type Prepare, type ServerFrame, type StreamPosition } from "./attachment_protocol";
 import { Composer, normalizeComposedText, type ComposerAvailability, type ComposerInjectionResult, type ComposerTypographyState } from "./composer";
 import type { ComposerStagedImage } from "./composer_attachments";
 import { IOSBackspaceRouter, syntheticInsertTextEvent } from "./continuous_surface/ios_backspace_router";
@@ -273,6 +273,16 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private normalAnchor: ScrollAnchor = { bufferType: "normal", row: 0, fraction: 0, scalarRemainder: 0, following: true };
   private generation = 0;
   private prepared?: Prepare;
+  // The page's place in its session's committed stream: the stream its last
+  // full admission started and the position after the last frame the
+  // terminal has parsed, owned by the generation that delivered it. A
+  // reconnect offers it, so the server sends only what follows instead of the
+  // whole history. Unset whenever the terminal may not hold exactly that
+  // prefix (a reset, a session switch, a history reload), which makes the
+  // next admission replay the whole stream.
+  private resumePoint?: Readonly<{ stream: string; seq: number; offset: number; generation: number }>;
+  // The point the last endpoint offered, frozen when it was built.
+  private resumeOffer?: Readonly<{ stream: string; seq: number; offset: number }>;
   private committed = false;
   private closed = false;
   private readonly geometryReadout: HTMLButtonElement;
@@ -3140,13 +3150,13 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         return "CLOSED";
       }
       const anchor = this.captureAnchor();
-      this.writesInFlight++;
-      this.terminal.write(frame.data, this.guardedWriteCallback(generation, "LIVE_WRITE_FAILED", () => {
-        this.writesInFlight--;
+      const position = frame.position, bytes = frame.data.byteLength;
+      this.inOrder(generation, "LIVE_WRITE_FAILED", frame.data, () => {
         if (this.closed) return;
+        this.advanceResume(generation, position, bytes);
         if (anchor.bufferType === this.terminal.buffer.active.type) this.syncNativeScroll(anchor.following, anchor);
         else this.scheduleReconcile();
-      }));
+      });
       return "ENQUEUED";
     }
     if (frame.type === "END") this.transportClosed(generation, frame.reason);
@@ -3260,6 +3270,19 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       return;
     }
     this.terminal.write("", this.guardedWriteCallback(generation, "LIVE_WRITE_FAILED", done));
+  }
+
+  // Every change to what the terminal shows goes through xterm's write queue.
+  // xterm runs a write's callback right after parsing that write and before
+  // the next one, so work done in an empty write's callback (a reset, a
+  // geometry) applies exactly between the output queued before and after it.
+  // writesInFlight counts what is queued.
+  private inOrder(generation: number, cause: FinalizeCause, data: string | Uint8Array, applied: () => void): void {
+    this.writesInFlight++;
+    this.terminal.write(data, this.guardedWriteCallback(generation, cause, () => {
+      this.writesInFlight--;
+      applied();
+    }));
   }
 
   // xterm runs write callbacks inside its write loop, and a callback that
@@ -3480,6 +3503,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
 	this.settlePendingRefit();
     this.replaying = false;
     this.knownSource = undefined;
+    this.resumePoint = undefined;
+    this.resumeOffer = undefined;
     this.terminal.reset();
     this.applyScrollbackRows(value.historyRows ?? readTerminalScrollbackRows(this.scrollbackScope));
     // The transcript has just been cleared and the new session has not
@@ -3673,7 +3698,28 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         this.options.port.finalize({ generation: this.generation, cause: "ACTIVE_TUPLE_MISMATCH" });
         return;
       }
-      this.applyCommittedGeometry(frame);
+      // It applies after the output before it has been parsed, never under
+      // it. A superseded generation's geometry still keeps its output
+      // company; its successor resets or continues from what that leaves.
+      const generation = this.generation;
+      this.inOrder(generation, "LIVE_WRITE_FAILED", "", () => {
+        if (this.closed) return;
+        if (generation !== this.generation) {
+          this.applyTerminalGeometry(frame.columns, frame.rows);
+          return;
+        }
+        this.applyCommittedGeometry(frame);
+        this.advanceResume(generation, frame.position, 0);
+      });
+      return;
+    }
+    // A resumed admission continues the terminal from the position this
+    // page offered. Anything else is a broken promise: the attachment ends,
+    // and with the point gone the next one replays the whole stream.
+    if (frame.resumed && !this.resumeHolds(frame)) {
+      this.resumePoint = undefined;
+      this.resumeOffer = undefined;
+      this.options.port.finalize({ generation: this.generation, cause: "ADMISSION_INVARIANT" });
       return;
     }
 	const pendingRefit = this.pendingRefit;
@@ -3697,24 +3743,53 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.connectionStatus.textContent = "";
     this.options.rememberSource(frame.source);
     this.replaying = true;
+    const generation = this.generation;
+    if (frame.resumed) {
+      // The terminal already shows everything before the offered position,
+      // at the geometry in force there; the replay and the backlog continue
+      // it. The transcript, the reader's scroll position and the selection
+      // all stay.
+      const anchor = this.captureAnchor();
+      const stream = frame.stream!, at = frame.position!;
+      this.resumeOffer = undefined;
+      this.inOrder(generation, "REPLAY_FAILED", frame.replay, () => {
+        this.replaying = false;
+        if (this.prepared !== frame || this.closed) return;
+        this.resumePoint = Object.freeze({ stream, seq: at.seq, offset: at.offset, generation });
+        this.syncNativeScroll(anchor.following, anchor);
+        this.updateGeometryControl();
+        this.send({ type: "READY", version: 1, source: frame.source, epoch: frame.epoch, cut: frame.cut });
+      });
+      return;
+    }
+    // The terminal is about to be reset: nothing it shows is a position.
+    this.resumePoint = undefined;
+    this.resumeOffer = undefined;
     this.projectedRow = -1;
     this.normalAnchor = { bufferType: "normal", row: 0, fraction: 0, scalarRemainder: 0, following: true };
-    // Reset exactly once per admission, then size to the generation's birth
-    // geometry. Replay re-derives the current geometry from the committed
-    // events that follow, in the order the live session produced them, so a
-    // reload wraps its lines the same way the live screen did.
-    this.terminal.reset();
-    this.applyTerminalGeometry(frame.columns, frame.rows);
-    this.terminal.write(frame.replay, this.guardedWriteCallback(this.generation, "REPLAY_FAILED", () => {
+    // Reset exactly once per admission, after everything queued before it
+    // has been parsed, then size to the generation's birth geometry. Replay
+    // re-derives the current geometry from the committed events that follow,
+    // in the order the live session produced them, so a reload wraps its
+    // lines the same way the live screen did.
+    this.inOrder(generation, "REPLAY_FAILED", "", () => {
+      if (this.prepared !== frame || this.closed) return;
+      this.terminal.reset();
+      this.applyTerminalGeometry(frame.columns, frame.rows);
+    });
+    this.inOrder(generation, "REPLAY_FAILED", frame.replay, () => {
       this.replaying = false;
       if (this.prepared !== frame || this.closed) return;
+      const at = frame.position;
+      this.resumePoint = frame.stream !== undefined && at !== undefined && at.offset === frame.replay.byteLength
+        ? Object.freeze({ stream: frame.stream, seq: at.seq, offset: at.offset, generation }) : undefined;
       this.syncNativeScroll(true);
       // The resize observer can run against the seed grid before admission.
       // Fit again with the admitted geometry after xterm has painted it.
       requestAnimationFrame(() => this.autoFitFont());
       this.updateGeometryControl();
       this.send({ type: "READY", version: 1, source: frame.source, epoch: frame.epoch, cut: frame.cut });
-    }));
+    });
   }
 
   // applyCommittedGeometry is the mid-session path, and it is deliberately not
@@ -3726,6 +3801,47 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.fitPending = false;
     this.syncNativeScroll(anchor.following, anchor);
     this.updateGeometryControl();
+  }
+
+  // Moves the resume point past a frame the terminal has just parsed: output
+  // moves the offset by exactly its bytes, a geometry moves only the
+  // sequence. A frame of another generation, without a position, or that
+  // does not follow the point leaves the page unable to say where it stands;
+  // what it shows is still right.
+  private advanceResume(generation: number, position: StreamPosition | undefined, bytes: number): void {
+    const point = this.resumePoint;
+    if (!point) return;
+    const follows = position !== undefined && generation === point.generation && position.offset === point.offset + bytes
+      && (bytes === 0 ? position.seq > point.seq : position.seq >= point.seq);
+    this.resumePoint = follows ? Object.freeze({ stream: point.stream, seq: position.seq, offset: position.offset, generation }) : undefined;
+  }
+
+  // Whether a resumed admission continues exactly what the terminal shows:
+  // the point is still the one this page offered, nothing is queued to the
+  // terminal, the geometry is the one in force there, and the replay follows
+  // the offered position.
+  private resumeHolds(frame: Prepare): boolean {
+    const offer = this.resumeOffer, point = this.resumePoint, at = frame.position;
+    return offer !== undefined && point !== undefined && at !== undefined && this.writesInFlight === 0
+      && point.stream === offer.stream && point.seq === offer.seq && point.offset === offer.offset
+      && frame.stream === offer.stream && frame.columns === this.committedColumns && frame.rows === this.committedRows
+      && at.offset === offer.offset + frame.replay.byteLength && (frame.replay.byteLength === 0 ? at.seq === offer.seq : at.seq > offer.seq);
+  }
+
+  // The resume subprotocol for a new endpoint. It is offered only while the
+  // terminal has parsed everything queued to it, so the point is exactly
+  // what it shows, and the offer is frozen for the admission to match.
+  resumeProtocol(): string | undefined {
+    const point = this.resumePoint;
+    const offer = point && this.writesInFlight === 0 ? Object.freeze({ stream: point.stream, seq: point.seq, offset: point.offset }) : undefined;
+    this.resumeOffer = offer;
+    return offer && `persea-resume.${offer.stream}.${offer.seq}.${offer.offset}`;
+  }
+
+  // A history reload asks for the whole stream again.
+  forgetResumePoint(): void {
+    this.resumePoint = undefined;
+    this.resumeOffer = undefined;
   }
 
   private applyTerminalGeometry(columns: number, rows: number): void {

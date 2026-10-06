@@ -438,13 +438,15 @@ async function main(): Promise<void> {
       frames: number; acknowledgedFrames: number;
       // The frame that completed a watched output line, once seen.
       watch: string; watchTail: string; watchFrame: number;
+      // The admission continued the page's terminal instead of replaying.
+      resumed: boolean;
     };
     const attachments: Attachment[] = [];
     page.on("websocket", (socket: any) => {
       if (new URL(socket.url()).pathname !== "/ws") return;
       const record: Attachment = {
         opened: Date.now(), closed: 0, commitAt: 0, modeAt: 0, bytesBeforeMode: 0, framesBeforeMode: 0, inputsBeforeMode: 0, acks: 0, pings: new Map(), rtts: [], refusals: [],
-        inputs: 0, lastInputAt: 0, frames: 0, acknowledgedFrames: 0, watch: "", watchTail: "", watchFrame: 0,
+        inputs: 0, lastInputAt: 0, frames: 0, acknowledgedFrames: 0, watch: "", watchTail: "", watchFrame: 0, resumed: false,
       };
       attachments.push(record);
       const text = (event: any) => typeof event.payload === "string" ? event.payload : Buffer.from(event.payload).toString("utf8");
@@ -487,6 +489,7 @@ async function main(): Promise<void> {
           record.bytesBeforeMode += length;
           record.framesBeforeMode += 1;
         }
+        if (frame.type === "PREPARE" && frame.kind !== "RESIZE" && !record.commitAt) record.resumed = frame.resumed === true;
         if (frame.type === "COMMIT" && !record.commitAt) record.commitAt = now;
         if (frame.type === "MODE" && frame.mode === "CONTROL" && !record.modeAt) record.modeAt = now;
       });
@@ -502,7 +505,8 @@ async function main(): Promise<void> {
     await until("initial attachment live", async () => (await pageState()).phase === "live");
     command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, `seq -w 1 16000 | sed 's/.*/HIST-&-${filler}/'; printf 'HIST-%s\\n' DONE`, "Enter"]);
     await until("history recorded", async () => (await pageState()).rows.includes("HIST-DONE"), 60_000);
-    command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, `(i=0; while :; do for j in 1 2 3 4 5; do i=$((i+1)); printf 'STEADY-%06d-%s\\n' "$i" ${filler}; done; sleep 0.2; done) &`, "Enter"]);
+    const steadyLoop = `(i=0; while :; do for j in 1 2 3 4 5; do i=$((i+1)); printf 'STEADY-%06d-%s\\n' "$i" ${filler}; done; sleep 0.2; done) &`;
+    command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, steadyLoop, "Enter"]);
     await until("steady output", () => steadyIn(capture()) > 0);
 
     // Typing paused: the page shows what happened and waits for the operator.
@@ -533,7 +537,9 @@ async function main(): Promise<void> {
 
     // Each stage waits for the attachment the page opens next, measured from
     // the moment its cause (navigation or link loss) happened.
-    const attach = async (stage: string, index: number, causedAt: number, rate: number) => {
+    // A page that opens replays the whole history; one that reconnects
+    // resumes, so only the output it missed crosses the link.
+    const attach = async (stage: string, index: number, causedAt: number, rate: number, resumes = false) => {
       const record = await until(`${stage}: terminal socket`, () => attachments[index], 20_000);
       await until(`${stage}: COMMIT`, () => record.commitAt, 20_000);
       // Admission no longer scales with history: it fits the attempt deadline
@@ -549,7 +555,9 @@ async function main(): Promise<void> {
         }
       }
       await until(`${stage}: control grant`, () => record.modeAt, Math.ceil(2 * HISTORY_BYTES / rate * 1000) + 60_000);
-      assert(record.bytesBeforeMode >= HISTORY_BYTES, `${stage}: only ${record.bytesBeforeMode} bytes of history preceded the control grant`);
+      assert(record.resumed === resumes, `${stage}: admission resumed=${record.resumed}, want ${resumes}`);
+      if (resumes) assert(record.bytesBeforeMode < HISTORY_BYTES / 16, `${stage}: a resumed reconnect sent ${record.bytesBeforeMode} bytes before the control grant`);
+      else assert(record.bytesBeforeMode >= HISTORY_BYTES, `${stage}: only ${record.bytesBeforeMode} bytes of history preceded the control grant`);
       assert(record.inputsBeforeMode === 0, `${stage}: ${record.inputsBeforeMode} input frames left before the control grant`);
       // Flow control must not starve the link: the raw backlog moves at no
       // less than half the link rate.
@@ -584,7 +592,7 @@ async function main(): Promise<void> {
       assert(record.refusals.every((refusal) => refusal === "PERSEA-REFUSAL/1 input_paused") && (inputPaused || record.refusals.length === 0),
         `${stage}: refusals ${JSON.stringify(record.refusals)}`);
       const measured = {
-        stage, rate, linkDelayMs: LINK_DELAY_MS, inputPaused,
+        stage, rate, linkDelayMs: LINK_DELAY_MS, inputPaused, resumed: record.resumed,
         toCommitMs: record.commitAt - causedAt, toControlMs: record.modeAt - causedAt, admissionMs: record.commitAt - record.opened, backlogMs,
         bytesBeforeControl: record.bytesBeforeMode, framesBeforeControl: record.framesBeforeMode, acknowledgements: record.acks,
         livenessRoundTripsMs: [...record.rtts],
@@ -721,12 +729,28 @@ async function main(): Promise<void> {
       if (rate === 32 << 10) measurements.push(await burstWhileBehind(`burst while behind at ${rate}`, opened.record, rate));
 
       // The link drops; the page reconnects by itself, once, through the same
-      // slow link.
+      // slow link, and resumes. The shell is quiet first and prints while the
+      // page is away, so the drop lies on screen afterwards: the screen must
+      // then equal tmux's, which it cannot if the resume sent a byte twice or
+      // lost one.
+      const visibleLines = (text: string) => {
+        const lines = text.replace(/\u00a0/g, " ").split("\n").map((line) => line.trimEnd());
+        while (lines.length > 0 && lines[lines.length - 1] === "") lines.pop();
+        return lines.join("\n");
+      };
+      const screenMatchesTmux = async () => visibleLines((await pageState()).rows) === visibleLines(command("tmux", ["-S", tmuxSocket, "capture-pane", "-p", "-t", target]));
+      command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, "kill %1", "Enter"]);
+      await until(`quiet screen before the drop at ${rate}`, screenMatchesTmux, 60_000);
       assert(shapedLink.pairs.size === 1, `expected one shaped terminal link, found ${shapedLink.pairs.size}`);
       const reconnectIndex = attachments.length;
       const droppedAt = Date.now();
       for (const pair of [...shapedLink.pairs]) pair.drop();
-      const reconnected = await attach("reconnect", reconnectIndex, droppedAt, rate);
+      const gap = `GAP${rate}`;
+      command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, `printf '${gap}-%02d\\n' $(seq 1 8)`, "Enter"]);
+      const reconnected = await attach("reconnect", reconnectIndex, droppedAt, rate, true);
+      await until(`screen after the resumed reconnect at ${rate}`, async () => (await pageState()).rows.includes(`${gap}-08`) && await screenMatchesTmux(), 20_000);
+      command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, steadyLoop, "Enter"]);
+      await until(`steady output again at ${rate}`, () => capture().includes("STEADY-000001"));
       await steady(`steady after reconnect at ${rate}`, reconnected.record);
       assert(attachments.length === reconnectIndex + 1, `reconnect at ${rate} opened ${attachments.length - reconnectIndex} attachments`);
       measurements.push({ ...reconnected.measured, livenessRoundTripsMs: [...reconnected.record.rtts] });

@@ -1774,6 +1774,7 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 	var mode string
 	engine := ""
 	historyRows := terminal.DefaultHistoryRows
+	var resume *proto.Resume
 	var a proto.Authority
 	var err error
 	operator := ""
@@ -1790,6 +1791,7 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 		mode = wa.mode
 		engine = wa.engine
 		historyRows = wa.history
+		resume = wa.resume
 		if !valid {
 			logRequestIngress(r, "capability")
 			http.Error(w, "invalid mode", 400)
@@ -1881,7 +1883,7 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 		}()
 	}
 
-	c, err := s.brokerRequest(a, proto.Control{Type: "attach", Authority: &a, Mode: mode, Engine: engine, HistoryLimit: &historyRows})
+	c, err := s.brokerRequest(a, proto.Control{Type: "attach", Authority: &a, Mode: mode, Engine: engine, HistoryLimit: &historyRows, Resume: resume})
 	if err != nil {
 		code := s.logTerminalFailure("broker_unavailable", &a)
 		_ = writeWSCloseReason(writes, writerDone, code)

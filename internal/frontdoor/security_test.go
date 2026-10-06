@@ -677,3 +677,40 @@ func TestHermeticTLSRequiresMatchingForwardedProto(t *testing.T) {
 		})
 	}
 }
+
+// The resume subprotocol is optional, present at most once, and exact: a
+// stream name and two canonical counts that fit the broker's int64 positions.
+func TestWSResumeProtocolExactAndNegativeMatrix(t *testing.T) {
+	base := "persea-engine.unified-dev, persea-terminal.v3, persea-handle.h, persea-mode.control, persea-csrf.c, persea-history.1000"
+	const stream = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+	parse := func(protocols string) (wsAuthority, bool) {
+		r := httptest.NewRequest("GET", "http://localhost/ws", nil)
+		r.Header.Set("Sec-WebSocket-Protocol", protocols)
+		return parseWSAuthority(r)
+	}
+	if got, ok := parse(base); !ok || got.resume != nil {
+		t.Fatalf("no resume: %+v ok=%v", got.resume, ok)
+	}
+	for _, want := range []proto.Resume{{Stream: stream, Sequence: 0, Offset: 0}, {Stream: stream, Sequence: 12, Offset: 999_999_999_999_999_999}} {
+		got, ok := parse(fmt.Sprintf("%s, persea-resume.%s.%d.%d", base, want.Stream, want.Sequence, want.Offset))
+		if !ok || got.resume == nil || *got.resume != want {
+			t.Fatalf("resume %+v parsed as %+v ok=%v", want, got.resume, ok)
+		}
+	}
+	for _, protocol := range []string{
+		"persea-resume." + stream + ".1.2, persea-resume." + stream + ".1.2",
+		"persea-resume." + stream + ".1",
+		"persea-resume." + stream + ".01.2",
+		"persea-resume." + stream + ".1.-2",
+		"persea-resume." + stream + ".1.2.3",
+		"persea-resume." + stream + ".1.1000000000000000000",
+		"persea-resume." + strings.ToLower(stream) + ".1.2",
+		"persea-resume." + stream[:25] + ".1.2",
+		"persea-resume." + stream + "1.1.2",
+		"persea-resume..1.2",
+	} {
+		if got, ok := parse(base + ", " + protocol); ok {
+			t.Fatalf("invalid resume accepted: %q as %+v", protocol, got.resume)
+		}
+	}
+}

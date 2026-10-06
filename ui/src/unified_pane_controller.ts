@@ -42,8 +42,10 @@ export function attachmentURL(handle: string, mode: "observe" | "control"): stri
   return url.toString();
 }
 
-export function attachmentProtocols(handle: string, mode: AttachmentMode, historyRows: number, engine: UnifiedEngine): string[] {
-  return ["persea-terminal.v3", `persea-handle.${handle}`, `persea-mode.${mode}`, `persea-csrf.${csrfToken()}`, `persea-history.${historyRows}`, `persea-engine.${engine}`];
+// resume is the page's resume subprotocol (UnifiedTerminalPage.resumeProtocol)
+// when it reconnects with a terminal that already holds part of the stream.
+export function attachmentProtocols(handle: string, mode: AttachmentMode, historyRows: number, engine: UnifiedEngine, resume?: string): string[] {
+  return ["persea-terminal.v3", `persea-handle.${handle}`, `persea-mode.${mode}`, `persea-csrf.${csrfToken()}`, `persea-history.${historyRows}`, `persea-engine.${engine}`, ...(resume ? [resume] : [])];
 }
 
 function takeoverProtocols(handle: string, historyRows: number, engine: UnifiedEngine): string[] {
@@ -83,6 +85,8 @@ export async function freshEndpoint(mode: AttachmentMode, historyRows: HistoryCh
   return Object.freeze({ url: attachmentURL(handle, mode), protocols: Object.freeze(attachmentProtocols(handle, mode, historyRows, engine)) });
 }
 
+// A takeover never resumes: the page's own socket can still be delivering
+// output while the new one opens, so no position it offered would hold.
 export async function takeoverEndpoint(claim: Readonly<{ offer: string } | { source: string }>, historyRows: HistoryChoice, signal: AbortSignal, engine: UnifiedEngine): Promise<AttachmentEndpoint> {
   const requestID = randomRequestID();
   const csrf = await refreshCSRFToken(signal);
@@ -327,6 +331,7 @@ export class UnifiedPaneController {
       ...(options.onScrollbackChanged ? { onScrollbackChanged: options.onScrollbackChanged } : {}),
       reloadRecordedHistory: () => {
         if (this.disposed || this.currentSource === null || this.refitPending || this.switchPending || this.reconnecting || this.transport.endpointReplacementBusy()) return false;
+        this.page.forgetResumePoint();
         this.transport.disconnect("history_reload");
         this.transport.attachAgain();
         return true;
@@ -577,7 +582,8 @@ export class UnifiedPaneController {
   private prepareSessionSwitch(session: DashboardSession, abort: AbortController): PreparedSessionSwitch {
     const identity = this.runtimeIdentity(session);
     const historyRows = readTerminalScrollbackRows(session.draftScope);
-    const endpoint = this.buildEndpoint(session.handles.control, historyRows);
+    // Another session's stream: nothing to resume.
+    const endpoint = this.buildEndpoint(session.handles.control, historyRows, false);
     const presentation = Object.freeze({
       sessionName: session.name,
       // The tag names the session B is now bound to, alias included, so an
@@ -752,9 +758,9 @@ export class UnifiedPaneController {
     try { this.options.forgetReloadHandle?.(); } catch { /* reload recovery is best-effort */ }
   }
 
-  private buildEndpoint(minted: string, historyRows = this.page.currentScrollbackRows()): AttachmentEndpoint {
+  private buildEndpoint(minted: string, historyRows = this.page.currentScrollbackRows(), resume = true): AttachmentEndpoint {
     const { capabilityMode: mode, engine } = this.options;
-    return Object.freeze({ url: attachmentURL(minted, mode), protocols: Object.freeze(attachmentProtocols(minted, mode, historyRows, engine)) });
+    return Object.freeze({ url: attachmentURL(minted, mode), protocols: Object.freeze(attachmentProtocols(minted, mode, historyRows, engine, resume ? this.page.resumeProtocol() : undefined)) });
   }
 
   // Source-binding re-mint (the fast reconnect path), capturing the handle so

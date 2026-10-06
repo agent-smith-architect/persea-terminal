@@ -3,6 +3,7 @@ package broker
 
 import (
 	"errors"
+	"math"
 	"persea-terminal/internal/proto"
 	"persea-terminal/internal/terminal"
 	"persea-terminal/internal/unifiedjournal"
@@ -262,6 +263,35 @@ func (effects *UnifiedDevPaneEffects) openSnapshotTail(sessionID string) ([]unif
 // while the consumer writes the snapshot, and the consumer then reads what
 // arrived meanwhile from the journal before it joins the live queue.
 func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string, attachment *recordingReaderLease, catchUp bool) ([]unifiedjournal.Event, unifiedjournal.Geometry, *unifiedDevSubscriber, func(), error) {
+	opening, err := effects.openStream(sessionID, attachment, catchUp, nil)
+	return opening.events, opening.initial, opening.tail, opening.cancel, err
+}
+
+// unifiedOpening is where an attachment's output starts.
+type unifiedOpening struct {
+	// events is the committed stream after from, which the attachment
+	// replays: the whole stream, or only what a resuming page missed.
+	events []unifiedjournal.Event
+	from   unifiedjournal.CommittedCursor
+	// initial is the geometry in force at from: the generation's birth
+	// geometry, or the geometry at the resume position.
+	initial unifiedjournal.Geometry
+	// stream names the generation's committed stream; empty when a page
+	// cannot resume from it.
+	stream string
+	// resumed: from is the page's resume position, and the page keeps what it
+	// shows.
+	resumed bool
+	tail    *unifiedDevSubscriber
+	cancel  func()
+}
+
+// openStream reads an attachment's snapshot and registers its tail. A resume
+// that names the active generation's stream and a position in it reads only
+// the committed suffix after that position; the attachment then admits it
+// exactly as a whole snapshot, so its COMMIT still ends the catch-up. Anything
+// else reads the whole snapshot.
+func (effects *UnifiedDevPaneEffects) openStream(sessionID string, attachment *recordingReaderLease, catchUp bool, resume *proto.Resume) (unifiedOpening, error) {
 	releaseAttempt := func(lease *recordingReaderLease) {
 		lease.releaseSnapshot()
 		if attachment == nil {
@@ -281,7 +311,7 @@ func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string
 		effects.mu.Unlock()
 		effects.subscriberMu.Unlock()
 		if !ok {
-			return nil, unifiedjournal.Geometry{}, nil, nil, errors.New("unified target is not journal-ready")
+			return unifiedOpening{}, errors.New("unified target is not journal-ready")
 		}
 		if !effects.recordingReady(key) {
 			// The active generation can swap between lookup and receipt check.
@@ -292,7 +322,7 @@ func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string
 			if present && current != key {
 				continue
 			}
-			return nil, unifiedjournal.Geometry{}, nil, nil, errRecordingInitial
+			return unifiedOpening{}, errRecordingInitial
 		}
 
 		if edge := effects.snapshotReadEdge; edge != nil {
@@ -301,12 +331,26 @@ func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string
 		effects.journalMu.Lock()
 		var events []unifiedjournal.Event
 		var lease *recordingReaderLease
+		var initial unifiedjournal.Geometry
+		var from unifiedjournal.CommittedCursor
+		var stream string
 		var err error
+		resumed := false
 		if !effects.realm.UnifiedEligible(key) {
 			err = unifiedjournal.ErrInvalidated
-		} else {
+		} else if stream, err = effects.realm.Stream(key); err == nil {
+			if resume != nil && stream != "" && resume.Stream == stream {
+				position := unifiedjournal.CommittedCursor{Sequence: resume.Sequence, Offset: resume.Offset}
+				if effects.realm.ValidCursor(key, position) == nil {
+					from, resumed = position, true
+				}
+			}
 			var bytes int64
-			bytes, _, err = effects.realm.SnapshotAllocation(key)
+			if resumed {
+				bytes, _, err = effects.realm.SuffixAllocation(key, from, math.MaxInt64)
+			} else {
+				bytes, _, err = effects.realm.SnapshotAllocation(key)
+			}
 			if err == nil {
 				if attachment == nil {
 					lease, err = effects.readers.acquire(bytes)
@@ -315,15 +359,19 @@ func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string
 					err = lease.reserveSnapshot(bytes)
 				}
 			}
-			if err == nil {
+			if err == nil && resumed {
+				events, err = effects.realm.ReadCommittedEventsAfter(key, from, math.MaxInt64)
+				if err == nil {
+					initial, err = effects.realm.GeometryAt(key, from.Sequence)
+				}
+			} else if err == nil {
 				events, err = effects.realm.ReadCommittedEvents(key)
+				if err == nil {
+					initial, err = effects.realm.InitialGeometry(key)
+				}
 			}
 		}
-		var initial unifiedjournal.Geometry
-		if err == nil {
-			initial, err = effects.realm.InitialGeometry(key)
-		}
-		cursor := int64(0)
+		cursor := from.Sequence
 		if len(events) != 0 {
 			cursor = events[len(events)-1].Sequence
 		}
@@ -344,14 +392,16 @@ func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string
 				time.Sleep(time.Millisecond)
 				continue
 			}
-			return nil, unifiedjournal.Geometry{}, nil, nil, err
+			return unifiedOpening{}, err
 		}
 		if !active {
 			releaseAttempt(lease)
 			effects.subscriberMu.Unlock()
 			effects.journalMu.Unlock()
-			return nil, unifiedjournal.Geometry{}, nil, nil, errors.New("unified target is not journal-ready")
+			return unifiedOpening{}, errors.New("unified target is not journal-ready")
 		}
+		// A snapshot must hold every published event, or the tail would miss
+		// the gap.
 		if activeKey != key || effects.publishedSequence[key] > cursor {
 			releaseAttempt(lease)
 			effects.subscriberMu.Unlock()
@@ -367,7 +417,7 @@ func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string
 				time.Sleep(time.Millisecond)
 				continue
 			}
-			return nil, unifiedjournal.Geometry{}, nil, nil, errRecordingInitial
+			return unifiedOpening{}, errRecordingInitial
 		}
 		subscriber := &unifiedDevSubscriber{lease: lease, key: key, cursor: cursor, data: newRecordingTailQueue(), done: make(chan struct{}), verdict: make(chan struct{})}
 		subscriber.data.catchingUp = catchUp
@@ -388,9 +438,9 @@ func (effects *UnifiedDevPaneEffects) openSnapshotTailWithLease(sessionID string
 			subscriber.lease.detach()
 			effects.subscriberMu.Unlock()
 		}
-		return events, initial, subscriber, cancel, nil
+		return unifiedOpening{events: events, from: from, initial: initial, stream: stream, resumed: resumed, tail: subscriber, cancel: cancel}, nil
 	}
-	return nil, unifiedjournal.Geometry{}, nil, nil, errors.New("unified snapshot registration did not stabilize")
+	return unifiedOpening{}, errors.New("unified snapshot registration did not stabilize")
 }
 
 // readCatchUp is one catch-up round for a subscriber whose consumer has

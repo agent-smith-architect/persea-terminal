@@ -258,8 +258,11 @@ ever-growing chain of retired-generation errors.
 allocations across the provider. These are aggregate admission limits, not a
 claim that the whole broker fits the combined target below. `openSnapshotTail`
 reserves the copied event index, payload slab and serializer allowances before
-calling `ReadCommittedEvents`, under the existing journal/snapshot seam. Array
-charges include allocator rounding. A failed admission allocates no snapshot.
+calling `ReadCommittedEvents`, under the existing journal/snapshot seam. A
+resumed admission's snapshot is the committed suffix after the page's position
+(`SuffixAllocation`, `ReadCommittedEventsAfter`), reserved and registered the
+same way. Array charges include allocator rounding. A failed admission
+allocates no snapshot.
 
 Each admitted reader reserves 528 KiB for its writer and fixed queue state,
 a 64 KiB + 128 byte first-event allowance, and
