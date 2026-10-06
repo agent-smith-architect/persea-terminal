@@ -300,17 +300,19 @@ type tailLimitedBuffer struct {
 
 func (b *tailLimitedBuffer) Write(p []byte) (int, error) {
 	n := len(p)
-	if n >= b.max {
+	if n > b.max {
 		b.buf.Reset()
 		_, _ = b.buf.Write(p[n-b.max:])
 		b.truncated = true
 		return n, nil
 	}
 	if b.buf.Len()+n > b.max {
+		// Keep the newest bytes, moved to the front in place: no write copies
+		// the retained tail into a new allocation.
 		drop := b.buf.Len() + n - b.max
-		kept := append([]byte(nil), b.buf.Bytes()[drop:]...)
-		b.buf.Reset()
-		_, _ = b.buf.Write(kept)
+		kept := b.buf.Bytes()
+		copy(kept, kept[drop:])
+		b.buf.Truncate(len(kept) - drop)
 		b.truncated = true
 	}
 	_, _ = b.buf.Write(p)

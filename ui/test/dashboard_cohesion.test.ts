@@ -16,6 +16,8 @@ function server() {
   const response = (status = 200) => new Response(JSON.stringify({ version: 1, favorites, revision, available: true }), { status, headers: { ETag: `"${revision}"` } });
   return {
     calls, current: () => [...favorites], revision: () => revision,
+    // The server's own change: an inventory pass moving a favorite.
+    move: (from: string, to: string) => { favorites = favorites.map(item => item === from ? to : item); revision++; },
     loseNextReply: () => { loseReply = true; }, unavailable: (value: boolean) => { unavailable = value; },
     fetch: async (_input: string, init: RequestInit): Promise<Response> => {
       const headers = new Headers(init.headers); calls.push({ method: init.method!, revision: headers.get("If-Match") });
@@ -78,6 +80,24 @@ test("favorites deduplicate page reads and reject stale reads after a write", as
   assert(await other.set(scope(1), true), "write during read");
   release(new Response(JSON.stringify({ version: 1, favorites: [], revision: 0, available: true }), { headers: { ETag: '"0"' } })); await stale;
   equal(other.snapshot().favorites, [scope(1)], "old read overwrote completed save"); service.dispose(); other.dispose();
+});
+
+test("a revision announced during a write is read once the write ends", async () => {
+  const backend = server();
+  let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+  // The server moves the new favorite right after committing the write, and
+  // an inventory announces that revision while the write is still pending.
+  const service = new DashboardFavorites(async (url, init) => {
+    if (init.method !== "PUT") return backend.fetch(url, init);
+    await gate; const reply = await backend.fetch(url, init); backend.move(scope(1), scope(2)); return reply;
+  }, () => "csrf");
+  await service.load(); const saving = service.set(scope(1), true);
+  await service.load(true, 2); release();
+  assert(await saving, "write");
+  equal(backend.calls.filter(call => call.method === "GET").length, 2, "announced revision was not read after the write");
+  await service.load(true);
+  equal([service.snapshot().favorites, service.snapshot().revision], [[scope(2)], 2], "the read after the write");
+  service.dispose();
 });
 
 test("favorite wire records reject capabilities, duplicates and revision mismatch", () => {

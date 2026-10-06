@@ -123,6 +123,12 @@ func dashboardScopeAuthority(scope string) (proto.Authority, bool) {
 // form would differ between Go and JavaScript, so a rebound favorite always
 // matches the page's own scope.
 func dashboardScope(a proto.Authority) (string, bool) {
+	// Go escapes U+2028 and U+2029; JSON.stringify writes them as they are.
+	for _, field := range []string{a.Realm, a.Server, a.SelectorKind, a.SelectorValue, a.BootID, a.SessionID} {
+		if strings.ContainsAny(field, "\u2028\u2029") {
+			return "", false
+		}
+	}
 	var b bytes.Buffer
 	encoder := json.NewEncoder(&b)
 	encoder.SetEscapeHTML(false)
@@ -130,7 +136,7 @@ func dashboardScope(a proto.Authority) (string, bool) {
 		return "", false
 	}
 	scope := strings.TrimSuffix(b.String(), "\n")
-	if strings.Contains(scope, `\u2028`) || strings.Contains(scope, `\u2029`) || !validDashboardScope(scope) {
+	if !validDashboardScope(scope) {
 		return "", false
 	}
 	parsed, ok := dashboardScopeAuthority(scope)
@@ -303,13 +309,19 @@ func (s *dashboardPreferencesStore) commitLocked(operator string, next dashboard
 // inventory read: a favorite whose session is live records its current name;
 // a favorite whose session is gone moves to the live session with the same
 // realm, server and name, when that server's list is complete and no other
-// favorite holds that session. The newest favorite wins a name. It returns
-// the record's revision, which changes only when something moved.
+// favorite holds that session. The newest favorite wins a name, and the
+// others waiting for it are dropped: a name on one tmux server belongs to one
+// session at a time, so they are dead duplicates that would otherwise take
+// the session back after the operator removed its star. It returns the
+// record's revision, which changes only when something changed.
 func (s *dashboardPreferencesStore) reconcile(operator string, live []aliasSession, complete map[string]bool) (uint64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	current, exists := s.records[operator]
-	if !exists || s.file.fault != nil {
+	if s.file.fault != nil {
+		return current.Revision, errDashboardPreferencesUnavailable
+	}
+	if !exists {
 		return current.Revision, nil
 	}
 	byIncarnation := map[string]aliasSession{}
@@ -325,27 +337,38 @@ func (s *dashboardPreferencesStore) reconcile(operator string, live []aliasSessi
 		}
 	}
 	next := copyDashboardRecord(current)
+	if next.Names == nil {
+		next.Names = map[string]string{}
+	}
+	nameKey := func(a proto.Authority, name string) string { return a.Realm + "\x00" + a.Server + "\x00" + name }
 	held := map[string]bool{}
+	owned := map[string]bool{}
 	stale := []int{}
 	for i, scope := range next.Favorites {
 		a, ok := dashboardScopeAuthority(scope)
 		if target, running := byIncarnation[authorityKey(a)]; ok && running {
 			held[authorityKey(a)] = true
-			if next.Names == nil {
-				next.Names = map[string]string{}
-			}
+			owned[nameKey(a, target.Name)] = true
 			next.Names[scope] = target.Name
 		} else if ok {
 			stale = append(stale, i)
 		}
 	}
+	dropped := map[string]bool{}
 	for j := len(stale) - 1; j >= 0; j-- {
 		i := stale[j]
 		scope := next.Favorites[i]
 		a, _ := dashboardScopeAuthority(scope)
 		name, known := next.Names[scope]
-		target, found := byName[a.Realm+"\x00"+a.Server+"\x00"+name]
-		if !known || !found || held[authorityKey(target.Authority)] {
+		if !known {
+			continue
+		}
+		if owned[nameKey(a, name)] {
+			dropped[scope] = true
+			continue
+		}
+		target, found := byName[nameKey(a, name)]
+		if !found || held[authorityKey(target.Authority)] {
 			continue
 		}
 		moved, ok := dashboardScope(target.Authority)
@@ -353,8 +376,16 @@ func (s *dashboardPreferencesStore) reconcile(operator string, live []aliasSessi
 			continue
 		}
 		held[authorityKey(target.Authority)] = true
+		owned[nameKey(a, name)] = true
 		delete(next.Names, scope)
 		next.Favorites[i], next.Names[moved] = moved, target.Name
+	}
+	next.Favorites = slices.DeleteFunc(next.Favorites, func(scope string) bool { return dropped[scope] })
+	for scope := range dropped {
+		delete(next.Names, scope)
+	}
+	if len(next.Names) == 0 {
+		next.Names = nil
 	}
 	if slices.Equal(current.Favorites, next.Favorites) && maps.Equal(current.Names, next.Names) {
 		return current.Revision, nil

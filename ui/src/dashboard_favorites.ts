@@ -35,6 +35,9 @@ export class DashboardFavorites {
   private readonly pending = new Set<string>();
   private readonly listeners = new Set<(state: DashboardFavoritesSnapshot) => void>();
   private readFlight?: Promise<void>;
+  // The newest revision the server is known to hold (an inventory reports
+  // it); a read that brings an older one is followed by another read.
+  private wanted = 0;
   private queue: Promise<unknown> = Promise.resolve();
   private epoch = 0;
   private disposed = false;
@@ -50,11 +53,18 @@ export class DashboardFavorites {
     return () => { this.listeners.delete(listener); };
   }
 
-  load(force = false): Promise<void> {
+  load(force = false, atLeast = 0): Promise<void> {
+    this.wanted = Math.max(this.wanted, atLeast);
     if (this.disposed || this.pending.size || !force && this.loadedAt && Date.now() - this.loadedAt < 60_000) return Promise.resolve();
     if (this.readFlight) return this.readFlight;
     const epoch = this.epoch;
-    const job = this.read(epoch).finally(() => { if (this.readFlight === job) this.readFlight = undefined; });
+    const wanted = this.wanted;
+    const job = this.read(epoch).finally(() => {
+      if (this.readFlight === job) this.readFlight = undefined;
+      // A read that started before a newer revision was announced may have
+      // brought an older one.
+      if (this.wanted > wanted && this.current.revision < this.wanted) void this.load(true);
+    });
     this.readFlight = job; return job;
   }
 
@@ -85,18 +95,26 @@ export class DashboardFavorites {
     const job = this.queue.then(() => this.save(scopes, favorite)).finally(() => {
       for (const scope of scopes) this.pending.delete(scope);
       this.publish();
+      // A newer revision announced while this change was pending.
+      if (!this.pending.size && this.current.revision < this.wanted) void this.load(true);
     });
     this.queue = job.catch(() => undefined);
     return job;
   }
 
   private async save(scopes: readonly string[], favorite: boolean): Promise<boolean> {
+    let conflicted = false;
     for (let attempt = 0; attempt < 3 && !this.disposed; attempt++) {
       const favorites = favorite ? [...new Set([...this.current.favorites, ...scopes])] : this.current.favorites.filter(scope => !scopes.includes(scope));
       if (favorites.length > DASHBOARD_FAVORITES_LIMIT) {
         this.message = `The dashboard can save ${DASHBOARD_FAVORITES_LIMIT} favorites. Remove one before adding another.`; return false;
       }
-      if (JSON.stringify(favorites) === JSON.stringify(this.current.favorites)) return true;
+      if (JSON.stringify(favorites) === JSON.stringify(this.current.favorites)) {
+        // A star removed elsewhere, or moved to its session's new identity
+        // while this removal was on its way: the operator must look again.
+        if (conflicted && !favorite) { this.message = "Favorites changed while saving. Use Refresh, then try again."; return false; }
+        return true;
+      }
       const revision = this.current.revision;
       try {
         const response = await this.fetcher("/api/dashboard-preferences", {
@@ -108,7 +126,7 @@ export class DashboardFavorites {
         const record = parseDashboardFavorites(await response.json(), response.headers.get("ETag"));
         if (!record.available || record.revision < revision || response.ok && record.revision !== revision + 1) throw new Error("Invalid favorites response");
         this.current = record; this.loaded = true; this.loadedAt = Date.now();
-        if (response.status === 412) continue;
+        if (response.status === 412) { conflicted = true; continue; }
         if (!scopes.every(scope => record.favorites.includes(scope) === favorite)) throw new Error("Favorites were not saved");
         this.message = ""; return true;
       } catch {

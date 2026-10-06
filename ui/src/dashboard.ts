@@ -797,7 +797,7 @@ export class Dashboard {
       preserveFocus(() => this.render(inventory));
       // The inventory just moved favorites with their sessions (a tmux restart):
       // read them now instead of at the next minute.
-      if (inventory.favoritesRevision !== undefined && inventory.favoritesRevision > this.favorites.snapshot().revision) void this.favorites.load(true);
+      if (inventory.favoritesRevision !== undefined && inventory.favoritesRevision > this.favorites.snapshot().revision) void this.favorites.load(true, inventory.favoritesRevision);
       if (reason === "initial" || reason === "manual" || reason === "mutation" || !this.workspacePanel.hidden) void this.refreshWorkspaces();
       this.status.textContent = "";
     } catch (error) {

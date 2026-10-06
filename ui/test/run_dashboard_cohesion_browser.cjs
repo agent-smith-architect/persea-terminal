@@ -185,6 +185,50 @@ async function main() {
       assert(count('/api/dashboard-preferences') === favoriteReads + 1, `A moved favorite needed ${count('/api/dashboard-preferences') - favoriteReads} favorites reads`);
     });
 
+    // The server moves qt1's favorite to its replacement, as its inventory pass
+    // does after a tmux restart.
+    const rebind = () => {
+      const old = scope(fixture.state.sessions[0]);
+      fixture.state.sessions[0] = session('local', 1, { authority: { ...fixture.state.sessions[0].authority, session_created: fixture.state.sessions[0].authority.session_created + 1 } });
+      fixture.state.favorites = { ...fixture.state.favorites, favorites: fixture.state.favorites.favorites.map(item => item === old ? scope(fixture.state.sessions[0]) : item), revision: fixture.state.favorites.revision + 1 };
+    };
+    const starred = name => row(name).locator('.session-pin').getAttribute('aria-pressed');
+
+    await check('shared favorites read again when inventory announces a newer revision during a read', async () => {
+      // Refresh reads favorites and inventory at once. The favorites reply,
+      // held back, carries the revision before the move; the inventory announces
+      // the move first.
+      const before = structuredClone(fixture.state.favorites);
+      let release, held; const gate = new Promise(resolve => { release = resolve; }), started = new Promise(resolve => { held = resolve; });
+      let reads = 0;
+      await page.route('**/api/dashboard-preferences', async route => {
+        if (route.request().method() !== 'GET' || ++reads !== 1) return route.continue();
+        held(); await gate;
+        await route.fulfill({ status: 200, headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ETag: `"${before.revision}"` }, body: JSON.stringify(before) });
+      });
+      try {
+        rebind();
+        await refresh(); await started; release();
+        await page.waitForFunction(() => [...document.querySelectorAll('.realm-card[data-realm="local"] .session-card')].some(card => /^qt1$/.test(card.querySelector('.session-tmux-name, .session-name')?.textContent ?? '') && card.querySelector('.session-pin')?.getAttribute('aria-pressed') === 'true'), undefined, { timeout: 5_000 });
+        assert(reads === 2, `The announced revision needed ${reads} favorites reads`);
+      } finally { await page.unroute('**/api/dashboard-preferences'); }
+    });
+
+    await check('shared favorites report a removal that a server move overtook', async () => {
+      // The page still shows the old identity; its removal meets the moved
+      // record (412) and has nothing left to remove. Success would be false:
+      // the replacement stays a favorite.
+      rebind(); const moved = scope(fixture.state.sessions[0]);
+      const conflict = page.waitForResponse(response => response.url().endsWith('/api/dashboard-preferences') && response.request().method() === 'PUT');
+      await row('qt1').locator('.session-pin').click();
+      assert((await conflict).status() === 412, 'The removal did not meet the moved record');
+      await page.waitForFunction(() => [...document.querySelectorAll('.session-pin')].every(node => node.getAttribute('aria-busy') === 'false'));
+      assert(await page.locator('.dashboard-favorites-status').textContent() === 'Favorites changed while saving. Use Refresh, then try again.', 'The overtaken removal reported success');
+      assert(fixture.state.favorites.favorites.includes(moved), 'The page removed the replacement by itself');
+      await refresh();
+      assert(await starred('qt1') === 'true', 'The replacement lost its star');
+    });
+
     await check('one creation form explicitly selects a user and saves name plus optional alias', async () => {
       await page.getByRole('button', { name: 'New session', exact: true }).click();
       const form = page.locator('.session-create');
