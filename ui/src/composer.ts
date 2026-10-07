@@ -881,6 +881,12 @@ export class Composer {
   private send(event: Event, override: boolean, refocusTerminal = true): void {
     if (!event.isTrusted || this.destroyed) return;
     event.preventDefault();
+    // A held Insert changes nothing: the pending one still owns the
+    // composer's delivery state.
+    if (this.pendingInsert) {
+      this.render("Waiting for the last Insert to reach the terminal.");
+      return;
+    }
     const availability = this.options.availability();
     if (!availability.canInject) {
       this.contentState = "blocked";
@@ -905,10 +911,6 @@ export class Composer {
       this.contentState = "guard";
       this.guardTrips += 1;
       this.render();
-      return;
-    }
-    if (this.pendingInsert) {
-      this.render("Waiting for the last Insert to reach the terminal.");
       return;
     }
     // The restore slot holds the text only: a staged path could outlive its
@@ -1016,7 +1018,7 @@ export class Composer {
     this.joinButton.hidden = this.contentState !== "guard";
     this.overrideButton.hidden = this.contentState !== "guard";
     this.restoreButton.hidden = !(text.length === 0 && this.lastRestore.length > 0) || this.pendingInsert !== undefined;
-    this.clearButton.disabled = text.length === 0 && this.attachments.length === 0;
+    this.clearButton.disabled = (text.length === 0 && this.attachments.length === 0) || this.pendingInsert !== undefined;
     this.sendButton.disabled = !hasContent || !availability.canInject || this.contentState === "guard" || uploadHint !== "" || this.pendingInsert !== undefined;
     this.sendButton.setAttribute("aria-disabled", this.sendButton.disabled ? "true" : "false");
     if (this.sendButton.disabled) this.sendButton.setAttribute("aria-describedby", this.status.id);
@@ -1628,8 +1630,10 @@ export class Composer {
   // Clear clears the whole draft including chips (aborting in-flight
   // uploads); the restore slot keeps the TEXT only, because a staged path
   // could outlive its TTL and a restored chip would then lie.
+  // Clear waits, like Insert and Restore, while an Insert waits for its
+  // result: that result may need the restore slot.
   private readonly onClear: EventListener = (event) => {
-    if (!event.isTrusted || this.destroyed || (this.text().length === 0 && this.attachments.length === 0)) return;
+    if (!event.isTrusted || this.destroyed || (this.text().length === 0 && this.attachments.length === 0) || this.pendingInsert) return;
     this.lastRestore = this.text();
     this.lastRestoreDroppedImages = this.attachments.length > 0;
     this.restoredWithoutImages = false;

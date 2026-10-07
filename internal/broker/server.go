@@ -2464,8 +2464,11 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 			id, ok := inputs.receive()
 			if !ok {
 				// Results are not reaching the front door; a fatal control
-				// would wait behind them. Closing is the verdict.
+				// would wait behind them. Closing is the verdict, and it
+				// comes first: the output writer may be parked on this
+				// connection, and teardown waits for it.
 				logAttachment("input_backlog", ctrl.Authority, epochID)
+				_ = conn.Close()
 				return
 			}
 			typed.InputID = id

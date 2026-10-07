@@ -179,7 +179,7 @@ assert((source.match(/this\.iosBackspace\.onXtermOperationComplete\(\);/g) ?? []
   && source.includes("const onRouterPaste = () => this.iosBackspace.onXtermOperationComplete();")
   && source.includes("Selection/copy changes document selection"),
   "native paste, the one text-delivery sink, and coarse Select focus restoration must be the only router reconciliations");
-assert(source.includes("return this.deliverText(text, true)") && source.includes("return this.deliverText(normalized, !coarse)"),
+assert(source.includes("return this.deliverText(text, true, onDelivery)") && source.includes("return this.deliverText(normalized, !coarse)"),
   "Composer and explicit Clipboard Send must share the corrected delivery sink");
 
 process.stdout.write("terminal interaction structural contracts: PASS\n");
