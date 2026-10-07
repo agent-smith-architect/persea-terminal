@@ -277,14 +277,14 @@ func TestInventoryEffectsFollowObservationOrder(t *testing.T) {
 	old, replacement := favoriteAuthority("$1", 42, 201), favoriteAuthority("$5", 77, 900)
 	oldScope, _ := dashboardScope(old)
 	replacementScope, _ := dashboardScope(replacement)
-	if _, ok := s.inventoryEffects(1, operator, []aliasSession{{Authority: old, Name: "shell"}}, complete); !ok {
+	if _, ok := s.inventoryEffects(1, operator, []aliasSession{{Authority: old, Name: "shell"}}, complete, nil); !ok {
 		t.Fatal("favorites unavailable")
 	}
 	if _, err := s.dashboardPreferences.put(operator, dashboardPreferences{Version: 1, Favorites: []string{oldScope}}, 0, s.inventorySessionName); err != nil {
 		t.Fatal(err)
 	}
-	newer, _ := s.inventoryEffects(3, operator, []aliasSession{{Authority: replacement, Name: "shell"}}, complete)
-	late, _ := s.inventoryEffects(2, operator, []aliasSession{{Authority: old, Name: "shell"}}, complete)
+	newer, _ := s.inventoryEffects(3, operator, []aliasSession{{Authority: replacement, Name: "shell"}}, complete, nil)
+	late, _ := s.inventoryEffects(2, operator, []aliasSession{{Authority: old, Name: "shell"}}, complete, nil)
 	record, _ := s.dashboardPreferences.get(operator)
 	if late != newer || !reflect.DeepEqual(record.Favorites, []string{replacementScope}) {
 		t.Fatalf("a late inventory moved the favorite back: revision %d after %d, favorites %q", late, newer, record.Favorites)
@@ -295,14 +295,14 @@ func TestInventoryEffectsFollowObservationOrder(t *testing.T) {
 
 	other := favoriteAuthority("$6", 77, 901)
 	otherScope, _ := dashboardScope(other)
-	s.inventoryEffects(4, operator, []aliasSession{{Authority: replacement, Name: "shell"}, {Authority: other, Name: "logs"}}, complete)
-	s.inventoryEffects(5, operator, nil, map[string]bool{})
+	s.inventoryEffects(4, operator, []aliasSession{{Authority: replacement, Name: "shell"}, {Authority: other, Name: "logs"}}, complete, nil)
+	s.inventoryEffects(5, operator, nil, map[string]bool{}, nil)
 	record, _ = s.dashboardPreferences.get(operator)
 	saved, err := s.dashboardPreferences.put(operator, dashboardPreferences{Version: 1, Favorites: []string{replacementScope, otherScope}}, record.Revision, s.inventorySessionName)
 	if err != nil || saved.Names[otherScope] != "logs" {
 		t.Fatalf("a star added while its server's list was incomplete lost its name: %+v %v", saved, err)
 	}
-	s.inventoryEffects(6, operator, nil, complete)
+	s.inventoryEffects(6, operator, nil, complete, nil)
 	if s.inventorySessionName(otherScope) != "" {
 		t.Fatal("a complete list kept the name of a session it no longer has")
 	}
@@ -331,7 +331,7 @@ func TestFavoritePutAndInventoryDoNotDeadlock(t *testing.T) {
 	}()
 	<-lookingUp
 	go func() {
-		s.inventoryEffects(1, "operator", []aliasSession{{Authority: a, Name: "shell"}}, map[string]bool{"local\x00private": true})
+		s.inventoryEffects(1, "operator", []aliasSession{{Authority: a, Name: "shell"}}, map[string]bool{"local\x00private": true}, nil)
 		close(inventory)
 	}()
 	// The inventory now holds its effects and waits for the store.
@@ -371,17 +371,17 @@ func TestFavoriteMissingFromAnIncompleteListStays(t *testing.T) {
 	renamed, other := favoriteAuthority("$1", 42, 201), favoriteAuthority("$2", 42, 202)
 	renamedScope, _ := dashboardScope(renamed)
 	otherScope, _ := dashboardScope(other)
-	s.inventoryEffects(1, "operator", []aliasSession{{Authority: renamed, Name: "shell"}}, complete)
+	s.inventoryEffects(1, "operator", []aliasSession{{Authority: renamed, Name: "shell"}}, complete, nil)
 	if _, err := s.dashboardPreferences.put("operator", dashboardPreferences{Version: 1, Favorites: []string{renamedScope}}, 0, s.inventorySessionName); err != nil {
 		t.Fatal(err)
 	}
-	revision, _ := s.inventoryEffects(2, "operator", []aliasSession{{Authority: other, Name: "shell"}}, map[string]bool{})
+	revision, _ := s.inventoryEffects(2, "operator", []aliasSession{{Authority: other, Name: "shell"}}, map[string]bool{}, nil)
 	if _, err := s.dashboardPreferences.put("operator", dashboardPreferences{Version: 1, Favorites: []string{renamedScope, otherScope}}, revision, s.inventorySessionName); err != nil {
 		t.Fatal(err)
 	}
-	s.inventoryEffects(3, "operator", []aliasSession{{Authority: other, Name: "shell"}}, map[string]bool{})
+	s.inventoryEffects(3, "operator", []aliasSession{{Authority: other, Name: "shell"}}, map[string]bool{}, nil)
 	partial, _ := s.dashboardPreferences.get("operator")
-	s.inventoryEffects(4, "operator", []aliasSession{{Authority: renamed, Name: "renamed"}, {Authority: other, Name: "shell"}}, complete)
+	s.inventoryEffects(4, "operator", []aliasSession{{Authority: renamed, Name: "renamed"}, {Authority: other, Name: "shell"}}, complete, nil)
 	record, _ := s.dashboardPreferences.get("operator")
 	want := []string{renamedScope, otherScope}
 	if !reflect.DeepEqual(partial.Favorites, want) || !reflect.DeepEqual(record.Favorites, want) || record.Names[renamedScope] != "renamed" {
@@ -498,7 +498,7 @@ func TestFullFavoritesMoveBeforeTheyDrop(t *testing.T) {
 	}
 	complete := map[string]bool{"local\x00private": true}
 	renamed, replacement := favoriteAuthority("$1", 42, 201), favoriteAuthority("$1", 43, 301)
-	s.inventoryEffects(1, "operator", []aliasSession{{Authority: renamed, Name: "shell"}}, complete)
+	s.inventoryEffects(1, "operator", []aliasSession{{Authority: renamed, Name: "shell"}}, complete, nil)
 	favorites := []string{}
 	for i := 0; i < dashboardFavoritesLimit; i++ {
 		value, _ := dashboardScope(favoriteAuthority(fmt.Sprintf("$%d", i+1), 42, int64(201+i)))
@@ -507,7 +507,7 @@ func TestFullFavoritesMoveBeforeTheyDrop(t *testing.T) {
 	if _, err := s.dashboardPreferences.put("operator", dashboardPreferences{Version: 1, Favorites: favorites}, 0, s.inventorySessionName); err != nil {
 		t.Fatal(err)
 	}
-	s.inventoryEffects(2, "operator", []aliasSession{{Authority: replacement, Name: "shell"}}, complete)
+	s.inventoryEffects(2, "operator", []aliasSession{{Authority: replacement, Name: "shell"}}, complete, nil)
 	record, _ := s.dashboardPreferences.get("operator")
 	moved, _ := dashboardScope(replacement)
 	want := append([]string{moved}, favorites[2:]...)
@@ -524,4 +524,208 @@ func removed(before, after []string) []string {
 		}
 	}
 	return out
+}
+
+// gatedBroker answers each inventory request only when the test sends its
+// reply, so a test can order two overlapping inventory reads.
+type gatedInventory struct {
+	reply chan []proto.ServerInventory
+	sent  chan struct{}
+}
+
+func gatedBroker(t *testing.T) (string, <-chan gatedInventory) {
+	t.Helper()
+	socket := filepath.Join(shortTestDir(t), "broker.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan struct{})
+	t.Cleanup(func() { close(done); _ = listener.Close() })
+	requests := make(chan gatedInventory, 8)
+	go func() {
+		for {
+			c, err := listener.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.Close()
+				_ = c.SetDeadline(time.Now().Add(10 * time.Second))
+				if _, err := proto.ReadFrame(c); err != nil {
+					return
+				}
+				if writeControl(c, proto.Control{Type: "hello_ok", V: 1}) != nil {
+					return
+				}
+				if _, err := proto.ReadFrame(c); err != nil {
+					return
+				}
+				request := gatedInventory{make(chan []proto.ServerInventory, 1), make(chan struct{})}
+				select {
+				case requests <- request:
+				case <-done:
+					return
+				}
+				select {
+				case servers := <-request.reply:
+					_ = writeControl(c, proto.Control{Type: "inventory_ok", Servers: servers})
+					close(request.sent)
+				case <-done:
+				}
+			}()
+		}
+	}()
+	return socket, requests
+}
+
+func (g gatedInventory) answer(t *testing.T, servers ...proto.ServerInventory) {
+	t.Helper()
+	g.reply <- servers
+	select {
+	case <-g.sent:
+	case <-time.After(5 * time.Second):
+		t.Fatal("inventory reply was not written")
+	}
+}
+
+func nextInventory(t *testing.T, requests <-chan gatedInventory) gatedInventory {
+	t.Helper()
+	select {
+	case request := <-requests:
+		return request
+	case <-time.After(5 * time.Second):
+		t.Fatal("inventory request did not arrive")
+	}
+	return gatedInventory{}
+}
+
+// overlapFixture serves a front door with two realms behind gated brokers,
+// "r" (one server, "main") and "slow", and a full favorites list.
+type overlapFixture struct {
+	s          *Server
+	main, slow <-chan gatedInventory
+}
+
+func newOverlapFixture(t *testing.T, favorites []string, names map[string]string) *overlapFixture {
+	t.Helper()
+	mainSocket, mainRequests := gatedBroker(t)
+	slowSocket, slowRequests := gatedBroker(t)
+	cfg := ergoFrontConfig(t)
+	cfg.Realms[0].Socket = mainSocket
+	slow := cfg.Realms[0]
+	slow.Name, slow.Socket = "slow", slowSocket
+	cfg.Realms = append(cfg.Realms, slow)
+	cfg.HandleCapacity = 2048
+	s := newServer(cfg, ".", cfg.Ingress.CanonicalHost)
+	if s.dashboardPreferencesErr != nil || s.aliasErr != nil {
+		t.Fatal(s.dashboardPreferencesErr, s.aliasErr)
+	}
+	if _, err := s.dashboardPreferences.put(cfg.Ingress.OperatorLogin, dashboardPreferences{Version: 1, Favorites: favorites}, 0, func(scope string) string { return names[scope] }); err != nil {
+		t.Fatal(err)
+	}
+	return &overlapFixture{s: s, main: mainRequests, slow: slowRequests}
+}
+
+// read starts an inventory read; finish waits for its reply.
+func (f *overlapFixture) read(t *testing.T) func() {
+	done := make(chan int, 1)
+	go func() { done <- ergoRequest(t, f.s, "GET", "http://localhost/api/inventory", "", nil, nil).Code }()
+	return func() {
+		t.Helper()
+		select {
+		case code := <-done:
+			if code != 200 {
+				t.Fatalf("inventory=%d", code)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("inventory did not finish")
+		}
+	}
+}
+
+func (f *overlapFixture) favorites() dashboardPreferenceRecord {
+	record, _ := f.s.dashboardPreferences.get(f.s.cfg.Ingress.OperatorLogin)
+	return record
+}
+
+func overlapAuthority(id string) proto.Authority {
+	return proto.Authority{Realm: "r", Server: "main", UID: uint32(os.Geteuid()), SelectorKind: "socket_name", SelectorValue: "main", BootID: "b", ServerPID: 42, ServerStart: 100, SessionID: id, SessionCreated: 200}
+}
+
+func overlapScope(a proto.Authority) string { scope, _ := dashboardScope(a); return scope }
+
+func overlapList(sessions ...proto.Session) proto.ServerInventory {
+	return proto.ServerInventory{Label: "main", Status: "ok", Sessions: sessions}
+}
+
+// fullOverlapList is a full favorites list whose first favorite is first;
+// the others are running sessions returned as others.
+func fullOverlapList(first proto.Authority, name string) ([]string, map[string]string, []proto.Session) {
+	favorites, names, others := []string{overlapScope(first)}, map[string]string{overlapScope(first): name}, []proto.Session{}
+	for i := 1; i < dashboardFavoritesLimit; i++ {
+		a := overlapAuthority(fmt.Sprintf("$%d", 900+i))
+		favorites, names[overlapScope(a)] = append(favorites, overlapScope(a)), fmt.Sprintf("f%d", i)
+		others = append(others, proto.Session{Authority: a, Name: names[overlapScope(a)], Width: 80, Height: 24})
+	}
+	return favorites, names, others
+}
+
+func overlapSession(a proto.Authority, name string) proto.Session {
+	return proto.Session{Authority: a, Name: name, Width: 80, Height: 24}
+}
+
+// Two inventory reads overlap. The later read sees the main realm while a
+// session restarts (gone), then waits for another realm; the earlier read
+// sees the restarted session, moves its favorite and finishes first. The
+// later read's older view must not drop the favorite that just moved.
+func TestOverlappingInventoriesDoNotDropOnAnOlderView(t *testing.T) {
+	old, restarted := overlapAuthority("$1"), overlapAuthority("$501")
+	favorites, names, others := fullOverlapList(old, "kept")
+	f := newOverlapFixture(t, favorites, names)
+	first := f.read(t)
+	firstMain, firstSlow := nextInventory(t, f.main), nextInventory(t, f.slow)
+	firstSlow.answer(t)
+	second := f.read(t)
+	secondMain, secondSlow := nextInventory(t, f.main), nextInventory(t, f.slow)
+	secondMain.answer(t, overlapList(others...))
+	firstMain.answer(t, overlapList(append([]proto.Session{overlapSession(restarted, "kept")}, others...)...))
+	first()
+	if moved := f.favorites(); len(moved.Favorites) != dashboardFavoritesLimit || moved.Favorites[0] != overlapScope(restarted) {
+		t.Fatalf("the newer view did not move the favorite: %d favorites", len(moved.Favorites))
+	}
+	secondSlow.answer(t)
+	second()
+	if after := f.favorites(); len(after.Favorites) != dashboardFavoritesLimit || after.Favorites[0] != overlapScope(restarted) || after.Names[overlapScope(restarted)] != "kept" {
+		t.Fatalf("an older view dropped the moved favorite: %d favorites, first %q", len(after.Favorites), after.Favorites[0])
+	}
+}
+
+// The same overlap across a rename: the older view still has the old name.
+// It must not record that name, or the session's next restart under its
+// current name would lose the favorite.
+func TestOverlappingInventoriesKeepTheNewerName(t *testing.T) {
+	session, restarted := overlapAuthority("$1"), overlapAuthority("$501")
+	favorites, names, others := fullOverlapList(session, "before")
+	f := newOverlapFixture(t, favorites, names)
+	first := f.read(t)
+	firstMain, firstSlow := nextInventory(t, f.main), nextInventory(t, f.slow)
+	firstSlow.answer(t)
+	second := f.read(t)
+	secondMain, secondSlow := nextInventory(t, f.main), nextInventory(t, f.slow)
+	secondMain.answer(t, overlapList(append([]proto.Session{overlapSession(session, "before")}, others...)...))
+	firstMain.answer(t, overlapList(append([]proto.Session{overlapSession(session, "after")}, others...)...))
+	first()
+	secondSlow.answer(t)
+	second()
+	if name := f.favorites().Names[overlapScope(session)]; name != "after" || f.s.inventorySessionName(overlapScope(session)) != "after" {
+		t.Fatalf("an older view recorded the old name: favorite %q, inventory %q", name, f.s.inventorySessionName(overlapScope(session)))
+	}
+	third := f.read(t)
+	nextInventory(t, f.main).answer(t, overlapList(append([]proto.Session{overlapSession(restarted, "after")}, others...)...))
+	nextInventory(t, f.slow).answer(t)
+	third()
+	if after := f.favorites(); len(after.Favorites) != dashboardFavoritesLimit || after.Favorites[0] != overlapScope(restarted) {
+		t.Fatalf("the restarted session lost its favorite: %d favorites, first %q", len(after.Favorites), after.Favorites[0])
+	}
 }

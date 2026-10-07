@@ -19,6 +19,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -118,6 +119,11 @@ type Server struct {
 	inventoryTurn        atomic.Uint64
 	inventoryEffectsMu   sync.Mutex
 	inventoryEffectsTurn uint64
+	// inventoryClock orders realm fetches: each takes a tick as it starts and
+	// one as it ends. realmListsApplied holds, per realm, the end of the last
+	// fetch whose view was applied (under inventoryEffectsMu).
+	inventoryClock    atomic.Uint64
+	realmListsApplied map[string]uint64
 	// sessionNames maps each session of the inventories (authorityKey) to its
 	// tmux name, so a new favorite records the name of its session. A server
 	// whose latest list is incomplete keeps its earlier names. sessionNamesMu
@@ -620,7 +626,13 @@ func dial(path string, brokerUID uint32) (net.Conn, error) {
 type realmInventoryResult struct {
 	servers []proto.ServerInventory
 	err     error
+	fetch   realmFetch
 }
+
+// realmFetch is when an inventory read fetched one realm, on inventoryClock.
+// A fetch that started after another ended saw the realm later; two that
+// overlap may have seen it in either order.
+type realmFetch struct{ started, ended uint64 }
 
 func fetchRealmInventory(realm config.Realm) realmInventoryResult {
 	c, err := dial(realm.Socket, realm.BrokerUID)
@@ -660,7 +672,9 @@ func (s *Server) inventory(w http.ResponseWriter, r *http.Request) {
 	for i, realm := range s.cfg.Realms {
 		go func() {
 			defer wg.Done()
+			started := s.inventoryClock.Add(1)
 			results[i] = fetchRealmInventory(realm)
+			results[i].fetch = realmFetch{started, s.inventoryClock.Add(1)}
 		}()
 	}
 	wg.Wait()
@@ -738,6 +752,12 @@ func (s *Server) inventory(w http.ResponseWriter, r *http.Request) {
 	}
 	live := make([]aliasSession, 0, len(all))
 	complete := map[string]bool{}
+	fetched := map[string]realmFetch{}
+	for i, realm := range s.cfg.Realms {
+		if results[i].err == nil {
+			fetched[realm.Name] = results[i].fetch
+		}
+	}
 	for _, rv := range views {
 		for _, sv := range rv.Servers {
 			if sv.complete {
@@ -749,7 +769,7 @@ func (s *Server) inventory(w http.ResponseWriter, r *http.Request) {
 		live = append(live, aliasSession{Authority: v.authority, Name: v.Name})
 	}
 	response := map[string]any{"realms": views, "snapshot_expires_at": expires, "image_upload": s.cfg.ImageUploadMaxBytes > 0}
-	if revision, ok := s.inventoryEffects(turn, operator, live, complete); ok {
+	if revision, ok := s.inventoryEffects(turn, operator, live, complete, fetched); ok {
 		response["favorites_revision"] = revision
 	}
 	records := s.aliases.list()
@@ -769,7 +789,7 @@ func (s *Server) inventory(w http.ResponseWriter, r *http.Request) {
 // inventoryEffects records what an inventory observed — alias and favorite
 // reconciliation and the session names — unless a newer inventory already
 // did, and returns the operator's favorites revision.
-func (s *Server) inventoryEffects(turn uint64, operator string, live []aliasSession, complete map[string]bool) (uint64, bool) {
+func (s *Server) inventoryEffects(turn uint64, operator string, live []aliasSession, complete map[string]bool, fetched map[string]realmFetch) (uint64, bool) {
 	s.inventoryEffectsMu.Lock()
 	defer s.inventoryEffectsMu.Unlock()
 	if turn <= s.inventoryEffectsTurn {
@@ -777,6 +797,29 @@ func (s *Server) inventoryEffects(turn uint64, operator string, live []aliasSess
 		return record.Revision, available && operator != ""
 	}
 	s.inventoryEffectsTurn = turn
+	// Request order is not fetch order. A realm's view is applied only when
+	// it was fetched after the last applied view of that realm ended; an
+	// older or overlapping view is left out entirely, so it can neither
+	// record names nor move or drop anything.
+	if s.realmListsApplied == nil {
+		s.realmListsApplied = map[string]uint64{}
+	}
+	stale := map[string]bool{}
+	for realm, fetch := range fetched {
+		if fetch.started < s.realmListsApplied[realm] {
+			stale[realm] = true
+		} else {
+			s.realmListsApplied[realm] = fetch.ended
+		}
+	}
+	if len(stale) > 0 {
+		live = slices.DeleteFunc(slices.Clone(live), func(session aliasSession) bool { return stale[session.Authority.Realm] })
+		for key := range complete {
+			if realm, _, _ := strings.Cut(key, "\x00"); stale[realm] {
+				delete(complete, key)
+			}
+		}
+	}
 	// Aliases are display names: a store that cannot record a change must not
 	// hide the sessions. The list keeps the aliases as last saved.
 	if err := s.aliases.reconcile(live, complete); err != nil {
