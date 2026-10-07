@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"reflect"
 	"runtime/pprof"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -593,6 +595,20 @@ func TestUnifiedRotationAutomaticRealTmuxTriggerToSealAndForcedReopen(t *testing
 	}
 	fixture.effects.mu.Unlock()
 
+	observerExitsSnapshot := func() []string {
+		measureMu.Lock()
+		defer measureMu.Unlock()
+		return append([]string(nil), observerExits...)
+	}
+	// Every durable commit is slow, as on a loaded host or slow storage, so
+	// durability lags the tmux output it records on every run, not only on a
+	// slow machine.
+	fixture.registry.retention.setHook(func(point string, _ unifiedjournal.PaneKey) {
+		if point == "before_commit" {
+			time.Sleep(20 * time.Millisecond)
+		}
+	})
+
 	sessionID := fixture.startPaneCommand(t, "automatic", "exec sh")
 	adoption, err := fixture.effects.AdoptSession(context.Background(), sessionID)
 	if err != nil {
@@ -606,16 +622,74 @@ func TestUnifiedRotationAutomaticRealTmuxTriggerToSealAndForcedReopen(t *testing
 		t.Fatalf("open predecessor: %v", err)
 	}
 	defer cancelPredecessor()
+
+	// The source admission allowance reserves a worst-case envelope count for
+	// every output event until it is durable, whatever its size. Thousands of
+	// small events ahead of durability exhaust it, and the generation then
+	// fails closed and is recovered instead of rotating; that bounded overload
+	// outcome is not what this test measures. The producer therefore writes
+	// its lines in chunks and starts each chunk only after the previous one is
+	// durable: one chunk is at most autoChunk line writes, which fits the
+	// allowance even if none of it is durable yet.
+	const autoLines, autoChunk = 102000, 1000
+	release := filepath.Join(shortTempDir(t), "release")
+	if err := syscall.Mkfifo(release, 0600); err != nil {
+		t.Fatal(err)
+	}
+	// A read-write open does not block, and the producer's read-only open
+	// then finds a writer already present.
+	releaseWriter, err := os.OpenFile(release, os.O_RDWR, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer releaseWriter.Close()
+	chunkDurable := make(chan struct{}, autoLines/autoChunk)
 	drainDone := make(chan struct{})
+	// next counts the chunk markers the predecessor delivered; read it after
+	// drainDone.
+	next := 0
 	go func() {
 		defer close(drainDone)
+		var stream []byte
 		for deliveredForTest, open := predecessor.receive(); open; deliveredForTest, open = predecessor.receive() {
+			if deliveredForTest.Kind == unifiedjournal.RecordOutput && next < autoLines/autoChunk {
+				stream = append(stream, deliveredForTest.Payload...)
+				for next < autoLines/autoChunk {
+					marker := fmt.Appendf(nil, "AUTO-%06d-", (next+1)*autoChunk-1)
+					index := bytes.Index(stream, marker)
+					if index < 0 {
+						// Keep enough bytes to find a marker split across events.
+						if keep := len(marker) - 1; len(stream) > keep {
+							stream = append(stream[:0], stream[len(stream)-keep:]...)
+						}
+						break
+					}
+					stream = stream[index+len(marker):]
+					chunkDurable <- struct{}{}
+					next++
+				}
+			}
 			predecessor.releaseEvent(deliveredForTest)
 		}
 	}()
 
-	fixture.disposable.run("send-keys", "-t", "automatic:",
-		`awk 'BEGIN { for (i=0; i<102000; i++) printf "AUTO-%06d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", i; fflush() }'`, "Enter")
+	fixture.disposable.run("send-keys", "-t", "automatic:", fmt.Sprintf(
+		`awk 'BEGIN { for (i=0; i<%d; i++) { if (i%%%d == 0) { fflush(); getline < "%s" } printf "AUTO-%%06d-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", i }; fflush() }'`,
+		autoLines, autoChunk, release), "Enter")
+	for chunk := 0; chunk < autoLines/autoChunk; chunk++ {
+		if chunk > 0 {
+			select {
+			case <-chunkDurable:
+			case <-drainDone:
+				t.Fatalf("predecessor closed with %q before chunk %d was durable: observer_exits=%v", predecessor.closeReason(), chunk-1, observerExitsSnapshot())
+			case <-time.After(20 * time.Second):
+				t.Fatalf("chunk %d never became durable: observer_exits=%v", chunk-1, observerExitsSnapshot())
+			}
+		}
+		if _, err := releaseWriter.Write([]byte("\n")); err != nil {
+			t.Fatal(err)
+		}
+	}
 
 	var successor unifiedjournal.PaneKey
 	deadline := time.Now().Add(20 * time.Second)
@@ -638,13 +712,13 @@ func TestUnifiedRotationAutomaticRealTmuxTriggerToSealAndForcedReopen(t *testing
 			seen[edge] = measurement
 		}
 		observedErr := attemptErr
-		exits := append([]string(nil), observerExits...)
 		measureMu.Unlock()
+		exits := observerExitsSnapshot()
 		_ = pprof.Lookup("goroutine").WriteTo(os.Stdout, 2)
 		t.Fatalf("automatic successor absent: logical=%d/%d err=%v edges=%v observer_exits=%v exit_records=%+v capture_tail=%q", charge, cap, observedErr, seen, exits, fixture.effects.recordingExitRecords(), fixture.capture(t, "automatic"))
 	}
 	if reason := waitRotationSubscriberClose(t, predecessor); reason != proto.SubscriberClosedGenerationRotated {
-		t.Fatalf("predecessor close=%q want %q", reason, proto.SubscriberClosedGenerationRotated)
+		t.Fatalf("predecessor close=%q want %q observer_exits=%v", reason, proto.SubscriberClosedGenerationRotated, observerExitsSnapshot())
 	}
 	<-drainDone
 	select {
@@ -702,20 +776,38 @@ func TestUnifiedRotationAutomaticRealTmuxTriggerToSealAndForcedReopen(t *testing
 		t.Fatalf("open successor: %v", err)
 	}
 	defer cancelSuccessor()
-	if got := bytes.Count(rotationSnapshotBytes(events), []byte("AUTO-101999")); got != 1 {
-		t.Fatalf("successor authoritative bootstrap count=%d want 1", got)
+	// The predecessor delivered this chunk marker before it closed, so its
+	// line preceded the rotation boundary and the successor's bootstrap holds
+	// it, once.
+	stream := rotationSnapshotBytes(events)
+	if last := fmt.Appendf(nil, "AUTO-%06d-", next*autoChunk-1); next == 0 || bytes.Count(stream, last) != 1 {
+		t.Fatalf("successor bootstrap count of the last predecessor marker %q=%d want 1", last, bytes.Count(stream, last))
 	}
-	fixture.disposable.run("send-keys", "-t", "automatic:", "printf 'AUTO-POST\\n'", "Enter")
-	select {
-	case <-successorTail.events():
-		event, openForRelease := successorTail.receive()
-		if openForRelease {
+	// The producer can still be writing its last chunk, which then reaches
+	// the successor's tail: its final line appears once across the snapshot
+	// and the tail, and later input follows it.
+	final, post := fmt.Appendf(nil, "AUTO-%06d-", autoLines-1), []byte("AUTO-POST")
+	posted := false
+	for !bytes.Contains(stream, post) {
+		if !posted && bytes.Contains(stream, final) {
+			fixture.disposable.run("send-keys", "-t", "automatic:", "printf 'AUTO-POST\\n'", "Enter")
+			posted = true
+		}
+		select {
+		case <-successorTail.events():
+			event, open := successorTail.receive()
+			if !open {
+				t.Fatalf("successor tail closed with %q", successorTail.closeReason())
+			}
+			if event.Kind == unifiedjournal.RecordOutput {
+				stream = append(stream, event.Payload...)
+			}
 			successorTail.releaseEvent(event)
+		case <-time.After(10 * time.Second):
+			t.Fatalf("successor tail stalled; final line seen=%t", posted)
 		}
-		if event.Kind != unifiedjournal.RecordOutput || !bytes.Contains(event.Payload, []byte("AUTO-POST")) {
-			t.Fatalf("successor tail=%+v", event)
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("successor did not deliver post-rotation sentinel")
+	}
+	if got := bytes.Count(stream, final); got != 1 {
+		t.Fatalf("final line count=%d across the successor snapshot and tail, want 1", got)
 	}
 }
