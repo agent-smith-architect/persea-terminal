@@ -227,7 +227,10 @@ function whole(): Promise<Record<string, unknown>> {
     live(cut === "utf-8" ? new Uint8Array([0xc3]) : cut === "osc" ? "\x1b]0;tit" : "\x1b[", { seq: 2, offset: 6 });
     await drained();
     close();
-    return await admit({ columns: 80, rows: 24, replay: encoder.encode("HELLO\r\nWORLD"), stream: OTHER_STREAM, position: { seq: 1, offset: 12 } });
+    // The stream starts with an orphan UTF-8 continuation byte, which a clean
+    // decoder drops; one still holding the cut character would join them.
+    const replay = new Uint8Array([0xa9, ...encoder.encode("HELLO\r\nWORLD")]);
+    return await admit({ columns: 80, rows: 24, replay, stream: OTHER_STREAM, position: { seq: 1, offset: replay.byteLength } });
   },
   // A frame whose position does not follow the point leaves the screen as
   // it is but drops the point.
