@@ -225,6 +225,9 @@ type serverView struct {
 	CanStageImages bool                  `json:"can_stage_images,omitempty"`
 	Sessions       []*sessionView        `json:"sessions"`
 	UnifiedDev     *unifiedDevLaunchView `json:"unified_dev,omitempty"`
+	// complete is true when the list holds every session on the server, so a
+	// session that is not in it is gone.
+	complete bool
 }
 type unifiedDevLaunchView struct {
 	State     string `json:"state"`
@@ -721,6 +724,7 @@ func (s *Server) inventory(w http.ResponseWriter, r *http.Request) {
 			if !valid {
 				break
 			}
+			sv.complete = bs.Status == "ok" && bs.Error == "" && !frontTruncated[realm.Name+"\x00"+bs.Label]
 			rv.Servers = append(rv.Servers, sv)
 		}
 		if !valid {
@@ -734,13 +738,10 @@ func (s *Server) inventory(w http.ResponseWriter, r *http.Request) {
 	}
 	live := make([]aliasSession, 0, len(all))
 	complete := map[string]bool{}
-	for i, realm := range s.cfg.Realms {
-		if results[i].err != nil {
-			continue
-		}
-		for _, bs := range results[i].servers {
-			if bs.Status == "ok" && bs.Error == "" && !frontTruncated[realm.Name+"\x00"+bs.Label] {
-				complete[realm.Name+"\x00"+bs.Label] = true
+	for _, rv := range views {
+		for _, sv := range rv.Servers {
+			if sv.complete {
+				complete[rv.Name+"\x00"+sv.Label] = true
 			}
 		}
 	}
