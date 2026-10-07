@@ -59,6 +59,7 @@ const MAX_CATCH_UP_FAILURES = 3;
 // fighting, so two devices reopening each other cannot ping-pong forever.
 const MAX_AUTO_TAKEOVERS = 3;
 const INPUT_SATURATED_NOTICE = "Input not sent — the connection is busy";
+const CANCEL = Uint8Array.of(0x18);
 const INPUT_CATCHING_UP_NOTICE = "Input not sent — history is still loading";
 // The history backlog follows COMMIT and the first MODE marks its end. On a
 // slow link that takes long enough to notice, so the strip says so before a
@@ -3775,8 +3776,10 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     // re-derives the current geometry from the committed events that follow,
     // in the order the live session produced them, so a reload wraps its
     // lines the same way the live screen did. reset() keeps xterm's parser
-    // state, so CAN first ends any sequence a lost connection cut short.
-    this.inOrder(generation, "REPLAY_FAILED", "\x18", () => {
+    // and UTF-8 decoder state, so CAN first ends any sequence or character a
+    // lost connection cut short. It is written as a byte: output is bytes,
+    // and only the byte decoder holds a cut character.
+    this.inOrder(generation, "REPLAY_FAILED", CANCEL, () => {
       if (this.prepared !== frame || this.closed) return;
       this.terminal.reset();
       this.applyTerminalGeometry(frame.columns, frame.rows);
