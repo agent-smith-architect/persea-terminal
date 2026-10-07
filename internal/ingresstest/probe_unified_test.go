@@ -73,7 +73,7 @@ func TestProbeAdoptsExactSourceBeforeUnifiedAttachAndRejectsReplay(t *testing.T)
 							w.WriteHeader(http.StatusGone)
 							return
 						}
-						upgrader := websocket.Upgrader{Subprotocols: []string{"persea-terminal.v3"}}
+						upgrader := websocket.Upgrader{Subprotocols: []string{"persea-terminal.v3"}, EnableCompression: true}
 						conn, err := upgrader.Upgrade(w, r, nil)
 						if err != nil {
 							t.Error(err)

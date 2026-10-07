@@ -2,6 +2,7 @@ package frontdoor
 
 import (
 	"bytes"
+	"compress/flate"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -430,7 +431,7 @@ func newServer(cfg config.Front, staticDir, listen string) *Server {
 	}
 	bindingTTL := time.Duration(cfg.HandleTTLSeconds) * time.Second
 	s := &Server{cfg: cfg, listen: listen, staticDir: staticDir, handles: newHandleStore(bindingTTL, cfg.HandleCapacity), bindings: newSourceBindingStore(bindingTTL, cfg.HandleCapacity), leases: newLeaseStore(LeaseTTL), takeovers: newControlTakeoverStore(LeaseTTL, cfg.HandleCapacity), aliases: aliases, aliasErr: aliasErr, preferences: preferences, preferencesErr: preferencesErr, snippets: snippets, snippetErr: snippetErr, workspaces: workspaces, workspaceErr: workspaceErr, diagnostic: diagnostic, diagnosticErr: diagnosticErr, browserProofTimeout: BrowserProofTimeout, browserProofNow: time.Now, flowStallTimeout: FlowStallTimeout, receiptInterval: ConsumptionReceiptInterval, previews: newPreviewStore(time.Now)}
-	s.upgrader = websocket.Upgrader{ReadBufferSize: websocketBufferBytes, WriteBufferSize: websocketBufferBytes, Subprotocols: []string{AttachmentProtocol}, CheckOrigin: func(*http.Request) bool { return true }}
+	s.upgrader = websocket.Upgrader{ReadBufferSize: websocketBufferBytes, WriteBufferSize: websocketBufferBytes, Subprotocols: []string{AttachmentProtocol}, EnableCompression: true, CheckOrigin: func(*http.Request) bool { return true }}
 	s.keyboardPreferences, s.keyboardPreferencesErr = keyboardPreferences, keyboardPreferencesErr
 	s.dashboardPreferences, s.dashboardPreferencesErr = openDashboardPreferencesStore(cfg.PreferencesStorePath)
 	s.clipboardImages, s.clipboardImageErr = openClipboardImageStore(cfg.SnippetStorePath, cfg.ImageUploadMaxBytes)
@@ -1607,6 +1608,32 @@ func returnedSnapshotHistoryRows(data []byte, height, depth int) int {
 	return rows
 }
 
+// The browser link uses permessage-deflate, negotiated when the browser
+// offers it, with no context takeover: each message is compressed on its own.
+// Only binary attachment messages of at least compressMinBytes are compressed
+// (full-history replays and large output); liveness, flow, refusal and input
+// results, and small output stay plain. Level 1 keeps the cost near 10 ms of
+// one core per MB of terminal output, which shrinks 3–4×. The flow window
+// still counts decoded bytes, so a window means the same parse and render
+// work in the browser; compression only shortens the wire bytes ahead of a
+// PONG.
+const compressMinBytes = 1 << 10
+
+// readWSMessage reads one browser message. The connection's read limit
+// counts wire bytes; a compressed message is also bounded by its decoded
+// size, so a small message cannot inflate past proto.MaxAttachment.
+func readWSMessage(ws *websocket.Conn) (int, []byte, error) {
+	kind, reader, err := ws.NextReader()
+	if err != nil {
+		return kind, nil, err
+	}
+	payload, err := io.ReadAll(io.LimitReader(reader, proto.MaxAttachment+1))
+	if err == nil && len(payload) > proto.MaxAttachment {
+		err = websocket.ErrReadLimit
+	}
+	return kind, payload, err
+}
+
 type wsWrite struct {
 	kind    int
 	payload []byte
@@ -1623,6 +1650,7 @@ func wsWritePump(ws *websocket.Conn, writes <-chan wsWrite, stop <-chan struct{}
 			return
 		case request := <-writes:
 			_ = ws.SetWriteDeadline(time.Now().Add(WSWriteTimeout))
+			ws.EnableWriteCompression(request.kind == websocket.BinaryMessage && len(request.payload) >= compressMinBytes)
 			err := ws.WriteMessage(request.kind, request.payload)
 			request.result <- err
 			if err != nil {
@@ -1672,7 +1700,7 @@ func orderlyWebSocketClose(err error) bool {
 
 func wsReadPump(ws *websocket.Conn, reads chan<- wsRead, done <-chan struct{}) {
 	for {
-		kind, payload, err := ws.ReadMessage()
+		kind, payload, err := readWSMessage(ws)
 		select {
 		case reads <- wsRead{kind: kind, payload: payload, err: err}:
 		case <-done:
@@ -1839,6 +1867,7 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 		s.logTerminalFailure("upgrade_failed", &a)
 		return
 	}
+	_ = ws.SetCompressionLevel(flate.BestSpeed)
 	writes := make(chan wsWrite, 64)
 	writerStop := make(chan struct{})
 	writerDone := make(chan struct{})
