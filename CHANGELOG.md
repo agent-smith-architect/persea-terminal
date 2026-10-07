@@ -2,6 +2,16 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
+## 0.1.21 — 2026-10-07
+
+### Changed
+
+- Terminal history now crosses the network compressed. Opening a session, switching to another session and reloading the page send the whole history; terminal output usually becomes three to four times smaller, so these wait less on a slow connection. Small messages, such as typing reports and connection checks, are not compressed. The browser decompresses natively, so the page itself does not change.
+
+### Testing notes
+
+- Server tests read the frames on the wire: large output is compressed, small messages and connection checks are not, a browser that does not offer compression gets uncompressed messages, and a compressed browser message that would expand past the size limit ends the connection as "message too big" before it is read in full. The slow-connection test, now also in WebKit, measures the bytes on the link while the whole history loads. The ingress test checks that its proxy carries the compression offer through. Each new test was shown to fail without the change it checks. Not tested on a real iPhone.
+
 ## 0.1.20 — 2026-10-07
 
 ### Changed
