@@ -2,6 +2,27 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
+## 0.1.20 — 2026-10-07
+
+### Changed
+
+- The terminal now knows what became of the text you type and insert. The server reports, for each piece of input, whether it was written to the terminal in full, refused, or written only in part. When the connection ends before that report arrives, the page tells you once that your last input may not have arrived. Nothing is ever sent again automatically.
+- The composer shows "Inserting" until the terminal has taken the text, then "Inserted". Only one Insert waits at a time; Insert, Restore and Clear wait with it. If nothing of it reached the terminal, the text goes back into the empty draft. If it may have arrived, completely or in part, the text stays available with Restore and the composer asks you to check the terminal before you insert it again.
+- An Insert that the connection did not take, or that is too large to send at once, keeps your draft and says why. Before, the draft was cleared and the composer reported the text as inserted.
+
+### Fixed
+
+- A Fit requested while an earlier size change was still waiting to be drawn was treated as done when that earlier change applied, so typing was allowed before the requested size arrived. A Fit now waits until earlier size changes are drawn.
+- When the history was replayed after a connection was lost in the middle of a non-ASCII character, the first character of the replay could be joined to that broken character. The replay now starts clean.
+
+### Upgrade notes
+
+- A terminal page that was open during the upgrade cannot reconnect correctly, because the server now sends input reports it does not know. Reload it once.
+
+### Testing notes
+
+- Server tests check that each input gets exactly one outcome by the bytes the terminal took (also when control is revoked during the write, when the write fails, and for input held during a size change), that outcomes are sent in order and grouped, that a full backlog (also while output to the front door is stalled) and a failed report end the connection, and that the front door rejects reports that go back or ahead. A test with a real tmux server checks the reports for refused and written input. In Chromium and WebKit, tests check the composer for each outcome and for a connection that ends first, one Insert at a time, Clear and Ctrl+Enter while an Insert waits, a session switch while an Insert waits, a focus report sent just before an Insert, an Insert the connection refuses or that is too large, and the order checks on reports. Other new browser tests cover the two fixes. Each new test was shown to fail without the change it checks. Not tested on a real iPhone.
+
 ## 0.1.19 — 2026-10-07
 
 ### Fixed
