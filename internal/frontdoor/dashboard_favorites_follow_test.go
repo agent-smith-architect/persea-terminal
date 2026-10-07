@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"runtime"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
@@ -409,4 +410,118 @@ func TestDashboardFavoritesReconcileReportsALatchedFault(t *testing.T) {
 			t.Fatalf("faulted store reconciled: %v", err)
 		}
 	}
+}
+
+// A full list keeps room for one more favorite: the inventory drops the
+// oldest favorite whose session is gone from a complete list. A server that
+// is stopped, failing or cut short by the front door may still run its
+// sessions, so their favorites stay.
+func TestFullFavoritesDropTheOldestGoneOnACompleteList(t *testing.T) {
+	socket := filepath.Join(shortTestDir(t), "broker.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	authority := func(server, id string) proto.Authority {
+		return proto.Authority{Realm: "r", Server: server, UID: uint32(os.Geteuid()), SelectorKind: "socket_name", SelectorValue: server, BootID: "b", ServerPID: 1, ServerStart: 2, SessionID: id, SessionCreated: 3}
+	}
+	session := func(server, id string) proto.Session {
+		return proto.Session{Authority: authority(server, id), Name: "s" + id, Width: 80, Height: 24}
+	}
+	go func() {
+		for {
+			c, e := listener.Accept()
+			if e != nil {
+				return
+			}
+			_, _ = proto.ReadFrame(c)
+			_ = writeControl(c, proto.Control{Type: "hello_ok", V: 1})
+			_, _ = proto.ReadFrame(c)
+			_ = writeControl(c, proto.Control{Type: "inventory_ok", Servers: []proto.ServerInventory{
+				{Label: "main", Status: "ok", Sessions: []proto.Session{session("main", "$1")}},
+				{Label: "stopped", Status: "no_server", Sessions: []proto.Session{}},
+				{Label: "failing", Status: "ok", Error: "list_failed", Sessions: []proto.Session{}},
+				// The front door lists three sessions in all: this server's third is cut.
+				{Label: "cut", Status: "ok", Sessions: []proto.Session{session("cut", "$2"), session("cut", "$3"), session("cut", "$4")}},
+			}})
+			c.Close()
+		}
+	}()
+	cfg := ergoFrontConfig(t)
+	cfg.Realms[0].Socket = socket
+	cfg.HandleCapacity = 9
+	s := newServer(cfg, ".", cfg.Ingress.CanonicalHost)
+	if s.dashboardPreferencesErr != nil {
+		t.Fatal(s.dashboardPreferencesErr)
+	}
+	scope := func(server, id string) string {
+		value, ok := dashboardScope(authority(server, id))
+		if !ok {
+			t.Fatal("invalid scope")
+		}
+		return value
+	}
+	oldest := []string{scope("stopped", "$10"), scope("failing", "$11"), scope("cut", "$4"), scope("main", "$20"), scope("main", "$21"), scope("main", "$1")}
+	favorites := append([]string{}, oldest...)
+	for i := len(favorites); i < dashboardFavoritesLimit; i++ {
+		favorites = append(favorites, scope("stopped", fmt.Sprintf("$%d", 100+i)))
+	}
+	body, _ := json.Marshal(dashboardPreferences{Version: 1, Favorites: favorites})
+	if w := dashboardRequest(t, s, "PUT", string(body), `"0"`, nil); w.Code != 200 {
+		t.Fatalf("favorites=%d %s", w.Code, w.Body.String())
+	}
+	if w := ergoRequest(t, s, "GET", "http://localhost/api/inventory", "", nil, nil); w.Code != 200 {
+		t.Fatalf("inventory=%d %s", w.Code, w.Body.String())
+	}
+	record, _ := s.dashboardPreferences.get(s.cfg.Ingress.OperatorLogin)
+	want := append(append([]string{}, favorites[:3]...), favorites[4:]...)
+	if !reflect.DeepEqual(record.Favorites, want) {
+		t.Fatalf("the full list did not drop only its oldest gone favorite on a complete list: lost %q", removed(favorites, record.Favorites))
+	}
+	// One slot is free: nothing more is dropped.
+	if w := ergoRequest(t, s, "GET", "http://localhost/api/inventory", "", nil, nil); w.Code != 200 {
+		t.Fatalf("inventory=%d %s", w.Code, w.Body.String())
+	}
+	if again, _ := s.dashboardPreferences.get(s.cfg.Ingress.OperatorLogin); !reflect.DeepEqual(again.Favorites, want) {
+		t.Fatalf("a list with room dropped a favorite: lost %q", removed(want, again.Favorites))
+	}
+}
+
+// A gone favorite that moves to the session now holding its name is kept,
+// even when it is the oldest: the full list drops the next gone one.
+func TestFullFavoritesMoveBeforeTheyDrop(t *testing.T) {
+	cfg := ergoFrontConfig(t)
+	s := newServer(cfg, ".", cfg.Ingress.CanonicalHost)
+	if s.dashboardPreferencesErr != nil {
+		t.Fatal(s.dashboardPreferencesErr)
+	}
+	complete := map[string]bool{"local\x00private": true}
+	renamed, replacement := favoriteAuthority("$1", 42, 201), favoriteAuthority("$1", 43, 301)
+	s.inventoryEffects(1, "operator", []aliasSession{{Authority: renamed, Name: "shell"}}, complete)
+	favorites := []string{}
+	for i := 0; i < dashboardFavoritesLimit; i++ {
+		value, _ := dashboardScope(favoriteAuthority(fmt.Sprintf("$%d", i+1), 42, int64(201+i)))
+		favorites = append(favorites, value)
+	}
+	if _, err := s.dashboardPreferences.put("operator", dashboardPreferences{Version: 1, Favorites: favorites}, 0, s.inventorySessionName); err != nil {
+		t.Fatal(err)
+	}
+	s.inventoryEffects(2, "operator", []aliasSession{{Authority: replacement, Name: "shell"}}, complete)
+	record, _ := s.dashboardPreferences.get("operator")
+	moved, _ := dashboardScope(replacement)
+	want := append([]string{moved}, favorites[2:]...)
+	if !reflect.DeepEqual(record.Favorites, want) || record.Names[moved] != "shell" {
+		t.Fatalf("favorites %d starting %q, names %v; want the moved favorite kept and the next gone one dropped", len(record.Favorites), record.Favorites[:2], record.Names)
+	}
+}
+
+func removed(before, after []string) []string {
+	out := []string{}
+	for _, scope := range before {
+		if !slices.Contains(after, scope) {
+			out = append(out, scope)
+		}
+	}
+	return out
 }

@@ -314,7 +314,8 @@ func (s *dashboardPreferencesStore) commitLocked(operator string, next dashboard
 // name on one tmux server belongs to one session at a time, so they are dead
 // duplicates that would otherwise take the session back after the operator
 // removed its star. On an incomplete list a favorite that is not seen may
-// still be running under another name, so it stays. It returns the record's
+// still be running under another name, so it stays. A full list drops its
+// oldest gone favorites to keep room for one more. It returns the record's
 // revision, which changes only when something changed.
 func (s *dashboardPreferencesStore) reconcile(operator string, live []aliasSession, complete map[string]bool) (uint64, error) {
 	s.mu.Lock()
@@ -387,6 +388,20 @@ func (s *dashboardPreferencesStore) reconcile(operator string, live []aliasSessi
 	next.Favorites = slices.DeleteFunc(next.Favorites, func(scope string) bool { return dropped[scope] })
 	for scope := range dropped {
 		delete(next.Names, scope)
+	}
+	// A full list keeps room for one more favorite by dropping its oldest
+	// favorites whose sessions are gone from a complete list and did not move
+	// to a session of the same name. They wait for a session that may never
+	// return and show no star, so the operator cannot remove them.
+	for i := 0; len(next.Favorites) >= dashboardFavoritesLimit && i < len(next.Favorites); {
+		scope := next.Favorites[i]
+		a, ok := dashboardScopeAuthority(scope)
+		if _, running := byIncarnation[authorityKey(a)]; ok && !running && complete[a.Realm+"\x00"+a.Server] {
+			next.Favorites = slices.Delete(next.Favorites, i, i+1)
+			delete(next.Names, scope)
+			continue
+		}
+		i++
 	}
 	if len(next.Names) == 0 {
 		next.Names = nil
