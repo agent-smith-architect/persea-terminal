@@ -232,6 +232,29 @@ function whole(): Promise<Record<string, unknown>> {
     const replay = new Uint8Array([0xa9, ...encoder.encode("HELLO\r\nWORLD")]);
     return await admit({ columns: 80, rows: 24, replay, stream: OTHER_STREAM, position: { seq: 1, offset: replay.byteLength } });
   },
+  // A Fit asked for while a committed geometry still waits behind output is
+  // refused: that geometry would be taken for its answer and open the input
+  // seal. Once it is applied, a Fit seals input until its own answer.
+  async fitWhileGeometryQueued() {
+    mount();
+    await whole();
+    const current = mounted() as any;
+    live("-a", { seq: 2, offset: 7 });
+    geometry(80, 30, { seq: 3, offset: 7 });
+    current.requestRowsOnly(40, true);
+    const whileQueued = { requests: sent.filter((entry) => entry.type === "RESIZE_REQUEST").length, fitPending: current.fitPending };
+    await drained();
+    current.requestRowsOnly(40, true);
+    const inputsBefore = sent.filter((entry) => entry.type === "INPUT").length;
+    current.sendInput(encoder.encode("X"));
+    return {
+      whileQueued,
+      requests: sent.filter((entry) => entry.type === "RESIZE_REQUEST").length,
+      fitPending: current.fitPending,
+      inputsWhileSealed: sent.filter((entry) => entry.type === "INPUT").length - inputsBefore,
+      rows: current.terminal.rows,
+    };
+  },
   // A frame whose position does not follow the point leaves the screen as
   // it is but drops the point.
   async positionGap() {

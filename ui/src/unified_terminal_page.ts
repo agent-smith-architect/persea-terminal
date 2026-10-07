@@ -329,6 +329,10 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private committedColumns = 0;
   private committedRows = 0;
   private fitPending = false;
+  // Committed geometries received but not yet applied: each waits behind the
+  // output before it (inOrder). While one waits, a Fit is not requested, so
+  // the next geometry applied after a request is always its answer.
+  private geometryQueued = 0;
   private pendingRefit?: PendingWidthRefit;
   private readonly geometryForms: GeometryFormView[] = [];
   // Diagnostics only: how many input bytes the seal dropped. Nothing is kept
@@ -3703,7 +3707,9 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       // it. A superseded generation's geometry still keeps its output
       // company; its successor resets or continues from what that leaves.
       const generation = this.generation;
+      this.geometryQueued++;
       this.inOrder(generation, "LIVE_WRITE_FAILED", "", () => {
+        this.geometryQueued--;
         if (this.closed) return;
         if (generation !== this.generation) {
           this.applyTerminalGeometry(frame.columns, frame.rows);
@@ -4489,6 +4495,13 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.showRefusalNotice(rows < MIN_FIT_ROWS || rows > MAX_FIT_ROWS
         ? `Fit not possible: ${rows} rows is outside ${MIN_FIT_ROWS}–${MAX_FIT_ROWS}`
         : `Fit not possible: ${this.committedColumns}×${rows} exceeds ${MAX_FIT_CELLS} cells`);
+      return;
+    }
+    // A geometry still waiting behind output would be applied after this
+    // request and taken for its answer, opening the input seal early; and the
+    // height it brings is not yet the committed one compared below.
+    if (this.geometryQueued > 0) {
+      if (explicit) this.showRefusalNotice("Fit not possible yet — the terminal is still resizing");
       return;
     }
     // Already the committed height: complete as a no-op rather than spending a
