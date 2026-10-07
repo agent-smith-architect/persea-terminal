@@ -152,6 +152,9 @@ type UnifiedDevPaneEffects struct {
 	// unitReapEdge is a test-only deterministic edge after provider maps are
 	// cleared and before the immutable witness snapshot is disconnected.
 	unitReapEdge func(*unifiedDevUnit, []controlmode.PaneWitness)
+	// generationEndEdge is a test-only copy of each generation-end log line,
+	// installed before the observer starts.
+	generationEndEdge func(string)
 	// rotationCommitEdge is a test-only scheduling seam while subscriberMu and
 	// effects.mu both protect the active-key/subscriber authority swap.
 	rotationCommitEdge func(string)

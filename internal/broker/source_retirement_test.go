@@ -167,6 +167,7 @@ func TestSourceObserverTransportRecoveryCapturesGapExactlyOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	ends := generationEnds(effects)
 	listener, err := net.Listen("unix", filepath.Join(t.TempDir(), "broker.sock"))
 	if err != nil {
 		t.Fatal(err)
@@ -268,6 +269,7 @@ func TestSourceObserverTransportRecoveryCapturesGapExactlyOnce(t *testing.T) {
 	if reason := subscriber.closeReason(); reason != proto.SubscriberClosedGenerationFailed {
 		t.Fatalf("transport subscriber reason=%q", reason)
 	}
+	awaitGenerationEnd(t, ends, generationEndLine(sessionID, proto.SubscriberClosedGenerationFailed, "error", true))
 
 	inventoryConn, inventory = request(t, listener.Addr().String(), proto.Control{Type: "inventory"})
 	_ = inventoryConn.Close()
@@ -329,6 +331,7 @@ func TestSourceTerminalRetirementRetriesAfterRetentionSaturation(t *testing.T) {
 		t.Skip("real tmux terminal-retirement saturation regression test")
 	}
 	fixture := newAdoptionFixture(t, 4)
+	ends := generationEnds(fixture.effects)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	sessionID := fixture.startPaneCommand(t, "rotation_f2_saturated", "sh -c 'printf F2-SATURATED\\n; sleep 120'")
@@ -406,6 +409,7 @@ func TestSourceTerminalRetirementRetriesAfterRetentionSaturation(t *testing.T) {
 	if reason := subscriber.closeReason(); reason != proto.SubscriberClosedGenerationFailed {
 		t.Fatalf("saturated subscriber reason=%q", reason)
 	}
+	awaitGenerationEnd(t, ends, generationEndLine(sessionID, proto.SubscriberClosedGenerationFailed, "session_ended", false))
 }
 
 func TestTerminalDurableRetirementRetriesAfterUnlinkFailure(t *testing.T) {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"persea-terminal/internal/controlmode"
+	"persea-terminal/internal/proto"
 	"persea-terminal/internal/unifiedjournal"
 )
 
@@ -84,7 +85,7 @@ func TestRotationAbortRefusedAfterRealSealWithoutMarkSealed(t *testing.T) {
 			predecessorBeforeReap := fixture.registry.retention.generations[journalKey(fixture.previous)]
 			panesBeforeReap := fixture.registry.retention.pUsed
 			fixture.registry.retention.mu.Unlock()
-			fixture.effects.reapFaultedUnitOnce(fixture.unit)
+			fixture.effects.reapFaultedUnitOnceWithReason(fixture.unit, proto.SubscriberClosedGenerationFailed, observerCauseRotation)
 			fixture.registry.retention.mu.Lock()
 			predecessorAfterReap := fixture.registry.retention.generations[journalKey(fixture.previous)]
 			panesAfterReap := fixture.registry.retention.pUsed
@@ -252,7 +253,7 @@ func TestRotationReapAfterRotationLeavesNoRetiredKeyResidue(t *testing.T) {
 		}
 	})
 	reap := func(unit *unifiedDevUnit) {
-		fixture.effects.reapFaultedUnitOnce(unit)
+		fixture.effects.reapFaultedUnitOnceWithReason(unit, proto.SubscriberClosedGenerationFailed, observerCauseRotation)
 		deadline := time.Now().Add(2 * time.Second)
 		for {
 			got := rotationRuntimeLedger(fixture.registry.retention)
@@ -306,7 +307,7 @@ func TestRotationExplicitFaultDisconnectsCurrentGeneration(t *testing.T) {
 			reservations.Add(1)
 		}
 	})
-	fixture.effects.reapFaultedUnitOnce(fixture.unit)
+	fixture.effects.reapFaultedUnitOnceWithReason(fixture.unit, proto.SubscriberClosedGenerationFailed, observerCauseRotation)
 	if got := reservations.Load(); got != 1 {
 		t.Fatalf("ordinary active-generation Disconnect reservations=%d want 1", got)
 	}

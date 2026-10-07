@@ -335,6 +335,7 @@ func TestRefitPostMutationRefitStageFailuresNeverRevivePredecessor(t *testing.T)
 		t.Run(string(item.stage), func(t *testing.T) {
 			stage := item.stage
 			fixture := newAdoptionFixture(t, 4)
+			ends := generationEnds(fixture.effects)
 			sessionID := fixture.startPaneCommand(t, "refit_failure-stage-"+string(stage), `sh -c 'stty -echo; printf "REFIT_FAILURE-STAGE-BEFORE\n"; while :; do sleep 1; done'`)
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -404,18 +405,16 @@ func TestRefitPostMutationRefitStageFailuresNeverRevivePredecessor(t *testing.T)
 			if !settled || settledStage != stage || settledClass != item.class {
 				t.Fatalf("settlement lost safe metadata: (%q,%q,%t) err=%v", settledStage, settledClass, settled, settlementErr)
 			}
+			awaitGenerationEnd(t, ends, generationEndLine(sessionID, proto.SubscriberClosedRefitFaulted, observerCauseOf(item.cause).String(), false))
 
 			// The immutable-operation replay is the broker wire seam used by the
 			// front door after a lost response. It must carry only the closed
 			// stage/class, never the injected cause text.
 			var wire bytes.Buffer
-			var logs strings.Builder
-			oldLogf := brokerLogf
-			brokerLogf = func(format string, args ...any) { _, _ = fmt.Fprintf(&logs, format, args...) }
+			logs := captureBrokerLogs(t)
 			(&Server{config: fixture.cfg, unified: fixture.effects}).refit(&lockedWriter{w: &wire}, proto.Control{
 				Type: "refit", Authority: &authority, Cols: wantColumns, ID: operation,
 			})
-			brokerLogf = oldLogf
 			frame, frameErr := proto.ReadFrame(&wire)
 			if frameErr != nil {
 				t.Fatal(frameErr)
@@ -452,6 +451,7 @@ func TestRefitPostCommitRefitStageFailuresCarryClosedMetadata(t *testing.T) {
 		t.Run(string(item.stage), func(t *testing.T) {
 			stage := item.stage
 			fixture := newAdoptionFixture(t, 4)
+			ends := generationEnds(fixture.effects)
 			sessionID := fixture.startPaneCommand(t, "refit_failure-commit-"+string(stage), `sh -c 'stty -echo; while :; do sleep 1; done'`)
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()
@@ -516,6 +516,7 @@ func TestRefitPostCommitRefitStageFailuresCarryClosedMetadata(t *testing.T) {
 			if !settled || settledStage != stage || settledClass != item.class {
 				t.Fatalf("settlement lost safe metadata: (%q,%q,%t) err=%v", settledStage, settledClass, settled, settlementErr)
 			}
+			awaitGenerationEnd(t, ends, generationEndLine(sessionID, proto.SubscriberClosedRefitFaulted, observerCauseOf(item.cause).String(), false))
 		})
 	}
 }
@@ -549,10 +550,7 @@ func TestRefitBrokerNeverEmitsUntypedRefitFault(t *testing.T) {
 	fixture.effects.mu.Unlock()
 
 	var wire bytes.Buffer
-	var logs strings.Builder
-	oldLogf := brokerLogf
-	defer func() { brokerLogf = oldLogf }()
-	brokerLogf = func(format string, args ...any) { _, _ = fmt.Fprintf(&logs, format, args...) }
+	logs := captureBrokerLogs(t)
 	(&Server{config: fixture.cfg, unified: fixture.effects}).refit(&lockedWriter{w: &wire}, proto.Control{
 		Type: "refit", Authority: &authority, Cols: 97, ID: operation,
 	})

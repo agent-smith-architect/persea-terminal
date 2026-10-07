@@ -2,7 +2,6 @@ package broker
 
 import (
 	"bytes"
-	"fmt"
 	"strings"
 	"testing"
 
@@ -10,10 +9,7 @@ import (
 )
 
 func TestAttachmentRejectionLogIsBoundedAndOmitsPayload(t *testing.T) {
-	var logs bytes.Buffer
-	prior := brokerLogf
-	brokerLogf = func(format string, args ...any) { _, _ = fmt.Fprintf(&logs, format, args...) }
-	t.Cleanup(func() { brokerLogf = prior })
+	logs := captureBrokerLogs(t)
 
 	var response bytes.Buffer
 	authority := &proto.Authority{Realm: "realm", Server: "server", SessionID: "$1"}

@@ -99,7 +99,7 @@ func rotationAssertSuccessorOnly(t *testing.T, rotation *rotationRotation) {
 			activeDisconnects.Add(1)
 		}
 	})
-	fixture.effects.reapFaultedUnitOnce(fixture.unit)
+	fixture.effects.reapFaultedUnitOnceWithReason(fixture.unit, proto.SubscriberClosedGenerationFailed, observerCauseRotation)
 	if oldDisconnects.Load() != 0 || activeDisconnects.Load() != 1 {
 		t.Fatalf("reap reservations: predecessor=%d successor=%d want 0/1", oldDisconnects.Load(), activeDisconnects.Load())
 	}
@@ -276,7 +276,7 @@ func TestRotationReapCannotObserveCommitInterior(t *testing.T) {
 				}
 				go func() {
 					close(started)
-					fixture.effects.reapFaultedUnitOnce(fixture.unit)
+					fixture.effects.reapFaultedUnitOnceWithReason(fixture.unit, proto.SubscriberClosedGenerationFailed, observerCauseRotation)
 					close(done)
 				}()
 				<-started

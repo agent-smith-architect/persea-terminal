@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"persea-terminal/internal/controlmode"
+	"persea-terminal/internal/proto"
 	"persea-terminal/internal/unifiedjournal"
 )
 
@@ -131,7 +132,7 @@ func (fixture *rotationFixture) lifecycleReadopt(t *testing.T, previous controlm
 
 func (fixture *rotationFixture) lifecycleDie() {
 	close(fixture.unit.done)
-	fixture.effects.reapFaultedUnit(fixture.unit)
+	fixture.effects.reapFaultedUnitWithReason(fixture.unit, proto.SubscriberClosedGenerationFailed, observerCauseRotation)
 }
 
 // lifecycleCountReserves records the builder's own ingress measurement point.

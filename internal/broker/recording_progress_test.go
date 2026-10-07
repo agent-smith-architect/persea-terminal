@@ -126,6 +126,8 @@ func TestObserverExitProgressRetainsStageAndClosedCause(t *testing.T) {
 		{nil, observerCauseEOF}, {context.Canceled, observerCauseCancelled}, {context.DeadlineExceeded, observerCauseDeadline},
 		{ErrUnifiedObserverFlowControl, observerCauseFlowControl}, {unifiedjournal.ErrInvalidated, observerCauseInvalidated},
 		{unifiedjournal.ErrStorage, observerCauseStorage}, {errors.New("private error text"), observerCauseStageError},
+		{unifiedjournal.ErrSourceQuota, observerCauseCapacity}, {unifiedjournal.ErrPhysicalQuota, observerCauseCapacity},
+		{errRecordingStalled, observerCauseStalled}, {ErrUnifiedRotateFatal, observerCauseRotation}, {ErrPaneRotationFatal, observerCauseRotation},
 	} {
 		var progress observerProgress
 		progress.stage.Store(uint32(observerStageAdoption))

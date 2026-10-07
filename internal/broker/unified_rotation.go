@@ -1476,7 +1476,7 @@ func (rotation *unifiedDevRotation) settleFatal(cause error) error {
 		if rotation.unit.process != nil && rotation.unit.process.Process != nil {
 			_ = rotation.unit.process.Process.Kill()
 		}
-		rotation.unit.owner.reapFaultedUnitWithReason(rotation.unit, rotation.fatalCloseReason())
+		rotation.unit.owner.reapFaultedUnitWithReason(rotation.unit, rotation.fatalCloseReason(), observerCauseOf(cause))
 	}
 	// The provisional successor is absent from the unit witness snapshot until
 	// commit. If its initial-operation lifetime already settled, terminal reap
@@ -1537,6 +1537,8 @@ func (rotation *unifiedDevRotation) retainUncertainRefitFailure(cause error) {
 	registry.retention.mu.Unlock()
 	registry.mu.Unlock()
 
+	activeKey, ending := effects.active[rotation.session]
+	ending = ending && (activeKey == rotation.oldKey || activeKey == rotation.newKey)
 	delete(effects.active, rotation.session)
 	delete(effects.units, rotation.session)
 	delete(effects.adopting, rotation.session)
@@ -1553,6 +1555,9 @@ func (rotation *unifiedDevRotation) retainUncertainRefitFailure(cause error) {
 	}
 	effects.mu.Unlock()
 	effects.subscriberMu.Unlock()
+	if ending {
+		effects.logGenerationEnd(rotation.unit, proto.SubscriberClosedRefitFaulted, observerCauseOf(cause).String(), false)
+	}
 
 	if rotation.holder != nil {
 		rotation.holder.mu.Lock()
@@ -1609,7 +1614,11 @@ func (rotation *unifiedDevRotation) failRefitPredecessor(cause error, decision o
 	effects := rotation.unit.owner
 	effects.subscriberMu.Lock()
 	effects.mu.Lock()
-	if active, ok := effects.active[rotation.session]; ok && active == rotation.oldKey {
+	// Removing the active key here leaves the later unit reap nothing to end,
+	// so this owner logs the generation end.
+	activeKey, ending := effects.active[rotation.session]
+	ending = ending && activeKey == rotation.oldKey
+	if ending {
 		delete(effects.active, rotation.session)
 	}
 	registry := rotation.registry
@@ -1644,6 +1653,9 @@ func (rotation *unifiedDevRotation) failRefitPredecessor(cause error, decision o
 	effects.closeSubscribersLocked(rotation.oldKey, proto.SubscriberClosedRefitFaulted)
 	effects.mu.Unlock()
 	effects.subscriberMu.Unlock()
+	if ending {
+		effects.logGenerationEnd(rotation.unit, proto.SubscriberClosedRefitFaulted, observerCauseOf(cause).String(), false)
+	}
 	if retiredLifetime {
 		// The retiring seal can refund the predecessor runtime lifetime before
 		// this terminal callback arrives. Its captured journal key still owns
@@ -1668,7 +1680,11 @@ func (rotation *unifiedDevRotation) failCommittedSuccessor(cause error) {
 	effects := rotation.unit.owner
 	effects.subscriberMu.Lock()
 	effects.mu.Lock()
-	if active, ok := effects.active[rotation.session]; ok && active == rotation.newKey {
+	// As in failRefitPredecessor, removing the active key makes this owner
+	// log the generation end.
+	activeKey, ending := effects.active[rotation.session]
+	ending = ending && activeKey == rotation.newKey
+	if ending {
 		delete(effects.active, rotation.session)
 	}
 
@@ -1700,6 +1716,9 @@ func (rotation *unifiedDevRotation) failCommittedSuccessor(cause error) {
 	effects.closeSubscribersLocked(rotation.newKey, rotation.fatalCloseReason())
 	effects.mu.Unlock()
 	effects.subscriberMu.Unlock()
+	if ending {
+		effects.logGenerationEnd(rotation.unit, rotation.fatalCloseReason(), observerCauseOf(cause).String(), false)
+	}
 
 	if cleanup != nil {
 		cleanup.done = make(chan error, 1)
