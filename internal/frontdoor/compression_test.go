@@ -42,7 +42,7 @@ type wireMessage struct {
 }
 
 // messages parses the recorded server frames after the HTTP upgrade
-// response. Server frames are never masked.
+// response.
 func (c *recordingConn) messages(t *testing.T) []wireMessage {
 	t.Helper()
 	c.mu.Lock()
@@ -52,39 +52,71 @@ func (c *recordingConn) messages(t *testing.T) []wireMessage {
 	if end < 0 {
 		t.Fatal("no upgrade response recorded")
 	}
-	raw = raw[end+4:]
+	out, err := parseServerFrames(raw[end+4:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+// parseServerFrames groups server frames (never masked) into messages. A
+// control frame stands alone, also between the fragments of a message. A
+// frame still arriving at the end is left out.
+func parseServerFrames(raw []byte) ([]wireMessage, error) {
 	var out []wireMessage
-	var current *wireMessage
+	current := -1 // the data message whose fragments are arriving
 	for len(raw) >= 2 {
 		fin, rsv1, opcode := raw[0]&0x80 != 0, raw[0]&0x40 != 0, raw[0]&0x0f
 		length, header := uint64(raw[1]&0x7f), 2
 		switch length {
 		case 126:
-			length, header = uint64(binary.BigEndian.Uint16(raw[2:4])), 4
+			header = 4
 		case 127:
-			length, header = binary.BigEndian.Uint64(raw[2:10]), 10
+			header = 10
 		}
-		if uint64(len(raw)) < uint64(header)+length {
-			break // a frame still arriving
+		if len(raw) < header {
+			break
 		}
-		if opcode >= 0x8 { // control frames stand alone
+		switch header {
+		case 4:
+			length = uint64(binary.BigEndian.Uint16(raw[2:4]))
+		case 10:
+			length = binary.BigEndian.Uint64(raw[2:10])
+		}
+		if uint64(len(raw)-header) < length {
+			break
+		}
+		switch {
+		case opcode >= 0x8:
 			out = append(out, wireMessage{opcode: opcode, compressed: rsv1, wireBytes: int(length)})
-		} else {
-			if opcode != 0 {
-				out = append(out, wireMessage{opcode: opcode, compressed: rsv1})
-				current = &out[len(out)-1]
-			}
-			if current == nil {
-				t.Fatal("continuation frame without a message")
-			}
-			current.wireBytes += int(length)
-			if fin {
-				current = nil
-			}
+		case opcode != 0:
+			out = append(out, wireMessage{opcode: opcode, compressed: rsv1, wireBytes: int(length)})
+			current = len(out) - 1
+		case current < 0:
+			return nil, fmt.Errorf("continuation frame without a message")
+		default:
+			out[current].wireBytes += int(length)
+		}
+		if opcode < 0x8 && fin {
+			current = -1
 		}
 		raw = raw[uint64(header)+length:]
 	}
-	return out
+	return out, nil
+}
+
+// The parser keeps a fragmented message whole across an interleaved Ping,
+// and leaves out a frame whose header has not fully arrived.
+func TestParseServerFramesFragmentsAndPartialHeaders(t *testing.T) {
+	raw := []byte{0x01, 3, 'a', 'b', 'c', 0x89, 0, 0x80, 3, 'd', 'e', 'f', 0x82, 126, 0x01}
+	got, err := parseServerFrames(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []wireMessage{{opcode: websocket.TextMessage, wireBytes: 6}, {opcode: websocket.PingMessage}}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+		t.Fatalf("messages %+v, want %+v", got, want)
+	}
 }
 
 func dialRecordedTerminalWS(t *testing.T, front *Server, addr, fixtureHandle string, compress bool) (*websocket.Conn, *recordingConn, string) {
@@ -190,7 +222,8 @@ func TestWebSocketWithoutCompressionStaysPlain(t *testing.T) {
 
 // The read limit counts wire bytes; a compressed browser message is also
 // bounded by its decoded size. One that inflates past the limit ends the
-// socket as a read failure before anything parses it.
+// socket as a read failure, closed 1009 like a message over the wire limit,
+// before anything parses it.
 func TestWebSocketBoundsDecodedBrowserMessages(t *testing.T) {
 	var logMu sync.Mutex
 	var logs []string
@@ -222,10 +255,12 @@ func TestWebSocketBoundsDecodedBrowserMessages(t *testing.T) {
 		t.Fatal(err)
 	}
 	_ = ws.SetReadDeadline(time.Now().Add(5 * time.Second))
-	for {
-		if _, _, err := ws.ReadMessage(); err != nil {
-			break
-		}
+	var readErr error
+	for readErr == nil {
+		_, _, readErr = ws.ReadMessage()
+	}
+	if !websocket.IsCloseError(readErr, websocket.CloseMessageTooBig) {
+		t.Fatalf("socket ended with %v, want close 1009", readErr)
 	}
 	waitForNoLease(t, front.leases, authority)
 	logMu.Lock()

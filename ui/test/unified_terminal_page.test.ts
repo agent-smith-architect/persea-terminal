@@ -23,7 +23,7 @@ const browserEngine = process.env.PERSEA_E2E1_ENGINE || "chromium";
 if (!path.isAbsolute(repo ?? "") || !path.isAbsolute(artifactRoot ?? "") || !path.isAbsolute(playwrightModule ?? "")) {
   throw new Error("E2E1 requires absolute repo, artifact, and Playwright module paths");
 }
-if (!(["chromium", "webkit"] as string[]).includes(browserEngine) || (!refitOnly && browserEngine !== "chromium")) {
+if (!(["chromium", "webkit"] as string[]).includes(browserEngine) || (!refitOnly && !slowLinkOnly && browserEngine !== "chromium")) {
   throw new Error(`unsupported E2E1 browser mode ${browserEngine}`);
 }
 
@@ -120,7 +120,7 @@ const upgradeOffers: Array<{ resume: boolean; takeover: boolean }> = [];
 const SHAPED_LINK_BUFFER_BYTES = 256 << 10;
 const SHAPED_LINK_TICK_MS = 50;
 
-function shapeLink(browserSocket: any, upstream: any): { push(chunk: any): void; send(chunk: any): void; end(): void } {
+function shapeLink(browserSocket: any, upstream: any, transport: any): { push(chunk: any): void; send(chunk: any): void; end(): void } {
   const { rate, delayMs } = shapedLink;
   shapedLink.delivered = 0;
   const queue: any[] = [];
@@ -150,10 +150,11 @@ function shapeLink(browserSocket: any, upstream: any): { push(chunk: any): void;
     }
     if (queued < SHAPED_LINK_BUFFER_BYTES && upstream.isPaused()) upstream.resume();
   }, SHAPED_LINK_TICK_MS);
-  // A drop is a network loss, not a close. The browser's end is reset; the
-  // front door's end too when the server notices at once, or else it stays
-  // open, as when a phone changes network and only the page knows.
-  const pair = { drop: (serverNotices: boolean) => { browserSocket.resetAndDestroy(); if (serverNotices) upstream.destroy(); } };
+  // A drop is a network loss, not a close. The browser's TCP connection is
+  // reset (under TLS too); the front door's end too when the server notices at
+  // once, or else it stays open, as when a phone changes network and only the
+  // page knows.
+  const pair = { drop: (serverNotices: boolean) => { transport.resetAndDestroy(); if (serverNotices) upstream.destroy(); } };
   function stop() { clearInterval(timer); shapedLink.pairs.delete(pair); }
   shapedLink.pairs.add(pair);
   browserSocket.on("close", stop);
@@ -172,7 +173,7 @@ function shapeLink(browserSocket: any, upstream: any): { push(chunk: any): void;
 }
 
 function startTrustedProxy(frontSocket: string, canonicalHost: () => string, scheme: "http" | "https", tlsOptions?: Record<string, unknown>): any {
-  const handler = (browserSocket: any) => {
+  const handler = (browserSocket: any, transport: any = browserSocket) => {
     const upstream = net.createConnection(frontSocket);
     let pending = Buffer.alloc(0);
     let forwarded = false;
@@ -193,7 +194,7 @@ function startTrustedProxy(frontSocket: string, canonicalHost: () => string, sch
         const offered = lines.find((line: string) => /^sec-websocket-protocol:/i.test(line)) ?? "";
         upgradeOffers.push({ resume: /persea-resume\./.test(offered), takeover: /persea-takeover\./.test(offered) });
       }
-      if (upgrade && shapedLink.rate > 0) shaper = shapeLink(browserSocket, upstream);
+      if (upgrade && shapedLink.rate > 0) shaper = shapeLink(browserSocket, upstream, transport);
       const forwardedRequest = Buffer.concat([Buffer.from(header, "latin1"), pending.subarray(boundary + 4)]);
       if (shaper) shaper.send(forwardedRequest); else upstream.write(forwardedRequest);
       pending = Buffer.alloc(0);
@@ -205,7 +206,15 @@ function startTrustedProxy(frontSocket: string, canonicalHost: () => string, sch
     browserSocket.on("error", () => upstream.destroy());
     upstream.on("error", () => { if (shaper) shaper.end(); else browserSocket.destroy(); });
   };
-  return tlsOptions ? tls.createServer(tlsOptions, handler) : net.createServer(handler);
+  if (!tlsOptions) return net.createServer(handler);
+  // TLS runs over a plain server so that a drop can reset the TCP socket: a
+  // TLS socket cannot be reset.
+  const secureContext = tls.createSecureContext(tlsOptions);
+  return net.createServer((transport: any) => {
+    const browserSocket = new tls.TLSSocket(transport, { isServer: true, secureContext });
+    browserSocket.on("error", () => browserSocket.destroy());
+    browserSocket.once("secure", () => handler(browserSocket, transport));
+  });
 }
 
 async function main(): Promise<void> {
@@ -742,6 +751,7 @@ async function main(): Promise<void> {
     };
 
     const measurements: unknown[] = [];
+    let drops = 0;
     for (const rate of [32 << 10, 256 << 10]) {
       // A fresh page load through the link. Cold dashboard and terminal loads
       // take most of the operator budget, and the first ones came just before
@@ -786,6 +796,7 @@ async function main(): Promise<void> {
       const reconnectIndex = attachments.length, offersBefore = upgradeOffers.length;
       const droppedAt = Date.now();
       for (const pair of [...shapedLink.pairs]) pair.drop(serverNotices);
+      drops += 1;
       const gap = `GAP${rate}`;
       command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, `printf '${gap}-%02d\\n' $(seq 1 8)`, "Enter"]);
       const admitted = serverNotices ? reconnectIndex : reconnectIndex + 1;
@@ -801,7 +812,10 @@ async function main(): Promise<void> {
       measurements.push({ ...reconnected.measured, livenessRoundTripsMs: [...reconnected.record.rtts] });
       shapedLink.rate = 0;
     }
-    assert(pageErrors.length === 0 && consoleMessages.length === 0 && httpErrors.length === 0, `slow-link browser findings: ${JSON.stringify({ pageErrors, consoleMessages, httpErrors })}`);
+    // WebKit reports each drop in the console; Chromium does not.
+    const dropReports = consoleMessages.filter((entry) => entry.type === "error" && /^WebSocket connection to 'wss:\/\/[^']+\/ws' failed: Error receiving data: Connection reset by peer$/.test(entry.text));
+    assert(pageErrors.length === 0 && dropReports.length === (browserEngine === "webkit" ? drops : 0) && consoleMessages.length === dropReports.length && httpErrors.length === 0,
+      `slow-link browser findings: ${JSON.stringify({ drops, pageErrors, consoleMessages, httpErrors })}`);
     emit("pass", { scenario: "slow-link", measurements });
     console.log(`Slow-link private stack passed: ${JSON.stringify(measurements)}`);
     return;
