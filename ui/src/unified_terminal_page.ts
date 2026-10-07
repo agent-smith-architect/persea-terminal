@@ -6,7 +6,7 @@ import type { CopyToClipsResult, UnifiedPopoverOwner, UnifiedExplainerTopic, Scr
 import { Terminal } from "@xterm/xterm";
 import type { FinalizeCause, PortSendResult } from "./attachment_port";
 import type { AttachmentTransportSink, ReconnectStatus } from "./websocket_attachment_transport";
-import { MAX_FIT_CELLS, MAX_FIT_ROWS, MIN_FIT_ROWS, validVerticalFit, validateServerFrame, type BrowserFrame, type Prepare, type ServerFrame, type StreamPosition } from "./attachment_protocol";
+import { MAX_FIT_CELLS, MAX_FIT_ROWS, MAX_INPUT_BYTES, MIN_FIT_ROWS, validVerticalFit, validateServerFrame, type BrowserFrame, type Prepare, type ServerFrame, type StreamPosition } from "./attachment_protocol";
 import { Composer, normalizeComposedText, type ComposerAvailability, type ComposerInjectionResult, type ComposerTypographyState } from "./composer";
 import type { ComposerStagedImage } from "./composer_attachments";
 import { IOSBackspaceRouter, syntheticInsertTextEvent } from "./continuous_surface/ios_backspace_router";
@@ -27,6 +27,7 @@ import { unifiedComposerAvailability, withCompactDensity, withStoredDensity } fr
 import { syntheticCtrlReleaseEvent, syntheticKeydownEvent, unifiedKeyDescriptor, type UnifiedKeyDescriptor } from "./unified_key_bar";
 import { UNIFIED_HANDOFF_REASONS, UNIFIED_RECONNECTABLE_NOTICES, UNIFIED_TAKEOVER_REASONS, automaticClaimAllowed, boundedUnifiedReason, classifyUnifiedClose, unifiedCloseNotice } from "./unified_close_policy";
 import { REFUSAL_NOTICE_MS, refusalPausesTyping, refusalReleasesFit, unifiedRefusalNotice } from "./unified_refusal_notice";
+import { INPUT_UNCERTAIN_NOTICE, inputDelivery, type InputDelivery, type InputResultCode } from "./input_results";
 import { UnifiedKeyboardBaseline } from "./unified_keyboard_baseline";
 import { SessionSwitcherView, type SessionSwitcherInventory } from "./session_switcher";
 import type { DashboardSession } from "./dashboard";
@@ -60,6 +61,7 @@ const MAX_CATCH_UP_FAILURES = 3;
 const MAX_AUTO_TAKEOVERS = 3;
 const INPUT_SATURATED_NOTICE = "Input not sent — the connection is busy";
 const CANCEL = Uint8Array.of(0x18);
+type InputSend = Readonly<{ result: PortSendResult; ordinal: number }>;
 const INPUT_CATCHING_UP_NOTICE = "Input not sent — history is still loading";
 // The history backlog follows COMMIT and the first MODE marks its end. On a
 // slow link that takes long enough to notice, so the strip says so before a
@@ -358,6 +360,13 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // The one refusal that is a state: typing paused after input_paused, until
   // the operator presses Resume typing (see pauseTyping).
   private typingPaused = false;
+  // What became of the INPUT frames this generation sent (input_results.ts):
+  // how many the transport accepted, how many have a result, and the
+  // composer Inserts waiting for theirs, by ordinal. A retired record takes
+  // no more input and ignores late results (retireInput).
+  private inputs = { generation: 0, sent: 0, settled: 0, retired: false, waiting: new Map<number, (delivery: InputDelivery) => void>() };
+  // The last INPUT send, read back by deliverText.
+  private lastInputSend?: InputSend;
   private readonly pausedNotice: HTMLElement;
   private readonly pausedMessage: HTMLElement;
   private readonly noticePanel: HTMLElement;
@@ -381,11 +390,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private historyNoticeTimer?: number;
   // Consecutive evictions before a first MODE; see MAX_CATCH_UP_FAILURES.
   private catchUpFailures = 0;
-  // The reattach burst limiter. A broker input_refused recovers by
-  // re-attaching, but a session that keeps refusing must still reach a terminal
-  // notice rather than loop. Timestamps within the window are counted; the
-  // window is NOT reset by a commit, so a refusal that recurs across
-  // re-attachments is still bounded.
+  // The reattach burst limiter. A reattachable close (rotation, refit, lag)
+  // recovers by re-attaching, but a session that keeps closing must still
+  // reach a terminal notice rather than loop. Timestamps within the window
+  // are counted; the window is NOT reset by a commit, so a close that recurs
+  // across re-attachments is still bounded.
   private readonly reattachEvents: number[] = [];
   // Bounded automatic control takeover for a cross-device reopen. Reopening is
   // explicit operator intent, so a lease held by another live attachment is
@@ -1571,7 +1580,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       ...(options.composerStorageScope ? { storageScope: options.composerStorageScope } : {}),
       ...(options.stageImage ? { stageImage: options.stageImage } : {}),
       availability: () => this.composerAvailability(),
-      inject: (text) => this.injectComposerText(text),
+      inject: (text, _event, onDelivery) => this.injectComposerText(text, onDelivery),
       refocusTerminal: () => this.focusTerminalPreservingKeyboard(),
       // The most height the panel may claim. Measured off the shell and the
       // rows around the viewport — never off the viewport's current height,
@@ -3044,7 +3053,9 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     // visible row was already Standard. Clear held gestures and Ctrl without
     // manufacturing focus before accepting the new generation.
     this.resetKeyInteractionAuthorityForLifecycle();
+    this.retireInput(true);
     this.generation = generation;
+    this.inputs = { generation, sent: 0, settled: 0, retired: false, waiting: new Map() };
     this.prepared = undefined;
     this.committed = false;
     this.controlGranted = false;
@@ -3184,6 +3195,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.closePresentationOverlays(true);
     }
     if (closeClass === "transient" && this.committed && this.options.capabilityMode === "control") this.controlLostAt = Date.now();
+    this.retireInput(true);
     this.committed = false;
     this.controlGranted = false;
     this.fitPending = false;
@@ -3208,9 +3220,9 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         this.connectionStatus.textContent = this.reconnectingText();
         return;
       case "reattach": {
-        // A recoverable broker refusal (input_refused): the transport already
-        // scheduled a re-attach on the same identity — render it, do not stop
-        // it. A burst within the window gives up, and so does a view that
+        // A recoverable broker close (UNIFIED_REATTACH_REASONS): the
+        // transport already scheduled a re-attach on the same identity —
+        // render it, do not stop it. A burst within the window gives up, and so does a view that
         // keeps falling behind before it catches up (MAX_CATCH_UP_FAILURES).
         // A handoff replaces the history, so earlier failures to catch up
         // say nothing about the next attempt.
@@ -3319,6 +3331,47 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       return;
     }
     this.showRefusalNotice(unifiedRefusalNotice(code));
+  }
+
+  // The result of the INPUT frames through `through` on this generation's
+  // socket. Results arrive in order and always advance; anything else is a
+  // peer protocol violation.
+  inputResult(generation: number, through: number, code: InputResultCode): void {
+    const inputs = this.inputs;
+    if (this.closed || generation !== this.generation || inputs.generation !== generation || inputs.retired) return;
+    if (through <= inputs.settled || through > inputs.sent) {
+      this.options.port.finalize({ generation, cause: "MALFORMED_FRAME" });
+      return;
+    }
+    inputs.settled = through;
+    const delivery = inputDelivery(code);
+    for (const [ordinal, deliver] of inputs.waiting) {
+      if (ordinal > through) break;
+      inputs.waiting.delete(ordinal);
+      deliver(delivery);
+    }
+    if (code === "") return;
+    if (refusalPausesTyping(code)) {
+      this.pauseTyping();
+      return;
+    }
+    this.showRefusalNotice(unifiedRefusalNotice(code));
+  }
+
+  // When a socket ends or the page leaves it (a session switch, destroy),
+  // the INPUT frames it has no result for may or may not have reached the
+  // terminal. Nothing resends them: a waiting composer Insert is told, and for
+  // anything else the operator is told once. Retiring twice does nothing.
+  private retireInput(notify: boolean): void {
+    const inputs = this.inputs;
+    if (inputs.retired) return;
+    inputs.retired = true;
+    const unanswered = inputs.sent - inputs.settled;
+    inputs.settled = inputs.sent;
+    const waiting = [...inputs.waiting.values()];
+    inputs.waiting.clear();
+    for (const deliver of waiting) deliver("uncertain");
+    if (notify && unanswered > waiting.length) this.showRefusalNotice(INPUT_UNCERTAIN_NOTICE);
   }
 
   // Typing paused. The broker refused a keystroke because this page was far
@@ -3493,6 +3546,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.renderAliasControls();
     this.sessionDraftScope = value.composerStorageScope;
     this.scrollbackScope = value.composerStorageScope;
+    // The old session's input is settled before the composer changes scope.
+    this.retireInput(true);
     this.composer?.rescope(value.composerStorageScope, value.stageImage);
     this.prepared = undefined;
     this.committed = false;
@@ -3590,6 +3645,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
 
   destroy(): void {
     if (this.closed) return;
+    this.retireInput(false);
 	this.settlePendingRefit();
     this.selectRestoreKeyboard = false;
     this.exitSelectMode();
@@ -4904,10 +4960,14 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
 	  return;
 	}
     // Input is never queued for later, so a send the transport could not
-    // accept is lost: say so rather than let the keystroke vanish.
-    if (this.send({ type: "INPUT", version: 1, source: this.prepared.source, epoch: this.prepared.epoch, data }) === "SATURATED") {
-      this.showRefusalNotice(INPUT_SATURATED_NOTICE);
-    }
+    // accept is lost: say so rather than let the keystroke vanish. An
+    // accepted send is numbered for its result (inputResult).
+    const inputs = this.inputs;
+    if (inputs.retired || inputs.generation !== this.generation) return;
+    const result = this.send({ type: "INPUT", version: 1, source: this.prepared.source, epoch: this.prepared.epoch, data });
+    if (result === "ACCEPTED") inputs.sent += 1;
+    this.lastInputSend = Object.freeze({ result, ordinal: inputs.sent });
+    if (result === "SATURATED") this.showRefusalNotice(INPUT_SATURATED_NOTICE);
   }
 
   private send(frame: BrowserFrame): PortSendResult {
@@ -5183,8 +5243,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // per its tracked mode, then emits through onData into sendInput — so mode
   // gating and the Fit seal apply unchanged (and can no longer bite: the
   // availability gate above was just consulted in the same tick).
-  private injectComposerText(text: string): ComposerInjectionResult {
-    return this.deliverText(text, true);
+  private injectComposerText(text: string, onDelivery: (delivery: InputDelivery) => void): ComposerInjectionResult {
+    return this.deliverText(text, true, onDelivery);
   }
 
   // The single delivery point for every path that puts operator text in the
@@ -5193,12 +5253,32 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // focus() call site this method has always had; the snippet paths pass
   // false on coarse pointers, where focusing would raise a keyboard nobody
   // asked for.
-  private deliverText(text: string, focusFirst: boolean): ComposerInjectionResult {
+  //
+  // SENT means the transport accepted the frame, never that it arrived:
+  // xterm's paste() emits onData synchronously, so the send's own result is
+  // read back here, and onDelivery hears what became of it (inputResult).
+  private deliverText(text: string, focusFirst: boolean, onDelivery?: (delivery: InputDelivery) => void): ComposerInjectionResult {
     if (this.closed || this.selectMode) return "REFUSED_DESTROYED";
-    if (!this.composerAvailability().canInject) return "REFUSED_NO_CONTROL";
+    const availability = this.composerAvailability();
+    if (!availability.canInject) return "REFUSED_NO_CONTROL";
+    // One INPUT frame carries the whole paste, as xterm frames it: line
+    // breaks become CR, and bracketed paste adds its 12 marker bytes.
+    const framed = new TextEncoder().encode(text.replace(/\r?\n/g, "\r")).byteLength + (availability.bracketedPasteMode ? 12 : 0);
+    if (framed > MAX_INPUT_BYTES) return "TOO_LARGE";
+    // Focus can send its own report; only the paste's send counts.
     if (focusFirst) this.terminal.focus();
-    this.terminal.paste(text);
+    this.lastInputSend = undefined;
+    let sent: InputSend | undefined;
+    try {
+      this.terminal.paste(text);
+      // paste() sent synchronously through sendInput, which set this.
+      sent = this.lastInputSend as InputSend | undefined;
+    } finally {
+      this.lastInputSend = undefined;
+    }
     this.iosBackspace.onXtermOperationComplete();
+    if (sent?.result !== "ACCEPTED") return "NOT_SENT";
+    if (onDelivery) this.inputs.waiting.set(sent.ordinal, onDelivery);
     return "SENT";
   }
 

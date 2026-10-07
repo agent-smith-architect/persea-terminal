@@ -17,13 +17,19 @@ import {
   type ComposerAttachment,
   type ComposerStagedImage,
 } from "./composer_attachments";
+import type { InputDelivery } from "./input_results";
 import { bindKeyboardPreservingActivation } from "./keyboard_preserving_button";
 import { COMPOSER_FONT_SIZE_MAX, COMPOSER_FONT_SIZE_MIN, DEFAULT_COMPOSER_FONT_SIZE } from "./operator_preferences";
 import type { ComposerDensity, ComposerMode, ComposerPanelSize, PreferencesV1 } from "./preferences";
 import { bindGenerationFencedClickActivation } from "./tap_activation";
 
+// SENT: the connection took the text; the delivery callback says later what
+// became of it. NOT_SENT: it did not, and the draft is kept. TOO_LARGE: the
+// text does not fit one input frame.
 export type ComposerInjectionResult =
   | "SENT"
+  | "NOT_SENT"
+  | "TOO_LARGE"
   | "REFUSED_UNTRUSTED"
   | "REFUSED_NO_CONTROL"
   | "REFUSED_DESTROYED";
@@ -79,7 +85,7 @@ export type ComposerOptions = Readonly<{
   symbolicChrome?: boolean;
   interactionGeneration(): number;
   availability(): ComposerAvailability;
-  inject(text: string, event: Event): ComposerInjectionResult;
+  inject(text: string, event: Event, onDelivery: (delivery: InputDelivery) => void): ComposerInjectionResult;
   refocusTerminal(): void;
   insetBudget(): number;
   commitOverlayInset(inset: number, stillCurrent: () => boolean): Promise<boolean>;
@@ -223,6 +229,13 @@ export class Composer {
   private storageWrites = 0;
   private storageFailures = 0;
   private lastSentImages = 0;
+  // The one Insert waiting to hear what became of it (input_results.ts).
+  // While it waits, Insert and Restore are held back, so the same text cannot
+  // go twice; a rescope abandons it. The notice says what happened to an
+  // Insert that did not, or may not, have reached the terminal.
+  private pendingInsert: Readonly<{ text: string; images: number }> | undefined;
+  private delivery: "pending" | "written" | "failed" = "written";
+  private deliveryNotice = "";
   private lastRestoreDroppedImages = false;
   private restoredWithoutImages = false;
   private attachmentUploads = 0;
@@ -563,6 +576,8 @@ export class Composer {
     this.lastRestore = "";
     this.lastRestoreDroppedImages = false;
     this.restoredWithoutImages = false;
+    this.pendingInsert = undefined;
+    this.deliveryNotice = "";
     this.storageDegraded = this.storageKey === undefined;
     this.restoreStoredDraft();
     this.contentState = this.hasInsertableContent() ? "draft" : "empty";
@@ -892,15 +907,26 @@ export class Composer {
       this.render();
       return;
     }
-    const result = this.options.inject(normalized, event);
-    if (result !== "SENT") {
-      this.contentState = "blocked";
-      this.render(result === "REFUSED_DESTROYED" ? "This page is closed." : "Terminal typing is not available.");
+    if (this.pendingInsert) {
+      this.render("Waiting for the last Insert to reach the terminal.");
       return;
     }
     // The restore slot holds the text only: a staged path could outlive its
     // TTL, and restoring a chip whose file may be gone would lie.
-    this.lastRestore = normalizeComposedText(this.text());
+    const pending = Object.freeze({ text: normalizeComposedText(this.text()), images: stagedCount(this.attachments) });
+    this.pendingInsert = pending;
+    this.deliveryNotice = "";
+    const result = this.options.inject(normalized, event, (delivery) => this.delivered(pending, delivery));
+    if (result !== "SENT") {
+      this.pendingInsert = undefined;
+      this.contentState = "blocked";
+      this.render(result === "REFUSED_DESTROYED" ? "This page is closed."
+        : result === "NOT_SENT" ? "Not sent \u2014 the connection is not ready. Your text is kept."
+          : result === "TOO_LARGE" ? "Too long to insert at once. Your text is kept."
+            : "Terminal typing is not available.");
+      return;
+    }
+    this.lastRestore = pending.text;
     this.lastRestoreDroppedImages = false;
     this.restoredWithoutImages = false;
     this.lastSentLength = normalized.length;
@@ -909,11 +935,45 @@ export class Composer {
     this.clearAttachments();
     this.deleteStoredDraft();
     this.contentState = "sent";
+    this.delivery = "pending";
     this.sends += 1;
     this.size = "compact";
     this.applySize();
     this.render();
     if (refocusTerminal) this.options.refocusTerminal();
+  }
+
+  // What became of the pending Insert. Only one of which nothing reached the
+  // terminal goes back into the draft, and only into the untouched empty
+  // draft it left: inserting it again cannot double it. One that may have
+  // arrived, whole or in part, stays in Restore so the terminal is checked
+  // first.
+  private delivered(pending: Readonly<{ text: string; images: number }>, delivery: InputDelivery): void {
+    if (this.destroyed || this.pendingInsert !== pending) return;
+    this.pendingInsert = undefined;
+    if (delivery === "written") {
+      this.delivery = "written";
+      this.render();
+      return;
+    }
+    this.delivery = "failed";
+    const untouched = this.contentState === "sent" && this.text().length === 0 && this.attachments.length === 0;
+    if (delivery === "not_written" && untouched) {
+      this.setText(pending.text);
+      this.restoredWithoutImages = pending.images > 0;
+      this.contentState = "draft";
+      this.scheduleStoredDraft();
+      this.deliveryNotice = "Not inserted \u2014 nothing reached the terminal. Your text is back.";
+    } else {
+      this.lastRestore = pending.text;
+      this.lastRestoreDroppedImages = pending.images > 0;
+      this.deliveryNotice = delivery === "not_written"
+        ? "Not inserted \u2014 nothing reached the terminal. Restore brings the text back."
+        : delivery === "partial"
+          ? "Only part of this Insert reached the terminal \u2014 check it before inserting again. Restore brings the text back."
+          : "The connection dropped before the terminal confirmed this Insert \u2014 check it before inserting again. Restore brings the text back.";
+    }
+    this.render();
   }
 
   private render(forcedStatus?: string): void {
@@ -939,20 +999,25 @@ export class Composer {
     if (forcedStatus) stateStatus = forcedStatus;
     else if (this.contentState === "guard") stateStatus = "The program in the terminal does not accept pasted line breaks safely \u2014 each line would run on arrival.";
     else if (this.contentState === "blocked") stateStatus = availability.reason;
-    else if (this.contentState === "sent") stateStatus = this.lastSentImages > 0
-      ? `Inserted ${this.lastSentLength.toLocaleString()} ch \u00b7 ${this.lastSentImages.toLocaleString()} image${this.lastSentImages === 1 ? "" : "s"}`
-      : `Inserted ${this.lastSentLength.toLocaleString()} ch`;
+    else if (this.contentState === "sent" && this.delivery !== "failed") {
+      const verb = this.delivery === "pending" ? "Inserting" : "Inserted";
+      const ellipsis = this.delivery === "pending" ? "\u2026" : "";
+      stateStatus = this.lastSentImages > 0
+        ? `${verb} ${this.lastSentLength.toLocaleString()} ch \u00b7 ${this.lastSentImages.toLocaleString()} image${this.lastSentImages === 1 ? "" : "s"}${ellipsis}`
+        : `${verb} ${this.lastSentLength.toLocaleString()} ch${ellipsis}`;
+    }
     // composer input \u00a716.1/\u00a716.2: no "not run" qualifier (the receipt says what
     // happened; the no-Return law is explained in Help) and no persistent
     // instruction line for the empty and draft states.
-    this.status.value = [stateStatus, uploadHint, failureHint, restoreHint, punctuationHint, storageHint].filter(Boolean).join(" \u00b7 ");
+    const pendingHint = this.pendingInsert && this.contentState !== "sent" ? "Waiting for the last Insert to reach the terminal" : "";
+    this.status.value = [this.deliveryNotice, stateStatus, pendingHint, uploadHint, failureHint, restoreHint, punctuationHint, storageHint].filter(Boolean).join(" \u00b7 ");
     this.status.hidden = this.status.value === "";
     this.fixButton.hidden = punctuationHint === "";
     this.joinButton.hidden = this.contentState !== "guard";
     this.overrideButton.hidden = this.contentState !== "guard";
-    this.restoreButton.hidden = !(text.length === 0 && this.lastRestore.length > 0);
+    this.restoreButton.hidden = !(text.length === 0 && this.lastRestore.length > 0) || this.pendingInsert !== undefined;
     this.clearButton.disabled = text.length === 0 && this.attachments.length === 0;
-    this.sendButton.disabled = !hasContent || !availability.canInject || this.contentState === "guard" || uploadHint !== "";
+    this.sendButton.disabled = !hasContent || !availability.canInject || this.contentState === "guard" || uploadHint !== "" || this.pendingInsert !== undefined;
     this.sendButton.setAttribute("aria-disabled", this.sendButton.disabled ? "true" : "false");
     if (this.sendButton.disabled) this.sendButton.setAttribute("aria-describedby", this.status.id);
     else this.sendButton.removeAttribute("aria-describedby");
@@ -1526,6 +1591,7 @@ export class Composer {
     if (this.destroyed) return;
     this.noteTypographyInteraction();
     this.setText(this.textarea.value);
+    this.deliveryNotice = "";
     this.contentState = this.hasInsertableContent() ? "draft" : "empty";
     this.scheduleStoredDraft();
     this.render();
@@ -1567,6 +1633,7 @@ export class Composer {
     this.lastRestore = this.text();
     this.lastRestoreDroppedImages = this.attachments.length > 0;
     this.restoredWithoutImages = false;
+    this.deliveryNotice = "";
     this.clearAttachments();
     this.setText("");
     this.deleteStoredDraft();
@@ -1574,9 +1641,10 @@ export class Composer {
     this.render();
   };
   private readonly onRestore: EventListener = (event) => {
-    if (!event.isTrusted || this.destroyed || this.text().length > 0 || this.lastRestore.length === 0) return;
+    if (!event.isTrusted || this.destroyed || this.text().length > 0 || this.lastRestore.length === 0 || this.pendingInsert) return;
     this.setText(this.lastRestore);
     this.restoredWithoutImages = this.lastRestoreDroppedImages;
+    this.deliveryNotice = "";
     this.contentState = "draft";
     this.restores += 1;
     this.scheduleStoredDraft();

@@ -57,9 +57,30 @@ offers nothing next time. A page that claims its own control lease back (the
 server had not yet noticed its lost connection) offers its position too;
 session switches and history reloads never do.
 
+## Input results
+
+Both ends number the INPUT frames of one WebSocket 1, 2, … in send order. The
+broker reports what became of each one after its write to the terminal ends,
+in that order, as the text message `PERSEA-INPUT/1 <through>` (every frame
+after the previous result, through `<through>`, was written in full) or
+`PERSEA-INPUT/1 <through> <code>`: `input_paused` (the page had not consumed
+the session's recent output), `input_refused` (it arrived mid-cut or without
+control), `input_dropped` (control was revoked before any byte was written) or
+`input_partial` (the write stopped part-way). Consecutive frames with the same
+outcome share one message, so a page that types while results wait receives
+fewer messages than keys; otherwise there is one per frame. The front door
+checks that each result advances and does not pass the frames it relayed.
+
+A frame with no result when its WebSocket ends is uncertain: it may or may not
+have reached the terminal. Nothing is ever resent. The page says so once for
+keystrokes; a composer Insert keeps its text for Restore, and only one Insert
+waits for its result at a time. An Insert of which nothing was written returns
+to the empty draft. If results stop reaching the front door, the broker
+bounds the frames waiting for one and then ends the attachment.
+
 Browser attachment requests remain WebSocket text JSON. INPUT uses canonical
-padded base64. Liveness, refusal and flow transport messages retain their
-reserved text namespaces. Flow ACKs count attachment frames after consumption,
+padded base64. Liveness, refusal, input-result and flow transport messages
+retain their reserved text namespaces. Flow ACKs count attachment frames after consumption,
 including binary frames with no body; they do not count bytes or text transport
 messages.
 

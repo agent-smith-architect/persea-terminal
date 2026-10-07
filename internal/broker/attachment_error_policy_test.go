@@ -78,7 +78,7 @@ func TestEveryBrokerAttachmentErrorCodeIsClassified(t *testing.T) {
 			}
 		}
 	}
-	for _, sentinel := range []string{"resize_failed", "resize_rejected", "input_refused", "observe_mode", "attach_failed", "stale_target", "protocol"} {
+	for _, sentinel := range []string{"resize_failed", "resize_rejected", "observe_mode", "attach_failed", "stale_target", "protocol"} {
 		if seen[sentinel] == 0 {
 			t.Fatalf("extraction lost a known emitted code: %s", sentinel)
 		}

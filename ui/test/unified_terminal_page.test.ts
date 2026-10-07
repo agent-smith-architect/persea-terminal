@@ -439,6 +439,9 @@ async function main(): Promise<void> {
       opened: number; closed: number; commitAt: number; modeAt: number;
       bytesBeforeMode: number; framesBeforeMode: number; inputsBeforeMode: number; acks: number;
       pings: Map<string, number>; rtts: number[]; refusals: string[];
+      // Input results in arrival order: every INPUT frame through `through`
+      // was written ("") or refused with `code`.
+      results: { through: number; code: string }[];
       // Every INPUT frame the page sent, and when the last one left.
       inputs: number; lastInputAt: number;
       // Attachment frames received, numbered as the page's flow
@@ -453,7 +456,7 @@ async function main(): Promise<void> {
     page.on("websocket", (socket: any) => {
       if (new URL(socket.url()).pathname !== "/ws") return;
       const record: Attachment = {
-        opened: Date.now(), closed: 0, commitAt: 0, modeAt: 0, bytesBeforeMode: 0, framesBeforeMode: 0, inputsBeforeMode: 0, acks: 0, pings: new Map(), rtts: [], refusals: [],
+        opened: Date.now(), closed: 0, commitAt: 0, modeAt: 0, bytesBeforeMode: 0, framesBeforeMode: 0, inputsBeforeMode: 0, acks: 0, pings: new Map(), rtts: [], refusals: [], results: [],
         inputs: 0, lastInputAt: 0, frames: 0, acknowledgedFrames: 0, watch: "", watchTail: "", watchFrame: 0, resumed: false,
       };
       attachments.push(record);
@@ -476,6 +479,11 @@ async function main(): Promise<void> {
           const nonce = payload.slice(23);
           const sent = record.pings.get(nonce);
           if (sent !== undefined) { record.rtts.push(now - sent); record.pings.delete(nonce); }
+          return;
+        }
+        if (payload.startsWith("PERSEA-INPUT/1 ")) {
+          const [through, code = ""] = payload.slice("PERSEA-INPUT/1 ".length).split(" ");
+          record.results.push({ through: Number(through), code });
           return;
         }
         if (payload.startsWith("PERSEA-")) { record.refusals.push(payload.slice(0, 120)); return; }
@@ -596,9 +604,11 @@ async function main(): Promise<void> {
         await typeMarker();
         await until(`${stage}: typed command ran after Resume typing`, () => capture().includes(`MARK-${marker}`), 20_000);
       }
-      // The only in-band refusals so far are the keys typed while behind.
-      assert(record.refusals.every((refusal) => refusal === "PERSEA-REFUSAL/1 input_paused") && (inputPaused || record.refusals.length === 0),
-        `${stage}: refusals ${JSON.stringify(record.refusals)}`);
+      // Every key typed has a result: written, or — only for keys typed while
+      // behind — input_paused. Nothing else was refused.
+      await until(`${stage}: every INPUT frame answered`, () => record.results.at(-1)?.through === record.inputs, 20_000);
+      assert(record.refusals.length === 0 && record.results.every((result) => result.code === "" || (inputPaused && result.code === "input_paused")),
+        `${stage}: refusals ${JSON.stringify(record.refusals)} results ${JSON.stringify(record.results)}`);
       const measured = {
         stage, rate, linkDelayMs: LINK_DELAY_MS, inputPaused, resumed: record.resumed,
         toCommitMs: record.commitAt - causedAt, toControlMs: record.modeAt - causedAt, admissionMs: record.commitAt - record.opened, backlogMs,
@@ -616,6 +626,7 @@ async function main(): Promise<void> {
     const steady = async (stage: string, record: Attachment) => {
       const count = attachments.length;
       const refusals = record.refusals.length;
+      const results = record.results.length;
       const startedAt = Date.now();
       while (Date.now() - startedAt < STEADY_MS) {
         const state = await pageState();
@@ -626,7 +637,8 @@ async function main(): Promise<void> {
       const produced = steadyIn(capture());
       await until(`${stage}: page shows current output`, async () => steadyIn((await pageState()).rows) >= produced, 5_000);
       liveness(stage, record);
-      assert(record.refusals.length === refusals, `${stage}: refusals ${JSON.stringify(record.refusals.slice(refusals))}`);
+      assert(record.refusals.length === refusals && record.results.length === results,
+        `${stage}: refusals ${JSON.stringify(record.refusals.slice(refusals))} results ${JSON.stringify(record.results.slice(results))}`);
     };
 
     // A healthy page far behind. The shell prints about a MiB at once (typed
@@ -660,7 +672,7 @@ async function main(): Promise<void> {
       // the pane, and the page pauses typing. An acknowledgement sent after
       // the keys orders every INPUT frame they caused before it.
       const inputsBefore = record.inputs;
-      const refusalsBefore = record.refusals.length;
+      const resultsBefore = record.results.length;
       const typedAt = Date.now();
       await xterm.focus();
       await page.keyboard.type(marker);
@@ -688,19 +700,23 @@ async function main(): Promise<void> {
       await until(`${stage}: the page consumed the burst`, () => record.watchFrame > 0 && record.acknowledgedFrames >= record.watchFrame, 180_000);
       const burstConsumedAt = Date.now();
       const resumed = await resumeWhenCurrent(stage, record);
-      // The broker keeps one refusal pending while output to the page is
-      // backed up, and it answers every key refused meanwhile: at least one,
-      // never more than one per key, all input_paused.
-      const answered = record.refusals.slice(refusalsBefore);
-      assert(answered.length >= 1 && answered.length <= typedFrames && answered.every((refusal) => refusal === "PERSEA-REFUSAL/1 input_paused"),
-        `${stage}: ${typedFrames} keys typed while behind drew refusals ${JSON.stringify(answered)}`);
+      // Results sent while output to the page is backed up are coalesced:
+      // every key typed while behind is answered input_paused, in one result
+      // or several, and the last covers the last key.
+      const answered = record.results.slice(resultsBefore);
+      assert(answered.length >= 1 && answered.length <= typedFrames && answered.every((result) => result.code === "input_paused")
+        && answered.at(-1)?.through === inputsBefore + typedFrames,
+        `${stage}: ${typedFrames} keys typed while behind drew results ${JSON.stringify(answered)}`);
       const sentWhilePaused = record.inputs - inputsWhilePaused;
       assert(sentWhilePaused === 0, `${stage}: ${sentWhilePaused} INPUT frames left the page while typing was paused`);
       assert(!history().includes(token), `${stage}: input typed while behind or paused reached the pane`);
       await page.keyboard.type(marker);
       await page.keyboard.press("Enter");
       await until(`${stage}: the command typed after Resume typing ran`, () => capture().includes(`NMARK-${token}`), 20_000);
-      assert(record.refusals.length === refusalsBefore + answered.length, `${stage}: the command typed after Resume typing was refused`);
+      await until(`${stage}: the command typed after Resume typing answered`, () => record.results.at(-1)?.through === record.inputs, 20_000);
+      const after = record.results.slice(resultsBefore + answered.length);
+      assert(after.length >= 1 && after.every((result) => result.code === "") && record.refusals.length === 0,
+        `${stage}: the command typed after Resume typing drew ${JSON.stringify(after)} refusals ${JSON.stringify(record.refusals)}`);
       assert(attachments.length === count && record.closed === 0, `${stage}: the page reconnected`);
       const measured = {
         stage, rate, linkDelayMs: LINK_DELAY_MS, burstLines: 12_000,

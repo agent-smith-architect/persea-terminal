@@ -94,6 +94,9 @@ type Frame struct {
 	Stream   string          `json:"stream,omitempty"`
 	Resumed  bool            `json:"resumed,omitempty"`
 	Position *StreamPosition `json:"position,omitempty"`
+	// InputID numbers an INPUT frame within its attachment, so the pump can
+	// report what became of it (Config.InputSettled). Never on the wire.
+	InputID uint64 `json:"-"`
 }
 
 // Explicit vertical Fit policy. The generic 1..1000 frame ceiling is a protocol

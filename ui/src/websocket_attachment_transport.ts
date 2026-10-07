@@ -9,6 +9,7 @@ import {
 } from "./transport_liveness";
 import { FlowAcknowledger } from "./transport_flow";
 import { UNIFIED_HANDOFF_REASONS, UNIFIED_TAKEOVER_REASONS } from "./unified_close_policy";
+import { decodeServerInputFrame, type InputResultCode } from "./input_results";
 import { decodeServerRefusalFrame } from "./unified_refusal_notice";
 
 export type AttachmentTransportSink = Readonly<{
@@ -19,6 +20,9 @@ export type AttachmentTransportSink = Readonly<{
   // An in-band operational refusal: one request's outcome on a transport
   // that stays open. Nothing about the attachment changes.
   operationalRefusal?(generation: number, code: string): void;
+  // What became of the INPUT frames this socket sent, through the given
+  // ordinal (see input_results.ts).
+  inputResult?(generation: number, through: number, code: InputResultCode): void;
   // Calls done once everything the frame just delivered caused in the
   // terminal has been written. The transport acknowledges the frame to the
   // server only then, which is what paces output to a page that falls
@@ -181,7 +185,7 @@ function withHistoryProtocol(protocols: readonly string[], desired?: HistoryChoi
 const protocolFaults = new Set<FinalizeCause>([
   "MALFORMED_FRAME", "OUT_OF_STATE", "ACTIVE_TUPLE_MISMATCH", "ADMISSION_INVARIANT",
 ]);
-const protocolFaultReasons = new Set(["malformed_frame", "liveness_protocol", "refusal_protocol"]);
+const protocolFaultReasons = new Set(["malformed_frame", "liveness_protocol", "refusal_protocol", "input_protocol"]);
 
 function closeSocket(socket: AttachmentWebSocket, code: number, reason: string): void {
   // Every code used here is one the browser accepts; a throw can only mean
@@ -553,6 +557,15 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
       if (refusal.type === "VIOLATION") {
         // An unreadable reserved code is a peer protocol violation.
         this.closeCurrent(socket, generation, "refusal_protocol", true);
+        return;
+      }
+      const input = decodeServerInputFrame(event.data);
+      if (input.type === "INPUT") {
+        this.sink?.inputResult?.(generation, input.through, input.code);
+        return;
+      }
+      if (input.type === "VIOLATION") {
+        this.closeCurrent(socket, generation, "input_protocol", true);
         return;
       }
     }

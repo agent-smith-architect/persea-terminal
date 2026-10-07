@@ -742,8 +742,12 @@ function startWorkspaceFixture(ui, options = {}) {
         return;
       }
       if (value.type === "INPUT") {
-        if (attachment.mode !== "CONTROL") { socket.sendText("PERSEA-REFUSAL/1 input_refused"); return; }
+        // Every INPUT frame gets its result, numbered per socket, as the
+        // real server reports it.
+        socket.inputCount = (socket.inputCount || 0) + 1;
+        if (attachment.mode !== "CONTROL") { socket.sendText(`PERSEA-INPUT/1 ${socket.inputCount} input_refused`); return; }
         attachment.inputs.push(Buffer.from(value.data, "base64").toString("binary"));
+        socket.sendText(`PERSEA-INPUT/1 ${socket.inputCount}`);
         return;
       }
       if (value.type === "RESIZE_REQUEST") {

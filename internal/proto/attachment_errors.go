@@ -15,8 +15,9 @@ import "sort"
 //   - OPERATIONAL: the outcome of ONE request. The session, its journal, and
 //     the attachment are all still valid; the broker keeps the epoch alive and
 //     reports the outcome, and the browser renders it as a passing notice. A
-//     Fit that did not apply, a Fit outside policy, a keystroke that landed a
-//     beat early, control traffic on an observe handle.
+//     Fit that did not apply, a Fit outside policy, control traffic on an
+//     observe handle. (What became of each INPUT frame is not an error: it is
+//     an `input` result, see InputResultCodes.)
 //   - FATAL: a verdict on the attachment itself. The broker ends the
 //     attachment after writing it, and the front door closes the WebSocket
 //     with the code as the reason.
@@ -33,11 +34,7 @@ const (
 var operationalAttachmentCodes = map[string]struct{}{
 	"resize_failed":   {},
 	"resize_rejected": {},
-	"input_refused":   {},
 	"observe_mode":    {},
-	// Input from a Control page that has not consumed the session's recent
-	// output was dropped; the page keeps its attachment and catches up.
-	"input_paused": {},
 }
 
 var fatalAttachmentCodes = map[string]struct{}{
@@ -146,4 +143,23 @@ func sortedCodes(set map[string]struct{}) []string {
 	}
 	sort.Strings(codes)
 	return codes
+}
+
+// inputResultCodes are the codes an `input` control may carry; written has
+// none. input_paused: the page had not consumed the session's recent output.
+// input_refused: the frame arrived mid-cut or without control. input_dropped:
+// control was revoked before any byte was written. input_partial: the write
+// stopped part-way.
+var inputResultCodes = map[string]struct{}{
+	"":              {},
+	"input_paused":  {},
+	"input_refused": {},
+	"input_dropped": {},
+	"input_partial": {},
+}
+
+// ValidInputResultCode reports whether code may label an `input` result.
+func ValidInputResultCode(code string) bool {
+	_, ok := inputResultCodes[code]
+	return ok
 }
