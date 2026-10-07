@@ -317,7 +317,8 @@ async function main(){
           await until(()=>send.isEnabled(),"Staged image ready to insert");
           const before=await inputs();await send.click();
           const receipt=terminal.locator('.attachment-page__composer[data-content="sent"]');await receipt.waitFor({state:"visible"});
-          assert(/Inserted.*1 image/.test(await receipt.innerText()),"Image insertion receipt is visible");
+          // "Inserting" until the terminal reports the input written.
+          await until(async()=>/Inserted.*1 image/.test(await receipt.innerText()),"Image insertion receipt is visible");
           assert(!await receipt.locator('.attachment-page__composer-typography').isVisible(),"Receipt has no font control");
           assert(!await terminal.locator('.attachment-page__composer-typography-popover').isVisible(),"Receipt has no font popover");
           await until(async()=>(await inputs()).length===before.length+1,"Image path sent exactly once");
