@@ -2,6 +2,16 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
+## 0.1.19 — 2026-10-07
+
+### Fixed
+
+- The session list that opens when you select the session name above the terminal now uses the height of the page. Before, it stopped at a fixed height, so on a tall window it showed only a few sessions above an empty area. It stops a small margin above the bottom of the visible page, and above an open on-screen keyboard.
+
+### Testing notes
+
+- In Chromium and WebKit, at phone, landscape and desktop sizes, a test with more sessions than fit checks that the list ends near the bottom of the page and stays inside it. The test was shown to fail without the change.
+
 ## 0.1.18 — 2026-10-06
 
 ### Changed
