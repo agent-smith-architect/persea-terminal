@@ -536,13 +536,17 @@
 .persea-session-switcher__empty { margin: 0.35rem 0; color: #aeb9cc; font-size: 0.75rem; }
 
 /* Keep the familiar session rows, with search visible while the list scrolls.
-   The list keeps room for a full row and a glimpse of the next. When the
-   popover is too short for that (phone landscape, or an open editor or open
-   details), the whole popover scrolls instead of squeezing the list. */
+   The popover may use the visible page down to a small margin above its
+   bottom edge: the toolbar row and that margin fit in 5rem. The visible band
+   excludes an open software keyboard, so the last rows stay reachable while
+   the search field has focus. The list keeps room for a full row and a
+   glimpse of the next. When the popover is too short for that (phone
+   landscape, or an open editor or open details), the whole popover scrolls
+   instead of squeezing the list. */
 .persea-unified-identity__details {
   display: flex;
   flex-direction: column;
-  max-height: min(80dvh, 38rem);
+  max-height: calc(var(--persea-visual-viewport-height, 100dvh) - 5rem);
   overflow: hidden auto;
 }
 .persea-unified-identity__current-details { flex: 0 0 auto; min-width: 0; }

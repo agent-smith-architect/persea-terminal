@@ -188,8 +188,6 @@ button[data-copy-state="failed"] {
   box-sizing: border-box;
   max-width: calc(100% - 1rem);
   width: min(28rem, calc(100% - 1rem));
-  max-height: min(70vh, 32rem);
-  overflow: auto;
   overscroll-behavior: contain;
   margin: 0.25rem 0 0;
   padding: 0.5rem 0.6rem;
