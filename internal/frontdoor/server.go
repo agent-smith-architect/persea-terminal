@@ -1621,7 +1621,9 @@ const compressMinBytes = 1 << 10
 
 // readWSMessage reads one browser message. The connection's read limit
 // counts wire bytes; a compressed message is also bounded by its decoded
-// size, so a small message cannot inflate past proto.MaxAttachment.
+// size, so a small message cannot inflate past proto.MaxAttachment. Either
+// overflow closes with 1009 (message too big), as gorilla does for the wire
+// limit.
 func readWSMessage(ws *websocket.Conn) (int, []byte, error) {
 	kind, reader, err := ws.NextReader()
 	if err != nil {
@@ -1629,6 +1631,7 @@ func readWSMessage(ws *websocket.Conn) (int, []byte, error) {
 	}
 	payload, err := io.ReadAll(io.LimitReader(reader, proto.MaxAttachment+1))
 	if err == nil && len(payload) > proto.MaxAttachment {
+		_ = ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseMessageTooBig, ""), time.Now().Add(time.Second))
 		err = websocket.ErrReadLimit
 	}
 	return kind, payload, err
