@@ -889,7 +889,7 @@ func TestUnifiedRotationUnitDeathAtEverySequenceEdgeCanRestart(t *testing.T) {
 					return
 				}
 				go func() {
-					fixture.effects.reapFaultedUnit(unit)
+					fixture.effects.reapFaultedUnitWithReason(unit, proto.SubscriberClosedGenerationFailed, observerCauseRotation)
 					_ = unit.process.Process.Kill()
 					close(reapDone)
 				}()

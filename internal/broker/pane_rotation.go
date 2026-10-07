@@ -657,7 +657,7 @@ func (stage *unifiedDevRotationWitnessStage) commit(txn *paneRotationTxn) paneRo
 
 func (*unifiedDevRotationWitnessStage) abort() {}
 
-func (stage *unifiedDevRotationWitnessStage) fatal(_ error, reason proto.SubscriberCloseReason) {
+func (stage *unifiedDevRotationWitnessStage) fatal(cause error, reason proto.SubscriberCloseReason) {
 	if stage.unit.process != nil && stage.unit.process.Process != nil {
 		_ = stage.unit.process.Process.Kill()
 	}
@@ -668,6 +668,6 @@ func (stage *unifiedDevRotationWitnessStage) fatal(_ error, reason proto.Subscri
 	// owns the immutable disconnect snapshot. Re-entering sync.Once from this
 	// fatal path would only wait on the same authoritative cleanup.
 	if live {
-		stage.effects.reapFaultedUnitWithReason(stage.unit, reason)
+		stage.effects.reapFaultedUnitWithReason(stage.unit, reason, observerCauseOf(cause))
 	}
 }

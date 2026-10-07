@@ -145,7 +145,48 @@ const (
 	observerCauseStorage
 	observerCauseStageError
 	observerCauseStalled
+	observerCauseCapacity
+	observerCauseRotation
 )
+
+// observerCauseNames is the closed log vocabulary of observerFailureCause.
+var observerCauseNames = [...]string{
+	"none", "eof", "cancelled", "deadline", "flow_control", "invalidated", "storage", "error", "stalled", "capacity", "rotation",
+}
+
+func (cause observerFailureCause) String() string {
+	if int(cause) < len(observerCauseNames) {
+		return observerCauseNames[cause]
+	}
+	return "unknown"
+}
+
+// observerCauseOf classifies why a unit or its generation failed. The class
+// is closed: error text can carry terminal-derived detail and is never kept.
+func observerCauseOf(err error) observerFailureCause {
+	switch {
+	case err == nil || errors.Is(err, io.EOF):
+		return observerCauseEOF
+	case errors.Is(err, context.Canceled):
+		return observerCauseCancelled
+	case errors.Is(err, context.DeadlineExceeded):
+		return observerCauseDeadline
+	case errors.Is(err, ErrUnifiedObserverFlowControl):
+		return observerCauseFlowControl
+	case errors.Is(err, unifiedjournal.ErrInvalidated):
+		return observerCauseInvalidated
+	case errors.Is(err, unifiedjournal.ErrStorage), errors.Is(err, unifiedjournal.ErrCorruptJournal):
+		return observerCauseStorage
+	case errors.Is(err, unifiedjournal.ErrQuota):
+		return observerCauseCapacity
+	case errors.Is(err, errRecordingStalled):
+		return observerCauseStalled
+	case errors.Is(err, ErrUnifiedRotateFatal), errors.Is(err, ErrPaneRotationFatal):
+		return observerCauseRotation
+	default:
+		return observerCauseStageError
+	}
+}
 
 type observerProgress struct {
 	stageMono            atomic.Int64
@@ -171,22 +212,7 @@ func (p *observerProgress) snapshot() observerProgressSnapshot {
 	return observerProgressSnapshot{observerFailureStage(p.stage.Load()), observerFailureStage(p.exitStage.Load()), observerFailureCause(p.exitCause.Load()), p.exitedUnixNano.Load()}
 }
 func (p *observerProgress) recordExit(err error) {
-	cause := observerCauseStageError
-	switch {
-	case err == nil || errors.Is(err, io.EOF):
-		cause = observerCauseEOF
-	case errors.Is(err, context.Canceled):
-		cause = observerCauseCancelled
-	case errors.Is(err, context.DeadlineExceeded):
-		cause = observerCauseDeadline
-	case errors.Is(err, ErrUnifiedObserverFlowControl):
-		cause = observerCauseFlowControl
-	case errors.Is(err, unifiedjournal.ErrInvalidated):
-		cause = observerCauseInvalidated
-	case errors.Is(err, unifiedjournal.ErrStorage), errors.Is(err, unifiedjournal.ErrCorruptJournal):
-		cause = observerCauseStorage
-	}
 	p.exitStage.Store(p.stage.Load())
-	p.exitCause.Store(uint32(cause))
+	p.exitCause.Store(uint32(observerCauseOf(err)))
 	p.exitedUnixNano.Store(time.Now().UnixNano())
 }

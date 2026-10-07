@@ -408,31 +408,28 @@ func (effects *UnifiedDevPaneEffects) reapUnit(unit *unifiedDevUnit) {
 func (effects *UnifiedDevPaneEffects) reapUnitContext(ctx context.Context, unit *unifiedDevUnit) {
 	unit.reapOnce.Do(func() {
 		defer unit.memory.done()
-		if unit.supervisorFault.Load() || errors.Is(unit.exitErr, ErrUnifiedObserverFlowControl) || errors.Is(unit.exitErr, ErrUnifiedRotateFatal) {
-			effects.reapFaultedUnitOnce(unit)
+		if unit.supervisorFault.Load() {
+			effects.reapFaultedUnitOnceWithReason(unit, proto.SubscriberClosedGenerationFailed, observerCauseStalled)
+			return
+		}
+		if errors.Is(unit.exitErr, ErrUnifiedObserverFlowControl) || errors.Is(unit.exitErr, ErrUnifiedRotateFatal) {
+			effects.reapFaultedUnitOnceWithReason(unit, proto.SubscriberClosedGenerationFailed, observerCauseOf(unit.exitErr))
 			return
 		}
 		effects.reapUnitOnceContext(ctx, unit)
 	})
 }
 
-// reapFaultedUnit is the synchronous post-fault entry point used when the
-// caller already proved an internal invariant failure. Source inventory cannot
-// turn that known fault into an ordinary reconnect merely because tmux remains
-// alive.
-func (effects *UnifiedDevPaneEffects) reapFaultedUnit(unit *unifiedDevUnit) {
-	effects.reapFaultedUnitWithReason(unit, proto.SubscriberClosedGenerationFailed)
+// reapFaultedUnitWithReason is the synchronous post-fault entry point used
+// when the caller already proved an internal invariant failure. Source
+// inventory cannot turn that known fault into an ordinary reconnect merely
+// because tmux remains alive. The caller names the cause: the unit may still
+// be running, so its exit error is not yet known.
+func (effects *UnifiedDevPaneEffects) reapFaultedUnitWithReason(unit *unifiedDevUnit, reason proto.SubscriberCloseReason, cause observerFailureCause) {
+	unit.reapOnce.Do(func() { defer unit.memory.done(); effects.reapFaultedUnitOnceWithReason(unit, reason, cause) })
 }
 
-func (effects *UnifiedDevPaneEffects) reapFaultedUnitWithReason(unit *unifiedDevUnit, reason proto.SubscriberCloseReason) {
-	unit.reapOnce.Do(func() { defer unit.memory.done(); effects.reapFaultedUnitOnceWithReason(unit, reason) })
-}
-
-func (effects *UnifiedDevPaneEffects) reapFaultedUnitOnce(unit *unifiedDevUnit) {
-	effects.reapFaultedUnitOnceWithReason(unit, proto.SubscriberClosedGenerationFailed)
-}
-
-func (effects *UnifiedDevPaneEffects) reapFaultedUnitOnceWithReason(unit *unifiedDevUnit, reason proto.SubscriberCloseReason) {
+func (effects *UnifiedDevPaneEffects) reapFaultedUnitOnceWithReason(unit *unifiedDevUnit, reason proto.SubscriberCloseReason, cause observerFailureCause) {
 	if unit.process != nil && unit.process.Process != nil {
 		_ = unit.process.Process.Kill()
 	}
@@ -479,6 +476,9 @@ func (effects *UnifiedDevPaneEffects) reapFaultedUnitOnceWithReason(unit *unifie
 	}
 	effects.mu.Unlock()
 	effects.subscriberMu.Unlock()
+	if active {
+		effects.logGenerationEnd(unit, reason, cause.String(), false)
+	}
 	if edge := effects.unitReapEdge; edge != nil {
 		edge(unit, append([]controlmode.PaneWitness(nil), witnesses...))
 	}
@@ -664,6 +664,18 @@ func (effects *UnifiedDevPaneEffects) classifyRefitSource(ctx context.Context, b
 	return observerSourceDecision{disposition: observerSourceAmbiguous}
 }
 
+// logGenerationEnd states why a recording generation ended its pages' tails,
+// which see only the close reason. The cause is a closed class, never error
+// text.
+func (effects *UnifiedDevPaneEffects) logGenerationEnd(unit *unifiedDevUnit, reason proto.SubscriberCloseReason, cause string, recovering bool) {
+	line := fmt.Sprintf("component=broker event=generation_end server=%q session=%q close=%q cause=%q recovering=%t",
+		unit.birth.server.Label, unit.sessionID, reason, cause, recovering)
+	brokerLogf("%s", line)
+	if edge := effects.generationEndEdge; edge != nil {
+		edge(line)
+	}
+}
+
 func (effects *UnifiedDevPaneEffects) settleOwnerGone(unit *unifiedDevUnit, witness controlmode.PaneWitness) error {
 	key := journalKey(witness)
 	effects.subscriberMu.Lock()
@@ -702,6 +714,7 @@ func (effects *UnifiedDevPaneEffects) settleOwnerGone(unit *unifiedDevUnit, witn
 	effects.mu.Unlock()
 	effects.closeSubscribersLocked(key, proto.SubscriberClosedGenerationFailed)
 	effects.subscriberMu.Unlock()
+	effects.logGenerationEnd(unit, proto.SubscriberClosedGenerationFailed, "session_ended", false)
 	if production {
 		return registry.finishOwnerGone(witness, reservation)
 	}
@@ -805,8 +818,10 @@ func (effects *UnifiedDevPaneEffects) reapUnitOnceContext(ctx context.Context, u
 	if replacement && effects.observer != nil {
 		_ = effects.observer.ObservePane(controlmode.Observation{Kind: controlmode.ObservationReplacement, Witness: current, Replacement: decision.replacement})
 	}
+	recovering := decision.disposition == observerSourceTransportLost && !recoveryFailed
 	effects.closeSubscribers(activeKey, proto.SubscriberClosedGenerationFailed)
-	if decision.disposition == observerSourceTransportLost && !recoveryFailed {
+	effects.logGenerationEnd(unit, proto.SubscriberClosedGenerationFailed, observerCauseOf(unit.exitErr).String(), recovering)
+	if recovering {
 		if err := effects.startObserverRecovery(ctx, unit, activeKey); err != nil {
 			effects.subscriberMu.Lock()
 			effects.mu.Lock()

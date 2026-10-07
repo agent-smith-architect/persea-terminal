@@ -12,6 +12,7 @@ import (
 
 	"persea-terminal/internal/config"
 	"persea-terminal/internal/controlmode"
+	"persea-terminal/internal/proto"
 	"persea-terminal/internal/unifiedjournal"
 )
 
@@ -157,7 +158,7 @@ func failedReconstructionFault(t *testing.T, fixture *adoptionFixture, witness c
 	// Direct observer injection bypasses the run loop's fatal return. Invoke
 	// its existing known-fault teardown owner, which stops the exact observer;
 	// the real process owner still performs Wait before the settlement check.
-	fixture.effects.reapFaultedUnit(unit)
+	fixture.effects.reapFaultedUnitWithReason(unit, proto.SubscriberClosedGenerationFailed, observerCauseRotation)
 }
 
 func failedReconstructionSettled(t *testing.T, fixture *adoptionFixture, key unifiedjournal.PaneKey, unit *unifiedDevUnit) {
