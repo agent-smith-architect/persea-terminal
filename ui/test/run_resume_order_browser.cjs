@@ -88,13 +88,17 @@ async function main() {
     const offer = await run("offerWaitsForTheRenderer");
     assert(offer.queued === null && offer.drained === `persea-resume.${STREAM}.2.10`, `offer while output is queued: ${JSON.stringify(offer)}`);
 
+    const fit = await run("fitWhileGeometryQueued");
+    assert(fit.whileQueued.requests === 0 && !fit.whileQueued.fitPending && fit.requests === 1 && fit.fitPending && fit.inputsWhileSealed === 0 && fit.rows === 30,
+      `Fit while a geometry is queued: ${JSON.stringify(fit)}`);
+
     const gap = await run("positionGap");
     same(gap.lines, ["first-more"], "position gap");
     assert(gap.offer === null && gap.finalized.length === 0, `position gap: ${JSON.stringify(gap)}`);
 
     assert(errors.length === 0, `browser errors: ${JSON.stringify(errors)}`);
     await context.close();
-    console.log(`resume order ${ENGINE}: PASS (geometry between output, ordered reset, resumed admission, 7 refused resumes, superseded geometry and replay, cut-short sequences, offer timing, position gap)`);
+    console.log(`resume order ${ENGINE}: PASS (geometry between output, ordered reset, resumed admission, 7 refused resumes, superseded geometry and replay, cut-short sequences, offer timing, Fit while geometry queued, position gap)`);
   } finally {
     await browser?.close();
     await new Promise((resolve) => server.close(resolve));
