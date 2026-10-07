@@ -57,6 +57,9 @@ async function main() {
         return { menu: box(node), list: box(list), searchBefore: before, searchAfter: after, scroll: list.scrollTop, scrollRange: list.scrollHeight - list.clientHeight, viewport: { width: innerWidth, height: innerHeight }, small: targets.filter(el => { const r = box(el); return r.width < 43.9 || r.height < 43.9; }).map(el => el.getAttribute('aria-label') || el.textContent) };
       });
       assert(geometry.menu.left >= 0 && geometry.menu.right <= width + 1 && geometry.menu.bottom <= height + 1, `Menu escaped viewport at ${width}: ${JSON.stringify(geometry)}`);
+      // A list longer than the page fills the page: the menu stops only a
+      // small margin above the bottom edge, not at a fixed height.
+      assert(geometry.scrollRange > 0 && height - geometry.menu.bottom <= 40, `Menu leaves the page height unused at ${width}x${height}: ${JSON.stringify(geometry.menu)}`);
       assert(geometry.scroll > 0 && geometry.searchBefore.top === geometry.searchAfter.top, `Search scrolled out of reach at ${width}`);
       assert(geometry.small.length === 0, `Menu targets too small at ${width}: ${geometry.small.join(', ')}`);
       const list = menu.locator('.persea-session-switcher__list'); await list.evaluate(node => node.scrollTop = 0);
