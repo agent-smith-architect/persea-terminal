@@ -5265,18 +5265,14 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     // breaks become CR, and bracketed paste adds its 12 marker bytes.
     const framed = new TextEncoder().encode(text.replace(/\r?\n/g, "\r")).byteLength + (availability.bracketedPasteMode ? 12 : 0);
     if (framed > MAX_INPUT_BYTES) return "TOO_LARGE";
-    // Focus can send its own report; only the paste's send counts.
+    // Focus can send its own report; only the paste's send counts. paste()
+    // sends synchronously through sendInput, which records the send.
     if (focusFirst) this.terminal.focus();
     this.lastInputSend = undefined;
-    let sent: InputSend | undefined;
-    try {
-      this.terminal.paste(text);
-      // paste() sent synchronously through sendInput, which set this.
-      sent = this.lastInputSend as InputSend | undefined;
-    } finally {
-      this.lastInputSend = undefined;
-    }
+    this.terminal.paste(text);
     this.iosBackspace.onXtermOperationComplete();
+    const sent = this.lastInputSend as InputSend | undefined;
+    this.lastInputSend = undefined;
     if (sent?.result !== "ACCEPTED") return "NOT_SENT";
     if (onDelivery) this.inputs.waiting.set(sent.ordinal, onDelivery);
     return "SENT";

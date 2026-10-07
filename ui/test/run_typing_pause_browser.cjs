@@ -421,6 +421,36 @@ async function inputResults(browser, origin) {
   await draft("");
   checked.push("one Insert at a time"); progress(checked.at(-1));
 
+  // Clear is held too: the waiting Insert may need the restore slot, and a
+  // late refusal must not cost the newer draft.
+  await draft("FIRST-INSERT");
+  await insert();
+  await until("Insert pending", async () => (await status()).startsWith("Inserting"));
+  await draft("SECOND-DRAFT");
+  assert(await page.locator(".attachment-page__composer-clear").isDisabled(), "Clear was offered while an Insert waits");
+  value = await call("refuse", "input_refused");
+  assert(value.composer.draft === "SECOND-DRAFT" && value.composer.status.includes("Restore brings the text back"),
+    `newer draft at a late refusal: ${JSON.stringify(value.composer)}`);
+  await draft("");
+  await page.locator(".attachment-page__composer-restore").click();
+  assert((await state()).composer.draft === "FIRST-INSERT", "Restore lost the refused Insert");
+  await draft("");
+  checked.push("Clear held"); progress(checked.at(-1));
+
+  // A held Ctrl+Enter on the reopened empty composer changes nothing: the
+  // waiting Insert is still confirmed, or still comes back when refused.
+  for (const [code, check] of [["", (c) => c.status === "Inserted 9 ch"], ["input_refused", (c) => c.draft === "UNTOUCHED" && c.status.includes("Your text is back")]]) {
+    await draft("UNTOUCHED");
+    await insert();
+    await until("Insert pending", async () => (await status()).startsWith("Inserting"));
+    await draft("");
+    await composer.press("Control+Enter");
+    value = code === "" ? (await call("answer"), await state()) : await call("refuse", code);
+    assert(check(value.composer), `held Ctrl+Enter then ${code || "written"}: ${JSON.stringify(value.composer)}`);
+    await draft("");
+  }
+  checked.push("held Ctrl+Enter"); progress(checked.at(-1));
+
   // Nothing of it reached the terminal: the text is back in the empty draft.
   await draft("AGAIN");
   await insert();
