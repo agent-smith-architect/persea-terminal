@@ -137,6 +137,15 @@ func TestProbeAdoptsExactSourceBeforeUnifiedAttachAndRejectsReplay(t *testing.T)
 							if !strings.Contains(string(data), "sentinel") {
 								t.Error("input changed")
 							}
+							// The input's result: written in full, before its output.
+							result, err := attachmentwire.EncodeTransportInput(1, "", attachmentwire.ServerToBrowser)
+							if err == nil {
+								err = conn.WriteMessage(websocket.TextMessage, result)
+							}
+							if err != nil {
+								t.Error(err)
+								return
+							}
 							send(terminal.Frame{Type: terminal.FrameLive, Cut: 1, Data: []byte("sentinel")})
 						}
 						_, _, _ = conn.ReadMessage()

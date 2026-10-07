@@ -249,14 +249,32 @@ func Probe(base, realm, session, mode, sentinel string, mutateAlias bool) error 
 		return fmt.Errorf("unexpected echoed subprotocol")
 	}
 	_ = ws.SetReadDeadline(time.Now().Add(30 * time.Second))
-	committed, controlled, sent := false, false, false
+	committed, controlled, sent, written := false, false, false, false
 	live := ""
 	var consumed uint64
+	complete := func() error {
+		_ = ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "probe_complete"), time.Now().Add(time.Second))
+		_ = ws.Close()
+		return proveReplayRejected(&dialer, wsURL.String(), headers)
+	}
 	for {
 		kind, payload, e := ws.ReadMessage()
 		if e != nil {
 			_ = ws.Close()
 			return e
+		}
+		// The probe sends one INPUT frame; its result must say it was
+		// written to the terminal in full.
+		if through, code, isResult, e := attachmentwire.DecodeTransportInput(payload, attachmentwire.ServerToBrowser); kind == websocket.TextMessage && isResult {
+			if e != nil || !sent || written || through != 1 || code != "" {
+				_ = ws.Close()
+				return fmt.Errorf("unexpected input result %q", payload)
+			}
+			written = true
+			if strings.Contains(live, sentinel) {
+				return complete()
+			}
+			continue
 		}
 		if kind != websocket.BinaryMessage {
 			_ = ws.Close()
@@ -291,9 +309,7 @@ func Probe(base, realm, session, mode, sentinel string, mutateAlias bool) error 
 			if !committed {
 				committed = true
 				if mode == "observe" {
-					_ = ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "probe_complete"), time.Now().Add(time.Second))
-					_ = ws.Close()
-					return proveReplayRejected(&dialer, wsURL.String(), headers)
+					return complete()
 				}
 				if e := ws.WriteJSON(map[string]any{"type": "MODE_REQUEST", "version": 1, "source": source, "epoch": epoch, "mode": "CONTROL"}); e != nil {
 					return e
@@ -310,10 +326,8 @@ func Probe(base, realm, session, mode, sentinel string, mutateAlias bool) error 
 			}
 		case "LIVE":
 			live += string(frame.Data)
-			if controlled && strings.Contains(live, sentinel) {
-				_ = ws.WriteControl(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "probe_complete"), time.Now().Add(time.Second))
-				_ = ws.Close()
-				return proveReplayRejected(&dialer, wsURL.String(), headers)
+			if controlled && written && strings.Contains(live, sentinel) {
+				return complete()
 			}
 		case "END":
 			return fmt.Errorf("attachment ended early")
