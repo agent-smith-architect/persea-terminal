@@ -17,6 +17,9 @@ type Config struct {
 	Clock           Clock
 	HistoryRows     int
 	HistoryRowsSet  bool
+	// InputSettled, when set, receives one outcome per admitted INPUT frame
+	// (see InputSettled).
+	InputSettled InputSettled
 }
 
 func (c Config) validate() error {
@@ -113,7 +116,7 @@ type Epoch struct {
 	nextCut                uint64
 	start                  *startAttempt
 	terminal               *terminalResult
-	transitionalInput      [][]byte
+	transitionalInput      []inputItem
 	transitionalInputBytes int
 	transitionalModes      []Mode
 	pendingHistory         *historyRequest
@@ -151,7 +154,7 @@ func newEpoch(ctx context.Context, source *PinnedSource, epoch uint64, writer Fr
 	if err != nil {
 		return nil, err
 	}
-	input, err := newInputPump(sourceID, epoch, pty)
+	input, err := newInputPump(sourceID, epoch, pty, config.InputSettled)
 	if err != nil {
 		_ = egress.finishAndWait()
 		return nil, err
@@ -706,7 +709,7 @@ func (e *Epoch) HandleFrame(frame Frame) error {
 				internalErr = ErrSaturated
 				break
 			}
-			e.transitionalInput = append(e.transitionalInput, append([]byte(nil), frame.Data...))
+			e.transitionalInput = append(e.transitionalInput, inputItem{data: append([]byte(nil), frame.Data...), id: frame.InputID})
 			e.transitionalInputBytes += len(frame.Data)
 			break
 		}
@@ -715,7 +718,7 @@ func (e *Epoch) HandleFrame(frame Frame) error {
 			e.mu.Unlock()
 			return err
 		}
-		internalErr = e.input.enqueue(frame.Source, frame.Epoch, frame.Data)
+		internalErr = e.input.enqueue(frame.Source, frame.Epoch, inputItem{data: frame.Data, id: frame.InputID})
 	default:
 		e.mu.Unlock()
 		return ErrOutOfState
@@ -1022,13 +1025,23 @@ func (e *Epoch) releaseTransitionalLocked(next *automaton, frames *[]Frame) erro
 	return nil
 }
 
+// clearTransitionalLocked forgets mid-cut state once the pump has its own
+// copy of the input. dropTransitionalLocked is the teardown path, where the
+// input never reached the pump.
 func (e *Epoch) clearTransitionalLocked() {
 	for i := range e.transitionalInput {
-		clear(e.transitionalInput[i])
+		clear(e.transitionalInput[i].data)
 	}
 	e.transitionalInput = nil
 	e.transitionalInputBytes = 0
 	e.transitionalModes = nil
+}
+
+func (e *Epoch) dropTransitionalLocked() {
+	for _, item := range e.transitionalInput {
+		e.input.settled(item.id, InputDropped)
+	}
+	e.clearTransitionalLocked()
 }
 
 // Fault acknowledges a typed terminal request without waiting on a possibly
@@ -1350,7 +1363,7 @@ func (e *Epoch) publishTerminalLocked(cause terminalCause) lifecycleResult {
 	}
 
 	e.ingress.discard()
-	e.clearTransitionalLocked()
+	e.dropTransitionalLocked()
 	if e.start != nil {
 		clear(e.start.replay)
 		e.start.replay = nil

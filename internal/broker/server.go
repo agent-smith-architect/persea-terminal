@@ -2340,16 +2340,16 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 	if readerLease != nil {
 		attachmentEffects = &recordingAttachmentEffects{delegate: attachmentEffects, lease: readerLease}
 	}
+	inputs := newInputLedger()
+	epochConfig := terminal.Config{
+		QuietInterval: 500 * time.Millisecond, MaximumInterval: 2 * time.Second,
+		CutTimeout: 5 * time.Second, Clock: terminal.RealClock{}, HistoryRows: *ctrl.HistoryLimit, HistoryRowsSet: true,
+		InputSettled: func(id uint64, outcome terminal.InputOutcome) { inputs.settle(id, pumpInputResult(outcome)) },
+	}
 	if attachmentEffects == nil {
-		epoch, err = terminal.NewEpoch(ctx, source, epochID, frameWriter, delayed, terminal.Config{
-			QuietInterval: 500 * time.Millisecond, MaximumInterval: 2 * time.Second,
-			CutTimeout: 5 * time.Second, Clock: terminal.RealClock{}, HistoryRows: *ctrl.HistoryLimit, HistoryRowsSet: true,
-		})
+		epoch, err = terminal.NewEpoch(ctx, source, epochID, frameWriter, delayed, epochConfig)
 	} else {
-		epoch, err = terminal.NewEpochWithAttachmentEffects(ctx, source, epochID, frameWriter, delayed, terminal.Config{
-			QuietInterval: 500 * time.Millisecond, MaximumInterval: 2 * time.Second,
-			CutTimeout: 5 * time.Second, Clock: terminal.RealClock{}, HistoryRows: *ctrl.HistoryLimit, HistoryRowsSet: true,
-		}, attachmentEffects)
+		epoch, err = terminal.NewEpochWithAttachmentEffects(ctx, source, epochID, frameWriter, delayed, epochConfig, attachmentEffects)
 	}
 	if err != nil {
 		logAttachment("attach_failed", ctrl.Authority, epochID)
@@ -2386,30 +2386,16 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 			return
 		}
 	}()
-	// Pongs and input_paused refusals are written by their own goroutine. The
-	// output writer can stay parked on a full socket for as long as the front
-	// door's flow window is closed; a pong or refusal written from this loop
-	// would wait behind it, and so would every input frame after it. One
-	// pending pong answers every ping that arrives before it is written, and
-	// one pending refusal tells the page about every input refused meanwhile.
+	// Pongs and input results are written by their own goroutine. The output
+	// writer can stay parked on a full socket for as long as the front door's
+	// flow window is closed; a pong or result written from this loop would
+	// wait behind it, and so would every input frame after it. One pending
+	// pong answers every ping that arrives before it is written, and results
+	// settled meanwhile are sent together, in frame order (see inputLedger).
 	pongs := make(chan struct{}, 1)
-	refusals := make(chan proto.Control, 1)
 	pongsDone := make(chan struct{})
 	defer close(pongsDone)
-	go func() {
-		for {
-			control := proto.Control{Type: "pong"}
-			select {
-			case <-pongs:
-			case control = <-refusals:
-			case <-pongsDone:
-				return
-			}
-			if writer.control(control) != nil {
-				return
-			}
-		}
-	}()
+	go inputs.report(pongs, pongsDone, writer.control, func() { _ = conn.Close() })
 	var frame proto.Frame
 	var typed terminal.Frame
 	var ingressBytes int64
@@ -2474,7 +2460,21 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 			_ = writer.control(proto.Control{Type: "error", Code: "bad_attachment"})
 			return
 		}
-		if ctrl.Mode == "observe" && ((typed.Type == terminal.FrameModeRequest && typed.Mode == terminal.ModeControl) || typed.Type == terminal.FrameInput || typed.Type == terminal.FrameResize) {
+		if typed.Type == terminal.FrameInput {
+			id, ok := inputs.receive()
+			if !ok {
+				// Results are not reaching the front door; a fatal control
+				// would wait behind them. Closing is the verdict.
+				logAttachment("input_backlog", ctrl.Authority, epochID)
+				return
+			}
+			typed.InputID = id
+			if ctrl.Mode == "observe" {
+				inputs.settle(id, inputRefused)
+				continue
+			}
+		}
+		if ctrl.Mode == "observe" && ((typed.Type == terminal.FrameModeRequest && typed.Mode == terminal.ModeControl) || typed.Type == terminal.FrameResize) {
 			_ = writer.control(proto.Control{Type: "error", Code: "observe_mode", Msg: "control authority denied"})
 			continue
 		}
@@ -2583,24 +2583,22 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 				brokerLogf("component=broker event=input_paused realm=%q server=%q session=%q epoch=%d", ctrl.Authority.Realm, ctrl.Authority.Server, ctrl.Authority.SessionID, epochID)
 			}
 			if !accepted {
-				select {
-				case refusals <- proto.Control{Type: "error", Code: "input_paused"}:
-				default:
-				}
+				inputs.settle(typed.InputID, inputPaused)
 				continue
 			}
 		}
 		if err := epoch.HandleFrame(typed); err != nil {
 			// ErrObserveOnly means "not right now", not "this attachment is
-			// broken": the frame was refused because the protocol is mid-cut or
-			// observe-only, and the epoch is not faulted by it. The observe-mode
-			// branch above already treats exactly that condition as a typed
-			// refusal, so treating it as fatal here was an inconsistency — and a
-			// costly one, because a keystroke landing inside the millisecond
-			// CutResize window took the whole attachment down with it. The frame
-			// is refused and dropped; it is never queued, replayed, or resent.
-			if errors.Is(err, terminal.ErrObserveOnly) {
-				_ = writer.control(proto.Control{Type: "error", Code: "input_refused"})
+			// broken": an INPUT frame was refused because the protocol is
+			// mid-cut or observe-only, and the epoch is not faulted by it. The
+			// observe-mode branch above already treats exactly that condition as
+			// a typed refusal, so treating it as fatal here was an inconsistency
+			// — and a costly one, because a keystroke landing inside the
+			// millisecond CutResize window took the whole attachment down with
+			// it. The frame is refused and dropped; it is never queued,
+			// replayed, or resent, and its result says so.
+			if errors.Is(err, terminal.ErrObserveOnly) && typed.Type == terminal.FrameInput {
+				inputs.settle(typed.InputID, inputRefused)
 				continue
 			}
 			logAttachment("attachment_failed", ctrl.Authority, epochID)

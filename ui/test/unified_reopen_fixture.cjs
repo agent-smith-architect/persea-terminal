@@ -1556,15 +1556,18 @@ function startFixture(ui, options = {}) {
         return;
       }
       if (value.type === "INPUT") {
-        // The real broker answers `error input_refused` for input outside the
-        // control grant. The front door relays it in-band and keeps the socket.
+        // Every INPUT frame gets its result, numbered per socket. The real
+        // broker refuses input outside the control grant (input_refused);
+        // the front door relays results in-band and keeps the socket.
+        socket.inputCount = (socket.inputCount || 0) + 1;
         if (attachment.mode !== "CONTROL" || state.refuseInputsInBand > 0) {
           if (state.refuseInputsInBand > 0) state.refuseInputsInBand -= 1;
           attachment.refusals = (attachment.refusals || 0) + 1;
-          socket.sendText(`${REFUSAL_PREFIX}input_refused`);
+          socket.sendText(`PERSEA-INPUT/1 ${socket.inputCount} input_refused`);
           return;
         }
         attachment.inputs.push(Buffer.from(value.data, "base64").toString("binary"));
+        socket.sendText(`PERSEA-INPUT/1 ${socket.inputCount}`);
         return;
       }
       if (value.type === "RESIZE_REQUEST") {

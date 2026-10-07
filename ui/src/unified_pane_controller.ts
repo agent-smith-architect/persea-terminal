@@ -21,6 +21,7 @@ import { boundedFetch } from "./bounded_fetch";
 import { ADOPTION_HISTORY_ROWS, readTerminalScrollbackRows } from "./scrollback_preferences";
 import { adoptFailureMessage, parseInventory, resolveDraftScope, unifiedBlockedMessage, type AttachmentMode, type DashboardInventory, type DashboardSession, type HistoryChoice } from "./dashboard";
 import type { ComposerStagedImage } from "./composer_attachments";
+import type { InputResultCode } from "./input_results";
 import type { SnippetServicePort } from "./snippet_client";
 import { switcherInventory, type SessionSwitcherInventory } from "./session_switcher";
 import { sessionScopeIdentity } from "./session_memory";
@@ -890,6 +891,7 @@ export class UnifiedPaneController {
         page.operationalRefusal(generation, code);
         observer.operationalRefusal?.(generation, code);
       },
+      inputResult: (generation: number, through: number, code: InputResultCode) => page.inputResult(generation, through, code),
       afterConsumed: (generation: number, done: () => void) => page.afterConsumed(generation, done),
     });
   }

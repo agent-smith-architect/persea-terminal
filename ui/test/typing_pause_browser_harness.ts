@@ -11,6 +11,11 @@ const decoder = new TextDecoder();
 
 type Sent = { generation: number; type: string; data?: string };
 const sent: Sent[] = [];
+const finalized: string[] = [];
+// What the fake port answers a send with, and how many of each generation's
+// INPUT frames have been given a result.
+let portResult: "ACCEPTED" | "SATURATED" = "ACCEPTED";
+const answered = new Map<number, number>();
 let page: UnifiedTerminalPage | undefined;
 let generation = 0;
 let cut = 20n;
@@ -73,7 +78,12 @@ function snapshot(): Record<string, unknown> {
     shell: box(shell),
     connection: root.querySelector(".persea-unified-connection")?.textContent ?? "",
     failureShown: shown(root.querySelector<HTMLElement>(".persea-unified-notice")),
-    composer: { status: composerStatus?.value ?? "", sendDisabled: composerSend?.disabled ?? null },
+    composer: {
+      status: composerStatus?.value ?? "", sendDisabled: composerSend?.disabled ?? null,
+      draft: root.querySelector<HTMLTextAreaElement>(".attachment-page__composer-textarea")?.value ?? "",
+      restoreShown: shown(root.querySelector<HTMLElement>(".attachment-page__composer-restore")),
+    },
+    finalized: finalized.slice(),
     activeIsTerminal: textarea !== null && document.activeElement === textarea,
     activeClass: (document.activeElement as HTMLElement | null)?.className ?? "",
     viewport: { width: window.innerWidth, height: window.innerHeight },
@@ -83,6 +93,9 @@ function snapshot(): Record<string, unknown> {
 function reset(name = "pause-one"): Record<string, unknown> {
   page?.destroy();
   sent.splice(0);
+  finalized.splice(0);
+  answered.clear();
+  portResult = "ACCEPTED";
   sessionName = name;
   const host = document.getElementById("typing-host");
   if (!(host instanceof HTMLElement)) throw new Error("typing host missing");
@@ -93,10 +106,11 @@ function reset(name = "pause-one"): Record<string, unknown> {
     root: host,
     port: {
       trySend: (frameGeneration, value) => {
+        if (value.type === "INPUT" && portResult !== "ACCEPTED") return portResult;
         sent.push({ generation: frameGeneration, type: value.type, ...(value.type === "INPUT" ? { data: decoder.decode(value.data) } : {}) });
         return "ACCEPTED";
       },
-      finalize: () => undefined,
+      finalize: (intent) => { finalized.push(intent.cause); },
       detach: () => undefined,
       attachAgain: () => undefined,
     },
@@ -127,8 +141,52 @@ async function admit(): Promise<Record<string, unknown>> {
   return snapshot();
 }
 
+const INPUT_CODES = new Set(["input_paused", "input_refused", "input_dropped", "input_partial"]);
+const inputsSent = (): number => sent.filter((entry) => entry.type === "INPUT" && entry.generation === generation).length;
+
+// A broker refusal. Input codes arrive as the result of the next INPUT frame
+// still waiting for one, as the server reports them; there must be one.
 function refuse(code: string, generationOffset = 0): Record<string, unknown> {
-  mounted().operationalRefusal(generation + generationOffset, code);
+  if (!INPUT_CODES.has(code)) {
+    mounted().operationalRefusal(generation + generationOffset, code);
+    return snapshot();
+  }
+  if (generationOffset !== 0) {
+    mounted().inputResult(generation + generationOffset, 1, code as never);
+    return snapshot();
+  }
+  const through = (answered.get(generation) ?? 0) + 1;
+  if (through > inputsSent()) throw new Error(`no INPUT frame waits for a result to refuse with ${code}`);
+  answered.set(generation, through);
+  mounted().inputResult(generation, through, code as never);
+  return snapshot();
+}
+
+// Results for INPUT frames of the current generation, as the server sends
+// them: every frame still waiting except the last `keep`, with one code
+// ("" = written).
+function answer(code = "", keep = 0): Record<string, unknown> {
+  const from = answered.get(generation) ?? 0;
+  const through = inputsSent() - keep;
+  if (through <= from || through > inputsSent()) throw new Error(`cannot answer through ${through} (answered ${from}, sent ${inputsSent()})`);
+  answered.set(generation, through);
+  mounted().inputResult(generation, through, code as never);
+  return snapshot();
+}
+
+// A result the server should never send: through `through`, as given.
+function rawResult(through: number, code = ""): Record<string, unknown> {
+  mounted().inputResult(generation, through, code as never);
+  return snapshot();
+}
+
+function setPortResult(value: "ACCEPTED" | "SATURATED"): void {
+  portResult = value;
+}
+
+// Terminal output on the live attachment.
+function live(text: string): Record<string, unknown> {
+  mounted().receiveDecoded(generation, frame({ type: "LIVE", cut, data: encoder.encode(text) }));
   return snapshot();
 }
 
@@ -174,7 +232,7 @@ function insertText(text: string): Record<string, unknown> {
   return { result: mounted().insertText(text, "paste"), ...snapshot() };
 }
 
-type PagePrivates = { composerAvailability(): { canInject: boolean; reason: string }; injectComposerText(text: string): string };
+type PagePrivates = { composerAvailability(): { canInject: boolean; reason: string }; injectComposerText(text: string, onDelivery: () => void): string };
 const privates = (): PagePrivates => mounted() as unknown as PagePrivates;
 
 function composerAvailability(): { canInject: boolean; reason: string } {
@@ -184,7 +242,7 @@ function composerAvailability(): { canInject: boolean; reason: string } {
 
 // The composer's own delivery hook, called as its Insert would call it.
 function injectComposer(text: string): Record<string, unknown> {
-  return { result: privates().injectComposerText(text), ...snapshot() };
+  return { result: privates().injectComposerText(text, () => undefined), ...snapshot() };
 }
 
 function setTheme(theme: string): Record<string, unknown> {
@@ -207,6 +265,10 @@ declare global {
       reset(name?: string): Record<string, unknown>;
       admit(): Promise<Record<string, unknown>>;
       refuse(code: string, generationOffset?: number): Record<string, unknown>;
+      answer(code?: string, keep?: number): Record<string, unknown>;
+      rawResult(through: number, code?: string): Record<string, unknown>;
+      setPortResult(value: "ACCEPTED" | "SATURATED"): void;
+      live(text: string): Record<string, unknown>;
       closeTransport(reason: string): Record<string, unknown>;
       readmit(): Promise<Record<string, unknown>>;
       switchSession(name: string): Promise<Record<string, unknown>>;
@@ -221,5 +283,5 @@ declare global {
   }
 }
 
-window.__typing_pause = { reset, admit, refuse, closeTransport, readmit, switchSession, paste, insertText, composerAvailability, injectComposer, setTheme, destroy, snapshot };
+window.__typing_pause = { reset, admit, refuse, answer, rawResult, setPortResult, live, closeTransport, readmit, switchSession, paste, insertText, composerAvailability, injectComposer, setTheme, destroy, snapshot };
 document.body.dataset.typingPauseReady = "true";

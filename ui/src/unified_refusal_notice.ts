@@ -1,21 +1,24 @@
 // Operational refusals for the unified terminal page.
 //
 // A broker `error` whose code is OPERATIONAL is the outcome of ONE request —
-// a Fit that did not apply, a Fit outside policy, a keystroke that landed a
-// beat early, control traffic on an observe handle, or typing while this page
-// is far behind the session (input_paused: the keys were dropped). The
-// session, its journal and the attachment are all still valid, so the front
-// door relays the code in-band as a reserved text frame instead of closing the
-// socket, and the page renders it as a passing notice: no reconnect, no dead
-// end. input_paused alone is also a state on the page: typing stays paused
-// until the operator presses Resume typing (see refusalPausesTyping).
+// a Fit that did not apply, a Fit outside policy, control traffic on an
+// observe handle. The session, its journal and the attachment are all still
+// valid, so the front door relays the code in-band as a reserved text frame
+// instead of closing the socket, and the page renders it as a passing notice:
+// no reconnect, no dead end.
+//
+// Refused input is reported by its input result instead (input_results.ts),
+// with the codes below; it shares these notices. input_paused (typing while
+// this page is far behind the session) is also a state on the page: typing
+// stays paused until the operator presses Resume typing (see
+// refusalPausesTyping).
 //
 // The operational set here mirrors the Go authority (internal/proto
 // attachment_errors.go); the source-to-policy test holds the two equal.
 export const TRANSPORT_REFUSAL_PREFIX = "PERSEA-REFUSAL/1 ";
 
 export const UNIFIED_OPERATIONAL_CODES: ReadonlySet<string> = new Set([
-  "resize_failed", "resize_rejected", "input_refused", "observe_mode", "input_paused",
+  "resize_failed", "resize_rejected", "observe_mode",
 ]);
 
 // How long a refusal stays on screen. Long enough to read on a phone, short
@@ -56,6 +59,8 @@ const NOTICES: Readonly<Record<string, string>> = Object.freeze({
   input_refused: "Input was refused — try again",
   observe_mode: "This view is read-only",
   input_paused: "Catching up — what you typed was not sent",
+  input_dropped: "Input was not sent — control changed",
+  input_partial: "Only part of the input reached the terminal",
 });
 
 // One sentence with the code beside it, so a report stays diagnosable. A

@@ -88,6 +88,24 @@ func (c *freshnessClient) receipt(frames uint64) {
 	}
 }
 
+// inputResult reads until the broker's next input result.
+func (c *freshnessClient) inputResult() (uint64, string) {
+	c.t.Helper()
+	for {
+		raw, _ := c.read()
+		if raw.Type != proto.FrameControl {
+			continue
+		}
+		control, err := proto.DecodeControl(raw.Payload)
+		if err != nil {
+			c.t.Fatal(err)
+		}
+		if control.Type == "input" {
+			return control.Frames, control.Code
+		}
+	}
+}
+
 // controlError reads until the broker's next error control.
 func (c *freshnessClient) controlError() string {
 	c.t.Helper()
@@ -211,18 +229,22 @@ func TestUnifiedInputIsPausedUntilThePageHasConsumedRecentOutput(t *testing.T) {
 	// Nothing has been receipted, and the snapshot is now a window old.
 	clock.advance(window + time.Millisecond)
 	client.input("printf 'EARLY-%s\\n' INPUT\n")
-	if code := client.controlError(); code != "input_paused" {
-		t.Fatalf("unconsumed snapshot: error %q, want input_paused", code)
+	if through, code := client.inputResult(); through != 1 || code != "input_paused" {
+		t.Fatalf("unconsumed snapshot: input result %d %q, want 1 input_paused", through, code)
 	}
 	// Receipting what was read covers the snapshot, but typing has not been
 	// quiet since the refusal.
 	client.receipt(client.frames)
 	client.input("printf 'QUIET-%s\\n' BREACH\n")
-	if code := client.controlError(); code != "input_paused" {
-		t.Fatalf("input inside the quiet period: error %q, want input_paused", code)
+	if through, code := client.inputResult(); through != 2 || code != "input_paused" {
+		t.Fatalf("input inside the quiet period: input result %d %q, want 2 input_paused", through, code)
 	}
 	clock.advance(quiet)
 	client.input("printf 'AFTER-%s\\n' CATCHUP\n")
+	// Written means the whole frame reached the attachment PTY.
+	if through, code := client.inputResult(); through != 3 || code != "" {
+		t.Fatalf("input after catching up: input result %d %q, want 3 written", through, code)
+	}
 	shown("AFTER-CATCHUP")
 
 	// A page that consumes what it is sent keeps typing freely.
@@ -230,6 +252,9 @@ func TestUnifiedInputIsPausedUntilThePageHasConsumedRecentOutput(t *testing.T) {
 	client.receipt(client.frames)
 	clock.advance(3 * window)
 	client.input("printf 'STILL-%s\\n' FRESH\n")
+	if through, code := client.inputResult(); through != 4 || code != "" {
+		t.Fatalf("fresh input: input result %d %q, want 4 written", through, code)
+	}
 	shown("STILL-FRESH")
 
 	pane := f.capture(t, "fresh-gate")

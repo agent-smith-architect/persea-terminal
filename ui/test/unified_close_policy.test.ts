@@ -25,7 +25,7 @@ for (const reason of [
   "snapshot_failed",
   "lease_unavailable", "lease_lost", "broker_protocol", "stale_snapshot",
   "bad_liveness", "bad_attachment", "bad_flow", "observe_mode", "websocket_message_type",
-  "liveness_protocol", "refusal_protocol", "malformed_frame", "attachment_fault",
+  "liveness_protocol", "refusal_protocol", "input_protocol", "malformed_frame", "attachment_fault",
   "attachment_failed",
 ]) {
   assert.equal(classifyUnifiedClose(reason), "terminal", `broker-typed refusal must be terminal: ${reason}`);
@@ -101,7 +101,7 @@ for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose
   const goProto = readGoPackage("proto");
   const operationalBlock = goProto.slice(goProto.indexOf("var operationalAttachmentCodes"), goProto.indexOf("var fatalAttachmentCodes"));
   const operationalCodes = new Set([...operationalBlock.matchAll(/"([a-z0-9_]+)":\s*\{\}/g)].map((match) => match[1]));
-  for (const code of ["input_refused", "input_paused", "resize_failed", "resize_rejected", "observe_mode"]) {
+  for (const code of ["resize_failed", "resize_rejected", "observe_mode"]) {
     assert.ok(operationalCodes.has(code), `extraction lost a known operational code: ${code}`);
   }
   const uiTransport = fs.readFileSync(path.join(uiRoot, "src", "websocket_attachment_transport.ts"), "utf8");
@@ -186,7 +186,7 @@ for (const reason of UNIFIED_INTERNAL_REASONS) assert.equal(classifyUnifiedClose
     // this attachment's view of the journal ended; the session did not.
     generation_rotated: "reattach", generation_refit: "reattach", subscriber_lagged: "reattach", generation_failed: "terminal", refit_faulted: "terminal",
     // Client transport self-closes.
-    liveness_protocol: "terminal", refusal_protocol: "terminal",
+    liveness_protocol: "terminal", refusal_protocol: "terminal", input_protocol: "terminal",
     // The transport stops retrying on these, so the page must render them.
     malformed_frame: "terminal", attachment_fault: "terminal",
     transport_error: "transient", transport_send_failed: "transient",
@@ -259,7 +259,7 @@ assert.equal(unifiedCloseNotice("generation_rotated").headline, "Refreshing term
 // the offline state, every page-limited reattach stop, and the peer protocol
 // faults the transport stopped on. Refusals a retry would replay get none.
 for (const reason of ["reconnect_offline", "reconnect_exhausted", "subscriber_lagged", "generation_rotated", "generation_refit",
-  "malformed_frame", "liveness_protocol", "refusal_protocol", "attachment_fault"]) {
+  "malformed_frame", "liveness_protocol", "refusal_protocol", "input_protocol", "attachment_fault"]) {
   assert.ok(UNIFIED_RECONNECTABLE_NOTICES.has(reason), `a fresh attachment can clear ${reason}; it must offer Reconnect`);
   assert.ok(unifiedCloseNotice(reason).headline !== "This terminal is unavailable", `${reason} must carry reviewed copy`);
 }

@@ -34,7 +34,7 @@ func TestAttachmentErrorClassesAreDisjointCanonicalAndFailClosed(t *testing.T) {
 	}
 	// The operational class is a closed set describing one
 	// request's outcome, never a verdict on the attachment.
-	want := []string{"input_paused", "input_refused", "observe_mode", "resize_failed", "resize_rejected"}
+	want := []string{"observe_mode", "resize_failed", "resize_rejected"}
 	got := OperationalAttachmentCodes()
 	if len(got) != len(want) {
 		t.Fatalf("operational codes=%v want %v", got, want)
@@ -86,6 +86,24 @@ func TestSubscriberCloseReasonsAreFatalAttachmentCodes(t *testing.T) {
 	for index := range want {
 		if reasons[index] != want[index] {
 			t.Fatalf("subscriber close reasons=%v want %v", reasons, want)
+		}
+	}
+}
+
+// An input result is not an attachment error: its codes are their own closed
+// set, and none of them may close or keep an attachment by accident.
+func TestInputResultCodesAreClosedAndNotAttachmentErrors(t *testing.T) {
+	for _, code := range []string{"", "input_paused", "input_refused", "input_dropped", "input_partial"} {
+		if !ValidInputResultCode(code) {
+			t.Fatalf("input result code %q refused", code)
+		}
+		if ClassifyAttachmentError(code) != AttachmentErrorUnknown {
+			t.Fatalf("input result code %q is also an attachment error", code)
+		}
+	}
+	for _, code := range []string{"written", "resize_failed", "Input_paused"} {
+		if ValidInputResultCode(code) {
+			t.Fatalf("input result code %q accepted", code)
 		}
 	}
 }

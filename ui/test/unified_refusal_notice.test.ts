@@ -25,6 +25,8 @@ assert.equal(unifiedRefusalNotice("resize_failed"), "Fit didn't apply (resize_fa
 assert.equal(unifiedRefusalNotice("resize_rejected"), "Fit was refused (resize_rejected)");
 assert.equal(unifiedRefusalNotice("input_refused"), "Input was refused — try again (input_refused)");
 assert.equal(unifiedRefusalNotice("input_paused"), "Catching up — what you typed was not sent (input_paused)");
+assert.equal(unifiedRefusalNotice("input_dropped"), "Input was not sent — control changed (input_dropped)");
+assert.equal(unifiedRefusalNotice("input_partial"), "Only part of the input reached the terminal (input_partial)");
 assert.ok(!refusalReleasesFit("input_paused"));
 assert.equal(unifiedRefusalNotice("observe_mode"), "This view is read-only (observe_mode)");
 assert.equal(unifiedRefusalNotice("some_future_code"), "Request refused (some_future_code)");
@@ -38,7 +40,7 @@ assert.ok(!refusalReleasesFit("input_refused") && !refusalReleasesFit("observe_m
 
 // --- only input_paused pauses typing; every other code stays passing ---------
 assert.ok(refusalPausesTyping("input_paused"), "input_paused must pause typing");
-for (const code of [...UNIFIED_OPERATIONAL_CODES].filter((value) => value !== "input_paused")) {
+for (const code of [...UNIFIED_OPERATIONAL_CODES, "input_refused", "input_dropped", "input_partial"]) {
   assert.ok(!refusalPausesTyping(code), `${code} must stay a passing notice`);
 }
 assert.ok(!refusalPausesTyping("some_future_code"), "an unknown code must not pause typing");

@@ -159,11 +159,16 @@ func TestFinalOwnerControlInputCrossingOngoingPrepareWaitsForCommit(t *testing.T
 
 func ongoingControlFixture(t *testing.T, control bool) (*terminal.Epoch, *memoryTransport, *recordingPTY, terminal.Frame) {
 	t.Helper()
+	return ongoingControlFixtureSettling(t, control, nil)
+}
+
+func ongoingControlFixtureSettling(t *testing.T, control bool, settled terminal.InputSettled) (*terminal.Epoch, *memoryTransport, *recordingPTY, terminal.Frame) {
+	t.Helper()
 	tx := &fakeTransaction{cutCapture: []byte("history\n")}
 	source, _ := sourceFor(t, tx)
 	wire, pty := newMemoryTransport(), newRecordingPTY()
 	clock := newManualDeadlineClock()
-	cfg := terminal.Config{Clock: clock, QuietInterval: 5 * time.Millisecond, MaximumInterval: 10 * time.Millisecond, CutTimeout: 25 * time.Millisecond}
+	cfg := terminal.Config{Clock: clock, QuietInterval: 5 * time.Millisecond, MaximumInterval: 10 * time.Millisecond, CutTimeout: 25 * time.Millisecond, InputSettled: settled}
 	var epoch *terminal.Epoch
 	tx.onCut = func(req terminal.TransactionRequest) error { return epoch.PTYBytes(marker(req)) }
 	epoch, _ = terminal.NewEpoch(context.Background(), source, 9, wire, pty, cfg)
@@ -327,6 +332,62 @@ func TestFinalOwnerTransitionalInputFIFODeferCapsAndTeardown(t *testing.T) {
 			t.Fatalf("teardown delivered transitional input: %q", got)
 		}
 	})
+}
+
+// Input held during a cut keeps its id: it is reported written once the cut
+// releases it to the PTY, and dropped if the epoch ends first.
+func TestFinalOwnerTransitionalInputKeepsItsResult(t *testing.T) {
+	var mu sync.Mutex
+	seen := map[uint64]terminal.InputOutcome{}
+	settled := func(id uint64, outcome terminal.InputOutcome) {
+		mu.Lock()
+		defer mu.Unlock()
+		if _, again := seen[id]; again {
+			t.Errorf("input %d settled twice", id)
+		}
+		seen[id] = outcome
+	}
+	waitSeen := func(want map[uint64]terminal.InputOutcome) {
+		t.Helper()
+		deadline := time.Now().Add(5 * time.Second)
+		for {
+			mu.Lock()
+			got := fmt.Sprint(seen)
+			mu.Unlock()
+			if got == fmt.Sprint(want) {
+				return
+			}
+			if time.Now().After(deadline) {
+				t.Fatalf("outcomes %s, want %v", got, want)
+			}
+			time.Sleep(time.Millisecond)
+		}
+	}
+	epoch, _, pty, ongoing := ongoingControlFixtureSettling(t, true, settled)
+	for _, input := range []struct {
+		id   uint64
+		data string
+	}{{7, "held"}, {8, "-back"}} {
+		if err := epoch.HandleFrame(terminal.Frame{Version: terminal.ProtocolVersion, Type: terminal.FrameInput, Source: ongoing.Source, Epoch: ongoing.Epoch, Data: []byte(input.data), InputID: input.id}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := epoch.HandleFrame(browserFrame(terminal.FrameReady, ongoing.Cut)); err != nil {
+		t.Fatal(err)
+	}
+	waitPTYBytes(t, pty, []byte("held-back"))
+	waitSeen(map[uint64]terminal.InputOutcome{7: terminal.InputWritten, 8: terminal.InputWritten})
+	_ = epoch.Finalize(context.Background())
+
+	mu.Lock()
+	seen = map[uint64]terminal.InputOutcome{}
+	mu.Unlock()
+	epoch, _, _, ongoing = ongoingControlFixtureSettling(t, true, settled)
+	if err := epoch.HandleFrame(terminal.Frame{Version: terminal.ProtocolVersion, Type: terminal.FrameInput, Source: ongoing.Source, Epoch: ongoing.Epoch, Data: []byte("never"), InputID: 9}); err != nil {
+		t.Fatal(err)
+	}
+	_ = epoch.Finalize(context.Background())
+	waitSeen(map[uint64]terminal.InputOutcome{9: terminal.InputDropped})
 }
 
 func TestFinalOwnerModeRequestCrossingOngoingPrepareIsNonTerminal(t *testing.T) {

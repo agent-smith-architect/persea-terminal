@@ -259,7 +259,7 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
     ["stale verdict", (r) => { r.frame(1, COMMIT, "STALE"); r.frame(1, COMMIT, "ENQUEUED"); }],
     ["closed verdict", (r) => { r.frame(1, COMMIT, "CLOSED"); r.frame(1, COMMIT, "ENQUEUED"); }],
     ["transport loss", (r) => { r.openTransport(1); r.transportClosed(1, "closed"); r.frame(1, COMMIT, "ENQUEUED"); }],
-    ["operational refusal", (r) => { r.openTransport(1); r.operationalRefusal(1, "input_refused"); r.frame(1, COMMIT, "ENQUEUED"); }],
+    ["operational refusal", (r) => { r.openTransport(1); r.operationalRefusal(1, "resize_failed"); r.frame(1, COMMIT, "ENQUEUED"); }],
     ["foreign generation", (r) => { r.openTransport(2); r.frame(2, COMMIT, "ENQUEUED"); }],
     ["navigation abandoned", (r) => { r.openTransport(1); r.abandon(); r.frame(1, COMMIT, "ENQUEUED"); }],
     ["no COMMIT at all", (r) => { r.openTransport(1); r.frame(1, Object.freeze({ type: "PREPARE" }), "ENQUEUED"); }],
@@ -417,7 +417,7 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
   {
     const store = new FakeStorage();
     const recorder = createCommittedSessionRecorder({ mode: "resolved", storage: store, identity: opsIdentity, generation: 9, now: () => NOW });
-    recorder.operationalRefusal(9, "input_refused");
+    recorder.operationalRefusal(9, "resize_failed");
     recorder.frame(9, COMMIT, "ENQUEUED");
     assert.equal(recorder.recorded(), false, "a resolved operation's own refusal still clears it");
   }
@@ -451,7 +451,7 @@ const goodRecord: LastSessionRecord = Object.freeze({ draftScope: opsScope, name
     incoming.frame(6, COMMIT, "ENQUEUED");
     assert.equal(incoming.recorded(), false, "an outgoing generation must not commit the incoming identity");
     incoming.transportClosed(6, "closed");
-    incoming.operationalRefusal(6, "input_refused");
+    incoming.operationalRefusal(6, "resize_failed");
     incoming.frame(7, COMMIT, "ENQUEUED");
     assert.equal(incoming.recorded(), true, "a sibling generation's failure must not clear this operation");
     assert.equal(readLastSession(store, NOW)?.draftScope, opsIdentity!.draftScope);

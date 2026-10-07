@@ -335,14 +335,16 @@ on a retired generation (still open for its close grace) is never fresh. A
 receipt may overtake the mark its frames complete; the mark is applied when it
 lands. A receipt that does not advance or exceeds the frames written ends the
 attachment as a protocol violation. Input from a page that is not fresh is
-dropped, never queued, with the operational refusal `input_paused`; from then
+dropped, never queued, with the input result `input_paused`; from then
 on input stays refused until the page is fresh again and has sent no input for
 2 s, which catches keys already in flight. The command boundary is the page's:
 after `input_paused` it sends nothing until the operator resumes typing. Input
 admitted before the pause began is not recalled. The Control lease and the
-output stream are untouched. Neither receipts nor refusals wait behind output:
-the frame count is read without the socket-write lock, and refusals are written
-by the same side goroutine as pongs.
+output stream are untouched. Receipts never wait behind output: the frame
+count is read without the socket-write lock. Input results are written by the
+same side goroutine as pongs, in frame order (`input_results.go`); the frames
+whose result has not been written are bounded, and past the bound the
+attachment closes.
 
 The public unified attachment acquires this same lease before constructing its
 Epoch or reading its outer frame body. Its additional 4 MiB allowance covers

@@ -1990,6 +1990,9 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 	// the latest forwarded to the broker as a consumption receipt.
 	var acknowledged, receipted uint64
 	var receiptSent time.Time
+	// INPUT frames relayed to the broker, and the last input result relayed
+	// back: a result must advance and may not pass what was relayed.
+	var inputsRelayed, inputsSettled uint64
 	sendReceipt := func() bool {
 		if !boundBrokerWrite() || writeControl(c, proto.Control{Type: "consumed", Frames: acknowledged}) != nil {
 			return false
@@ -2130,6 +2133,9 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 					_ = writeWSCloseReason(writes, writerDone, code)
 					return
 				}
+				if typed.Type == terminal.FrameInput {
+					inputsRelayed++
+				}
 			default:
 				code := s.logTerminalFailure("websocket_message_type", &a)
 				_ = writeWSCloseReason(writes, writerDone, code)
@@ -2166,6 +2172,20 @@ func (s *Server) terminal(w http.ResponseWriter, r *http.Request) {
 					code := s.logTerminalFailure("broker_protocol", &a)
 					_ = writeWSCloseReason(writes, writerDone, code)
 					return
+				}
+				if control.Type == "input" {
+					result, encodeErr := attachmentwire.EncodeTransportInput(control.Frames, control.Code, attachmentwire.ServerToBrowser)
+					if encodeErr != nil || control.Frames <= inputsSettled || control.Frames > inputsRelayed {
+						code := s.logTerminalFailure("broker_protocol", &a)
+						_ = writeWSCloseReason(writes, writerDone, code)
+						return
+					}
+					inputsSettled = control.Frames
+					if writeWS(writes, writerDone, websocket.TextMessage, result) != nil {
+						s.logTerminalFailure("websocket_write", &a)
+						return
+					}
+					continue
 				}
 				if control.Type == "error" && proto.ClassifyAttachmentError(control.Code) == proto.AttachmentErrorOperational {
 					// One request's outcome, not a verdict on the attachment:

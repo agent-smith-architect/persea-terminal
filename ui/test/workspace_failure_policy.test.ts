@@ -45,7 +45,7 @@ const goBroker = readGoPackage("broker");
 const goProto = readGoPackage("proto");
 const operationalBlock = goProto.slice(goProto.indexOf("var operationalAttachmentCodes"), goProto.indexOf("var fatalAttachmentCodes"));
 const operationalCodes = new Set([...operationalBlock.matchAll(/"([a-z0-9_]+)":\s*\{\}/g)].map((match) => match[1]));
-for (const code of ["input_refused", "input_paused", "resize_failed", "resize_rejected", "observe_mode"]) {
+for (const code of ["resize_failed", "resize_rejected", "observe_mode"]) {
   assert.ok(operationalCodes.has(code), `extraction lost a known operational code: ${code}`);
 }
 const uiTransport = fs.readFileSync(path.join(uiRoot, "src", "websocket_attachment_transport.ts"), "utf8");

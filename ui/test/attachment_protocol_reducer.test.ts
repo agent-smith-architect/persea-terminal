@@ -2306,7 +2306,8 @@ test("composer_mobile_repair_structure_is_shared_bounded_and_operator_vocabulary
   for (const visible of [
     "Insert \\u25b8",
     "Insert into terminal without running it",
-    "Inserted ${this.lastSentLength.toLocaleString()} ch",
+    '"Inserting" : "Inserted"',
+    "${verb} ${this.lastSentLength.toLocaleString()} ch",
     "Insert anyway",
     "Restore the last cleared or inserted draft",
   ]) assert(composer.includes(visible), `missing Composer vocabulary: ${visible}`);
