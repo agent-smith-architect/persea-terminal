@@ -235,7 +235,8 @@ func Probe(base, realm, session, mode, sentinel string, mutateAlias bool) error 
 		return fmt.Errorf("capability leaked into WebSocket query")
 	}
 	protocols := []string{"persea-engine.unified-dev", "persea-history.5000", "persea-terminal.v3", "persea-handle." + wsHandle, "persea-mode." + mode, "persea-csrf." + csrf}
-	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second, Subprotocols: protocols, TLSClientConfig: probeTLS}
+	// Browsers offer permessage-deflate; the proxy must carry it through.
+	dialer := websocket.Dialer{HandshakeTimeout: 10 * time.Second, Subprotocols: protocols, TLSClientConfig: probeTLS, EnableCompression: true}
 	headers := http.Header{"Cookie": []string{cookieHeader}, "Origin": []string{base}}
 	ws, wsResponse, err := dialer.Dial(wsURL.String(), headers)
 	if err != nil {
@@ -247,6 +248,10 @@ func Probe(base, realm, session, mode, sentinel string, mutateAlias bool) error 
 	if ws.Subprotocol() != "persea-terminal.v3" {
 		_ = ws.Close()
 		return fmt.Errorf("unexpected echoed subprotocol")
+	}
+	if !strings.HasPrefix(wsResponse.Header.Get("Sec-WebSocket-Extensions"), "permessage-deflate") {
+		_ = ws.Close()
+		return fmt.Errorf("WebSocket compression was not negotiated")
 	}
 	_ = ws.SetReadDeadline(time.Now().Add(30 * time.Second))
 	committed, controlled, sent, written := false, false, false, false

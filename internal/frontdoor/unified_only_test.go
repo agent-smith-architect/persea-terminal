@@ -68,6 +68,9 @@ func currentFixtureHeaders(addr string) http.Header {
 	return http.Header{"Origin": []string{"http://" + addr}, "Cookie": []string{csrfCookie + "=" + testCSRF}}
 }
 func currentFixtureDial(addr, handle, mode string) (*websocket.Conn, *http.Response, error) {
-	dialer := websocket.Dialer{Subprotocols: []string{"persea-engine.unified-dev", "persea-terminal.v3", "persea-handle." + handle, "persea-mode." + mode, "persea-csrf." + testCSRF, "persea-history.5000"}}
+	return currentFixtureDialWith(websocket.Dialer{}, addr, handle, mode)
+}
+func currentFixtureDialWith(dialer websocket.Dialer, addr, handle, mode string) (*websocket.Conn, *http.Response, error) {
+	dialer.Subprotocols = []string{"persea-engine.unified-dev", "persea-terminal.v3", "persea-handle." + handle, "persea-mode." + mode, "persea-csrf." + testCSRF, "persea-history.5000"}
 	return dialer.Dial("ws://"+addr+"/ws", currentFixtureHeaders(addr))
 }

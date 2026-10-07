@@ -2,7 +2,16 @@
 
 The WebSocket subprotocol is `persea-terminal.v3`. This is a hard version
 boundary: a page loaded before the upgrade cannot reconnect until reloaded.
-The attachment state machine still uses frame version 1. Compression is off.
+The attachment state machine still uses frame version 1.
+
+The WebSocket uses `permessage-deflate` when the browser offers it (every
+current browser does), with no context takeover: each message is compressed
+on its own. The front door compresses only binary attachment messages of at
+least 1 KiB (history replays and large output) at level 1; liveness, flow,
+refusal and input-result messages and small output stay plain. The browser
+inflates before the page sees a message, so nothing below changes. The front
+door bounds a browser message by its decoded size as well as its wire size.
+Flow acknowledgements and the flow window count decoded bytes.
 
 Every server attachment frame (PREPARE, COMMIT, LIVE, MODE, END) is one WebSocket
 binary message:

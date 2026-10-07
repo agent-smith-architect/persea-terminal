@@ -112,7 +112,9 @@ function writeJSON(file: string, value: unknown): void {
 // closes after its last frame is read to the end, so the close frame is never
 // stranded unread behind a paused read when a late acknowledgement fails.
 // Whatever the link has taken still crosses it after the front door closes.
-const shapedLink = { rate: 0, delayMs: 0, pairs: new Set<{ drop: (serverNotices: boolean) => void }>() };
+// `delivered` counts the bytes the newest shaped link has handed to the
+// browser: what crossed the wire, compressed or not.
+const shapedLink = { rate: 0, delayMs: 0, delivered: 0, pairs: new Set<{ drop: (serverNotices: boolean) => void }>() };
 // What each terminal WebSocket upgrade through the proxy offered.
 const upgradeOffers: Array<{ resume: boolean; takeover: boolean }> = [];
 const SHAPED_LINK_BUFFER_BYTES = 256 << 10;
@@ -120,6 +122,7 @@ const SHAPED_LINK_TICK_MS = 50;
 
 function shapeLink(browserSocket: any, upstream: any): { push(chunk: any): void; send(chunk: any): void; end(): void } {
   const { rate, delayMs } = shapedLink;
+  shapedLink.delivered = 0;
   const queue: any[] = [];
   let queued = 0;
   let inAir = 0;
@@ -139,7 +142,11 @@ function shapeLink(browserSocket: any, upstream: any): { push(chunk: any): void;
       queued -= size;
       budget -= size;
       inAir += 1;
-      setTimeout(() => { inAir -= 1; if (!browserSocket.destroyed) browserSocket.write(slice); finish(); }, delayMs);
+      setTimeout(() => {
+        inAir -= 1;
+        if (!browserSocket.destroyed) { browserSocket.write(slice); shapedLink.delivered += slice.length; }
+        finish();
+      }, delayMs);
     }
     if (queued < SHAPED_LINK_BUFFER_BYTES && upstream.isPaused()) upstream.resume();
   }, SHAPED_LINK_TICK_MS);
@@ -438,6 +445,8 @@ async function main(): Promise<void> {
     type Attachment = {
       opened: number; closed: number; commitAt: number; modeAt: number;
       bytesBeforeMode: number; framesBeforeMode: number; inputsBeforeMode: number; acks: number;
+      // Bytes the shaped link carried up to the control grant.
+      wireBeforeMode: number;
       pings: Map<string, number>; rtts: number[]; refusals: string[];
       // Input results in arrival order: every INPUT frame through `through`
       // was written ("") or refused with `code`.
@@ -456,7 +465,7 @@ async function main(): Promise<void> {
     page.on("websocket", (socket: any) => {
       if (new URL(socket.url()).pathname !== "/ws") return;
       const record: Attachment = {
-        opened: Date.now(), closed: 0, commitAt: 0, modeAt: 0, bytesBeforeMode: 0, framesBeforeMode: 0, inputsBeforeMode: 0, acks: 0, pings: new Map(), rtts: [], refusals: [], results: [],
+        opened: Date.now(), closed: 0, commitAt: 0, modeAt: 0, bytesBeforeMode: 0, framesBeforeMode: 0, inputsBeforeMode: 0, acks: 0, wireBeforeMode: 0, pings: new Map(), rtts: [], refusals: [], results: [],
         inputs: 0, lastInputAt: 0, frames: 0, acknowledgedFrames: 0, watch: "", watchTail: "", watchFrame: 0, resumed: false,
       };
       attachments.push(record);
@@ -507,7 +516,7 @@ async function main(): Promise<void> {
         }
         if (frame.type === "PREPARE" && frame.kind !== "RESIZE" && !record.commitAt) record.resumed = frame.resumed === true;
         if (frame.type === "COMMIT" && !record.commitAt) record.commitAt = now;
-        if (frame.type === "MODE" && frame.mode === "CONTROL" && !record.modeAt) record.modeAt = now;
+        if (frame.type === "MODE" && frame.mode === "CONTROL" && !record.modeAt) { record.modeAt = now; record.wireBeforeMode = shapedLink.delivered; }
       });
     });
     const liveness = (stage: string, record: Attachment) => {
@@ -574,6 +583,8 @@ async function main(): Promise<void> {
       assert(record.resumed === resumes, `${stage}: admission resumed=${record.resumed}, want ${resumes}`);
       if (resumes) assert(record.bytesBeforeMode < HISTORY_BYTES / 16, `${stage}: a resumed reconnect sent ${record.bytesBeforeMode} bytes before the control grant`);
       else assert(record.bytesBeforeMode >= HISTORY_BYTES, `${stage}: only ${record.bytesBeforeMode} bytes of history preceded the control grant`);
+      // The history crosses the link compressed.
+      if (!resumes) assert(record.wireBeforeMode < record.bytesBeforeMode / 2, `${stage}: ${record.wireBeforeMode} wire bytes carried ${record.bytesBeforeMode} bytes of history`);
       assert(record.inputsBeforeMode === 0, `${stage}: ${record.inputsBeforeMode} input frames left before the control grant`);
       // Flow control must not starve the link: the raw backlog moves at no
       // less than half the link rate.
@@ -612,7 +623,7 @@ async function main(): Promise<void> {
       const measured = {
         stage, rate, linkDelayMs: LINK_DELAY_MS, inputPaused, resumed: record.resumed,
         toCommitMs: record.commitAt - causedAt, toControlMs: record.modeAt - causedAt, admissionMs: record.commitAt - record.opened, backlogMs,
-        bytesBeforeControl: record.bytesBeforeMode, framesBeforeControl: record.framesBeforeMode, acknowledgements: record.acks,
+        bytesBeforeControl: record.bytesBeforeMode, wireBytesBeforeControl: record.wireBeforeMode, framesBeforeControl: record.framesBeforeMode, acknowledgements: record.acks,
         livenessRoundTripsMs: [...record.rtts],
       };
       emit("slow-link-stage", measured);
@@ -656,7 +667,9 @@ async function main(): Promise<void> {
       // The whole pane history, so a line cannot scroll out of view unseen.
       const history = () => command("tmux", ["-S", tmuxSocket, "capture-pane", "-p", "-S", "-", "-t", target]);
       record.watch = "BURST-DONE";
-      command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, `seq -w 1 12000 | sed 's/.*/BURST-&-${filler}/'; printf 'BURST-%s\\n' DONE`, "Enter"]);
+      // About a MiB of random text: the link compresses output, and only
+      // incompressible output keeps the page behind for certain.
+      command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, `head -c 693000 /dev/urandom | base64 -w 70 | sed 's/^/BURST-/'; printf 'BURST-%s\\n' DONE`, "Enter"]);
       const burstSentAt = Date.now();
       await until(`${stage}: burst published`, () => capture().includes("BURST-DONE"), 30_000);
       const publishedAt = Date.now();
