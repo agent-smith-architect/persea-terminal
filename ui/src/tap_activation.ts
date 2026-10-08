@@ -207,6 +207,14 @@ export type TapRepeat = Readonly<{
   isLive(): boolean;
 }>;
 
+// Whether a control is rendered and visible: it has a layout box (it is in
+// the page and no ancestor is display: none) and its computed visibility is
+// visible. It does not see content-visibility: hidden ancestors, which this
+// UI does not use.
+function shown(element: Element): boolean {
+  return element.getClientRects().length > 0 && getComputedStyle(element).visibility === "visible";
+}
+
 /**
  * Tap activation for a control on a SCROLLABLE surface (the quick-actions
  * sheet). Same keyboard-preserving posture as bindKeyboardPreservingActivation
@@ -270,13 +278,25 @@ export function bindTapActivation(
     keyboardFence.revoke();
     const capture: Capture = { generation: interactionGeneration(), x: event.clientX, y: event.clientY, focus: document.activeElement };
     armedPointers.set(event.pointerId, capture);
+    // The press owns its release. Without capture a mouse release is
+    // hit-tested against the layout at release time, so a control that moves
+    // under a still pointer (a status line appearing above it) loses the tap.
+    // For the same reason leaving the box is not a cancel: an engine may send
+    // a layout-driven pointerleave before the capture takes effect. Dragging
+    // off is the movement tolerance below.
+    try {
+      button.setPointerCapture(event.pointerId);
+    } catch {
+      retirePointer(event.pointerId);
+      return;
+    }
     if (repeat) scheduleRepeat(event.pointerId, capture, event, 400);
   };
   const cancelPointer = (event: PointerEvent): void => {
     retirePointer(event.pointerId);
   };
-  // Implicit touch capture can keep the pointer on the button throughout a
-  // drag, even when the engine does not claim the gesture as native scrolling.
+  // Pointer capture keeps the pointer on the button throughout a drag, even
+  // when the engine does not claim the gesture as native scrolling.
   // Use the same movement tolerance as the long-press recognizer below.
   const onPointerMove = (event: PointerEvent): void => {
     const capture = armedPointers.get(event.pointerId);
@@ -290,7 +310,9 @@ export function bindTapActivation(
     retirePointer(event.pointerId);
     if (!event.isTrusted || !isLive() || capture.generation !== interactionGeneration()) return;
     event.preventDefault();
-    if (capture.repeated || !allowed) return;
+    // A captured release reaches the pressed control even after it was
+    // hidden or disabled, which a hit-tested release never did.
+    if (capture.repeated || !allowed || button.disabled || !shown(button)) return;
     activate(event);
     restoreFocus();
   };
@@ -321,7 +343,6 @@ export function bindTapActivation(
   button.addEventListener("pointermove", onPointerMove);
   button.addEventListener("pointercancel", cancelPointer);
   button.addEventListener("lostpointercapture", cancelPointer);
-  button.addEventListener("pointerleave", cancelPointer);
   button.addEventListener("pointerup", onPointerUp);
   button.addEventListener("touchend", onTouchEnd, { passive: false });
   button.addEventListener("click", onClick);
@@ -342,7 +363,6 @@ export function bindTapActivation(
     button.removeEventListener("pointermove", onPointerMove);
     button.removeEventListener("pointercancel", cancelPointer);
     button.removeEventListener("lostpointercapture", cancelPointer);
-    button.removeEventListener("pointerleave", cancelPointer);
     button.removeEventListener("pointerup", onPointerUp);
     button.removeEventListener("touchend", onTouchEnd);
     button.removeEventListener("click", onClick);
