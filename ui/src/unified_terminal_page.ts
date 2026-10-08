@@ -2033,13 +2033,12 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     if (this.closed || !this.options.sessionSwitch || !this.sessionSwitcher) return;
     const root = this.sessionSwitcherRoot();
     if (!root) return;
-    if (!refresh && this.sessionSwitcherOpen) {
-      this.sessionSwitcherOpen = false;
-      root.hidden = true;
-      return;
-    }
-    this.sessionSwitcherOpen = true;
-    root.hidden = false;
+    const open = refresh || !this.sessionSwitcherOpen;
+    // A press on a row belongs to the list as it was shown when pressed.
+    if (open !== this.sessionSwitcherOpen) this.keyInteractionGeneration++;
+    this.sessionSwitcherOpen = open;
+    root.hidden = !open;
+    if (!open) return;
     if (!refresh) this.sessionSwitcher.revealCurrent();
     await this.loadSessionInventory(refresh);
   }
@@ -3991,6 +3990,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // opening it changes no box the ResizeObserver watches.
   private setIdentityDetails(open: boolean, coordinated = false): void {
     if (this.closed || this.identityDetails.hidden === !open) return;
+    // A press on a row of its session list belongs to the panel as shown.
+    this.keyInteractionGeneration++;
     if (open && !coordinated) this.claimPopover("tag");
     if (open) {
       this.renderIdentityDetails(this.connectionPhase());

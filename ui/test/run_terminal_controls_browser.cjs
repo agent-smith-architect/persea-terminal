@@ -556,6 +556,33 @@ async function main() {
         await control({ releaseMode: true });
         await delay(100);
         caseEvidence.preControlInputDelta = after - before;
+
+        // A status line that appears while a menu tile is held moves the tile,
+        // not the pointer. The press keeps its release and Keys opens. The
+        // history notice fills this line one second after COMMIT while MODE is
+        // late; MODE is granted here, so no product writer races the fill.
+        await page.waitForFunction(() => document.querySelector('[aria-label="Fit rows"]')?.dataset.availability !== "no_control");
+        assert(await page.locator(".persea-unified-connection").textContent() === "", `${shape.name}: connection status is not empty after MODE(CONTROL)`);
+        await page.locator(".persea-unified-quick-actions").click();
+        const keysTile = page.getByRole("button", { name: "Open Terminal Keys", exact: true });
+        await keysTile.scrollIntoViewIfNeeded();
+        const tileBefore = await keysTile.boundingBox();
+        const press = { x: tileBefore.x + tileBefore.width / 2, y: tileBefore.y + 4 };
+        await page.mouse.move(press.x, press.y);
+        await page.mouse.down();
+        await page.evaluate(() => new Promise((resolve) => {
+          document.querySelector(".persea-unified-connection").textContent = "Loading history…";
+          requestAnimationFrame(() => requestAnimationFrame(resolve));
+        }));
+        const tileMoved = await keysTile.boundingBox();
+        await page.mouse.up();
+        const keysOpened = await page.locator(".persea-terminal-keys").waitFor({ state: "visible", timeout: 2_000 }).then(() => true, () => false);
+        await page.evaluate(() => { document.querySelector(".persea-unified-connection").textContent = ""; });
+        assert(press.y < tileMoved.y, `${shape.name}: status line did not move the Keys tile from under the pointer: ${JSON.stringify({ tileBefore, tileMoved, press })}`);
+        assert(keysOpened, `${shape.name}: a still press on Keys was lost when a status line moved the tile`);
+        await page.getByRole("button", { name: "Terminal Keys" }).click();
+        await page.locator(".persea-terminal-keys").waitFor({ state: "hidden" });
+        caseEvidence.keysTileLayoutShift = { tileBefore, tileMoved, press };
       } else if (detailed) {
         await control({ releaseMode: true });
       }
@@ -1592,9 +1619,63 @@ async function main() {
             `${shape.name}: sheet SessionSwitcher keyboard activation crossed disclosure generation: ${JSON.stringify({ sheetSwitcherName })}`);
           await page.evaluate(() => document.querySelector("#terminal_controls-session-sheet-focus-probe")?.remove());
           if (await page.locator(".persea-unified-identity__details").getAttribute("hidden") === null) await tag.click();
+          if (!MUTANT) {
+            // The tag's list: hold a row, close the panel from the keyboard
+            // (or close and reopen it), release. The press ends with the panel.
+            const identityPress = {};
+            for (const variant of ["closed", "reopened"]) {
+              if (await page.locator(".persea-unified-identity__details").getAttribute("hidden") !== null) await tag.click();
+              await tagBeta.waitFor({ state: "visible" });
+              const row = await tagBeta.boundingBox();
+              await tag.focus();
+              await page.mouse.move(row.x + row.width / 2, row.y + row.height / 2);
+              await page.mouse.down();
+              await page.keyboard.press("Enter");
+              const hidden = await page.locator(".persea-unified-identity__details").getAttribute("hidden") !== null;
+              if (variant === "reopened") await page.keyboard.press("Enter");
+              await page.mouse.up();
+              await delay(200);
+              identityPress[variant] = { hidden, session: await page.locator(".persea-unified-tag__name").textContent() };
+              assert(hidden && identityPress[variant].session === "alpha",
+                `${shape.name}: a held identity session row switched the session after its panel ${variant}: ${JSON.stringify(identityPress)}`);
+            }
+            if (await page.locator(".persea-unified-identity__details").getAttribute("hidden") === null) await tag.click();
+            caseEvidence.identityRowPressAcrossDisclosure = identityPress;
+          }
           await page.evaluate(() => document.querySelector("#terminal_controls-session-host-probe")?.remove());
           await page.setViewportSize({ width: shape.width, height: shape.height });
           caseEvidence.sessionSwitcherGenerationFence = { tag: tagSwitcherName, sheet: sheetSwitcherName };
+        }
+        if (detailed && !MUTANT) {
+          // A row press belongs to the list as it was shown. The pressed row
+          // keeps its release when the layout moves it, so closing the list
+          // while the mouse is held, or closing and reopening it, must end the
+          // press instead of switching the session.
+          await control({ switchSessions: true, holdModeGrant: false });
+          if ((await uiState()).sheetHidden) await page.locator(".persea-unified-quick-actions").click();
+          const listToggle = page.getByRole("button", { name: "Choose another session", exact: true });
+          const sheetList = page.locator(".persea-unified-sheet .persea-session-switcher");
+          const rowPress = {};
+          for (const variant of ["closed", "reopened"]) {
+            if (await sheetList.isHidden()) await listToggle.click();
+            const beta = sheetList.locator('.persea-session-switcher__row[aria-label="Switch to beta"]');
+            await beta.waitFor({ state: "visible" });
+            await beta.scrollIntoViewIfNeeded();
+            const row = await beta.boundingBox();
+            await listToggle.focus();
+            await page.mouse.move(row.x + row.width / 2, row.y + row.height / 2);
+            await page.mouse.down();
+            await page.keyboard.press("Enter");
+            const hidden = await sheetList.isHidden();
+            if (variant === "reopened") await page.keyboard.press("Enter");
+            await page.mouse.up();
+            await delay(200);
+            rowPress[variant] = { hidden, session: await page.locator(".persea-unified-tag__name").textContent() };
+            assert(hidden && rowPress[variant].session === "alpha",
+              `${shape.name}: a held session row switched the session after its list ${variant}: ${JSON.stringify(rowPress)}`);
+          }
+          if (!(await uiState()).sheetHidden) await page.locator(".persea-unified-quick-actions").click();
+          caseEvidence.sessionRowPressAcrossDisclosure = rowPress;
         }
         if (detailed && (!MUTANT || MUTANT === "standard-key-generation-fence" || MUTANT === "keyboard-activation-generation-fence")) {
           // Standard-row controls share the same generation authority. A held
