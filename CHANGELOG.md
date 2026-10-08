@@ -2,6 +2,22 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
+## 0.1.22 — 2026-10-08
+
+### Fixed
+
+- A press on a terminal control is no longer lost when the page moves the control while it is held. The connection status line that appears above the quick actions while history loads did this, so a press on Keys could do nothing. Seen with a mouse, trackpad or pen.
+- Favorites of sessions that are gone no longer fill the list. Such a favorite stays so that it can follow its session if the session returns under the same name, but it shows no star and cannot be removed by hand; once the list held its limit of them, no new favorite could be added. When the list is full, the oldest of them is now removed to keep room for a new favorite. A favorite is removed only when its server listed all of its sessions without it, so a session on a stopped or unreachable server keeps its favorite.
+- When two session-list refreshes overlapped, for example from two open pages, the older view of a server could undo the newer one: set back a session's name after a rename, or take a favorite that had just followed a restarted session for a gone one. Only the newest view of each server is now used.
+
+### Changed
+
+- When a session's recording ends and its pages reconnect to a full replay, the server log now states why in one line: the session, whether the recording recovers, and a cause such as the end of the session, a capacity limit, storage, a stalled recording or a failed history rotation. The line carries no terminal content and no error text.
+
+### Testing notes
+
+- A browser test in Chromium and WebKit holds a press while a status line moves the control. It checks that a pointer that leaves because of the layout keeps the press, and that a drag-off, a change of state, or a control that is hidden, made invisible or disabled during the press still cancels it. The terminal controls test does the same on the Keys control, and holds a row of each session list while the list closes, or closes and opens again. Server tests check the full favorites list against real inventory replies (stopped, failing and truncated servers keep their favorites; a favorite that follows a restarted session is kept) and two overlapping refreshes in both orders, including across a rename. Server tests end a recording in each way the server can end one (a lost connection, a flow-control fault, a failed history rotation or width change, the end of the session) and check that exactly one cause is logged for each. The automatic history rotation test failed now and then on slow test machines because it wrote output faster than it could be saved; it now writes in steps and slows every save on purpose, so it tests the slow case on every run, and it no longer assumes that the output finished before the rotation. Each new test was shown to fail without the change it checks. Not tested on a real iPhone.
+
 ## 0.1.21 — 2026-10-07
 
 ### Changed
