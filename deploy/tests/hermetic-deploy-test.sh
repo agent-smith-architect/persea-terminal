@@ -1068,7 +1068,8 @@ done
 [[ $(grep -R -h -c '^RestrictAddressFamilies=AF_UNIX$' "$candidate_a/units" | awk '{s+=$1} END{print s+0}') == 3 ]] || fail 'unit address-family hardening drifted'
 sidecar_unit="$candidate_a/units/persea-terminal-tailscaled.service"
 grep -Fxq 'Requires=persea-terminal-front.service' "$sidecar_unit" || fail 'sidecar does not require the front unit'
-grep -Fxq 'After=persea-terminal-front.service network-online.target' "$sidecar_unit" || fail 'sidecar ordering drifted'
+grep -Fxq 'After=persea-terminal-front.service network-online.target tailscaled.service' "$sidecar_unit" || fail 'sidecar ordering drifted'
+grep -Fxq 'Wants=network-online.target tailscaled.service' "$sidecar_unit" || fail 'sidecar does not start the daemon that creates its masked runtime path'
 grep -Fxq 'User=root' "$sidecar_unit" || fail 'sidecar is not root-owned at runtime'
 grep -Fxq 'ExecStart=/usr/sbin/tailscaled --state=/var/lib/persea-terminal-tailscale/tailscaled.state --statedir=/var/lib/persea-terminal-tailscale --socket=/run/persea-terminal-tailscale/tailscaled.sock --tun=userspace-networking --port=0' "$sidecar_unit" || fail 'sidecar daemon boundary drifted'
 grep -Fxq 'InaccessiblePaths=/run/tailscale /var/lib/tailscale' "$sidecar_unit" || fail 'sidecar can access protected main-daemon paths'

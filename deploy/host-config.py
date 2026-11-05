@@ -618,8 +618,8 @@ def sidecar_unit() -> bytes:
     return b"""[Unit]
 Description=Persea Terminal isolated Tailscale Service sidecar
 Requires=persea-terminal-front.service
-After=persea-terminal-front.service network-online.target
-Wants=network-online.target
+After=persea-terminal-front.service network-online.target tailscaled.service
+Wants=network-online.target tailscaled.service
 
 [Service]
 Type=simple
