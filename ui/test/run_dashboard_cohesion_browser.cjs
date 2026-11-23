@@ -114,6 +114,7 @@ async function main() {
         assert(await card.locator('.session-preview-row-screen').isHidden(), 'Narrow row did not use an eye icon');
         await card.locator('.session-preview-row-button').click();
         await phone.waitForFunction(() => document.querySelector('.session-preview-dialog .session-preview-screen')?.textContent.includes('Build passed'));
+        assert(await phone.locator('.session-preview-dialog .session-open-action').isVisible(), 'Output preview modal did not expose a direct Open action');
         assert(previewsFor('$10') === initial + 1, 'The row preview did not make one capture');
         await phone.keyboard.press('Escape');
         assert(await card.locator('.session-preview-row-button').evaluate(node => node === document.activeElement), 'Preview did not return focus to its row button');
@@ -130,6 +131,19 @@ async function main() {
         assert(aligned, `Recent action layout differs from the main row at ${width}`);
       }
       await page.setViewportSize({ width: 1280, height: 960 });
+      // Keyboard shortcuts: / focuses the session filter, Escape clears it,
+      // and Escape closes the New session panel when open.
+      await page.locator('h1').click();
+      await page.keyboard.press('/');
+      assert(await page.locator('.dashboard-search-input').evaluate(node => node === document.activeElement), 'Pressing / did not focus the session filter');
+      await page.keyboard.type('qt10');
+      assert(await page.locator('.dashboard-search-input').inputValue() === 'qt10', 'Filter input did not accept text after / shortcut');
+      await page.keyboard.press('Escape');
+      assert(await page.locator('.dashboard-search-input').inputValue() === '', 'Escape inside session filter did not clear it');
+      await page.getByRole('button', { name: 'New session', exact: true }).click();
+      assert(await page.locator('#dashboard-create').isVisible(), 'New session panel did not open');
+      await page.keyboard.press('Escape');
+      assert(await page.locator('#dashboard-create').isHidden(), 'Escape did not close the New session panel');
     });
 
     await check('scrollback choice is preserved in launch links while shared history keeps its full import', async () => {

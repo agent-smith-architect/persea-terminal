@@ -2,6 +2,23 @@
 
 Notable user-facing changes are recorded here. Releases use [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- **Faster, central device pasting:** **Paste from this device** is now the primary action at the top of Clipboard rather than a small footer button. In a terminal, clicking it reads this device’s clipboard and delivers text directly to the terminal (respecting the multiline safety guard and never appending Enter) or stages images directly into the composer, while sharing storable items in the background so shared-store outages or the 16 KB limit never block local pasting. **Save from device** remains in the footer when you want to import without pasting. Shared clipboard rows now show a labeled **Paste** / **Insert** button with a distinct icon, and the terminal image preview includes a direct **Insert image** button.
+- **Direct image paste in the terminal:** pasting an image (`Cmd+V` / `Ctrl+V`) while focused on the terminal now stages it directly into the composer for review without intercepting plain-text paste.
+- **Dashboard ergonomics:** enlarged session output previews now include a direct **Open** button in the dialog footer, `/` focuses the session filter, `Escape` clears the filter or closes the New session panel, and the header Clipboard button shows the clipboard icon.
+- **Dependencies:** updated Playwright to 1.65.1 and CI GitHub Actions (`actions/setup-go` and `actions/setup-node` to v7.1.0).
+
+### Fixed
+
+- **Saved cursor across scroll-up regions (`@xterm/xterm` patch):** `DECSC`/`DECRC` and `SCOSC`/`SCORC` now stay anchored to the same screen row when `CSI S` archives lines into scrollback on the normal buffer, matching tmux.
+- **Remaining layout-shift tap drops:** `Select`, `Clipboard`, and generation-fenced click controls (`Attach image`, `Show keyboard`, `Hide keyboard`) no longer drop a still press when a layout shift emits `pointerleave`.
+- **Freshness receipt ordering:** the broker now records an attachment frame’s delivered sequence before the bytes hit the socket, eliminating a race where an immediate consumption receipt plus input could be falsely paused.
+- **Sidecar boot ordering:** ordered `persea-terminal-tailscaled.service` after `tailscaled.service` so `/run/tailscale` exists before the sidecar namespace masks it.
+- **Test portability on Ubuntu 26.04 / newer tmux:** fixed setgid fixture setup in the hermetic deploy suite, accepted tmux 3.5+ literal tabs in session previews, stabilized multi-delivery control-mode batching and zero-progress finalization tests, and normalized test fixture umask in release-retention tests.
+
 ## 0.1.22 — 2026-10-08
 
 ### Fixed

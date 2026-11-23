@@ -11,6 +11,7 @@ import { leaf, type SessionSelector } from "./workspace_model";
 import { COMPOSER_FONT_SIZE_MAX, COMPOSER_FONT_SIZE_MIN, OperatorPreferencesService, type OperatorPreferenceOutcome, type OperatorPreferencePatch, type OperatorPreferenceSnapshot } from "./operator_preferences";
 import { KeyboardSettings } from "./keyboard_settings";
 import { ClipboardPanel } from "./clipboard_panel";
+import { clipboardIcon } from "./clipboard_icons";
 import { ClipboardImages } from "./clipboard_images";
 import { ClipboardPreferencesService } from "./clipboard_preferences";
 import { SnippetService, deviceOrigin } from "./snippet_client";
@@ -500,7 +501,7 @@ export class Dashboard {
     document.body.classList.add("dashboard-mode"); const header = element("header", "dashboard-header"); const titles = element("div"); titles.append(element("p", "dashboard-eyebrow", "PERSEA TERMINAL"), element("h1", undefined, "Sessions"));
     this.refreshButton.type = "button"; this.refreshButton.title = "Refresh sessions"; this.refreshButton.setAttribute("aria-label", "Refresh sessions"); this.refreshButton.addEventListener("click", () => void this.refresh("manual"));
     this.workspaceRefresh.type = "button"; this.workspaceRefresh.setAttribute("aria-label", "Refresh workspaces"); this.workspaceRefresh.addEventListener("click", () => void this.refresh("manual"));
-    const clipboard = element("button", "dashboard-clipboard", "Clipboard"); clipboard.type = "button"; clipboard.setAttribute("aria-label", "Open shared clipboard"); clipboard.addEventListener("click", () => this.clipboard.open(clipboard));
+    const clipboard = element("button", "dashboard-clipboard"); clipboard.type = "button"; clipboard.setAttribute("aria-label", "Open shared clipboard"); clipboard.append(clipboardIcon("clipboard"), element("span", undefined, "Clipboard")); clipboard.addEventListener("click", () => this.clipboard.open(clipboard));
     const headerActions = element("div", "dashboard-header-actions"); headerActions.append(this.newSession, clipboard); header.append(titles, headerActions);
     try { this.collapsedGroups = readCollapsedGroups(window.localStorage); } catch { /* collapse is only a device hint */ }
     this.readDeviceHints();
@@ -510,6 +511,11 @@ export class Dashboard {
     this.searchInput.addEventListener("input", () => { this.filterQuery = this.searchInput.value; this.applyPresentation(); });
     const clear = element("button", "dashboard-search-clear", "×"); clear.type = "button"; clear.setAttribute("aria-label", "Clear session filter");
     clear.addEventListener("click", () => { this.searchInput.value = ""; this.filterQuery = ""; this.applyPresentation(); this.searchInput.focus(); });
+    this.searchInput.addEventListener("keydown", (event) => {
+      if (event.isTrusted && event.key === "Escape" && this.searchInput.value !== "") {
+        event.preventDefault(); event.stopPropagation(); clear.click();
+      }
+    });
     search.append(this.searchInput, clear, this.refreshButton);
     this.status.setAttribute("role", "status"); this.status.setAttribute("aria-live", "polite"); this.workspacePanel.setAttribute("aria-label", "Workspaces"); this.root.className = "dashboard"; this.root.setAttribute("aria-label", "Persea Terminal dashboard");
     this.landing.setAttribute("aria-label", "Recent and default sessions");
@@ -560,6 +566,19 @@ export class Dashboard {
       }
     };
     window.addEventListener("storage", onStorage); this.cleanup.push(() => window.removeEventListener("storage", onStorage));
+    const onKeydown = (event: KeyboardEvent): void => {
+      if (!event.isTrusted || this.destroyed || event.defaultPrevented) return;
+      if (document.querySelector("dialog[open]")) return;
+      if (event.key === "Escape" && !this.creationPanel.hidden) {
+        event.preventDefault(); closeCreate.click(); return;
+      }
+      if (event.key === "/" && !event.ctrlKey && !event.metaKey && !event.altKey && !this.sessionsPanel.hidden) {
+        const target = event.target;
+        if (target instanceof HTMLElement && (target.matches("input, textarea, select") || target.isContentEditable)) return;
+        event.preventDefault(); this.searchInput.focus(); this.searchInput.select();
+      }
+    };
+    document.addEventListener("keydown", onKeydown); this.cleanup.push(() => document.removeEventListener("keydown", onKeydown));
     const toolbar = element("div", "dashboard-toolbar"); this.listModes.append(this.resultStatus); toolbar.append(search, this.listModes);
     this.favoritesStatus.setAttribute("role", "status");
     this.sessionsPanel.append(toolbar, this.favoritesStatus, this.emptyResults, this.content);
@@ -1455,7 +1474,13 @@ export class Dashboard {
       modalMeta = element("p", "session-preview-meta");
       modalNotice = element("output", "session-preview-notice"); modalNotice.setAttribute("role", "status");
       modalRefresh = element("button", "session-preview-refresh", "↻ Refresh preview"); modalRefresh.type = "button"; modalRefresh.addEventListener("click", () => void load(true));
-      const footer = element("div", "session-preview-dialog-footer"); footer.append(modalMeta, modalRefresh);
+      const modalActions = element("div", "session-preview-dialog-actions");
+      modalActions.append(modalRefresh);
+      const previewSession = currentSession();
+      if (previewSession.unified?.state === "open" || previewSession.unified?.state === "adoptable") {
+        modalActions.append(this.createOpenAction(previewSession, previewSession.unified.state, modalNotice, currentSession));
+      }
+      const footer = element("div", "session-preview-dialog-footer"); footer.append(modalMeta, modalActions);
       const explanation = element("p", "session-preview-explanation", "A snapshot of recent output. It stays still until you refresh it.");
       dialog.append(heading, modalScreen, explanation, footer, modalNotice);
       dialog.addEventListener("click", event => {

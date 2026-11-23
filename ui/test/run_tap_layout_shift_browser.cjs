@@ -43,8 +43,8 @@ async function runEngine(engine, source) {
   const snapshot = () => page.evaluate(() => TapShiftRegression.snapshot());
   const box = () => page.evaluate(() => TapShiftRegression.box());
   const showStatus = () => page.evaluate(() => TapShiftRegression.showStatus());
-  async function check(name, run) {
-    try { await page.evaluate(() => TapShiftRegression.mount()); await run(); checks.push({ name, pass: true }); }
+  async function check(name, run, mode = "tap") {
+    try { await page.evaluate((targetMode) => TapShiftRegression.mount(targetMode), mode); await run(); checks.push({ name, pass: true }); }
     catch (error) { checks.push({ name, pass: false, error: error.message, receipt: await snapshot() }); }
   }
   try {
@@ -139,6 +139,46 @@ async function runEngine(engine, source) {
       assert(result.actions.length === 1 && result.actions[0].trusted && result.actions[0].pointerType === "touch",
         "a still touch lost its activation when the layout moved the control");
     });
+    await check("explained-tap-stationary-press-survives-layout-shift", async () => {
+      const before = await box();
+      const press = { x: before.x + before.width / 2, y: before.y + 10 };
+      await page.mouse.move(press.x, press.y);
+      await page.mouse.down();
+      await showStatus();
+      const after = await box();
+      assert(press.y < after.y, "the status line did not move the explained control");
+      await page.evaluate(() => TapShiftRegression.leave());
+      await page.mouse.up();
+      const result = await snapshot();
+      assert(result.actions.length === 1 && result.actions[0].trusted, "explained tap lost activation across a layout shift");
+    }, "explained");
+    await check("explained-tap-hidden-control-release-does-not-act", async () => {
+      const control = await box();
+      await page.mouse.move(control.x + control.width / 2, control.y + control.height / 2);
+      await page.mouse.down();
+      await page.evaluate(() => TapShiftRegression.hideList());
+      await page.mouse.up();
+      assert((await snapshot()).actions.length === 0, "explained tap activated a hidden control on captured release");
+    }, "explained");
+    await check("fenced-click-layout-driven-pointerleave-keeps-click", async () => {
+      const before = await box();
+      const press = { x: before.x + before.width / 2, y: before.y + before.height / 2 };
+      await page.mouse.move(press.x, press.y);
+      await page.mouse.down();
+      await page.evaluate(() => TapShiftRegression.leave());
+      await page.mouse.up();
+      const result = await snapshot();
+      assert(result.actions.length === 1 && result.actions[0].trusted, "generation-fenced click dropped activation after a layout-driven pointerleave");
+    }, "click");
+    await check("fenced-click-drag-off-still-cancels", async () => {
+      const control = await box();
+      const center = { x: control.x + control.width / 2, y: control.y + control.height / 2 };
+      await page.mouse.move(center.x, center.y);
+      await page.mouse.down();
+      await page.mouse.move(center.x, control.y + control.height + 30, { steps: 4 });
+      await page.mouse.up();
+      assert((await snapshot()).actions.length === 0, "generation-fenced click activated after dragging off");
+    }, "click");
     assert(diagnostics.length === 0, `browser diagnostics: ${diagnostics.join("; ")}`);
     return { engine, checks, unsupported, diagnostics, pass: checks.every((check) => check.pass) };
   } finally { await browser.close(); }
