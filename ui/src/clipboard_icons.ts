@@ -2,7 +2,7 @@ export type ClipboardIcon = "clipboard" | "paste" | "copy" | "trash" | "text" | 
 
 const paths: Readonly<Record<ClipboardIcon, readonly string[]>> = {
   clipboard: ["M9 5H6a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-3", "M9 3h6v4H9z", "M8 12h8M8 16h6"],
-  paste: ["M12 3v11m-4-4 4 4 4-4", "M5 13v7h14v-7"],
+  paste: ["M9 5H6a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3", "M9 3h6v4H9z", "M13 13h8m-3-3 3 3-3 3"],
   copy: ["M9 9h11v11H9z", "M15 5V3H3v12h2"],
   trash: ["M3 6h18M9 6V3h6v3", "m5 6 1 15h12l1-15", "M10 10v7M14 10v7"],
   text: ["M3 5h12M9 5v14M5 19h8", "M19 11v8M15 15h8"],

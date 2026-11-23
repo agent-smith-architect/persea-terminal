@@ -10,6 +10,7 @@
 // limited to the outage phase.
 const DISCONNECT_PHASE="disconnect invalidates an already open row Paste action";
 const OUTAGE_PHASE="cached text remains locally copyable during server outage";
+const DIRECT_PASTE_OUTAGE_PHASE="Paste from this device succeeds during shared-clipboard outage";
 const STATUS_503=/status of 503/;
 const SNIPPETS=/\/api\/snippets$/;
 
@@ -20,7 +21,7 @@ function expectedClipboardDiagnostics(pages){
     for(const message of [...page.console,...page.pageerrors]){
       if(message.phase===DISCONNECT_PHASE&&/WebSocket.*410/.test(message.text)){expected.push(message);continue;}
       if(!STATUS_503.test(message.text))continue;
-      if(message.phase===OUTAGE_PHASE&&SNIPPETS.test(message.url||"")){expected.push(message);continue;}
+      if((message.phase===OUTAGE_PHASE||message.phase===DIRECT_PASTE_OUTAGE_PHASE)&&SNIPPETS.test(message.url||"")){expected.push(message);continue;}
       const index=responses.findIndex(response=>response.url===message.url);
       if(index<0)continue;
       responses.splice(index,1);

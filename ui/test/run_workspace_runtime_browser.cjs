@@ -1485,7 +1485,7 @@ async function main() {
 	  const pastePointC = await cellPoint(paneC, `cell.querySelector('.persea-unified-toolbar-paste')`);
       assert(pastePointC && !pastePointC.disabled, `${id}: pane ${paneC} has no enabled Paste action`);
       await tab.trustedClick(pastePointC);
-      await clipboardAction("Paste from device");
+      await clipboardAction("Save from device");
       for (let attempt = 0; attempt < 100; attempt++) {
         if (await tab.evaluate(`Array.from(document.querySelectorAll('.persea-clipboard__preview')).some(node => node.textContent === 'REFIT-WS-PASTE')`)) break;
         await delay(30);
