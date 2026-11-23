@@ -1607,9 +1607,9 @@ func serve(listener net.Listener, cfg config.Broker, effects PaneEffects) error 
 	ctx, cancel := context.WithCancel(context.Background())
 	observerDone := make(chan error, 1)
 	go func() {
+		defer func() { _ = listener.Close() }()
 		observerErr := effects.RunObserver(ctx, s.panes)
 		observerDone <- errors.Join(observerErr, s.panes.Close())
-		_ = listener.Close()
 	}()
 	acceptErr := s.accept(listener)
 	select {

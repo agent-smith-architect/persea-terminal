@@ -521,6 +521,15 @@ func guardedResizeArgs(authority proto.Authority, witness terminal.SourceWitness
 	return []string{"if-shell", "-t", pinnedTmuxTarget(witness), guard, success, "run-shell 'exit 77'"}
 }
 
+// guardedResizeControlArgs is the control-connection form of guardedResizeArgs:
+// a control client carries no process exit status (the post-issue witness
+// recheck is the sole rejection detector), and omitting the fallback run-shell
+// prevents tmux 3.6+ from printing an asynchronous failure line outside the
+// closed %begin/%end block when a stale guard evaluates false.
+func guardedResizeControlArgs(authority proto.Authority, witness terminal.SourceWitness, columns, rows int) []string {
+	return guardedResizeArgs(authority, witness, columns, rows)[:5]
+}
+
 func (t *tmuxPinnedTransaction) resize(ctx context.Context, req terminal.TransactionRequest) (terminal.TransactionResult, error) {
 	if req.Columns < 1 || req.Columns > 1000 || req.Rows < 1 || req.Rows > 1000 ||
 		!validSessionID(req.Attachment.ShadowSessionID) || req.Attachment.ClientID == "" {
@@ -555,7 +564,7 @@ func (t *tmuxPinnedTransaction) resize(ctx context.Context, req terminal.Transac
 			return terminal.TransactionResult{}, err
 		}
 		defer ticket.Release()
-		if err := ticket.Issue(ctx, args); err != nil {
+		if err := ticket.Issue(ctx, guardedResizeControlArgs(t.authority, req.Witness, req.Columns, req.Rows)); err != nil {
 			if errors.Is(err, errGeometryNotIssued) {
 				return terminal.TransactionResult{}, terminal.RefuseResize(fmt.Errorf("guarded RESIZE: %w", err))
 			}

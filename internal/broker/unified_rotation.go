@@ -1012,7 +1012,7 @@ func tmuxControlCommand(args []string) string {
 // control-mode line as the adoption composite; rows is the resolved target
 // (the request's, or the predecessor's when none were requested).
 func refitCompositeLine(authority proto.Authority, source terminal.SourceWitness, columns, rows int) string {
-	return tmuxControlCommand(guardedResizeArgs(authority, source, columns, rows)) + " ; " + strings.TrimSuffix(adoptionCompositeLine(source.PaneID), "\n") + "\n"
+	return tmuxControlCommand(guardedResizeControlArgs(authority, source, columns, rows)) + " ; " + strings.TrimSuffix(adoptionCompositeLine(source.PaneID), "\n") + "\n"
 }
 
 func (unit *unifiedDevUnit) submitRotationComposite(ctx context.Context, decoder *controlmode.Decoder, read <-chan []byte, readResult *observerReadResult, rotation *unifiedDevRotation, attempt int) ([]byte, unifiedjournal.Geometry, error) {

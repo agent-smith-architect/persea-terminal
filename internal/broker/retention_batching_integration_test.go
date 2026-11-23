@@ -1126,18 +1126,24 @@ func TestRetentionBatchingNaturalIntegratedPath(t *testing.T) {
 	clock := newRetentionManualClock()
 	effects := &retentionShadowEffects{realm: openRetentionRealm(t, "natural-red"), maxBytes: 64 << 10, maxDelay: 16 * time.Millisecond, clock: clock}
 	decoded := 0
+	d := newDisposable(t)
+	d.run("new-session", "-d", "-s", "natural", "-x", "80", "-y", "24", "sh")
 	effects.run = func(ctx context.Context, observer PaneObservationEffects) error {
-		d := newDisposable(t)
-		d.run("kill-session", "-t", "alpha")
-		d.run("new-session", "-d", "-s", "alpha", "-x", "80", "-y", "24", "sh")
 		readCtx, cancelRead := context.WithTimeout(ctx, 15*time.Second)
 		defer cancelRead()
-		cmd := exec.CommandContext(readCtx, "tmux", "-S", d.path, "-CC", "attach-session", "-r", "-t", "alpha")
+		cmd := exec.CommandContext(readCtx, "tmux", "-S", d.path, "-CC", "attach-session", "-r", "-t", "natural")
 		terminal, err := pty.Start(cmd)
 		if err != nil {
 			return err
 		}
-		defer terminal.Close()
+		defer func() {
+			_ = terminal.Close()
+			_ = cmd.Wait()
+		}()
+		go func() {
+			<-readCtx.Done()
+			_ = terminal.Close()
+		}()
 		go func() {
 			// Send distinct bursts spaced across tmux control-mode flushes so
 			// newer tmux versions that coalesce one line still produce at least
@@ -1148,8 +1154,8 @@ func TestRetentionBatchingNaturalIntegratedPath(t *testing.T) {
 					return
 				case <-time.After(100 * time.Millisecond):
 				}
-				d.run("send-keys", "-t", "alpha:", "-l", line)
-				d.run("send-keys", "-t", "alpha:", "Enter")
+				_ = exec.CommandContext(readCtx, "tmux", "-S", d.path, "send-keys", "-t", "natural:", "-l", line).Run()
+				_ = exec.CommandContext(readCtx, "tmux", "-S", d.path, "send-keys", "-t", "natural:", "Enter").Run()
 			}
 		}()
 		decoder := controlmode.NewDecoder()

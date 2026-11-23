@@ -17,7 +17,8 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 - **Remaining layout-shift tap drops:** `Select`, `Clipboard`, and generation-fenced click controls (`Attach image`, `Show keyboard`, `Hide keyboard`) no longer drop a still press when a layout shift emits `pointerleave`.
 - **Freshness receipt ordering:** the broker now records an attachment frame’s delivered sequence before the bytes hit the socket, eliminating a race where an immediate consumption receipt plus input could be falsely paused.
 - **Sidecar boot ordering:** ordered `persea-terminal-tailscaled.service` after `tailscaled.service` so `/run/tailscale` exists before the sidecar namespace masks it.
-- **Test portability on Ubuntu 26.04 / newer tmux:** fixed setgid fixture setup in the hermetic deploy suite, accepted tmux 3.5+ literal tabs in session previews, stabilized multi-delivery control-mode batching and zero-progress finalization tests, and normalized test fixture umask in release-retention tests.
+- **tmux 3.6+ guarded resize compatibility:** omitted the unused `run-shell` fallback on control-connection guarded resizes (`guardedResizeControlArgs`), preventing tmux 3.6+ from emitting an asynchronous failure line outside `%begin`/`%end` when a stale resize guard evaluates false.
+- **Test portability on Ubuntu 26.04 / newer tmux:** fixed setgid fixture setup in the hermetic deploy suite, accepted tmux 3.5+ literal tabs in session previews, stabilized multi-delivery control-mode batching and zero-progress finalization tests, deferred listener close on observer exit, and normalized test fixture umask in release-retention tests.
 
 ## 0.1.22 — 2026-10-08
 

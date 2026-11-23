@@ -185,7 +185,7 @@ export function bindGenerationFencedClickActivation(
     activate(event);
   };
   button.addEventListener("pointerdown", onPointerDown);
-  button.addEventListener("pointermove", onPointerMove);
+  document.addEventListener("pointermove", onPointerMove, true);
   button.addEventListener("pointerup", onPointerUp);
   button.addEventListener("pointercancel", cancelPointer);
   button.addEventListener("click", onClick);
@@ -193,7 +193,7 @@ export function bindGenerationFencedClickActivation(
     pointerGenerations.clear();
     keyboardFence.dispose();
     button.removeEventListener("pointerdown", onPointerDown);
-    button.removeEventListener("pointermove", onPointerMove);
+    document.removeEventListener("pointermove", onPointerMove, true);
     button.removeEventListener("pointerup", onPointerUp);
     button.removeEventListener("pointercancel", cancelPointer);
     button.removeEventListener("click", onClick);
