@@ -544,9 +544,9 @@ func TestSameClientRestartInterleavingHistoryAndAttachFailClosed(t *testing.T) {
 	if got := d.run("display-message", "-p", "-t", "=$0:", "#{session_id}"); got != "$0" {
 		t.Fatalf("replacement did not reuse $0: %q", got)
 	}
-	if replacement := d.run("capture-pane", "-p", "-t", "=$0:"); !strings.Contains(replacement, "replacement-incarnation") {
-		t.Fatalf("replacement evidence missing: %q", replacement)
-	}
+	waitFor(t, func() bool {
+		return strings.Contains(d.run("capture-pane", "-p", "-t", "=$0:"), "replacement-incarnation")
+	})
 
 	cfg := unifiedAdoptionDevConfig(t, d.tmux, t.TempDir(), 0)
 	cfg.Realm = "local"

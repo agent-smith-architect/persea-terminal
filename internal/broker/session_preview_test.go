@@ -103,9 +103,9 @@ func TestPreviewControlOpCapturesActivePane(t *testing.T) {
 		t.Fatalf("small capture reported truncation: %+v", got)
 	}
 	joined := strings.Join(got.Lines, "\n")
-	// Measured: the pane grid holds RENDERED cells, so a printed \t arrives as
-	// the spaces the terminal advanced over, never as a tab byte.
-	if !strings.Contains(joined, "PREVIEW_ALPHA") || !strings.Contains(joined, "PREVIEW TAB") {
+	// Older tmux versions expand \t to spaces in capture-pane; tmux 3.5+ can
+	// preserve the literal tab cell, which sanitizePreviewANSI keeps for layout.
+	if !strings.Contains(joined, "PREVIEW_ALPHA") || (!strings.Contains(joined, "PREVIEW TAB") && !strings.Contains(joined, "PREVIEW\tTAB")) {
 		t.Fatalf("marker rows did not come back: %q", joined)
 	}
 	if strings.ContainsAny(joined, "\x1b\x07\x00\r") {

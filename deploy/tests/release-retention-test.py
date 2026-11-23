@@ -22,6 +22,11 @@ class RetentionTests(unittest.TestCase):
         self.root = self.work / "opt/persea-terminal"
         self.releases = self.root / "releases"
         self.releases.mkdir(parents=True, mode=0o755)
+        # Path.mkdir(parents=True, mode=...) applies mode only to the leaf;
+        # normalize intermediate directories so an ambient 0002 umask never
+        # triggers the production group-writable ancestor guard in tests.
+        for ancestor in (self.work / "opt", self.root, self.releases):
+            ancestor.chmod(0o755)
         self.names = [f"{index:040x}-{'a' * 16}" for index in range(8)]
         for index, name in enumerate(self.names):
             target = self.releases / name
