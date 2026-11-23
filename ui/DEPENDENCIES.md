@@ -30,14 +30,16 @@ Retain third-party license notices when generating assets.
 `@xterm/xterm` 6.0.0 uses a version-specific `patch-package` patch:
 [`patches/@xterm+xterm+6.0.0.patch`](patches/@xterm+xterm+6.0.0.patch).
 It changes normal-screen scrollback handling for CSI Scroll Up, including
-scrolling regions whose top is below the first row. Alternate-screen scrolling
-and Delete Lines must not add normal history. The patch updates the generated
-CJS and ESM distributions.
+scrolling regions whose top is below the first row, and advances `savedY` with
+`ybase` so `DECSC`/`DECRC` and `SCOSC`/`SCORC` remain anchored to the same
+screen row across `CSI S`. Alternate-screen scrolling and Delete Lines must not
+add normal history. The patch updates the generated CJS and ESM distributions.
 
 The related upstream report is [xterm issue 6010](https://github.com/xtermjs/xterm.js/issues/6010)
-and [PR 6011](https://github.com/xtermjs/xterm.js/pull/6011). The proposed upstream
-behavior covers regions starting at the first row; our acceptance cases also
-cover a lower region. Check the actual merged behavior before removing the patch.
+and [PR 6011](https://github.com/xtermjs/xterm.js/pull/6011) (both still open;
+`@xterm/xterm` 6.1.0 remains in beta). The proposed upstream behavior covers
+regions starting at the first row; our acceptance cases also cover a lower
+region. Check the actual merged behavior before removing the patch.
 
 When upgrading xterm:
 

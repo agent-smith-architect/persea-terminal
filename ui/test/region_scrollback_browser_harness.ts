@@ -298,6 +298,36 @@ async function projectionCoversArchivedHistory(): Promise<CaseResult> {
   });
 }
 
+// Saved cursors (DECSC/DECRC and SCOSC/SCORC) stay anchored to the same screen
+// row across CSI S on the normal buffer, both for top-anchored and inner scroll
+// regions (matching tmux 3.4 control probes and xterm).
+async function suPreservesSavedCursor(): Promise<CaseResult> {
+  await boot(seedScreen());
+  // Top-anchored region 1..10: save cursor at row 15 col 5, SU 3, restore, write X.
+  await live("\x1b[15;5H\x1b7\x1b[1;10r\x1b[3S\x1b[r\x1b8X");
+  const topBaseY = buffer().baseY;
+  const topCursorY = buffer().cursorY;
+  const topCursorX = buffer().cursorX;
+  const topLine15 = lineText(topBaseY + 14);
+
+  await boot(seedScreen());
+  // Inner region 5..10: SCOSC at row 15 col 5, SU 3, SCORC, write Y.
+  await live("\x1b[15;5H\x1b[s\x1b[5;10r\x1b[3S\x1b[r\x1b[uY");
+  const innerBaseY = buffer().baseY;
+  const innerCursorY = buffer().cursorY;
+  const innerCursorX = buffer().cursorX;
+  const innerLine15 = lineText(innerBaseY + 14);
+
+  return judge("su_preserves_saved_cursor", {
+    topCursorY: [topCursorY, 14],
+    topCursorX: [topCursorX, 5],
+    topLine15: [topLine15, "S15 X"],
+    innerCursorY: [innerCursorY, 14],
+    innerCursorX: [innerCursorX, 5],
+    innerLine15: [innerLine15, "S15 Y"],
+  });
+}
+
 (window as any).__regionScrollbackHarness = {
   async run(): Promise<{ results: CaseResult[]; failures: string[] }> {
     const results: CaseResult[] = [];
@@ -309,6 +339,7 @@ async function projectionCoversArchivedHistory(): Promise<CaseResult> {
     results.push(await suOverscrollClamp());
     results.push(await suFullBufferTrim());
     results.push(await projectionCoversArchivedHistory());
+    results.push(await suPreservesSavedCursor());
     const failures = results.filter((result) => !result.pass)
       .map((result) => `${result.name}: ${JSON.stringify(result.detail)}`);
     return { results, failures };
