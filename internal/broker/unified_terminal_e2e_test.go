@@ -1306,7 +1306,7 @@ func (observer *unifiedE2E1ControlObserver) consume(chunk []byte) {
 	observer.t.Helper()
 	events, err := observer.decoder.Feed(chunk)
 	if err != nil {
-		observer.t.Fatalf("%s: production decoder failed: %v", unifiedE2E1BoundaryRed, err)
+		observer.t.Fatalf("%s: production decoder failed: %v (chunk=%q)", unifiedE2E1BoundaryRed, err, chunk)
 	}
 	for _, event := range events {
 		if event.Kind == controlmode.EventCommandResponse {
@@ -1494,7 +1494,7 @@ func unifiedE2E1GuardedResizeCommand(authority proto.Authority, witness terminal
 		"; [ " + shellQuote("#{window_panes}") + " = 1 ] || exit 1" +
 		"; stat=$(cat /proc/" + strconv.Itoa(witness.Pane.PID) + "/stat) || exit 1; suffix=${stat##*) }; set -- $suffix; [ \"${20}\" = " + shellQuote(strconv.FormatUint(witness.Pane.StartTime, 10)) + " ]"
 	success := fmt.Sprintf("%s -t %s -x %d -y %d", "resize"+"-window", shellQuote(witness.WindowID), witness.Columns, rows)
-	args := []string{"if-shell", "-t", pinnedTmuxTarget(witness), guard, success, "run-shell 'exit 77'"}
+	args := []string{"if-shell", "-t", pinnedTmuxTarget(witness), guard, success}
 	quoted := make([]string, len(args))
 	for index, argument := range args {
 		quoted[index] = shellQuote(argument)
