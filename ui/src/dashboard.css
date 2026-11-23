@@ -57,6 +57,8 @@ body.dashboard-mode:has(.dashboard) #app { width: min(1180px, 100%); margin-inli
 .dashboard-header > div { min-width: 0; max-width: 100%; }
 .dashboard .dashboard-eyebrow { margin-bottom: .25rem; color: var(--dashboard-muted); font-size: .6875rem; font-weight: 650; letter-spacing: .12em; }
 .dashboard-header-actions { justify-content: flex-end; }
+.dashboard .dashboard-clipboard { display: inline-flex; align-items: center; justify-content: center; gap: .4rem; }
+.dashboard .dashboard-clipboard svg { width: 18px; height: 18px; flex: 0 0 18px; }
 .dashboard .dashboard-create-shortcut { border-color: var(--dashboard-accent); }
 .dashboard-navigation { display: flex; gap: .2rem; margin: 1rem 0 1.25rem; border-bottom: 1px solid var(--dashboard-border); }
 .dashboard .dashboard-navigation button { flex: 1 1 0; min-width: 0; padding-inline: min(.4rem, 1vw); border: 0; border-radius: .4rem .4rem 0 0; background: transparent; font-size: clamp(12px, 4vw, 1rem); white-space: nowrap; overflow-wrap: normal; color: var(--dashboard-muted); }
@@ -165,6 +167,7 @@ body.dashboard-mode:has(.dashboard) #app { width: min(1180px, 100%); margin-inli
 .session-preview-dialog .session-preview-screen { height: auto; max-height: 60dvh; min-height: 8rem; overflow: auto; margin: .75rem 0; border: 1px solid var(--dashboard-border); border-radius: .6rem; padding: .75rem; font-size: .8125rem; }
 .session-preview-explanation { color: var(--dashboard-muted); font-size: .8125rem; }
 .session-preview-dialog-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem; margin-top: .65rem; }
+.session-preview-dialog-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; }
 
 /* Every settings panel uses the same disclosure header and inset body. */
 .dashboard-settings { display: grid; grid-template-columns: minmax(0, 1fr); gap: .8rem; }

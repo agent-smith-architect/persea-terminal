@@ -1,4 +1,6 @@
-import { bindTapActivation } from "../src/tap_activation";
+import { bindExplainedTapActivation, bindGenerationFencedClickActivation, bindTapActivation } from "../src/tap_activation";
+
+type Mode = "tap" | "explained" | "click";
 
 type Receipt = Readonly<{
   type: string;
@@ -31,7 +33,7 @@ function receipt(event: Event): Receipt {
 // dispatches an event. An empty status line sits above the control in normal
 // flow, as the terminal's connection status does above an open sheet; the
 // control sits in a list that can be hidden, as a session row does.
-export function mount(): void {
+export function mount(mode: Mode = "tap"): void {
   dispose?.();
   generation = 0;
   actions = [];
@@ -51,7 +53,13 @@ export function mount(): void {
     pressed = event.pointerId;
     if (detachOnPress) button.remove();
   });
-  dispose = bindTapActivation(button, (event) => actions.push(receipt(event)), () => {}, () => true, () => generation);
+  if (mode === "explained") {
+    dispose = bindExplainedTapActivation(button, (event) => { actions.push(receipt(event)); }, () => {}, () => {}, () => true, () => generation);
+  } else if (mode === "click") {
+    dispose = bindGenerationFencedClickActivation(button, (event) => { actions.push(receipt(event)); }, () => true, () => generation);
+  } else {
+    dispose = bindTapActivation(button, (event) => { actions.push(receipt(event)); }, () => {}, () => true, () => generation);
+  }
 }
 
 // The status line appears: everything below it moves down by its height.

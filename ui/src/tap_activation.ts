@@ -139,22 +139,22 @@ export function bindGenerationFencedClickActivation(
   interactionGeneration: () => number,
 ): () => void {
   const keyboardFence = bindKeyboardActivationFence(button, interactionGeneration);
-  const pointerGenerations = new Map<number, Readonly<{ generation: number; released: boolean }>>();
+  const pointerGenerations = new Map<number, Readonly<{ generation: number; released: boolean; x: number; y: number }>>();
   const onPointerDown = (event: PointerEvent): void => {
     if (!event.isTrusted || !isLive()) return;
     keyboardFence.revoke();
-    pointerGenerations.set(event.pointerId, { generation: interactionGeneration(), released: false });
+    pointerGenerations.set(event.pointerId, { generation: interactionGeneration(), released: false, x: event.clientX, y: event.clientY });
   };
   const cancelPointer = (event: PointerEvent): void => { pointerGenerations.delete(event.pointerId); };
+  const onPointerMove = (event: PointerEvent): void => {
+    const capture = pointerGenerations.get(event.pointerId);
+    if (capture && !capture.released && Math.hypot(event.clientX - capture.x, event.clientY - capture.y) > 8) cancelPointer(event);
+  };
   const onPointerUp = (event: PointerEvent): void => {
+    onPointerMove(event);
     const capture = pointerGenerations.get(event.pointerId);
     if (!event.isTrusted || !capture) return;
     pointerGenerations.set(event.pointerId, { ...capture, released: true });
-  };
-  const onPointerLeave = (event: PointerEvent): void => {
-    // Touch ends with pointerup → pointerleave → click. Only leaving while
-    // held cancels acquisition; a completed release still owns its click.
-    if (!pointerGenerations.get(event.pointerId)?.released) cancelPointer(event);
   };
   const onClick = (event: MouseEvent): void => {
     if (!isLive()) return;
@@ -185,17 +185,17 @@ export function bindGenerationFencedClickActivation(
     activate(event);
   };
   button.addEventListener("pointerdown", onPointerDown);
+  button.addEventListener("pointermove", onPointerMove);
   button.addEventListener("pointerup", onPointerUp);
   button.addEventListener("pointercancel", cancelPointer);
-  button.addEventListener("pointerleave", onPointerLeave);
   button.addEventListener("click", onClick);
   return () => {
     pointerGenerations.clear();
     keyboardFence.dispose();
     button.removeEventListener("pointerdown", onPointerDown);
+    button.removeEventListener("pointermove", onPointerMove);
     button.removeEventListener("pointerup", onPointerUp);
     button.removeEventListener("pointercancel", cancelPointer);
-    button.removeEventListener("pointerleave", onPointerLeave);
     button.removeEventListener("click", onClick);
   };
 }
@@ -475,7 +475,7 @@ export function bindExplainedTapActivation(
     suppressTimer = window.setTimeout(() => { suppressCompatibility = false; suppressTimer = undefined; }, 800);
   };
   const gesture = new LongPressGesture(() => {
-    if (!isLive() || armedPointer?.generation !== interactionGeneration()) return;
+    if (!isLive() || button.disabled || !shown(button) || armedPointer?.generation !== interactionGeneration()) return;
     suppress();
     explain();
   }, clock);
@@ -489,6 +489,12 @@ export function bindExplainedTapActivation(
     keyboardFence.revoke();
     armedPointer = Object.freeze({ pointerId: event.pointerId, generation: interactionGeneration() });
     gesture.pointerDown(event.pointerId, event.clientX, event.clientY);
+    try {
+      button.setPointerCapture(event.pointerId);
+    } catch {
+      armedPointer = undefined;
+      gesture.cancel();
+    }
   };
   const onPointerMove = (event: PointerEvent): void => gesture.pointerMove(event.pointerId, event.clientX, event.clientY);
   const onCancel = (event: PointerEvent): void => {
@@ -498,12 +504,14 @@ export function bindExplainedTapActivation(
     keyboardFence.revoke();
   };
   const onPointerUp = (event: PointerEvent): void => {
+    gesture.pointerMove(event.pointerId, event.clientX, event.clientY);
     if (armedPointer?.pointerId !== event.pointerId) return;
     const generation = armedPointer.generation;
     armedPointer = undefined;
     const result = gesture.pointerUp(event.pointerId);
     if (result === "none" || !event.isTrusted || !isLive() || generation !== interactionGeneration()) return;
     event.preventDefault();
+    if (button.disabled || !shown(button)) return;
     if (result === "consumed") { suppress(); return; }
     if (activate(event) !== false) restoreFocus();
   };
@@ -538,7 +546,6 @@ export function bindExplainedTapActivation(
   button.addEventListener("pointerdown", onPointerDown);
   button.addEventListener("pointermove", onPointerMove);
   button.addEventListener("pointercancel", onCancel);
-  button.addEventListener("pointerleave", onCancel);
   button.addEventListener("lostpointercapture", onCancel);
   button.addEventListener("pointerup", onPointerUp);
   button.addEventListener("touchend", onTouchEnd, { passive: false });
@@ -555,7 +562,6 @@ export function bindExplainedTapActivation(
     button.removeEventListener("pointerdown", onPointerDown);
     button.removeEventListener("pointermove", onPointerMove);
     button.removeEventListener("pointercancel", onCancel);
-    button.removeEventListener("pointerleave", onCancel);
     button.removeEventListener("lostpointercapture", onCancel);
     button.removeEventListener("pointerup", onPointerUp);
     button.removeEventListener("touchend", onTouchEnd);
