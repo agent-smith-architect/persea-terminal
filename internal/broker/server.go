@@ -644,6 +644,7 @@ func (writer *unifiedAttachmentFrameWriter) terminateLocked(reason proto.Subscri
 // browser sees geometry exactly where the journal committed it: after every
 // earlier byte and before every later one.
 func (writer *unifiedAttachmentFrameWriter) writeEventLocked(event unifiedjournal.Event) error {
+	mark := func(frames uint64) { writer.fresh.delivered(frames, event.Sequence) }
 	if event.Kind == unifiedjournal.RecordGeometry {
 		frame := terminal.Frame{
 			Version: terminal.ProtocolVersion, Type: terminal.FramePrepare, Source: writer.source,
@@ -655,13 +656,17 @@ func (writer *unifiedAttachmentFrameWriter) writeEventLocked(event unifiedjourna
 		if err != nil {
 			return err
 		}
-		return writer.downstream.wire.frame(proto.FrameAttachment, encoded)
+		return writer.downstream.wire.frameMarked(proto.FrameAttachment, encoded, mark)
 	}
 	for payload := event.Payload; len(payload) != 0; {
 		chunkBytes := min(len(payload), unifiedLiveFrameBytes)
 		chunk := payload[:chunkBytes]
 		payload = payload[chunkBytes:]
-		if err := writer.writeLiveLocked(chunk, *positionWithin(event, len(payload))); err != nil {
+		var onCounted func(uint64)
+		if len(payload) == 0 {
+			onCounted = mark
+		}
+		if err := writer.writeLiveMarkedLocked(chunk, *positionWithin(event, len(payload)), onCounted); err != nil {
 			return err
 		}
 	}
@@ -669,12 +674,16 @@ func (writer *unifiedAttachmentFrameWriter) writeEventLocked(event unifiedjourna
 }
 
 func (writer *unifiedAttachmentFrameWriter) writeLiveLocked(data []byte, at terminal.StreamPosition) error {
+	return writer.writeLiveMarkedLocked(data, at, nil)
+}
+
+func (writer *unifiedAttachmentFrameWriter) writeLiveMarkedLocked(data []byte, at terminal.StreamPosition, onCounted func(uint64)) error {
 	frame := terminal.Frame{Version: terminal.ProtocolVersion, Type: terminal.FrameLive, Source: writer.source, Epoch: writer.epochID, Cut: writer.cut, Data: data, Position: &at}
 	encoded, err := attachmentwire.Encode(frame, attachmentwire.ServerToBrowser)
 	if err != nil {
 		return err
 	}
-	return writer.downstream.wire.frame(proto.FrameAttachment, encoded)
+	return writer.downstream.wire.frameMarked(proto.FrameAttachment, encoded, onCounted)
 }
 
 // writeBacklogLocked writes the part of the snapshot that PREPARE did not
@@ -1642,10 +1651,17 @@ type lockedWriter struct {
 }
 
 func (w *lockedWriter) frame(t proto.FrameType, payload []byte) error {
+	return w.frameMarked(t, payload, nil)
+}
+
+func (w *lockedWriter) frameMarked(t proto.FrameType, payload []byte, onCounted func(uint64)) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	if t == proto.FrameAttachment {
-		w.attachments.Add(1)
+		frames := w.attachments.Add(1)
+		if onCounted != nil {
+			onCounted(frames)
+		}
 	}
 	return proto.WriteFrame(w.w, t, payload)
 }

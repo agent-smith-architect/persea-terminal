@@ -370,22 +370,32 @@ func (w *thresholdTransport) waitFrame(t *testing.T, kind terminal.FrameType) te
 }
 
 type zeroProgressPTY struct {
-	closed  bool
-	started chan struct{}
-	once    sync.Once
+	closed     bool
+	closedCh   chan struct{}
+	closeOnce  sync.Once
+	started    chan struct{}
+	once       sync.Once
 }
 
 func (w *zeroProgressPTY) WriteContext(context.Context, []byte) (int, error) {
 	w.once.Do(func() { close(w.started) })
 	return 0, nil
 }
-func (w *zeroProgressPTY) Close() error { w.closed = true; return nil }
+func (w *zeroProgressPTY) Close() error {
+	w.closed = true
+	w.closeOnce.Do(func() {
+		if w.closedCh != nil {
+			close(w.closedCh)
+		}
+	})
+	return nil
+}
 
 func TestZeroProgressInputFailsAndFinalizationReportsIt(t *testing.T) {
 	tx := &fakeTransaction{cutCapture: []byte("history\n")}
 	source, _ := sourceFor(t, tx)
 	wire := newMemoryTransport()
-	pty := &zeroProgressPTY{started: make(chan struct{})}
+	pty := &zeroProgressPTY{started: make(chan struct{}), closedCh: make(chan struct{})}
 	var epoch *terminal.Epoch
 	tx.onCut = func(req terminal.TransactionRequest) error { return epoch.PTYBytes(marker(req)) }
 	epoch, _ = terminal.NewEpoch(context.Background(), source, 9, wire, pty, config())
@@ -400,6 +410,13 @@ func TestZeroProgressInputFailsAndFinalizationReportsIt(t *testing.T) {
 	case <-pty.started:
 	case <-time.After(time.Second):
 		t.Fatal("input writer did not start")
+	}
+	// Wait for the zero-progress fault itself to tear down the attachment so
+	// Finalize observes that fault rather than racing ahead as an orderly close.
+	select {
+	case <-pty.closedCh:
+	case <-time.After(time.Second):
+		t.Fatal("zero-progress input did not fault and close the PTY")
 	}
 	if err := epoch.Finalize(context.Background()); !errors.Is(err, terminal.ErrNoProgress) {
 		t.Fatalf("no-progress error hidden: %v", err)

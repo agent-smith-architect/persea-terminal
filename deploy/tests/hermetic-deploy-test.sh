@@ -1080,7 +1080,10 @@ grep -Fxq 'InaccessiblePaths=/run/tailscale /var/lib/tailscale' "$sidecar_unit" 
 pass 'unit hardening and explicit tmux/service scope are static invariants'
 
 mkdir -m 0700 "$ROOT/run/persea-terminal" "$ROOT/run/persea-terminal-desk-a7"
-mkdir -m 2710 "$ROOT/run/persea-terminal-lab-k4"
+mkdir -m 0710 "$ROOT/run/persea-terminal-lab-k4"
+# Some mkdir implementations strip setgid on creation; chmod sets the fixture
+# boundary mode explicitly, matching systemd's RuntimeDirectoryMode=2710.
+chmod 2710 "$ROOT/run/persea-terminal-lab-k4"
 socket="$ROOT/run/persea-terminal/front.sock"
 POSITIVE_COUNT="$TMP/positive-probe-count"
 : >"$POSITIVE_COUNT"

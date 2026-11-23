@@ -1130,16 +1130,27 @@ func TestRetentionBatchingNaturalIntegratedPath(t *testing.T) {
 		d := newDisposable(t)
 		d.run("kill-session", "-t", "alpha")
 		d.run("new-session", "-d", "-s", "alpha", "-x", "80", "-y", "24", "sh")
-		cmd := exec.CommandContext(ctx, "tmux", "-S", d.path, "-CC", "attach-session", "-r", "-t", "alpha")
+		readCtx, cancelRead := context.WithTimeout(ctx, 15*time.Second)
+		defer cancelRead()
+		cmd := exec.CommandContext(readCtx, "tmux", "-S", d.path, "-CC", "attach-session", "-r", "-t", "alpha")
 		terminal, err := pty.Start(cmd)
 		if err != nil {
 			return err
 		}
 		defer terminal.Close()
 		go func() {
-			time.Sleep(100 * time.Millisecond)
-			d.run("send-keys", "-t", "alpha:", "-l", "printf one; printf two; printf three")
-			d.run("send-keys", "-t", "alpha:", "Enter")
+			// Send distinct bursts spaced across tmux control-mode flushes so
+			// newer tmux versions that coalesce one line still produce at least
+			// two %output deliveries while remaining well within maxDelay/manual clock.
+			for _, line := range []string{"printf one; printf two", "printf three; printf four", "printf five"} {
+				select {
+				case <-readCtx.Done():
+					return
+				case <-time.After(100 * time.Millisecond):
+				}
+				d.run("send-keys", "-t", "alpha:", "-l", line)
+				d.run("send-keys", "-t", "alpha:", "Enter")
+			}
 		}()
 		decoder := controlmode.NewDecoder()
 		witness := retentionWitness("%0", "natural")
