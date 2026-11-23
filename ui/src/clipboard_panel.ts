@@ -11,6 +11,7 @@ type TerminalDestination = Readonly<{
   identity(): string;
   unavailable(): string;
   send(text: string, event: Event): Delivery;
+  draftText?(text: string, event: Event): void;
   canAttach(): boolean;
   attach(file: File, event: Event): Delivery;
 }>;
@@ -52,6 +53,10 @@ function textBody(value: string): string { return value.replace(/\r\n?/g, "\n");
 function itemTitle(item: Item): string {
   return item.kind === "image" ? "Image" : snippetLabelFromBody(item.record.body) || "Text";
 }
+function clipboardBlobToFile(blob: Blob, index: number): File {
+  const ext = blob.type === "image/jpeg" ? "jpg" : blob.type === "image/gif" ? "gif" : blob.type === "image/webp" ? "webp" : "png";
+  return new File([blob], `clipboard-image-${index + 1}.${ext}`, { type: blob.type || "image/png" });
+}
 
 let panelSerial = 0;
 
@@ -74,6 +79,10 @@ export class ClipboardPanel {
   private readonly settings: HTMLButtonElement;
   private readonly list = el("div", "persea-clipboard__list");
   private readonly fileInput = el("input");
+  private heroButton?: HTMLButtonElement;
+  private heroReason?: HTMLParagraphElement;
+  private searchInput?: HTMLInputElement;
+  private listHeading?: HTMLParagraphElement;
   private textSnapshot: SnippetSnapshot;
   private imageSnapshot: ClipboardImagesSnapshot;
   private releases: (() => void)[] = [];
@@ -173,7 +182,10 @@ export class ClipboardPanel {
     this.targetIdentity = this.options.terminal?.identity() ?? "";
     this.lifetime++; this.busy = false; this.query = ""; this.editorItem = undefined;
     this.showList(); document.body.append(this.element); this.element.showModal(); this.fitViewport();
-    this.element.querySelector<HTMLButtonElement>("[aria-label='Close clipboard']")?.focus({ preventScroll: true });
+    const initialFocus = this.heroButton && !this.heroButton.disabled
+      ? this.heroButton
+      : this.element.querySelector<HTMLButtonElement>("[aria-label='Close clipboard']");
+    initialFocus?.focus({ preventScroll: true });
     document.addEventListener("pointerup", this.pointerReleased, true);
     document.addEventListener("pointercancel", this.pointerReleased, true);
     window.visualViewport?.addEventListener("resize", this.fitViewport);
@@ -202,6 +214,7 @@ export class ClipboardPanel {
     this.clock = undefined;
     this.heldPointers.clear(); this.pendingList = false; this.busy = false;
     if (this.element.open) this.element.close(); this.element.remove();
+    this.heroButton = undefined; this.heroReason = undefined; this.searchInput = undefined; this.listHeading = undefined;
     this.content.replaceChildren(); this.handoff.replaceChildren(); this.handoff.hidden = true; this.handoffBody = undefined;
     this.footer.replaceChildren(); this.notice();
     if (this.returnFocus?.isConnected) this.returnFocus.focus({ preventScroll: true });
@@ -230,16 +243,42 @@ export class ClipboardPanel {
     this.view = "list"; this.lifetime++; this.editorItem = undefined;
     this.title.textContent = "Clipboard"; this.back.hidden = true; this.settings.hidden = !!this.options.terminal;
     this.notice(); this.listKey = ""; this.footer.replaceChildren();
+    const hero = el("div", "persea-clipboard__hero");
+    if (this.options.terminal) {
+      const action = this.button("", (event) => { void this.pasteFromDevice(event); }, "Paste from this device");
+      action.className = "persea-clipboard__primary persea-clipboard__hero-action";
+      action.title = "Paste text or image from this device into this terminal";
+      action.append(clipboardIcon("paste"), el("span", "", "Paste from this device"));
+      const reason = el("p", "persea-clipboard__hero-reason");
+      reason.hidden = true;
+      hero.append(action, reason);
+      this.heroButton = action; this.heroReason = reason;
+    } else {
+      const action = this.button("", () => { void this.importClipboard(); }, "Paste from device");
+      action.className = "persea-clipboard__primary persea-clipboard__hero-action";
+      action.title = "Add text or image from this device to your shared clipboard";
+      action.append(clipboardIcon("clipboard"), el("span", "", "Paste from device"));
+      hero.append(action);
+      this.heroButton = action; this.heroReason = undefined;
+    }
     const search = el("input", "persea-clipboard__search");
-    search.type = "search"; search.placeholder = "Search clipboard"; search.setAttribute("aria-label", "Find a clipboard item"); search.value = this.query;
+    search.type = "search"; search.placeholder = "Search shared clipboard"; search.setAttribute("aria-label", "Find a clipboard item"); search.value = this.query;
     search.addEventListener("input", () => { this.query = search.value; this.renderList(); });
-    this.content.replaceChildren(search, this.list);
+    this.searchInput = search;
+    const listHeading = el("p", "persea-clipboard__section-label", "Shared across devices");
+    this.listHeading = listHeading;
+    this.content.replaceChildren(hero, search, listHeading, this.list);
     this.footer.classList.add("persea-clipboard__footer--tools");
-    const tools: readonly [ClipboardIcon, string, () => void][] = [
-      ["clipboard", "Paste from device", () => { void this.importClipboard(); }],
-      ["text", "Add text", () => this.showAddText()],
-      ["image", "Add image", () => { this.fileInput.value = ""; this.fileInput.click(); }],
-    ];
+    const tools: readonly [ClipboardIcon, string, () => void][] = this.options.terminal
+      ? [
+          ["download", "Save from device", () => { void this.importClipboard(); }],
+          ["text", "Add text", () => this.showAddText()],
+          ["image", "Add image", () => { this.fileInput.value = ""; this.fileInput.click(); }],
+        ]
+      : [
+          ["text", "Add text", () => this.showAddText()],
+          ["image", "Add image", () => { this.fileInput.value = ""; this.fileInput.click(); }],
+        ];
     for (const [icon, label, action] of tools) {
       const button = this.button("", action, label); button.className = "persea-clipboard__tool"; button.title = label;
       button.append(clipboardIcon(icon), el("span", "", label)); this.footer.append(button);
@@ -265,10 +304,26 @@ export class ClipboardPanel {
     if (this.heldPointers.size || (document.activeElement instanceof HTMLSelectElement && this.list.contains(document.activeElement))) { this.pendingList = true; return; }
     this.pendingList = false; this.renderHandoff();
     if (this.view !== "list") return;
+    const all = this.allItems();
     const items = this.items();
-    const key = JSON.stringify([this.query, Math.floor(Date.now()/15_000), this.textSnapshot.status, this.imageSnapshot.status, this.unavailable(), this.busy, items.map((item) => [itemID(item), item.record.revision, item.record.updatedAt, item.record.expiresAt, item.record.retentionSeconds])]);
+    const unavailableReason = this.unavailable();
+    const key = JSON.stringify([this.query, Math.floor(Date.now()/15_000), this.textSnapshot.status, this.imageSnapshot.status, unavailableReason, this.busy, all.length, items.map((item) => [itemID(item), item.record.revision, item.record.updatedAt, item.record.expiresAt, item.record.retentionSeconds])]);
     if (key === this.listKey) return;
     this.listKey = key;
+    if (this.options.terminal && this.heroButton) {
+      if (unavailableReason) {
+        this.heroButton.dataset.clipboardUnavailable = "true";
+        this.heroButton.title = unavailableReason;
+        if (this.heroReason) { this.heroReason.textContent = unavailableReason; this.heroReason.hidden = false; }
+      } else {
+        delete this.heroButton.dataset.clipboardUnavailable;
+        this.heroButton.title = "Paste text or image from this device into this terminal";
+        if (this.heroReason) { this.heroReason.textContent = ""; this.heroReason.hidden = true; }
+      }
+    }
+    const showSearch = all.length > 0 || this.query !== "";
+    if (this.searchInput) this.searchInput.hidden = !showSearch;
+    if (this.listHeading) this.listHeading.hidden = !showSearch;
     const focused = this.list.contains(document.activeElement) ? (document.activeElement as HTMLElement).dataset.clipboardFocus : undefined;
     const content: HTMLElement[] = [];
     if (this.textSnapshot.status === "unavailable") content.push(el("p", "persea-clipboard__note", "Shared text is unavailable. Try again when your connection returns."));
@@ -297,19 +352,23 @@ export class ClipboardPanel {
       }
       actions.append(copy);
       if (this.options.terminal) {
-        const reason = this.unavailable() || (item.kind === "image" && !this.options.terminal.canAttach() ? "Image attachments are unavailable for this terminal." : "");
-        const paste = this.iconButton("paste", item.kind === "text" ? "Paste text to terminal" : "Insert image", (event) => {
+        const reason = unavailableReason || (item.kind === "image" && !this.options.terminal.canAttach() ? "Image attachments are unavailable for this terminal." : "");
+        const accessible = item.kind === "text" ? "Paste text to terminal" : "Insert image";
+        const paste = this.button("", (event) => {
           if (item.kind === "text") this.pasteText(item.record, event); else void this.attachImage(item.record, event);
-        });
-        paste.classList.add("persea-clipboard__paste"); paste.dataset.clipboardFocus = id + ":paste";
-        if (reason) { paste.dataset.clipboardUnavailable = "true"; paste.title = reason; }
+        }, accessible);
+        paste.className = "persea-clipboard__paste";
+        paste.title = reason || accessible;
+        paste.dataset.clipboardFocus = id + ":paste";
+        paste.append(clipboardIcon("paste"), el("span", "", item.kind === "text" ? "Paste" : "Insert"));
+        if (reason) { paste.dataset.clipboardUnavailable = "true"; }
         actions.append(paste);
       }
       row.append(open, remove, this.expiryControl(item), actions); content.push(row);
     }
     if (!items.length) {
       const loading = this.textSnapshot.status === "idle" || this.textSnapshot.status === "loading" || this.imageSnapshot.status === "loading";
-      content.push(el("p", "persea-clipboard__empty", loading ? "Loading your clipboard…" : this.query ? "No matching items." : "Your clipboard is empty. Paste from this device, add text, or choose an image below."));
+      content.push(el("p", "persea-clipboard__empty", loading ? "Loading your clipboard…" : this.query ? "No matching items." : this.options.terminal ? "Your shared clipboard is empty. Paste from this device above, or save text or an image below to share across devices." : "Your clipboard is empty. Paste from this device above, add text, or choose an image below."));
     }
     this.list.replaceChildren(...content);
     this.setBusy(this.busy);
@@ -344,6 +403,7 @@ export class ClipboardPanel {
   }
   private previewHeader(view: View, title: string): void {
     this.view = view; this.lifetime++; this.title.textContent = title; this.back.hidden = false; this.settings.hidden = true;
+    this.heroButton = undefined; this.heroReason = undefined; this.searchInput = undefined; this.listHeading = undefined;
     this.notice(); this.footer.replaceChildren(); this.footer.classList.remove("persea-clipboard__footer--tools"); this.setBusy(false);
   }
   private showText(record: SnippetRecord): void {
@@ -357,10 +417,15 @@ export class ClipboardPanel {
     this.editorItem = "image:" + record.id; this.previewHeader("image", "Image");
     const image = el("img", "persea-clipboard__image"); image.src = clipboardImageURL(record); image.alt = "Shared clipboard image";
     const meta = el("p", "persea-clipboard__meta", Math.ceil(record.byteSize/1024) + " KB · " + remaining(record.expiresAt));
-    const download = el("a", "persea-clipboard__download", "Download image"); download.href = clipboardImageURL(record); download.download = clipboardImageFilename(record);
+    const download = el("a", "persea-clipboard__download", this.options.terminal ? "Download" : "Download image"); download.href = clipboardImageURL(record); download.download = clipboardImageFilename(record); download.setAttribute("aria-label", "Download image");
     this.content.replaceChildren(image, meta);
     const done = this.button("Done", () => this.showList("image:" + record.id)); done.dataset.clipboardDismiss = "true";
-    this.footer.append(download, done);
+    if (this.options.terminal) {
+      const reason = this.unavailable() || (!this.options.terminal.canAttach() ? "Image attachments are unavailable for this terminal." : "");
+      this.footer.append(done, download, this.destinationButton("Insert image", (event) => { void this.attachImage(record, event); }, reason));
+    } else {
+      this.footer.append(download, done);
+    }
   }
   private showAddText(): void {
     this.editorItem = undefined; this.previewHeader("add", "Add text");
@@ -467,6 +532,76 @@ export class ClipboardPanel {
       this.notice(added === 1 ? "Image added. Matching content refreshes the existing item." : "Clipboard updated with " + added + " images.", "success");
     } catch (error) { if (lifetime === this.lifetime) this.notice((added ? added + " added. " : "") + clipboardImageErrorMessage(error)); }
     finally { if (lifetime === this.lifetime) this.setBusy(false); }
+  }
+  private async pasteFromDevice(event: Event): Promise<void> {
+    if (!this.options.terminal) { await this.importClipboard(); return; }
+    const reason = this.unavailable();
+    if (reason) { this.notice(reason); return; }
+    const lifetime = this.lifetime;
+    try {
+      // Invoke the native API synchronously inside the click gesture (required
+      // by Safari/iOS). Permission dismissal stays in the list without input.
+      const read = navigator.clipboard?.read ? navigator.clipboard.read() : navigator.clipboard?.readText();
+      if (!read) { this.notice("This browser cannot read the clipboard here. Use Add text and your device's Paste command."); return; }
+      this.setBusy(true); this.notice("Reading this device's clipboard…", "progress");
+      const result = await read;
+      if (lifetime !== this.lifetime || !this.element.open) return;
+      const images: Blob[] = [], texts: string[] = [];
+      if (typeof result === "string") { if (result) texts.push(result); }
+      else {
+        for (const item of result) {
+          const media = item.types.find((type) => CLIPBOARD_IMAGE_TYPES.some((allowed) => allowed === type));
+          if (media) images.push(await item.getType(media));
+          if (item.types.includes("text/plain")) { const value = await (await item.getType("text/plain")).text(); if (value) texts.push(value); }
+        }
+      }
+      if (lifetime !== this.lifetime || !this.element.open) return;
+      if (!images.length && !texts.length) { this.notice("No text or image found on this device's clipboard.", "info"); return; }
+      const currentReason = this.unavailable();
+      if (currentReason) { this.notice(currentReason); return; }
+      if (images.length && this.options.terminal.canAttach()) {
+        let acceptedResult: Delivery | undefined;
+        let lastFailure = "The composer cannot add this image. Remove an attachment and try again.";
+        for (let i = 0; i < images.length; i++) {
+          const delivery = this.options.terminal.attach(clipboardBlobToFile(images[i], i), event);
+          if (delivery.accepted) acceptedResult = delivery; else lastFailure = delivery.message;
+        }
+        if (acceptedResult) {
+          if (texts.length) this.options.terminal.draftText?.(textBody(texts.join("\n")), event);
+          // Share in the background after local delivery so store outages or
+          // size limits never block pasting into the terminal.
+          const canShareText = this.textSnapshot.status !== "unavailable";
+          const canShareImage = this.imageSnapshot.status !== "unavailable";
+          const sharedTexts = canShareText ? texts.map((value) => textBody(value)).filter((body) => isStorableSnippetBody(body) && !this.alreadyShared(body)) : [];
+          this.close();
+          acceptedResult.afterClose?.();
+          if (canShareImage) for (const image of images) void this.images.add(image).catch(() => undefined);
+          for (const body of sharedTexts) void this.options.text.createClip(body).catch(() => undefined);
+          return;
+        }
+        this.notice(lastFailure);
+        return;
+      }
+      if (texts.length) {
+        const body = textBody(texts.join("\n"));
+        const delivery = this.options.terminal.send(body, event);
+        if (delivery.accepted) {
+          const shouldShare = this.textSnapshot.status !== "unavailable" && isStorableSnippetBody(body) && !this.alreadyShared(body);
+          this.close();
+          delivery.afterClose?.();
+          if (shouldShare) void this.options.text.createClip(body).catch(() => undefined);
+        } else {
+          this.notice(delivery.message);
+        }
+        return;
+      }
+      this.notice("Image attachments are unavailable for this terminal.");
+    } catch {
+      if (lifetime !== this.lifetime) return;
+      this.notice("Nothing pasted. Clipboard access was cancelled or blocked. You can try again or use Add text.", "info");
+    } finally {
+      if (lifetime === this.lifetime) this.setBusy(false);
+    }
   }
   private async importClipboard(): Promise<void> {
     const lifetime = this.lifetime; let importing = false, added = 0;

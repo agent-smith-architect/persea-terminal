@@ -602,6 +602,13 @@ export class Composer {
     this.stageFile(file); this.showWithoutFocus(); return true;
   }
 
+  addClipboardRefusedImage(refused: File | undefined): boolean {
+    if (this.destroyed || !this.stageImage) return false;
+    this.addRefusedAttachment(refused);
+    this.showWithoutFocus();
+    return true;
+  }
+
   closeFromTrustedEvent(event: Event): boolean {
     if (!event.isTrusted || this.destroyed) return false;
     event.preventDefault();

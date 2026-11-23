@@ -45,13 +45,21 @@ must not make a freshly selected four-hour duration read as five hours.
 - A trusted browser Copy of selected text in Persea's terminal, frozen
   selection, composer, or Clipboard editor also shares that text. Ctrl+C
   without a selection retains its terminal interrupt behavior.
-- Copying outside Persea is imported with **Paste from device**. The app
-  does not monitor other applications or read the OS clipboard during polling.
-  Browser permissions and trusted gestures govern clipboard access. When an
-  API is unavailable, Add text accepts native paste and Add image opens the
-  device picker. Native image paste inside the dialog also adds an image.
-  An empty or refused read leaves the list open with a status message. Cancelling
-  the device file picker does not cancel its parent Clipboard dialog.
+- Copying outside Persea is pasted directly into a terminal with the central
+  **Paste from this device** action at the top of Clipboard (or saved to the
+  shared store without pasting via **Save from device**; on the Dashboard, the
+  central **Paste from device** action imports directly into the shared list).
+  The app does not monitor other applications or read the OS clipboard during
+  polling. Browser permissions and trusted gestures govern clipboard access.
+  Direct terminal paste checks terminal authority before and after reading the
+  device clipboard, delivers through the existing input/composer boundary, and
+  independently shares storable content in the background so store outages or
+  the 16 KB shared-text cap never block local pasting. When an API is
+  unavailable, Add text accepts native paste and Add image opens the device
+  picker. Native image paste directly in the terminal (`Cmd+V`/`Ctrl+V`) or
+  inside the dialog also stages/adds an image without intercepting plain-text
+  paste. An empty or refused read leaves the list open with a status message.
+  Cancelling the device file picker does not cancel its parent Clipboard dialog.
 - Copying an existing shared item does not create another copy or extend its
   deadline. Saving edited text updates its shared item, renews expiry, and
   merges an exact duplicate if one exists. Images can be copied when

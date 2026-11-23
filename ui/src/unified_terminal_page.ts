@@ -8,7 +8,7 @@ import type { FinalizeCause, PortSendResult } from "./attachment_port";
 import type { AttachmentTransportSink, ReconnectStatus } from "./websocket_attachment_transport";
 import { MAX_FIT_CELLS, MAX_FIT_ROWS, MAX_INPUT_BYTES, MIN_FIT_ROWS, validVerticalFit, validateServerFrame, type BrowserFrame, type Prepare, type ServerFrame, type StreamPosition } from "./attachment_protocol";
 import { Composer, normalizeComposedText, type ComposerAvailability, type ComposerInjectionResult, type ComposerTypographyState } from "./composer";
-import type { ComposerStagedImage } from "./composer_attachments";
+import { triageClipboardItems, type ComposerStagedImage } from "./composer_attachments";
 import { IOSBackspaceRouter, syntheticInsertTextEvent } from "./continuous_surface/ios_backspace_router";
 import type { LogicalKey } from "./continuous_surface/types";
 import { bindExplainedTapActivation, bindGenerationFencedClickActivation, bindTapActivation } from "./tap_activation";
@@ -116,9 +116,9 @@ const TOAST_MS = 3_000;
 // The space between the typing-paused notice and a passing notice below it.
 const PAUSED_NOTICE_GAP_PX = 6;
 const UNIFIED_EXPLAINERS: ReadonlyArray<Readonly<{ topic: UnifiedExplainerTopic; title: string; detail: string }>> = Object.freeze([
-  Object.freeze({ topic: "copy", title: "Copy", detail: "Copies the selection to this device and adds it to your shared Clipboard for 30 minutes. Copying selected Persea text with the device’s Copy command also shares it; copies made in other apps need Import from this device." }),
+  Object.freeze({ topic: "copy", title: "Copy", detail: "Copies the selection to this device and adds it to your shared Clipboard. Copying selected Persea text with the device’s Copy command also shares it; copies made in other apps can be pasted or saved from Clipboard." }),
   Object.freeze({ topic: "select", title: "Select", detail: "Freezes a selectable copy of the terminal so you can select text with your finger (a long press on the terminal does the same). Tap blank terminal space to return to typing, or tap Select again or press Escape to leave without copying." }),
-  Object.freeze({ topic: "paste", title: "Paste / Copy", detail: "Opens your shared Clipboard. Choose text, review or edit its preview, then send it to the terminal. Cancel sends nothing. Persea does not append Enter, but the terminal app decides how pasted text is handled; undo after sending is not universal. Images go into the composer as attachments. While text is selected, this control becomes Copy." }),
+  Object.freeze({ topic: "paste", title: "Paste / Copy", detail: "Opens Clipboard with Paste from this device at the top and your shared items below. Pasting text never appends Enter (unsafe multiline text and images open in the composer for review); Save from device stores an item without pasting. While text is selected, this control becomes Copy." }),
   Object.freeze({ topic: "fit", title: "Fit rows / Fit width", detail: "Fit rows changes terminal rows to fit the visible height. Fit width rebuilds this session at the column count that fits the visible width. Both run only when you tap them. Both fix the tmux window at the new size, so other terminals attached to this session no longer resize it. To give sizing back to those terminals, run tmux set-option -wu window-size in that window." }),
   Object.freeze({ topic: "view", title: "View and size", detail: "Opens text zoom and explicit terminal-size controls." }),
   Object.freeze({ topic: "size", title: "Terminal size", detail: "Type columns and rows, then Apply. A row-only change resizes in place; a column change rebuilds this session at that width, carrying the rows you typed. Like Fit, Apply fixes the tmux window at that size for every terminal attached to this session." }),
@@ -1358,6 +1358,29 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     const onRouterBlur = (event: Event) => this.iosBackspace.onBlur(event as FocusEvent);
     const onRouterSelectionChange = () => this.iosBackspace.onSelectionChange();
     const onRouterPolicyChange = () => this.iosBackspace.onPolicyChange();
+    // Intercept trusted image pastes directly in the terminal (e.g. Cmd+V /
+    // Ctrl+V with a screenshot) and stage them into the composer for review.
+    // Plain-text pastes are never intercepted here and flow straight to xterm.
+    const onTerminalImagePaste = (event: Event): void => {
+      const pasteEvent = event as ClipboardEvent;
+      if (!pasteEvent.isTrusted || this.closed || !this.composer?.canAttachImages) return;
+      const data = pasteEvent.clipboardData;
+      if (!data) return;
+      const triage = triageClipboardItems(Array.from(data.items));
+      if (!triage.captured) return;
+      pasteEvent.preventDefault();
+      pasteEvent.stopImmediatePropagation();
+      const text = data.getData("text/plain");
+      if (text) this.handOffToComposer(text, pasteEvent);
+      let accepted = 0;
+      for (const file of triage.allowed) {
+        if (this.composer.addClipboardImage(file)) accepted++;
+      }
+      for (const refused of triage.refused) {
+        this.composer.addClipboardRefusedImage(refused);
+      }
+      if (accepted > 0) this.showToast(accepted === 1 ? "Image added to the composer for review" : `${accepted} images added to the composer for review`);
+    };
     // xterm's paste handler clears textarea.value synchronously; reconcile
     // after it has run (same-phase listener registered after xterm's own).
     const onRouterPaste = () => this.iosBackspace.onXtermOperationComplete();
@@ -1371,6 +1394,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     document.addEventListener("selectionchange", onRouterSelectionChange);
     this.anyCoarsePointerQuery?.addEventListener("change", onRouterPolicyChange);
     const routerPasteTarget = this.terminal.textarea;
+    routerPasteTarget?.addEventListener("paste", onTerminalImagePaste, true);
     routerPasteTarget?.addEventListener("paste", onRouterPaste);
     this.cleanupListeners.push(
       () => host.removeEventListener("beforeinput", onRouterBeforeInput, true),
@@ -1382,6 +1406,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       () => host.removeEventListener("blur", onRouterBlur, true),
       () => document.removeEventListener("selectionchange", onRouterSelectionChange),
       () => this.anyCoarsePointerQuery?.removeEventListener("change", onRouterPolicyChange),
+      () => routerPasteTarget?.removeEventListener("paste", onTerminalImagePaste, true),
       () => routerPasteTarget?.removeEventListener("paste", onRouterPaste),
     );
     // Enter and Ctrl+C clear xterm's textarea synchronously; reseed after.
@@ -1638,6 +1663,10 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
             ? () => { if (!this.closed) this.focusTerminalPreservingKeyboard(); }
             : undefined;
           return { accepted, message, afterClose };
+        },
+        draftText: (text, event) => {
+          const normalized = normalizeComposedText(text);
+          if (normalized !== "") this.handOffToComposer(normalized, event);
         },
         canAttach: () => this.composer?.canAttachImages ?? false,
         attach: (file) => {

@@ -1496,7 +1496,7 @@ async function main() {
       const before=await wire(),focusBefore=(await tabA.state()).focusCalls;
       await tabA.activate(await tabA.state(),await tabA.pointFor(`document.querySelector('.persea-unified-toolbar-paste')`));
       const readsBeforeImport=await tabA.evaluate('window.__clipboardDevice.reads');if(readsBeforeImport!==0)fail('clipboard-explicit-import','Paste read the device clipboard before explicit Import',readsBeforeImport);
-      await clipboardAction('Paste from device');await waitClipboard(value=>value.draft===null&&value.rows.some(row=>row.label==='device text'));await noWireChange(before,'device import');
+      await clipboardAction('Save from device');await waitClipboard(value=>value.draft===null&&value.rows.some(row=>row.label==='device text'));await noWireChange(before,'device import');
       await preview('device text');await noWireChange(before,'explicit imported text editor');
       await clipboardAction('Cancel');await noWireChange(before,'import Cancel');
       if((await tabA.state()).focusCalls!==focusBefore)fail('clipboard-explicit-import','Clipboard transaction focused xterm implicitly',{keyboardOpen});
@@ -1504,7 +1504,7 @@ async function main() {
       if(sendAfter.inputs.slice(sendBefore.inputs.length).join('')!=='device text'||sendAfter.resizes!==sendBefore.resizes)fail('clipboard-explicit-import','explicit imported text Send changed bytes or geometry',{keyboardOpen});
       clipboard.r7[keyboardOpen?'open':'closed']={reads:await tabA.evaluate('window.__clipboardDevice.reads'),sent:sendAfter.inputs.slice(sendBefore.inputs.length).join('')};
     }
-    await freshClipboardPage();await installClipboardStub();await tabA.evaluate('window.__clipboardDevice.readFail=true');await openList();const denialWire=await wire();await clipboardAction('Paste from device');
+    await freshClipboardPage();await installClipboardStub();await tabA.evaluate('window.__clipboardDevice.readFail=true');await openList();const denialWire=await wire();await clipboardAction('Paste from this device');
     const denial=await waitClipboard(value=>/cancelled or blocked/.test(value.status));if(denial.draft!==null||!/Add text/.test(denial.status)||!denial.actions.some(action=>action.label==='Add image'))fail('clipboard-explicit-import','permission refusal omitted the local manual route',denial);
     await noWireChange(denialWire,'device clipboard permission refusal');clipboard.r7.denial=denial.status;
     await clipboardAction('Add text');await waitClipboard(value=>value.draft==='');await clipboardAction('Cancel');await noWireChange(denialWire,'explicit manual fallback Cancel');

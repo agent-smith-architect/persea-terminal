@@ -222,7 +222,7 @@ async function main() {
         const beforeDeniedImport = (await snapshot()).attachments.at(-1).inputs.length;
         await pasteAction().click();
         const clipboard = page.locator(".persea-clipboard");
-        await clipboard.getByRole("button", { name: "Paste from device", exact: true }).click();
+        await clipboard.getByRole("button", { name: "Paste from this device", exact: true }).click();
         const denied = clipboard.locator(".persea-clipboard__status");
         await denied.waitFor({ state: "visible" });
         await clipboard.getByRole("button", { name: "Add text", exact: true }).waitFor();
@@ -285,7 +285,7 @@ async function main() {
         const beforePaste = await snapshot();
         await pasteAction().click();
         const clipboard = page.locator(".persea-clipboard");
-        await clipboard.getByRole("button", { name: "Paste from device", exact: true }).click();
+        await clipboard.getByRole("button", { name: "Save from device", exact: true }).click();
         await page.waitForFunction(() => document.querySelector(".persea-clipboard")?.getAttribute("aria-busy") === "false");
         const importedText = await page.evaluate(() => window.__terminal_interactionClipboard.writes.at(-1).replace(/\r\n?/g, "\n"));
         const importedRow = clipboard.locator("[data-clipboard-item]").filter({ has: page.locator(".persea-clipboard__preview", { hasText: importedText }) }).first();
