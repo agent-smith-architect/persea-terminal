@@ -4,21 +4,28 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+## 0.1.23 — 2026-11-24
+
 ### Changed
 
-- **Faster, central device pasting:** **Paste from this device** is now the primary action at the top of Clipboard rather than a small footer button. In a terminal, clicking it reads this device’s clipboard and delivers text directly to the terminal (respecting the multiline safety guard and never appending Enter) or stages images directly into the composer, while sharing storable items in the background so shared-store outages or the 16 KB limit never block local pasting. **Save from device** remains in the footer when you want to import without pasting. Shared clipboard rows now show a labeled **Paste** / **Insert** button with a distinct icon, and the terminal image preview includes a direct **Insert image** button.
-- **Direct image paste in the terminal:** pasting an image (`Cmd+V` / `Ctrl+V`) while focused on the terminal now stages it directly into the composer for review without intercepting plain-text paste.
-- **Dashboard ergonomics:** enlarged session output previews now include a direct **Open** button in the dialog footer, `/` focuses the session filter, `Escape` clears the filter or closes the New session panel, and the header Clipboard button shows the clipboard icon.
-- **Dependencies:** updated Playwright to 1.65.1 and CI GitHub Actions (`actions/setup-go` and `actions/setup-node` to v7.1.0).
+- **Faster, central device pasting:** **Paste from this device** is now the primary action at the top of Clipboard rather than a small footer button. In a terminal, clicking it reads this device’s clipboard and delivers text directly to the terminal (respecting the multiline safety guard and never appending Enter) or stages images directly into the composer, while sharing storable items in the background so shared-store outages or the 16 KB limit never block local pasting. **Save from device** remains in the footer when you want to import without pasting.
+- **Clearer Clipboard actions and handoff visibility:** Shared clipboard rows now show a labeled **Paste** / **Insert** button with a distinct icon, the terminal **Edit text** view and **Image** preview expose explicit **Paste** / **Insert image** actions (while **Save** and **Cancel** continue to send zero input), and the toolbar Clipboard button displays a subtle indicator dot when an OSC 52 terminal copy awaits local delivery without adding background polling.
+- **Direct image paste and drag-and-drop in the terminal:** Pasting an image (`Cmd+V` / `Ctrl+V`) or dragging and dropping image files onto the terminal viewport now stages them directly into the composer for review without intercepting plain-text paste.
+- **Dashboard ergonomics:** Enlarged session output previews include a direct **Open** button in the dialog footer; creating a session offers a direct **Open** action right in the confirmation; `/` focuses the session filter, `Enter` opens the sole matching session when filtered down to one, `Escape` clears the filter or closes the New session panel; and the header Clipboard button shows the clipboard icon.
+- **Dependencies and CI:** Updated Playwright to 1.65.1, pinned `actions/setup-go` and `actions/setup-node` to v7.1.0, and scoped `push` CI runs to `main` so pull requests run once per update.
 
 ### Fixed
 
 - **Saved cursor across scroll-up regions (`@xterm/xterm` patch):** `DECSC`/`DECRC` and `SCOSC`/`SCORC` now stay anchored to the same screen row when `CSI S` archives lines into scrollback on the normal buffer, matching tmux.
-- **Remaining layout-shift tap drops:** `Select`, `Clipboard`, and generation-fenced click controls (`Attach image`, `Show keyboard`, `Hide keyboard`) no longer drop a still press when a layout shift emits `pointerleave`.
-- **Freshness receipt ordering:** the broker now records an attachment frame’s delivered sequence before the bytes hit the socket, eliminating a race where an immediate consumption receipt plus input could be falsely paused.
-- **Sidecar boot ordering:** ordered `persea-terminal-tailscaled.service` after `tailscaled.service` so `/run/tailscale` exists before the sidecar namespace masks it.
-- **tmux 3.6+ guarded resize compatibility:** omitted the unused `run-shell` fallback on control-connection guarded resizes (`guardedResizeControlArgs`), preventing tmux 3.6+ from emitting an asynchronous failure line outside `%begin`/`%end` when a stale resize guard evaluates false.
-- **Test portability on Ubuntu 26.04 / newer tmux:** fixed setgid fixture setup in the hermetic deploy suite, accepted tmux 3.5+ literal tabs in session previews, stabilized multi-delivery control-mode batching and zero-progress finalization tests, deferred listener close on observer exit, and normalized test fixture umask in release-retention tests.
+- **tmux 3.6+ guarded resize compatibility:** Omitted the unused `run-shell` fallback on control-connection guarded resizes, preventing tmux 3.6+ from emitting an asynchronous failure line outside `%begin`/`%end` when a stale resize guard evaluates false.
+- **Remaining layout-shift tap drops:** `Select`, `Clipboard`, generation-fenced click controls (`Attach image`, `Show keyboard`, `Hide keyboard`, alias `Save`), and held/tapped repeat keys no longer drop a still press when a layout shift moves the control.
+- **Freshness receipt ordering:** The broker now records an attachment frame’s delivered sequence before bytes hit the socket, eliminating a race where an immediate consumption receipt plus input could be falsely paused.
+- **Sidecar boot ordering:** Ordered `persea-terminal-tailscaled.service` after `tailscaled.service` so `/run/tailscale` exists before the sidecar namespace masks it.
+- **Ubuntu 26.04 and tmux 3.5+ test portability:** Fixed setgid fixture setup in the hermetic deploy suite, accepted tmux 3.5+ literal tabs in session previews, stabilized multi-delivery control-mode batching and zero-progress finalization tests, deferred listener close on observer exit, and normalized test fixture umask in release-retention tests.
+
+### Testing notes
+
+- Verified locally and in CI on Ubuntu 26.04 (Go 1.27.4, tmux 3.6a, Playwright 1.65.1): `go vet`, `go build`, `CGO_ENABLED=1 go test -race ./...`, `host-config-test.py`, `hermetic-deploy-test.sh` (121/121), UI contracts/unit/scrollback/key-input suites, and Chromium + WebKit browser suites covering Clipboard (direct paste, offline paste, image paste, editor Paste, Save from device, OSC 52 handoff indicator, expiry), tap and repeat-key layout shift, native click activation, alias activation fence, terminal controls, terminal interaction, unified ergonomics, workspace runtime, and dashboard navigation/redesign/cohesion/scrollback. Each new regression test was observed failing before its fix. Not tested on a real iPhone.
 
 ## 0.1.22 — 2026-10-08
 
