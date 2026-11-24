@@ -144,6 +144,18 @@ async function main() {
       assert(await page.locator('#dashboard-create').isVisible(), 'New session panel did not open');
       await page.keyboard.press('Escape');
       assert(await page.locator('#dashboard-create').isHidden(), 'Escape did not close the New session panel');
+      // Enter in Filter sessions opens the sole visible matching open session.
+      const enterCtx = await browser.newContext({ viewport: { width: 1280, height: 900 }, ignoreHTTPSErrors: true });
+      const enterPage = await enterCtx.newPage(); capture(enterPage);
+      try {
+        await enterPage.route('**/terminal**', route => route.fulfill({ status: 200, contentType: 'text/html', body: '<!doctype html><title>Terminal</title>' }));
+        await enterPage.goto(fixture.origin); await ready(enterPage);
+        await enterPage.locator('.dashboard-search-input').fill('qt10');
+        await Promise.all([
+          enterPage.waitForURL(url => url.pathname === '/terminal' && url.hash.includes('name=qt10')),
+          enterPage.locator('.dashboard-search-input').press('Enter'),
+        ]);
+      } finally { await enterCtx.close(); }
     });
 
     await check('scrollback choice is preserved in launch links while shared history keeps its full import', async () => {
@@ -256,6 +268,7 @@ async function main() {
       assert(await form.locator('input[name="name"]').inputValue() === 'cohesion_created' && await form.locator('select').inputValue() === JSON.stringify(['smith', 'default']), 'Refresh lost the creation draft');
       await form.getByRole('button', { name: 'Create session', exact: true }).click();
       await page.waitForFunction(() => document.querySelector('.session-create-status').textContent.includes('as Research notes'));
+      assert(await form.locator('.session-create-open .session-open-action').isVisible(), 'New session confirmation did not offer a direct Open action');
       assert(count('/api/sessions') === creates + 1, 'Creation was duplicated');
       const request = fixture.state.requests.filter(request => request.path === '/api/sessions').at(-1);
       assert(JSON.stringify(request.body) === JSON.stringify({ realm: 'smith', server: 'default', name: 'cohesion_created' }), 'Creation did not use the selected user or sent extra execution fields');

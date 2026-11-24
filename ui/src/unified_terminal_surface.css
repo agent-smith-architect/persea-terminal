@@ -190,3 +190,5 @@
 .persea-unified-notice__take-control[hidden],
 .persea-unified-notice__reconnect[hidden] { display: none; }
 .persea-unified-notice__dashboard { color: #9fd1ff; }
+
+.persea-unified-terminal[data-image-drop="active"] .persea-unified-scroll { outline: 2px dashed var(--persea-accent, #8fc7ff); outline-offset: -4px; }

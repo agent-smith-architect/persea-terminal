@@ -1470,6 +1470,7 @@ async function main() {
     await tabA.evaluate('window.__clipboardDevice.fail=true');
     await control({writeLive:'\x1b]52;c;'+Buffer.from('automatic B').toString('base64')+'\x07'});await delay(1200);
     await waitClipboard(value=>value.handoff&&value.rows.some(row=>row.label==='automatic B'));
+    if(await tabA.evaluate(`document.querySelector(".persea-unified-toolbar-paste")?.dataset.clipboardHandoff`)!=="true")fail("clipboard-device-handoff","toolbar clipboard button omitted handoff indicator dot",{});
     await control({snippetWrite:[{kind:'clip',body:'unrelated manual copy'}]});
     await exactRow('unrelated manual copy');await tabA.evaluate('window.__clipboardDevice.fail=false');await rowAction('unrelated manual copy','Copy to device');
     const unrelated=await waitClipboard(value=>/Copied/.test(value.status));
@@ -1486,7 +1487,9 @@ async function main() {
     if(clipboard.r6.writes.at(-1)!=='automatic C')fail('clipboard-device-handoff','matching handoff copied a stale value',clipboard.r6.writes);
     if(afterAcknowledge.mutations!==beforeAcknowledge.mutations)fail('clipboard-device-handoff','acknowledging a shared handoff renewed or recreated its item',{before:beforeAcknowledge.mutations,after:afterAcknowledge.mutations});
     await noWireChange(oscWire,'value-bound handoff acknowledgement');
-    await closeClipboard();await openList();if((await clipboardState()).handoff)fail('clipboard-device-handoff','acknowledged handoff reappeared after reopening',{});
+    await closeClipboard();
+    if(await tabA.evaluate(`document.querySelector(".persea-unified-toolbar-paste")?.dataset.clipboardHandoff`)==="true")fail("clipboard-device-handoff","acknowledged handoff left indicator dot on toolbar",{});
+    await openList();if((await clipboardState()).handoff)fail('clipboard-device-handoff','acknowledged handoff reappeared after reopening',{});
 
     // Device import stays in the list. Explicit edits and Cancel never
     // imply terminal Paste or resize; permission denial opens no editor.

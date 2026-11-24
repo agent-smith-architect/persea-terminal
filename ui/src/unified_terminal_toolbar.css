@@ -261,9 +261,21 @@ button[data-copy-state="failed"] {
 /* the Paste slot carries the copy outcome. Its box is fixed like the
    Select box, so Paste → Copy → Copied ✓ → Paste never moves a neighbour. */
 .persea-unified-toolbar button.persea-unified-toolbar-paste {
+  position: relative;
   inline-size: 4.75rem;
   min-width: 4.75rem;
   font: 600 0.75rem/1 ui-monospace, monospace;
+}
+.persea-unified-toolbar button.persea-unified-toolbar-paste[data-paste-state="paste"][data-clipboard-handoff="true"]::after {
+  content: "";
+  position: absolute;
+  top: 5px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--persea-accent, #8fc7ff);
+  pointer-events: none;
 }
 .persea-unified-toolbar button.persea-unified-toolbar-paste[data-paste-state="copy"] {
   border-color: var(--persea-chrome-fg, #e6edf3);

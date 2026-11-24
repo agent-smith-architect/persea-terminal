@@ -73,7 +73,8 @@ body.dashboard-mode:has(.dashboard) #app { width: min(1180px, 100%); margin-inli
 .dashboard .session-create-help { grid-column: 1 / -1; color: var(--dashboard-muted); font-size: .8125rem; }
 .session-create > button { grid-column: 1; justify-self: start; }
 .session-create-status { grid-column: 2 / -1; align-self: center; min-width: 0; font-size: .8125rem; color: var(--dashboard-muted); overflow-wrap: anywhere; }
-.session-create-status:empty { display: none; }
+.session-create-status:empty, .session-create-open:empty { display: none; }
+.session-create-open { grid-column: 1 / -1; display: flex; align-items: center; gap: .5rem; }
 
 /* Recent and default entries are the same keyed rows as the main inventory. */
 .dashboard-landing { display: grid; gap: 1rem; margin: 0 0 1rem; }

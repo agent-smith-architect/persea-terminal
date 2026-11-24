@@ -179,6 +179,31 @@ async function runEngine(engine, source) {
       await page.mouse.up();
       assert((await snapshot()).actions.length === 0, "generation-fenced click activated after dragging off");
     }, "click");
+    await check("repeat-key-stationary-press-survives-layout-shift", async () => {
+      const before = await box();
+      const press = { x: before.x + before.width / 2, y: before.y + 10 };
+      await page.mouse.move(press.x, press.y);
+      await page.mouse.down();
+      await showStatus();
+      const after = await box();
+      assert(press.y < after.y, "the status line did not move the repeat control");
+      await page.mouse.up();
+      const result = await snapshot();
+      assert(result.actions.length === 1 && result.actions[0].trusted, "repeat key tap was lost when layout shifted under a still press");
+    }, "repeat");
+    await check("repeat-key-hold-survives-layout-shift", async () => {
+      const before = await box();
+      const press = { x: before.x + before.width / 2, y: before.y + 10 };
+      await page.mouse.move(press.x, press.y);
+      await page.mouse.down();
+      await showStatus();
+      const after = await box();
+      assert(press.y < after.y, "the status line did not move the held repeat control");
+      await page.waitForTimeout(560);
+      await page.mouse.up();
+      const result = await snapshot();
+      assert(result.actions.length >= 2, `held repeat key stopped repeating across a layout shift: ${JSON.stringify(result)}`);
+    }, "repeat");
     assert(diagnostics.length === 0, `browser diagnostics: ${diagnostics.join("; ")}`);
     return { engine, checks, unsupported, diagnostics, pass: checks.every((check) => check.pass) };
   } finally { await browser.close(); }

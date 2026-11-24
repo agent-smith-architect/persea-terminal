@@ -1677,6 +1677,17 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       },
     }) : undefined;
     this.installNativeCopySharing();
+    this.installImageDrop();
+    if (options.snippets) {
+      const syncHandoff = (pending: boolean): void => {
+        if (this.closed) return;
+        if (pending) this.pasteSlotButton.dataset.clipboardHandoff = "true";
+        else delete this.pasteSlotButton.dataset.clipboardHandoff;
+      };
+      syncHandoff(options.snippets.snapshot().clipboardHandoff !== undefined);
+      const sub = options.snippets.subscribe((snapshot) => syncHandoff(snapshot.clipboardHandoff !== undefined));
+      this.cleanupListeners.push(() => sub.dispose());
+    }
     this.preferenceSubscription = options.preferences?.subscribe((snapshot) => this.applyPreferences(snapshot));
     this.evaluateKeyboardState();
     this.scheduleReconcile();
@@ -2291,6 +2302,53 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.setSheet(false); this.keysPanel.setOpen(false);
     if (!this.clipboardPanel) { this.showToast("Shared clipboard unavailable"); return; }
     this.clipboardPanel.open(this.pasteSlotButton);
+  }
+
+  private installImageDrop(): void {
+    let dragDepth = 0;
+    const hasFiles = (event: DragEvent): boolean =>
+      Boolean(this.composer?.canAttachImages && event.dataTransfer && Array.from(event.dataTransfer.types).includes("Files"));
+    const clearDrop = (): void => { dragDepth = 0; delete this.shell.dataset.imageDrop; };
+    const onDragEnter = (event: DragEvent): void => {
+      if (this.closed || !hasFiles(event)) return;
+      event.preventDefault();
+      dragDepth += 1;
+      this.shell.dataset.imageDrop = "active";
+    };
+    const onDragOver = (event: DragEvent): void => {
+      if (this.closed || !hasFiles(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+      this.shell.dataset.imageDrop = "active";
+    };
+    const onDragLeave = (event: DragEvent): void => {
+      if (!this.shell.dataset.imageDrop) return;
+      void event;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) delete this.shell.dataset.imageDrop;
+    };
+    const onDrop = (event: DragEvent): void => {
+      clearDrop();
+      if (!event.isTrusted || this.closed || !this.composer?.canAttachImages) return;
+      const files = Array.from(event.dataTransfer?.files ?? []).filter((file) => file.type.startsWith("image/"));
+      if (!files.length) return;
+      event.preventDefault();
+      let accepted = 0;
+      for (const file of files) {
+        if (this.composer.addClipboardImage(file)) accepted++;
+      }
+      if (accepted > 0) this.showToast(accepted === 1 ? "Image added to the composer for review" : `${accepted} images added to the composer for review`);
+    };
+    this.shell.addEventListener("dragenter", onDragEnter);
+    this.shell.addEventListener("dragover", onDragOver);
+    this.shell.addEventListener("dragleave", onDragLeave);
+    this.shell.addEventListener("drop", onDrop);
+    this.cleanupListeners.push(
+      () => this.shell.removeEventListener("dragenter", onDragEnter),
+      () => this.shell.removeEventListener("dragover", onDragOver),
+      () => this.shell.removeEventListener("dragleave", onDragLeave),
+      () => this.shell.removeEventListener("drop", onDrop),
+    );
   }
 
   private installNativeCopySharing(): void {

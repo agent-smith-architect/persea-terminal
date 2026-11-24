@@ -1,6 +1,6 @@
 import { bindExplainedTapActivation, bindGenerationFencedClickActivation, bindTapActivation } from "../src/tap_activation";
 
-type Mode = "tap" | "explained" | "click";
+type Mode = "tap" | "explained" | "click" | "repeat";
 
 type Receipt = Readonly<{
   type: string;
@@ -57,6 +57,14 @@ export function mount(mode: Mode = "tap"): void {
     dispose = bindExplainedTapActivation(button, (event) => { actions.push(receipt(event)); }, () => {}, () => {}, () => true, () => generation);
   } else if (mode === "click") {
     dispose = bindGenerationFencedClickActivation(button, (event) => { actions.push(receipt(event)); }, () => true, () => generation);
+  } else if (mode === "repeat") {
+    dispose = bindTapActivation(button, (event) => { actions.push(receipt(event)); }, () => {}, () => true, () => generation, {
+      begin: (event) => {
+        actions.push(receipt(event));
+        return () => actions.push({ type: "repeat", trusted: true, generation });
+      },
+      isLive: () => true,
+    });
   } else {
     dispose = bindTapActivation(button, (event) => { actions.push(receipt(event)); }, () => {}, () => true, () => generation);
   }
