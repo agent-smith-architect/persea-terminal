@@ -411,7 +411,19 @@ export class ClipboardPanel {
     const input = el("textarea", "persea-clipboard__text"); input.value = record.body; input.spellcheck = false; input.setAttribute("aria-label", "Clipboard text");
     this.content.replaceChildren(input, el("p", "persea-clipboard__note", "Save updates this shared item and renews its expiry. It does not paste into the terminal."));
     const cancel = this.button("Cancel", () => this.showList("text:" + record.id)); cancel.dataset.clipboardDismiss = "true";
-    this.footer.append(cancel, this.destinationButton("Save", () => { void this.saveText(record, input.value); }, ""));
+    if (this.options.terminal) {
+      const save = this.button("Save", () => { void this.saveText(record, input.value); });
+      const paste = this.destinationButton("Paste", (event) => {
+        const reason = this.unavailable(); if (reason) { this.notice(reason); return; }
+        const body = textBody(input.value);
+        const result = this.options.terminal!.send(body, event);
+        if (result.accepted) { this.close(); result.afterClose?.(); } else this.notice(result.message);
+      });
+      paste.setAttribute("aria-label", "Paste text to terminal");
+      this.footer.append(cancel, save, paste);
+    } else {
+      this.footer.append(cancel, this.destinationButton("Save", () => { void this.saveText(record, input.value); }, ""));
+    }
   }
   private showImage(record: ClipboardImage): void {
     this.editorItem = "image:" + record.id; this.previewHeader("image", "Image");

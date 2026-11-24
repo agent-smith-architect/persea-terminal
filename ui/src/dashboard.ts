@@ -512,8 +512,25 @@ export class Dashboard {
     const clear = element("button", "dashboard-search-clear", "×"); clear.type = "button"; clear.setAttribute("aria-label", "Clear session filter");
     clear.addEventListener("click", () => { this.searchInput.value = ""; this.filterQuery = ""; this.applyPresentation(); this.searchInput.focus(); });
     this.searchInput.addEventListener("keydown", (event) => {
-      if (event.isTrusted && event.key === "Escape" && this.searchInput.value !== "") {
-        event.preventDefault(); event.stopPropagation(); clear.click();
+      if (!event.isTrusted) return;
+      if (event.key === "Escape" && this.searchInput.value !== "") {
+        event.preventDefault(); event.stopPropagation(); clear.click(); return;
+      }
+      if (event.key === "Enter" && normalizeSessionFilter(this.filterQuery) !== "") {
+        const visible = Array.from(this.content.querySelectorAll<HTMLElement>(".session-card")).filter((card) => !card.hidden && !card.closest("[hidden]"));
+        if (visible.length !== 1) return;
+        const action = visible[0].querySelector<HTMLAnchorElement | HTMLButtonElement>(".session-open-action");
+        if (!action || (action instanceof HTMLButtonElement && action.disabled)) return;
+        event.preventDefault();
+        const scope = visible[0].dataset.sessionScope ?? "";
+        const match = this.sessionNodes.get(scope)?.current();
+        if (!match || !match.unified) return;
+        if (match.unified.state === "open") {
+          window.location.assign(unifiedTerminalURL(window.location.href, match.handles.control, match, this.stageSessionIdentity(match), this.scrollbackRows));
+        } else if (match.unified.state === "adoptable" && action instanceof HTMLButtonElement) {
+          const rowStatus = visible[0].querySelector<HTMLElement>(".session-unified-status") ?? this.status;
+          void this.adoptAndAssign(match, action, rowStatus);
+        }
       }
     });
     search.append(this.searchInput, clear, this.refreshButton);
@@ -542,7 +559,7 @@ export class Dashboard {
     this.newSession.setAttribute("aria-controls", this.creationPanel.id); this.newSession.setAttribute("aria-expanded", "false");
     const createHeading = element("div", "dashboard-panel-heading");
     const closeCreate = element("button", "dashboard-icon-button", "×"); closeCreate.type = "button"; closeCreate.setAttribute("aria-label", "Close new session form");
-    closeCreate.addEventListener("click", () => { this.creationPanel.hidden = true; this.newSession.setAttribute("aria-expanded", "false"); this.newSession.focus(); });
+    closeCreate.addEventListener("click", () => { this.creationPanel.hidden = true; this.newSession.setAttribute("aria-expanded", "false"); this.creationPanel.querySelector(".session-create-open")?.replaceChildren(); this.newSession.focus(); });
     createHeading.append(element("h2", undefined, "New session"), closeCreate);
     this.creationPanel.append(createHeading, this.renderCreate());
     this.newSession.addEventListener("click", () => {
@@ -1292,8 +1309,9 @@ export class Dashboard {
     const status = element("output", "session-create-status");
     status.setAttribute("role", "status");
     status.setAttribute("aria-live", "polite");
+    const createdAction = element("div", "session-create-open");
     label.append(input);
-    form.append(targetLabel, label, aliasLabel, element("p", "session-create-help", "The session name is used in tmux. The alias is its display name on the dashboard."), submit, status);
+    form.append(targetLabel, label, aliasLabel, element("p", "session-create-help", "The session name is used in tmux. The alias is its display name on the dashboard."), submit, status, createdAction);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       const server = this.createTargets.get(this.createTarget.value);
@@ -1311,6 +1329,7 @@ export class Dashboard {
     this.creationBusy = true;
     submit.disabled = input.disabled = alias.disabled = this.createTarget.disabled = true;
     this.gate.setMutating(true);
+    this.creationPanel.querySelector(".session-create-open")?.replaceChildren();
     assignText(status, "Creating…");
     try {
       const response = await this.fetcher("/api/sessions", {
@@ -1339,6 +1358,12 @@ export class Dashboard {
         this.listMode = "all"; this.searchInput.value = this.filterQuery = "";
         this.collapsedGroups.delete(collapseGroupKey(server.realm, server.label)); this.applyPresentation();
         assignText(status, displayAlias ? `Created ${name} as ${displayAlias}.` : `Created ${name}.`);
+        const latestSessions = this.inventory?.realms.find(realm => realm.name === server.realm)?.servers.find(item => item.label === server.label)?.sessions ?? [];
+        const latestTarget = latestSessions.find(session => session.sessionId === createdID && session.name === name) ?? target;
+        const createdSlot = this.creationPanel.querySelector<HTMLElement>(".session-create-open");
+        if (createdSlot && latestTarget && (latestTarget.unified?.state === "open" || latestTarget.unified?.state === "adoptable")) {
+          createdSlot.replaceChildren(this.createOpenAction(latestTarget, latestTarget.unified.state, status, () => latestTarget));
+        }
         return;
       }
       // The response body carries a closed-set code, never broker text, so the

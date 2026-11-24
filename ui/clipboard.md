@@ -72,11 +72,16 @@ must not make a freshly selected four-hour duration read as five hours.
 
 ## Terminal authority and cancellation
 
-Opening text enters an editor with Save and Cancel. Save updates shared storage;
-Cancel returns to the list. Neither sends terminal input. Rows expose separate
-copy, paste, and delete actions; Delete is visually distinct. Text Paste uses
-the existing input boundary and adds no Enter. The existing unsafe multiline
-policy can route text to the composer for further review.
+Opening text enters an editor with Save and Cancel (plus an explicit Paste
+action in terminal mode). Save updates shared storage; Cancel returns to the
+list. Neither sends terminal input; only the explicit Paste action sends text.
+Rows expose separate copy, paste, and delete actions; Delete is visually
+distinct. Text Paste uses the existing input boundary and adds no Enter. The
+existing unsafe multiline policy can route text to the composer for further
+review. Dragging and dropping image files onto the terminal viewport stages
+them into the composer for review without sending terminal bytes. When an
+unacknowledged OSC 52 terminal copy awaits local delivery, the toolbar
+clipboard button shows a subtle indicator dot without eager background polling.
 
 To attach an image, the client fetches its original bytes after the operator
 asks to add it to the composer.

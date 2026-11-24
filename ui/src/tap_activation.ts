@@ -246,10 +246,8 @@ export function bindTapActivation(
   };
   const cancelAll = (): void => { for (const id of armedPointers.keys()) retirePointer(id); };
   const repeatLive = (capture: Capture): boolean => {
-    const rect = button.getBoundingClientRect();
-    return !!repeat && isLive() && repeat.isLive() && !document.hidden && button.isConnected && !button.disabled
-      && capture.generation === interactionGeneration() && document.activeElement === capture.focus
-      && rect.width > 0 && rect.height > 0 && capture.x >= rect.left && capture.x <= rect.right && capture.y >= rect.top && capture.y <= rect.bottom;
+    return !!repeat && isLive() && repeat.isLive() && !document.hidden && button.isConnected && !button.disabled && shown(button)
+      && capture.generation === interactionGeneration() && document.activeElement === capture.focus;
   };
   const scheduleRepeat = (pointerId: number, capture: Capture, event: PointerEvent, delay: number): void => {
     capture.timer = window.setTimeout(() => {
