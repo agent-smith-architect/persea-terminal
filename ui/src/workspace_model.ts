@@ -275,6 +275,117 @@ export function setWeights(root: WorkspaceNode, path: NodePath, weights: readonl
   return validated(replaceAt(root, path, split(target.direction, target.children, weights)));
 }
 
+// Canonical signature of a subtree's ordered leaf identities. Used to verify
+// that a live split divider still names the exact same split in an edited draft
+// before transferring divider weights into the draft.
+export function subtreeSignature(node: WorkspaceNode): string {
+  return JSON.stringify(leafEntries(node).map((entry) => entry.key));
+}
+
+export function splitChildSignatures(node: WorkspaceSplit): readonly string[] {
+  return Object.freeze(node.children.map(subtreeSignature));
+}
+
+// Transfers weights from a live divider adjustment into `draft` only when the
+// split at `path` still has the exact same direction and ordered child
+// identities. Never overwrites staged aliases, additions, removals, or presets.
+export function applySplitWeightsByMatch(
+  draft: WorkspaceNode,
+  path: NodePath,
+  direction: SplitDirection,
+  childSignatures: readonly string[],
+  weights: readonly number[],
+): WorkspaceResult<WorkspaceNode> {
+  const target = nodeAt(draft, path);
+  if (target === undefined) return refuse({ code: "path_not_found", path: pathLabel(path) });
+  if (target.kind !== "split") return refuse({ code: "wrong_node_kind", path: pathLabel(path), expected: "split" });
+  if (target.direction !== direction || target.children.length !== childSignatures.length) {
+    return refuse({ code: "path_not_found", path: pathLabel(path) });
+  }
+  const current = splitChildSignatures(target);
+  if (current.some((sig, index) => sig !== childSignatures[index])) {
+    return refuse({ code: "path_not_found", path: pathLabel(path) });
+  }
+  return validated(replaceAt(draft, path, split(target.direction, target.children, weights)));
+}
+
+// Swaps two leaves in place while preserving split structure, weights, and each
+// leaf's full metadata (session, onMissing, aliasHint).
+export function swapLeaves(root: WorkspaceNode, pathA: NodePath, pathB: NodePath): WorkspaceResult<WorkspaceNode> {
+  const nodeA = nodeAt(root, pathA);
+  if (nodeA === undefined) return refuse({ code: "path_not_found", path: pathLabel(pathA) });
+  if (nodeA.kind !== "leaf") return refuse({ code: "wrong_node_kind", path: pathLabel(pathA), expected: "leaf" });
+  const nodeB = nodeAt(root, pathB);
+  if (nodeB === undefined) return refuse({ code: "path_not_found", path: pathLabel(pathB) });
+  if (nodeB.kind !== "leaf") return refuse({ code: "wrong_node_kind", path: pathLabel(pathB), expected: "leaf" });
+  if (pathLabel(pathA) === pathLabel(pathB)) return validated(root);
+  const withBAtA = replaceAt(root, pathA, nodeB);
+  return validated(replaceAt(withBAtA, pathB, nodeA));
+}
+
+// Replaces the session selector at `path` in place while keeping position,
+// weights, onMissing, and aliasHint. Refuses duplicate sessions via validation.
+export function replaceLeafSession(root: WorkspaceNode, path: NodePath, session: SessionSelector): WorkspaceResult<WorkspaceNode> {
+  const target = nodeAt(root, path);
+  if (target === undefined) return refuse({ code: "path_not_found", path: pathLabel(path) });
+  if (target.kind !== "leaf") return refuse({ code: "wrong_node_kind", path: pathLabel(path), expected: "leaf" });
+  return validated(replaceAt(root, path, leaf(session, target.onMissing, target.aliasHint)));
+}
+
+export type WorkspaceLayoutPreset = "side-by-side" | "stacked" | "main-stack" | "grid";
+
+export function presetLabel(preset: WorkspaceLayoutPreset, count: number): string {
+  switch (preset) {
+    case "side-by-side": return count === 6 ? "2 columns" : "Side by side";
+    case "stacked": return "Stacked";
+    case "main-stack": return "Main + stack";
+    case "grid": return "Grid";
+  }
+}
+
+// Two contextual presets per pane count (2..6), always respecting SPLIT_MAX_CHILDREN
+// and SPLIT_MAX_DEPTH.
+export function availablePresetsForCount(count: number): readonly WorkspaceLayoutPreset[] {
+  if (count === 2) return Object.freeze(["side-by-side", "stacked"]);
+  if (count === 3) return Object.freeze(["main-stack", "side-by-side"]);
+  if (count === 4 || count === 5) return Object.freeze(["grid", "main-stack"]);
+  if (count === 6) return Object.freeze(["grid", "side-by-side"]);
+  return Object.freeze([]);
+}
+
+// Re-arranges existing leaves into a balanced preset tree while preserving each
+// leaf's onMissing and aliasHint verbatim.
+export function arrangeWithPreset(leaves: readonly WorkspaceLeaf[], preset: WorkspaceLayoutPreset): WorkspaceResult<WorkspaceNode> {
+  if (leaves.length === 0) return refuse({ code: "malformed", path: "root", detail: "a workspace needs at least one pane" });
+  if (leaves.length > PANE_CAP) return refuse({ code: "pane_cap_exceeded", count: leaves.length, cap: PANE_CAP });
+  if (leaves.length === 1) return validated(leaves[0]!);
+  if (leaves.length === 2) {
+    return validated(split(preset === "stacked" ? "column" : "row", [leaves[0]!, leaves[1]!], [50, 50]));
+  }
+  if (preset === "main-stack") {
+    const rest = leaves.slice(1);
+    if (rest.length <= SPLIT_MAX_CHILDREN) {
+      return validated(split("row", [leaves[0]!, split("column", rest)], [55, 45]));
+    }
+    const mid = Math.ceil(rest.length / 2);
+    return validated(split("row", [leaves[0]!, split("column", [split("row", rest.slice(0, mid)), split("row", rest.slice(mid))])], [50, 50]));
+  }
+  if (preset === "stacked") {
+    if (leaves.length <= SPLIT_MAX_CHILDREN) return validated(split("column", leaves));
+    const top = Math.ceil(leaves.length / 2);
+    return validated(split("column", [split("row", leaves.slice(0, top)), split("row", leaves.slice(top))]));
+  }
+  if (preset === "side-by-side") {
+    if (leaves.length <= SPLIT_MAX_CHILDREN) return validated(split("row", leaves));
+    const left = Math.ceil(leaves.length / 2);
+    return validated(split("row", [split("column", leaves.slice(0, left)), split("column", leaves.slice(left))], [50, 50]));
+  }
+  // "grid": balanced two-row layout for 3..6 leaves (each row holds 2..3 leaves).
+  if (leaves.length <= 3) return validated(split("row", leaves));
+  const top = Math.ceil(leaves.length / 2);
+  return validated(split("column", [split("row", leaves.slice(0, top)), split("row", leaves.slice(top))], [50, 50]));
+}
+
 // Largest-remainder rescale to `total` with every entry at least WEIGHT_MIN.
 // Invariants: same length, sum === total, order of magnitude preserved.
 export function normalizeWeights(weights: readonly number[], total: number = WEIGHT_SCALE): readonly number[] {

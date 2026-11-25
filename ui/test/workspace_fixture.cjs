@@ -466,6 +466,8 @@ function startWorkspaceFixture(ui, options = {}) {
       if (request.headers["x-persea-csrf"] !== CSRF_TOKEN || !body || body.version !== 1 || typeof body.name !== "string" || !body.tree) { response.writeHead(400); response.end("invalid"); return; }
       if (!current) { response.writeHead(404); response.end("not found"); return; }
       if (request.headers["if-match"] !== `"${current.revision}"`) { response.setHeader("Content-Type", "application/json"); response.writeHead(409); response.end(JSON.stringify(current)); return; }
+      const owner = state.workspaces.get(body.name.toLowerCase());
+      if (owner && owner.workspace_id !== current.workspace_id) { response.setHeader("Content-Type", "application/json"); response.writeHead(409); response.end(JSON.stringify(owner)); return; }
       state.workspaces.delete(current.normalized_name);
       const next = workspaceWire(body.name, body.tree, current);
       state.workspaces.set(next.normalized_name, next);
@@ -479,6 +481,8 @@ function startWorkspaceFixture(ui, options = {}) {
       if (request.headers["x-persea-csrf"] !== CSRF_TOKEN) { response.writeHead(400); response.end("invalid"); return; }
       if (!current) { response.writeHead(404); response.end("not found"); return; }
       if (request.headers["if-match"] !== `"${current.revision}"`) { response.setHeader("Content-Type", "application/json"); response.writeHead(409); response.end(JSON.stringify(current)); return; }
+      const owner = state.workspaces.get(body.name.toLowerCase());
+      if (owner && owner.workspace_id !== current.workspace_id) { response.setHeader("Content-Type", "application/json"); response.writeHead(409); response.end(JSON.stringify(owner)); return; }
       state.workspaces.delete(current.normalized_name);
       response.writeHead(204);
       response.end();

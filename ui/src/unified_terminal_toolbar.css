@@ -305,10 +305,11 @@ button[data-copy-state="failed"] {
    workspace compaction defaults because the attachment toolbar owns the new
    controls and their constant geometry. */
 @media (pointer: fine), (pointer: none) {
-  /* Reserve the same share of the header that the toolbar actually uses.
-     A fixed cap starves the name even when the pane has ample free space. */
-  .ws-cell .ws-cell__header { padding-right: 90%; }
-  .ws-cell .ws-cell__mount .persea-unified-toolbar { width: 90%; }
+  /* On live panes, the folded toolbar owns the session chip and gets the full
+     header width minus a slim left indicator slot. Non-live panes keep their
+     outer header text readable without an active toolbar competing for room. */
+  .ws-cell[data-ws-state="live"] .ws-cell__header { padding-right: calc(100% - 1.1rem); }
+  .ws-cell[data-ws-state="live"] .ws-cell__mount .persea-unified-toolbar { width: calc(100% - 1.1rem); }
   .ws-cell .ws-cell__mount .persea-unified-toolbar button.persea-unified-tag { min-width: 0; max-width: none; }
   /* the Paste slot is a fixed box now (it has to hold "Copied ✓"), so
      a cell's bar trims both fixed boxes to what their widest word needs at
