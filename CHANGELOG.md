@@ -4,6 +4,33 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+## 0.1.25 — 2026-11-25
+
+### Changed
+
+- **Workspaces visual & daily-use overhaul:**
+  - Synced `/workspace` chrome (header, cells, dividers, editor, landing card, and phone view) to all eight operator themes via class/data-attribute tokens with zero inline style attributes, including light color-scheme support for Rosé Pine Dawn.
+  - Added presentation-only pane **Maximize / Restore grid** (zero `RESIZE_REQUEST`, all sibling sockets remain live and retain output while hidden), a roving-tabindex header pane picker with live status dots and immediate switched-session indicators, and a capture-phase `Alt+Shift+F6` shortcut to jump from an active terminal into the pane picker without leaking terminal input.
+  - De-duplicated fine-pointer live pane headers so the folded toolbar uses the full header bar without clipping a redundant session name beside it, while keeping non-live pane headers readable and preserving DOM selection and toolbar Tab order.
+  - Replaced the disabled-checkbox durable workspace landing screen with a focused launch card showing a miniature layout diagram and only the workspace's member sessions with honest inventory states (`ready to open` / `can be enabled` / `missing`).
+  - Upgraded the workspace editor with an interactive miniature draft diagram, contextual layout presets (preserving pane labels and `on_missing`), pane position swapping, in-place session replacement, global session aliases in pickers, pending-removal chips with undo, and human-readable split collapse labels.
+- **Dashboard Workspaces & Sessions polish:**
+  - Upgraded Dashboard workspace cards with miniature split diagrams, pane counts, passive availability exceptions that update in place on inventory refresh, member chips, and desktop **Duplicate workspace** under Manage.
+  - Added an inline multi-session workspace builder (up to 6 panes with contextual starter layout presets and live miniature preview) plus an inline **Open** link right after creation, while preserving the quick single-session form and phone limitations.
+  - Added `This device` scope labeling on Sessions settings, active theme/font summary on Appearance, and scoped Left/Right keyboard focus navigation across Dashboard section buttons.
+- **Refreshed README screenshots:** Updated `docs/images/dashboard-desktop.png` and `docs/images/workspace-desktop.png` to match the current UI.
+
+### Fixed
+
+- **Workspace editor draft & conflict safety:** Divider drag/nudge now merges weights into the staged draft by split direction and ordered child identities instead of overwriting staged labels/edits (locking diverged live seams until Save), normalized-name `409` collisions no longer offer cross-workspace Reload that could retarget another workspace, and concurrent Saves are guarded at page level.
+- **Locked dividers outside Edit mode:** Dividers outside Edit mode now render as quiet `presentation` seams with no resize cursor, hover highlight, grip buttons, coarse hit padding, or dead Tab stop.
+- **Dashboard mini-preview alignment:** Session output thumbnails on the Dashboard now align terminal text to the left instead of inheriting button center alignment.
+- **Broker pre-PREPARE admission close ordering:** Suppressed early binary `END` frames before the initial `PREPARE` reaches the wire and unified initial admission failure handling (`openStream` / encode / `Start` errors) so startup failures deliver a single `attach_failed` control error and close cleanly instead of triggering `broker_protocol`, and added explicit reviewed notice copy for `broker_protocol`.
+
+### Testing notes
+
+- Verified full Go suite (`CGO_ENABLED=1 go test -race ./...` under 20-byte `TMPDIR`, including new broker initial-admission and frontdoor pre-PREPARE tests), UI unit/contract tests (`npm test`), full Dashboard Chromium + WebKit suites (`test:browser:dashboard`), full Workspace Chromium + WebKit suites (`test:browser:workspace` including new `run_workspace_ux_browser.cjs`), `test:pwa-landing-browser`, and `test:terminal-position-browser`. Not tested on a real iPhone.
+
 ## 0.1.24 — 2026-11-25
 
 ### Changed
