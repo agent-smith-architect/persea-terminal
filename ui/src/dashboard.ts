@@ -7,7 +7,8 @@ import { DashboardFavorites } from "./dashboard_favorites";
 import { renderTerminalPreview } from "./terminal_preview";
 import { SCROLLBACK_CHOICES as HISTORY_CHOICES, ADOPTION_HISTORY_ROWS, SCROLLBACK_STORAGE_KEY, TERMINAL_SCROLLBACK_STORAGE_KEY, type ScrollbackRows as HistoryChoice, createScrollbackControl, readScrollbackRows, readTerminalScrollbackRows, saveScrollbackRows } from "./scrollback_preferences";
 import { defaultSessionState, landingMemoryState, parseDefaultSessionPreference, newOperationId, pendingIdentityFromSession, readLastSession, stagePendingSession, type DefaultSessionPreference, type DefaultSessionState, type LastSessionRecord } from "./session_memory";
-import { leaf, type SessionSelector } from "./workspace_model";
+import { PANE_CAP, arrangeWithPreset, availablePresetsForCount, leaf, leafEntries, presetLabel, sameSession, sessionKey, type SessionSelector, type WorkspaceLayoutPreset, type WorkspaceNode } from "./workspace_model";
+import { renderWorkspaceDiagram } from "./workspace_diagram";
 import { COMPOSER_FONT_SIZE_MAX, COMPOSER_FONT_SIZE_MIN, OperatorPreferencesService, type OperatorPreferenceOutcome, type OperatorPreferencePatch, type OperatorPreferenceSnapshot } from "./operator_preferences";
 import { KeyboardSettings } from "./keyboard_settings";
 import { ClipboardPanel } from "./clipboard_panel";
@@ -445,6 +446,8 @@ export class Dashboard {
   private readonly workspaceAPI: WorkspaceAPI;
   private workspaceRecords: readonly WorkspaceRecord[] = [];
   private workspaceInventory?: DashboardInventory;
+  private workspaceDraftExtras = new Set<string>();
+  private workspaceDraftPreset?: WorkspaceLayoutPreset;
   private readonly searchInput = element("input", "dashboard-search-input"); private filterQuery = ""; private collapsedGroups = new Set<string>(); private readonly expandedSessions = new Set<string>(); private view: readonly RealmView[] = [];
   // Device history is a display hint. Recent resolves from the same inventory
   // as the main list, and only a trusted Open stages an identity or adopts.
@@ -618,6 +621,15 @@ export class Dashboard {
       });
       navigation.append(button); panel.hidden = label !== "Sessions";
     }
+    navigation.addEventListener("keydown", (event) => {
+      const buttons = Array.from(navigation.querySelectorAll<HTMLButtonElement>("button"));
+      const index = buttons.findIndex((candidate) => candidate === document.activeElement);
+      if (index < 0 || buttons.length === 0) return;
+      if (event.key === "ArrowRight") { event.preventDefault(); buttons[(index + 1) % buttons.length]!.focus(); }
+      else if (event.key === "ArrowLeft") { event.preventDefault(); buttons[(index - 1 + buttons.length) % buttons.length]!.focus(); }
+      else if (event.key === "Home") { event.preventDefault(); buttons[0]!.focus(); }
+      else if (event.key === "End") { event.preventDefault(); buttons[buttons.length - 1]!.focus(); }
+    });
     this.root.replaceChildren(header, navigation, this.creationPanel, this.landing, this.status, this.sessionsPanel, this.workspacePanel, this.settingsPanel);
     this.cleanup.push(this.favorites.subscribe(snapshot => {
       this.favoritesStatus.textContent = snapshot.message;
@@ -663,7 +675,9 @@ export class Dashboard {
       preserveFocus(() => this.renderLanding());
     });
     label.append(select); body.append(label, scrollback);
-    card.append(element("h2", undefined, "Sessions"), body, status); return card;
+    const cardHead = element("div", "dashboard-settings-heading");
+    cardHead.append(element("h2", undefined, "Sessions"), element("span", "dashboard-settings-scope", "This device"));
+    card.append(cardHead, body, status); return card;
   }
 
   private appearanceCard(): HTMLElement {
@@ -671,7 +685,9 @@ export class Dashboard {
     // font and composer text moved here from the terminal's View popover.
     const card = element("details", "dashboard-settings-panel dashboard-appearance");
     card.open = true;
-    const summary = element("summary", "dashboard-appearance__summary", "Appearance");
+    const summary = element("summary", "dashboard-appearance__summary");
+    const summaryMeta = element("span", "dashboard-appearance__summary-meta");
+    summary.append(element("span", undefined, "Appearance"), summaryMeta);
     const body = element("div", "dashboard-settings-body");
     const grid = element("div", "dashboard-appearance__grid");
     const status = element("p", "dashboard-appearance__status");
@@ -738,6 +754,8 @@ export class Dashboard {
       else if (inFlight === 0 && (snapshot.status === "unavailable" || snapshot.status === "conflict")) say(snapshot.message, false);
       else if (snapshot.status === "ready" && inFlight === 0 && status.textContent === "Loading…") say("", false);
       const palette = unifiedTheme(snapshot.preferences.theme);
+      const fontDesc = snapshot.preferences.fontSize === null ? "Auto" : `${snapshot.preferences.fontSize} px`;
+      assignText(summaryMeta, `${palette.label} · ${fontDesc}`);
       this.root.style.setProperty("--dashboard-bg", palette.pageBackground);
       this.root.style.setProperty("--dashboard-card", palette.background);
       this.root.style.setProperty("--dashboard-chrome", palette.chromeBackground);
@@ -873,12 +891,108 @@ export class Dashboard {
     }
   }
 
-  private openableWorkspaceSelectors(): readonly SessionSelector[] {
-    const inventory = this.workspaceInventory;
+  private openableWorkspaceSessions(): readonly DashboardSession[] {
+    const inventory = this.workspaceInventory ?? this.inventory;
     if (!inventory) return [];
     return inventory.realms.flatMap((realm) => realm.servers.flatMap((server) => server.sessions
-      .filter((session) => session.unified?.state === "open" || session.unified?.state === "adoptable")
-      .map((session) => Object.freeze({ realm: session.realm, server: session.server, name: session.name }))));
+      .filter((session) => session.unified?.state === "open" || session.unified?.state === "adoptable")));
+  }
+
+  private openableWorkspaceSelectors(): readonly SessionSelector[] {
+    return this.openableWorkspaceSessions().map((session) => Object.freeze({ realm: session.realm, server: session.server, name: session.name }));
+  }
+
+  private workspaceSessionMatch(selector: SessionSelector): Readonly<{ kind: "ready" | "adoptable" | "blocked" | "missing" | "unavailable"; session?: DashboardSession }> {
+    const inventory = this.workspaceInventory ?? this.inventory;
+    if (!inventory) return { kind: "unavailable" };
+    const realm = inventory.realms.find((candidate) => candidate.name === selector.realm);
+    if (!realm) return { kind: "missing" };
+    const server = realm.servers.find((candidate) => candidate.label === selector.server);
+    if (!server) return realm.error ? { kind: "unavailable" } : { kind: "missing" };
+    if (server.error) return { kind: "unavailable" };
+    const matches = server.sessions.filter((session) => session.name === selector.name);
+    if (matches.length === 0) return { kind: "missing" };
+    if (matches.length > 1) return { kind: "blocked" };
+    const session = matches[0]!;
+    if (session.unified?.state === "open") return { kind: "ready", session };
+    if (session.unified?.state === "adoptable") return { kind: "adoptable", session };
+    return { kind: "blocked", session };
+  }
+
+  private workspaceSessionLabel(selector: SessionSelector, aliasHint?: string): string {
+    const match = this.workspaceSessionMatch(selector);
+    const alias = aliasHint ?? match.session?.aliases[0]?.displayAlias;
+    return alias && alias !== selector.name ? `${alias} (${selector.name})` : selector.name;
+  }
+
+  private workspaceSummaryText(record: WorkspaceRecord): Readonly<{ text: string; exceptional: boolean }> {
+    const entries = leafEntries(record.tree);
+    const base = `${entries.length} ${entries.length === 1 ? "pane" : "panes"}`;
+    const inventory = this.workspaceInventory ?? this.inventory;
+    if (!inventory) return { text: base, exceptional: false };
+    let missing = 0;
+    let unavailable = 0;
+    let blocked = 0;
+    for (const entry of entries) {
+      const m = this.workspaceSessionMatch(entry.leaf.session);
+      if (m.kind === "missing") missing += 1;
+      else if (m.kind === "unavailable") unavailable += 1;
+      else if (m.kind === "blocked") blocked += 1;
+    }
+    const notes: string[] = [];
+    if (missing > 0) notes.push(`${missing} missing`);
+    if (blocked > 0) notes.push(`${blocked} blocked`);
+    if (unavailable > 0) notes.push(`${unavailable} host unavailable`);
+    return notes.length > 0 ? { text: `${base} · ${notes.join(", ")}`, exceptional: true } : { text: base, exceptional: false };
+  }
+
+  private populateWorkspaceCardLiveState(record: WorkspaceRecord, item: HTMLElement): void {
+    const diagramHost = item.querySelector<HTMLElement>(".workspace-panel__diagram");
+    if (diagramHost) {
+      diagramHost.replaceChildren(renderWorkspaceDiagram(record.tree, {
+        showLabels: false,
+        availabilityFor: (leafNode) => {
+          const m = this.workspaceSessionMatch(leafNode.session);
+          if (m.kind === "ready" || m.kind === "adoptable") return "ready";
+          if (m.kind === "missing") return "missing";
+          if (m.kind === "blocked" || m.kind === "unavailable") return "blocked";
+          return undefined;
+        },
+      }));
+    }
+    const summaryEl = item.querySelector<HTMLElement>(".workspace-panel__summary");
+    if (summaryEl) {
+      const summary = this.workspaceSummaryText(record);
+      assignText(summaryEl, summary.text);
+      if (summary.exceptional) summaryEl.dataset.workspaceExceptional = "true";
+      else delete summaryEl.dataset.workspaceExceptional;
+    }
+    const membersEl = item.querySelector<HTMLElement>(".workspace-panel__members");
+    if (membersEl) {
+      const chips = leafEntries(record.tree).map((entry) => {
+        const match = this.workspaceSessionMatch(entry.leaf.session);
+        const chip = element("li", "workspace-panel__member");
+        chip.dataset.workspaceAvailability = match.kind;
+        const label = this.workspaceSessionLabel(entry.leaf.session, entry.leaf.aliasHint);
+        const stateCopy = match.kind === "ready" ? "ready" : match.kind === "adoptable" ? "enable" : match.kind;
+        chip.append(
+          element("span", "workspace-panel__member-name", label),
+          element("span", "workspace-panel__member-scope", `${entry.leaf.session.realm} · ${entry.leaf.session.server}`),
+          element("span", "workspace-panel__member-state", stateCopy),
+        );
+        return chip;
+      });
+      membersEl.replaceChildren(...chips);
+    }
+  }
+
+  private updateWorkspaceCardsAvailability(): void {
+    for (const { record, el } of this.workspaceNodes.values()) {
+      this.populateWorkspaceCardLiveState(record, el);
+    }
+    if (this.workspaceCreate && this.workspaceCreate.matches("form.workspace-panel__create")) {
+      this.syncWorkspaceCreateForm(this.workspaceCreate);
+    }
   }
 
   private renderWorkspaces(): void {
@@ -897,6 +1011,7 @@ export class Dashboard {
           const link = previous.el.querySelector<HTMLAnchorElement>(".workspace-panel__open")!; link.textContent = record.name; link.href = workspaceURL(window.location.href, record.name);
           const notice = previous.el.querySelector<HTMLElement>(".workspace-panel__changed")!; notice.hidden = false;
         }
+        this.populateWorkspaceCardLiveState(previous.record.revision === record.revision ? record : previous.record, previous.el);
         return previous.el;
       }
       const el = this.renderWorkspaceRecord(record, this.workspaceStatus);
@@ -904,26 +1019,11 @@ export class Dashboard {
     });
     reconcileChildren(this.workspaceList, rows.length ? rows : [element("li", "workspace-panel__empty", "No saved workspaces yet. Create one to keep a group of terminals together.")]);
     for (const key of this.workspaceNodes.keys()) if (!this.workspaceRecords.some(record => record.workspaceId === key)) this.workspaceNodes.delete(key);
-    const select = this.workspaceCreate.querySelector<HTMLSelectElement>("select");
-    if (select) {
-      const selected = select.value;
-      const values = this.openableWorkspaceSelectors().map(selector => ({ value: JSON.stringify(selector), label: `${selector.name} · ${selector.realm} · ${selector.server}` }));
-      if (JSON.stringify(values.map(item => item.value)) !== JSON.stringify(Array.from(select.options).map(option => option.value))) {
-        select.replaceChildren(...values.map(item => { const option = element("option", undefined, item.label); option.value = item.value; return option; }));
-        if (values.some(item => item.value === selected)) select.value = selected;
-      }
-      const submit = this.workspaceCreate.querySelector<HTMLButtonElement>("button[type=submit]"); if (submit) submit.disabled = select.options.length === 0;
+    if (this.workspaceCreate.matches("form.workspace-panel__create")) {
+      this.syncWorkspaceCreateForm(this.workspaceCreate);
     }
   }
 
-  // a phone-class device opens no workspace view, so the
-  // dashboard must not offer a create affordance the same device then refuses.
-  // The workspace access notice takes the form's place — the operator reads the refusal
-  // before producing a record for it, rather than after. Existing records stay
-  // listed exactly as before: each one keeps its row, and the /workspace
-  // landing keeps its "Open as a single terminal" link per leaf. The posture
-  // question is asked through the same function the /workspace document uses,
-  // from the same stable screen witness, so the two never disagree.
   private renderWorkspaceCreateAffordance(status: HTMLElement): HTMLElement {
     if (workspacePosture(stablePostureEnvironment(window)) !== "phone") return this.renderWorkspaceCreate(status);
     const notice = element("p", "workspace-panel__notice", PHONE_STATE_NOTICE);
@@ -931,17 +1031,44 @@ export class Dashboard {
     return notice;
   }
 
+  private duplicateWorkspaceName(baseName: string): string {
+    const taken = new Set(this.workspaceRecords.map((record) => record.normalizedName));
+    for (let n = 1; n <= 99; n += 1) {
+      const suffix = n === 1 ? " copy" : ` copy ${n}`;
+      const candidate = `${baseName.slice(0, Math.max(1, 128 - suffix.length)).trimEnd()}${suffix}`;
+      if (!taken.has(candidate.toLowerCase())) return candidate;
+    }
+    return `${baseName.slice(0, 120)} copy`;
+  }
+
   private renderWorkspaceRecord(record: WorkspaceRecord, status: HTMLElement): HTMLElement {
+    const isPhone = workspacePosture(stablePostureEnvironment(window)) === "phone";
     const item = element("li", "workspace-panel__item"); item.dataset.workspaceId = record.workspaceId;
+    const diagram = element("div", "workspace-panel__diagram");
+    const info = element("div", "workspace-panel__info");
     const open = element("a", "workspace-panel__open", record.name); open.href = workspaceURL(window.location.href, record.name); open.dataset.workspaceAction = "open";
+    const summary = element("span", "workspace-panel__summary");
+    info.append(open, summary);
+
     const manage = element("details", "workspace-panel__manage"); manage.append(element("summary", undefined, "Manage"));
+    const members = element("ul", "workspace-panel__members");
     const revision = element("span", "workspace-panel__revision", `r${record.revision}`); revision.title = `Saved revision ${record.revision}`;
     const rename = element("form", "workspace-panel__rename");
     const input = element("input"); input.name = "name"; input.value = input.defaultValue = record.name; input.setAttribute("aria-label", `Rename ${record.name}`);
     const save = element("button", undefined, "Rename"); save.type = "submit";
     rename.append(input, save);
     rename.addEventListener("submit", (event) => { event.preventDefault(); void this.renameWorkspace(record, input, save, status); });
+
+    const manageActions = element("div", "workspace-panel__manage-actions");
+    if (!isPhone) {
+      const duplicate = element("button", "workspace-panel__duplicate", "Duplicate workspace");
+      duplicate.type = "button";
+      duplicate.addEventListener("click", () => void this.duplicateWorkspace(record, duplicate, status));
+      manageActions.append(duplicate);
+    }
     const remove = element("button", "workspace-panel__delete", "Delete workspace…"); remove.type = "button";
+    manageActions.append(remove);
+
     const confirmation = element("div", "workspace-panel__confirmation"); confirmation.hidden = true;
     const confirm = element("button", "workspace-panel__delete", `Delete ${record.name}`); confirm.type = "button";
     const cancel = element("button", undefined, "Cancel"); cancel.type = "button";
@@ -950,41 +1077,190 @@ export class Dashboard {
     cancel.addEventListener("click", () => { confirmation.hidden = true; remove.hidden = false; remove.focus(); });
     confirm.addEventListener("click", () => void this.deleteWorkspace(record, confirm, status));
     const changed = element("p", "workspace-panel__changed", "Updated elsewhere. Your unsaved name is kept."); changed.hidden = true;
-    manage.append(revision, changed, rename, remove, confirmation); item.append(open, manage);
+    manage.append(members, revision, changed, rename, manageActions, confirmation);
+    item.append(diagram, info, manage);
+    this.populateWorkspaceCardLiveState(record, item);
     item.addEventListener("focusout", () => queueMicrotask(() => { if (item.dataset.changedElsewhere === "true" && !item.contains(document.activeElement) && !hasDraft(item)) preserveFocus(() => this.renderWorkspaces()); }));
     return item;
   }
 
   private renderWorkspaceCreate(status: HTMLElement): HTMLElement {
     const form = element("form", "workspace-panel__create");
+    const primaryRow = element("div", "workspace-panel__create-row");
     const name = element("input"); name.name = "workspace_name"; name.placeholder = "Workspace name"; name.autocomplete = "off"; name.setAttribute("aria-label", "New workspace name");
     const select = element("select"); select.name = "workspace_session"; select.setAttribute("aria-label", "First workspace session");
-    for (const selector of this.openableWorkspaceSelectors()) {
-      const option = element("option"); option.value = JSON.stringify(selector); option.textContent = `${selector.name} · ${selector.realm} · ${selector.server}`; select.append(option);
-    }
-    const submit = element("button", undefined, "New workspace"); submit.type = "submit"; submit.disabled = select.options.length === 0;
-    const selector = element("span", "workspace-panel__selector"); selector.append(select);
-    form.append(name, selector, submit);
+    const submit = element("button", undefined, "New workspace"); submit.type = "submit"; submit.disabled = true;
+    const selectorWrap = element("span", "workspace-panel__selector"); selectorWrap.append(select);
+    primaryRow.append(name, selectorWrap, submit);
+
+    const extras = element("div", "workspace-panel__extras");
+    extras.hidden = true;
+    const extrasHeader = element("div", "workspace-panel__extras-head");
+    extrasHeader.append(element("span", "workspace-panel__extras-title", "Add more panes (optional)"), element("span", "workspace-panel__extras-count"));
+    const extrasGrid = element("div", "workspace-panel__extras-grid");
+    const presetRow = element("div", "workspace-panel__presets");
+    presetRow.hidden = true;
+    const presetButtons = element("div", "workspace-panel__preset-buttons");
+    const presetPreview = element("div", "workspace-panel__preset-preview");
+    presetRow.append(element("span", "workspace-panel__presets-label", "Starter layout"), presetButtons, presetPreview);
+    extras.append(extrasHeader, extrasGrid, presetRow);
+
+    form.append(primaryRow, extras);
+    select.addEventListener("change", () => {
+      try {
+        const chosen = JSON.parse(select.value) as SessionSelector;
+        this.workspaceDraftExtras.delete(sessionKey(chosen));
+      } catch { /* ignore */ }
+      this.syncWorkspaceCreateForm(form);
+    });
     form.addEventListener("submit", (event) => {
       event.preventDefault();
-      let selector: SessionSelector;
-      try { selector = JSON.parse(select.value) as SessionSelector; } catch { return; }
-      void this.createWorkspace(name, selector, submit, status);
+      let first: SessionSelector;
+      try { first = JSON.parse(select.value) as SessionSelector; } catch { return; }
+      const selectors: SessionSelector[] = [first];
+      const openable = this.openableWorkspaceSelectors();
+      for (const candidate of openable) {
+        if (selectors.length >= PANE_CAP) break;
+        if (sameSession(candidate, first)) continue;
+        if (this.workspaceDraftExtras.has(sessionKey(candidate))) selectors.push(candidate);
+      }
+      let tree: WorkspaceNode = leaf(first);
+      if (selectors.length > 1) {
+        const presets = availablePresetsForCount(selectors.length);
+        const preset = this.workspaceDraftPreset && presets.includes(this.workspaceDraftPreset) ? this.workspaceDraftPreset : presets[0]!;
+        const arranged = arrangeWithPreset(selectors.map((selector) => leaf(selector)), preset);
+        if (arranged.ok) tree = arranged.value;
+      }
+      void this.createWorkspace(name, tree, submit, status, form);
     });
+    this.syncWorkspaceCreateForm(form);
     return form;
   }
 
-  private async createWorkspace(input: HTMLInputElement, selector: SessionSelector, submit: HTMLButtonElement, status: HTMLElement): Promise<void> {
+  private syncWorkspaceCreateForm(form: HTMLElement): void {
+    const select = form.querySelector<HTMLSelectElement>('select[name="workspace_session"]');
+    if (!select) return;
+    const sessions = this.openableWorkspaceSessions();
+    const selected = select.value;
+    const values = sessions.map((session) => {
+      const selector: SessionSelector = Object.freeze({ realm: session.realm, server: session.server, name: session.name });
+      const alias = session.aliases[0]?.displayAlias;
+      const label = alias && alias !== session.name
+        ? `${alias} (${session.name}) · ${session.realm} · ${session.server}`
+        : `${session.name} · ${session.realm} · ${session.server}`;
+      return { selector, key: sessionKey(selector), value: JSON.stringify(selector), label, short: alias ?? session.name };
+    });
+    if (JSON.stringify(values.map(item => item.value)) !== JSON.stringify(Array.from(select.options).map(option => option.value))) {
+      select.replaceChildren(...values.map(item => { const option = element("option", undefined, item.label); option.value = item.value; return option; }));
+      if (values.some(item => item.value === selected)) select.value = selected;
+    }
+    const submit = form.querySelector<HTMLButtonElement>("button[type=submit]");
+    if (submit) submit.disabled = select.options.length === 0;
+
+    const extras = form.querySelector<HTMLElement>(".workspace-panel__extras");
+    const extrasGrid = form.querySelector<HTMLElement>(".workspace-panel__extras-grid");
+    const extrasCount = form.querySelector<HTMLElement>(".workspace-panel__extras-count");
+    const presetRow = form.querySelector<HTMLElement>(".workspace-panel__presets");
+    const presetButtons = form.querySelector<HTMLElement>(".workspace-panel__preset-buttons");
+    const presetPreview = form.querySelector<HTMLElement>(".workspace-panel__preset-preview");
+    if (!extras || !extrasGrid || !extrasCount || !presetRow || !presetButtons || !presetPreview) return;
+
+    let firstSelector: SessionSelector | undefined;
+    try { firstSelector = select.value ? JSON.parse(select.value) as SessionSelector : undefined; } catch { firstSelector = undefined; }
+    const firstKey = firstSelector ? sessionKey(firstSelector) : undefined;
+    if (firstKey) this.workspaceDraftExtras.delete(firstKey);
+    const others = values.filter((item) => item.key !== firstKey);
+    extras.hidden = others.length === 0;
+    if (others.length === 0) return;
+
+    const activeExtras = others.filter((item) => this.workspaceDraftExtras.has(item.key));
+    const totalCount = (firstSelector ? 1 : 0) + activeExtras.length;
+    assignText(extrasCount, `${totalCount} of ${PANE_CAP} panes`);
+
+    const chips = others.map((item) => {
+      const checked = this.workspaceDraftExtras.has(item.key);
+      const chip = element("label", "workspace-panel__extra-chip");
+      if (checked) chip.dataset.checked = "true";
+      const box = element("input");
+      box.type = "checkbox";
+      box.checked = checked;
+      box.disabled = !checked && totalCount >= PANE_CAP;
+      box.addEventListener("change", () => {
+        if (box.checked) {
+          if ((firstSelector ? 1 : 0) + this.workspaceDraftExtras.size < PANE_CAP) this.workspaceDraftExtras.add(item.key);
+        } else {
+          this.workspaceDraftExtras.delete(item.key);
+        }
+        this.syncWorkspaceCreateForm(form);
+      });
+      chip.append(box, element("span", undefined, item.short), element("span", "workspace-panel__extra-scope", item.selector.realm));
+      return chip;
+    });
+    extrasGrid.replaceChildren(...chips);
+
+    if (!firstSelector || totalCount < 2) {
+      presetRow.hidden = true;
+      return;
+    }
+    presetRow.hidden = false;
+    const presets = availablePresetsForCount(totalCount);
+    const activePreset = this.workspaceDraftPreset && presets.includes(this.workspaceDraftPreset) ? this.workspaceDraftPreset : presets[0]!;
+    this.workspaceDraftPreset = activePreset;
+    const previewLeaves = [leaf(firstSelector), ...activeExtras.slice(0, PANE_CAP - 1).map((item) => leaf(item.selector))];
+    const previewTree = arrangeWithPreset(previewLeaves, activePreset);
+    presetButtons.replaceChildren(...presets.map((preset) => {
+      const btn = element("button", "workspace-panel__preset-btn", presetLabel(preset, totalCount));
+      btn.type = "button";
+      btn.setAttribute("aria-pressed", String(preset === activePreset));
+      btn.addEventListener("click", () => {
+        this.workspaceDraftPreset = preset;
+        this.syncWorkspaceCreateForm(form);
+      });
+      return btn;
+    }));
+    if (previewTree.ok) {
+      const labelByKey = new Map(values.map((item) => [item.key, item.short]));
+      presetPreview.replaceChildren(renderWorkspaceDiagram(previewTree.value, {
+        showLabels: true,
+        labelFor: (leafNode) => labelByKey.get(sessionKey(leafNode.session)) ?? leafNode.session.name,
+      }));
+    }
+  }
+
+  private async createWorkspace(input: HTMLInputElement, tree: WorkspaceNode, submit: HTMLButtonElement, status: HTMLElement, form: HTMLElement): Promise<void> {
     if (submit.disabled) return;
     submit.disabled = true; this.gate.setMutating(true); status.textContent = "Saving workspace…";
     try {
-      const created = await this.workspaceAPI.create(input.value, leaf(selector));
+      const created = await this.workspaceAPI.create(input.value, tree);
       this.workspaceSerial += 1; input.value = input.defaultValue = "";
+      this.workspaceDraftExtras.clear();
+      this.workspaceDraftPreset = undefined;
       this.workspaceRecords = Object.freeze([...this.workspaceRecords, created].sort((a, b) => a.normalizedName.localeCompare(b.normalizedName)));
       this.renderWorkspaces();
+      this.syncWorkspaceCreateForm(form);
+      const openLink = element("a", "action workspace-panel__created-open", `Open ${created.name}`);
+      openLink.href = workspaceURL(window.location.href, created.name);
+      status.replaceChildren(element("span", undefined, `Workspace “${created.name}” created. `), openLink);
     } catch (error) {
       status.textContent = workspaceAPIMessage(error, "created").detail;
     } finally { this.gate.setMutating(false); submit.disabled = false; }
+  }
+
+  private async duplicateWorkspace(record: WorkspaceRecord, button: HTMLButtonElement, status: HTMLElement): Promise<void> {
+    if (button.disabled) return;
+    button.disabled = true; this.gate.setMutating(true); status.textContent = "Duplicating workspace…";
+    try {
+      const nextName = this.duplicateWorkspaceName(record.name);
+      const created = await this.workspaceAPI.create(nextName, record.tree);
+      this.workspaceSerial += 1;
+      this.workspaceRecords = Object.freeze([...this.workspaceRecords, created].sort((a, b) => a.normalizedName.localeCompare(b.normalizedName)));
+      this.renderWorkspaces();
+      const openLink = element("a", "action workspace-panel__created-open", `Open ${created.name}`);
+      openLink.href = workspaceURL(window.location.href, created.name);
+      status.replaceChildren(element("span", undefined, `Duplicated as “${created.name}”. `), openLink);
+    } catch (error) {
+      status.textContent = workspaceAPIMessage(error, "duplicated").detail;
+    } finally { this.gate.setMutating(false); button.disabled = false; }
   }
 
   private async renameWorkspace(record: WorkspaceRecord, input: HTMLInputElement, submit: HTMLButtonElement, status: HTMLElement): Promise<void> {
@@ -997,8 +1273,14 @@ export class Dashboard {
       this.workspaceRecords = Object.freeze(this.workspaceRecords.map((item) => item.workspaceId === updated.workspaceId ? updated : item));
       this.renderWorkspaces();
     } catch (error) {
-      if (error instanceof WorkspaceAPIError && error.code === "conflict") this.renderWorkspaceConflict(status, input);
-      else status.textContent = workspaceAPIMessage(error, "renamed").detail;
+      if (error instanceof WorkspaceAPIError && error.code === "conflict") {
+        if (error.current && error.current.workspaceId !== record.workspaceId) {
+          status.textContent = "That workspace name is already in use. Choose another name.";
+          input.focus();
+        } else {
+          this.renderWorkspaceConflict(status, input);
+        }
+      } else status.textContent = workspaceAPIMessage(error, "renamed").detail;
     } finally { this.gate.setMutating(false); submit.disabled = false; }
   }
 
@@ -1084,7 +1366,7 @@ export class Dashboard {
     this.aliasArchive.hidden = inventory.detachedAliases.length === 0;
     this.updateCreateTargets(inventory);
     this.newSession.hidden = this.sessionsPanel.hidden || this.createTargets.size === 0;
-    this.view = view; this.inventory = inventory; this.renderLanding(); this.applyPresentation();
+    this.view = view; this.inventory = inventory; this.workspaceInventory = inventory; this.renderLanding(); this.applyPresentation(); if (this.workspaceCreate) this.updateWorkspaceCardsAvailability();
   }
 
   // --- session memory landing -----------------------------------------------------------

@@ -103,11 +103,17 @@ remain in place on refresh. Their metadata, links and callbacks read the latest
 inventory while alias forms retain their baseline revision and unsaved values.
 An alias change elsewhere must still pass the server's revision check.
 
-Workspace forms retain drafts across background, foreground and manual refresh.
-List request generations prevent an older response from undoing a later local
-mutation. Workspace deletion requires a confirmation naming the workspace, then
-uses the existing revision precondition. Deletion removes the saved layout; it
-does not close any terminal session. Phone workspace limitations are unchanged.
+Each saved workspace card shows a miniature layout diagram, pane count, and
+passive availability exceptions derived from the already-loaded session list
+(without extra polling). Member details, renaming, duplication (desktop only),
+and deletion live under Manage. Desktop users can create a 1-to-6-pane
+workspace directly from the Workspaces tab with starter layout presets and an
+inline Open link after confirmation; workspace drafts survive background,
+foreground, and manual refresh as well as 409/507 failures. List request
+generations prevent an older response from undoing a later local mutation.
+Workspace deletion requires a confirmation naming the workspace, then uses the
+existing revision precondition. Deletion removes the saved layout; it does not
+close any terminal session. Phone workspace limitations are unchanged.
 
 Filtering updates the matching count and offers a clear action for no results.
 A failed refresh retains the last good inventory and says when it was read.

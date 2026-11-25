@@ -1,16 +1,68 @@
 /* Workspace shell — presentation-only split layout.
  *
  * Everything here is class-based: weights map onto the closed .ws-w-1 … .ws-w-100
- * class set (the model's integer range), so no element ever carries a style
- * attribute or a CSSOM property write. The shell therefore renders under the
- * base nonce'd CSP without style-src-attr, and a track size can only ever be
- * one of the hundred reviewed values.
- *
- * Nothing in this file touches terminal geometry: a cell resize reaches the
- * unified page's own ResizeObserver, which refits the font.
+ * class set (the model's integer range), and themes map onto data-ws-theme
+ * tokens, so no workspace element ever carries a style attribute or CSSOM
+ * write. Nothing in this file touches terminal geometry: a cell resize reaches
+ * the unified page's own ResizeObserver, which refits the font.
  */
 
-.ws-root { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; color: #e8f0f5; background: #081018; }
+:root,
+body.ws-document {
+  --ws-bg: #0b0f14;
+  --ws-surface: #111318;
+  --ws-chrome: #1b1e25;
+  --ws-fg: #f3f4f6;
+  --ws-accent: #8fc7ff;
+  --ws-muted: color-mix(in srgb, var(--ws-fg) 72%, var(--ws-bg));
+  --ws-border: color-mix(in srgb, var(--ws-fg) 18%, var(--ws-bg));
+  --ws-border-strong: color-mix(in srgb, var(--ws-fg) 30%, var(--ws-bg));
+  --ws-seam: color-mix(in srgb, var(--ws-fg) 14%, var(--ws-bg));
+  --ws-overlay: color-mix(in srgb, var(--ws-bg) 93%, transparent);
+  --ws-ok-bg: #123a2a;
+  --ws-ok-fg: #8ef0be;
+  --ws-ok-border: #28755b;
+  --ws-warn-bg: #2c2414;
+  --ws-warn-fg: #f3cf87;
+  --ws-warn-border: #b88433;
+  --ws-danger-bg: #36181e;
+  --ws-danger-fg: #ffc5c1;
+  --ws-danger-border: #d95a66;
+  --ws-mini-bg: var(--ws-bg);
+  --ws-mini-border: var(--ws-border);
+  --ws-mini-cell-bg: var(--ws-chrome);
+  --ws-mini-cell-border: var(--ws-border-strong);
+  --ws-mini-accent: var(--ws-accent);
+  --ws-mini-ok: var(--ws-ok-fg);
+  color-scheme: dark;
+}
+body.ws-document[data-ws-theme="rose-pine"] {
+  --ws-bg: #12101c; --ws-surface: #191724; --ws-chrome: #26233a; --ws-fg: #e0def4; --ws-accent: #c4a7e7;
+}
+body.ws-document[data-ws-theme="rose-pine-dawn"] {
+  --ws-bg: #f2e9e1; --ws-surface: #faf4ed; --ws-chrome: #fffaf3; --ws-fg: #575279; --ws-accent: #286983;
+  --ws-ok-bg: #e1f1ec; --ws-ok-fg: #265f5a; --ws-ok-border: #56949f;
+  --ws-warn-bg: #f9eedc; --ws-warn-fg: #8c5a10; --ws-warn-border: #d48c28;
+  --ws-danger-bg: #f8e3e6; --ws-danger-fg: #8e2d43; --ws-danger-border: #b4637a;
+  color-scheme: light;
+}
+body.ws-document[data-ws-theme="solarized-dark"] {
+  --ws-bg: #001f27; --ws-surface: #002b36; --ws-chrome: #073642; --ws-fg: #eee8d5; --ws-accent: #2aa198;
+}
+body.ws-document[data-ws-theme="gruvbox-dark"] {
+  --ws-bg: #1d2021; --ws-surface: #282828; --ws-chrome: #3c3836; --ws-fg: #ebdbb2; --ws-accent: #fabd2f;
+}
+body.ws-document[data-ws-theme="one-dark"] {
+  --ws-bg: #21252b; --ws-surface: #282c34; --ws-chrome: #2f343f; --ws-fg: #e6e6e6; --ws-accent: #61afef;
+}
+body.ws-document[data-ws-theme="dracula"] {
+  --ws-bg: #1f2029; --ws-surface: #282a36; --ws-chrome: #343746; --ws-fg: #f8f8f2; --ws-accent: #bd93f9;
+}
+body.ws-document[data-ws-theme="catppuccin-mocha"] {
+  --ws-bg: #181825; --ws-surface: #1e1e2e; --ws-chrome: #313244; --ws-fg: #cdd6f4; --ws-accent: #cba6f7;
+}
+
+.ws-root { display: flex; width: 100%; height: 100%; min-width: 0; min-height: 0; overflow: hidden; color: var(--ws-fg); background: var(--ws-bg); padding: 4px; box-sizing: border-box; }
 .ws-root > .ws-track { flex: 1 1 0; }
 
 .ws-split { display: flex; min-width: 0; min-height: 0; overflow: hidden; }
@@ -18,76 +70,100 @@
 .ws-split--column { flex-direction: column; }
 .ws-track { min-width: 0; min-height: 0; flex-shrink: 1; flex-basis: 0; overflow: hidden; }
 
-/* Dividers: an 8 px visual line; on coarse pointers the hit box grows to 44 px
- * through symmetric negative margins so the panes keep their space. */
-.ws-divider { position: relative; z-index: 2; flex: 0 0 8px; box-sizing: content-box; background: #1c3446; background-clip: content-box; touch-action: none; user-select: none; outline: none; }
+/* Presentation-only maximize: hide sibling tracks and dividers while keeping
+ * mounted cells, WebSockets, and toolbar nodes untouched. */
+.ws-zoom-hidden { display: none !important; }
+.ws-root[data-ws-zoomed="true"] .ws-divider { display: none; }
+
+/* Dividers: active 8 px draggable seams in edit mode; quiet non-interactive
+ * seams outside edit mode or when diverged from a staged structural draft. */
+.ws-divider { position: relative; z-index: 2; flex: 0 0 8px; box-sizing: content-box; background: var(--ws-seam); background-clip: content-box; touch-action: none; user-select: none; outline: none; transition: background-color 120ms ease; }
 .ws-divider--row { cursor: col-resize; }
 .ws-divider--column { cursor: row-resize; }
-.ws-divider:hover, .ws-divider:focus-visible, .ws-divider[data-ws-dragging="true"] { background-color: #3b6f8f; }
+.ws-divider:hover, .ws-divider:focus-visible, .ws-divider[data-ws-dragging="true"] { background-color: color-mix(in srgb, var(--ws-accent) 55%, var(--ws-bg)); }
 /* The active divider stacks above its neighbours so its grip is never painted over by a perpendicular divider crossing it at the midpoint. */
 .ws-divider:hover, .ws-divider:focus-within, .ws-divider[data-ws-dragging="true"] { z-index: 3; }
-.ws-divider:focus-visible { box-shadow: inset 0 0 0 2px #66d4ff; }
+.ws-divider:focus-visible { box-shadow: inset 0 0 0 2px var(--ws-accent); }
 .ws-divider__grip { position: absolute; top: 50%; left: 50%; display: flex; gap: 2px; transform: translate(-50%, -50%); visibility: hidden; }
 .ws-divider:hover .ws-divider__grip, .ws-divider:focus-within .ws-divider__grip, .ws-divider[data-ws-dragging="true"] .ws-divider__grip { visibility: visible; }
-.ws-divider__nudge { box-sizing: border-box; min-width: 24px; min-height: 24px; padding: 0 .35rem; border: 1px solid #36566a; border-radius: .4rem; color: #eef8ff; background: #122533; font: 700 .85rem/1 ui-monospace, monospace; cursor: pointer; }
-.ws-divider__nudge:focus-visible { outline: 3px solid #66d4ff; outline-offset: 1px; }
+.ws-divider__nudge { box-sizing: border-box; min-width: 24px; min-height: 24px; padding: 0 .35rem; border: 1px solid var(--ws-border-strong); border-radius: .4rem; color: var(--ws-fg); background: var(--ws-chrome); font: 700 .85rem/1 ui-monospace, monospace; cursor: pointer; }
+.ws-divider__nudge:focus-visible { outline: 3px solid var(--ws-accent); outline-offset: 1px; }
+
+.ws-root[data-ws-editing="false"] .ws-divider,
+.ws-divider[data-ws-disabled="true"] {
+  flex: 0 0 4px;
+  cursor: default;
+  background: transparent;
+  background-color: transparent;
+  touch-action: auto;
+  pointer-events: none;
+}
+.ws-root[data-ws-editing="false"] .ws-divider__grip,
+.ws-divider[data-ws-disabled="true"] .ws-divider__grip {
+  display: none;
+}
 
 /* Cells: header + mount + state slot. The header is always populated, so a cell
  * is never blank even before anything is mounted. */
-.ws-cell { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid #27485c; border-radius: .4rem; background: #0d1b25; overflow: hidden; }
-.ws-cell__header { display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: .25rem .6rem; min-height: 1.9rem; padding: .2rem .55rem; border-bottom: 1px solid #1c3446; background: #0a1721; font-size: .8rem; line-height: 1.3; }
-.ws-cell__header:focus-visible { outline: 2px solid #66d4ff; outline-offset: -2px; }
-.ws-cell__name { font-weight: 700; color: #eef8ff; overflow-wrap: anywhere; }
-.ws-cell__hint { color: #9fd4ff; overflow-wrap: anywhere; }
-.ws-cell__scope { color: #7f98a6; font: 600 .7rem/1.3 ui-monospace, monospace; overflow-wrap: anywhere; }
-.ws-cell__badge { margin-left: auto; border-radius: 999px; padding: .1rem .5rem; background: #162d3b; color: #b9d8e8; font: 700 .68rem/1.4 ui-monospace, monospace; text-transform: uppercase; white-space: nowrap; }
-.ws-cell[data-ws-tone="live"] .ws-cell__badge { background: #123a2a; color: #8ef0be; }
+.ws-cell { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; border: 1px solid var(--ws-border); border-radius: .5rem; background: var(--ws-surface); overflow: hidden; }
+.ws-cell__header { position: relative; display: flex; flex: 0 0 auto; flex-wrap: wrap; align-items: center; gap: .25rem .55rem; min-height: 2rem; padding: .2rem .55rem; border-bottom: 1px solid var(--ws-border); background: var(--ws-chrome); font-size: .8rem; line-height: 1.3; }
+.ws-cell__header:focus-visible { outline: 2px solid var(--ws-accent); outline-offset: -2px; }
+.ws-cell__name { font-weight: 650; color: var(--ws-fg); overflow-wrap: anywhere; }
+.ws-cell__hint { color: var(--ws-accent); font-weight: 600; overflow-wrap: anywhere; }
+.ws-cell__scope { color: var(--ws-muted); font: 600 .7rem/1.3 ui-monospace, monospace; overflow-wrap: anywhere; }
+.ws-cell__badge { margin-left: auto; border-radius: 999px; padding: .1rem .5rem; background: var(--ws-bg); color: var(--ws-muted); font: 700 .68rem/1.4 ui-monospace, monospace; text-transform: uppercase; white-space: nowrap; }
+.ws-cell[data-ws-tone="live"] .ws-cell__badge { background: var(--ws-ok-bg); color: var(--ws-ok-fg); }
 .ws-cell[data-ws-state="live"] .ws-cell__badge { display: none; }
-.ws-cell[data-ws-tone="waiting"] .ws-cell__badge { background: #2c2f14; color: #f0e28e; }
-.ws-cell[data-ws-tone="blocked"] .ws-cell__badge { background: #3a2a14; color: #ffcf8e; }
-.ws-cell[data-ws-tone="failed"] .ws-cell__badge { background: #34171d; color: #ffc5c1; }
+.ws-cell[data-ws-tone="waiting"] .ws-cell__badge { background: var(--ws-warn-bg); color: var(--ws-warn-fg); }
+.ws-cell[data-ws-tone="blocked"] .ws-cell__badge { background: var(--ws-warn-bg); color: var(--ws-warn-fg); }
+.ws-cell[data-ws-tone="failed"] .ws-cell__badge { background: var(--ws-danger-bg); color: var(--ws-danger-fg); }
 .ws-cell__body { position: relative; display: flex; flex: 1 1 0; min-width: 0; min-height: 0; }
 .ws-cell__mount { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-.ws-cell__state { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: .45rem; padding: .8rem 1rem; overflow: auto; background: rgb(8 16 24 / 92%); }
+.ws-cell__state { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; gap: .45rem; padding: .85rem 1.05rem; overflow: auto; background: var(--ws-overlay); }
 .ws-cell__state[hidden] { display: none; }
-.ws-cell__state-headline { margin: 0; font-size: 1rem; font-weight: 700; color: #eef8ff; overflow-wrap: anywhere; }
-.ws-cell__state-detail { margin: 0; max-width: 34rem; font-size: .85rem; line-height: 1.45; color: #b7cbe0; overflow-wrap: anywhere; }
-.ws-cell__state-code { margin: 0; font: 600 .72rem/1.4 ui-monospace, monospace; color: #7f98a6; overflow-wrap: anywhere; }
-.ws-cell[data-ws-tone="failed"] .ws-cell__state { border-left: 3px solid #e85d67; }
-.ws-cell[data-ws-tone="blocked"] .ws-cell__state { border-left: 3px solid #e8a85d; }
+.ws-cell__state-headline { margin: 0; font-size: 1rem; font-weight: 650; color: var(--ws-fg); overflow-wrap: anywhere; }
+.ws-cell__state-detail { margin: 0; max-width: 34rem; font-size: .85rem; line-height: 1.45; color: var(--ws-muted); overflow-wrap: anywhere; }
+.ws-cell__state-code { margin: 0; font: 600 .72rem/1.4 ui-monospace, monospace; color: var(--ws-muted); overflow-wrap: anywhere; }
+.ws-cell[data-ws-tone="failed"] .ws-cell__state { border-left: 3px solid var(--ws-danger-border); }
+.ws-cell[data-ws-tone="blocked"] .ws-cell__state { border-left: 3px solid var(--ws-warn-border); }
 .ws-cell__state-actions { display: flex; flex-wrap: wrap; gap: .5rem; }
 .ws-cell__state-actions[hidden] { display: none; }
-/* A live pane hides both of its state carriers — the overlay (so the terminal
- * stays visible) and the header badge (rule above) — so an inventory detail
- * gets its own notice. It is absolutely positioned inside the cell body: the
- * mount keeps its exact box, the terminal never refits, and presentation
- * spends no RESIZE. It takes no pointer input either: a status strip must
- * never swallow a click or a selection meant for the live terminal under it.
- *
- * It is also BOUNDED. Wrapping made it grow as the cell narrowed — measured at
- * up to three quarters of a small cell — which covers the key bar and the
- * composer of the very terminal it describes, and a status line that hides the
- * thing it is about is the same defect this notice exists to fix. One line, at
- * most a quarter of the cell body, clipped rather than wrapped; the sentence
- * itself stays reachable through the title and the accessible name, which no
- * width can truncate. Both limits are asserted by the layout gate. */
-.ws-cell__notice { position: absolute; right: 0; bottom: 0; left: 0; z-index: 9; display: flex; flex-wrap: nowrap; align-items: baseline; gap: .5rem; max-height: min(2rem, 25%); overflow: hidden; padding: .3rem .6rem; border-top: 1px solid #4a3a1c; border-left: 3px solid #e8a85d; background: rgb(29 26 18 / 94%); color: #ffe0b2; font-size: .78rem; line-height: 1.35; white-space: nowrap; pointer-events: none; }
+.ws-cell__notice { position: absolute; right: 0; bottom: 0; left: 0; z-index: 9; display: flex; flex-wrap: nowrap; align-items: baseline; gap: .5rem; max-height: min(2rem, 25%); overflow: hidden; padding: .3rem .6rem; border-top: 1px solid var(--ws-warn-border); border-left: 3px solid var(--ws-warn-border); background: var(--ws-warn-bg); color: var(--ws-warn-fg); font-size: .78rem; line-height: 1.35; white-space: nowrap; pointer-events: none; }
 .ws-cell__notice[hidden] { display: none; }
-.ws-cell__notice-badge { border-radius: 999px; padding: .05rem .45rem; background: #2c2f14; color: #f0e28e; font: 700 .68rem/1.4 ui-monospace, monospace; text-transform: uppercase; white-space: nowrap; }
+.ws-cell__notice-badge { border-radius: 999px; padding: .05rem .45rem; background: color-mix(in srgb, var(--ws-warn-border) 25%, var(--ws-warn-bg)); color: var(--ws-warn-fg); font: 700 .68rem/1.4 ui-monospace, monospace; text-transform: uppercase; white-space: nowrap; }
 .ws-cell__notice-detail { flex: 0 1 auto; margin: 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ws-cell__action { box-sizing: border-box; min-height: 32px; border: 1px solid #36566a; border-radius: .5rem; padding: .35rem .8rem; color: #eef8ff; background: #122533; font: inherit; font-size: .85rem; text-decoration: none; cursor: pointer; }
-.ws-cell__action:focus-visible { outline: 3px solid #66d4ff; outline-offset: 2px; }
+.ws-cell__action { box-sizing: border-box; min-height: 34px; border: 1px solid var(--ws-border-strong); border-radius: .5rem; padding: .35rem .8rem; color: var(--ws-fg); background: var(--ws-chrome); font: inherit; font-size: .85rem; text-decoration: none; cursor: pointer; }
+.ws-cell__action:hover { border-color: var(--ws-accent); }
+.ws-cell__action:focus-visible { outline: 3px solid var(--ws-accent); outline-offset: 2px; }
 
 /* Fine-pointer compaction folds the actual UnifiedTerminalPage toolbar over
- * the cell header. No clone or proxy is created: the same nodes, listeners,
- * enabled state, ARIA state and popover remain owned by the terminal page. */
+ * the cell header. On live panes, the folded toolbar owns the visible session
+ * chip, so the outer name/scope are visually clipped (while staying selectable
+ * in the DOM for selection-preservation and semantics). Non-live panes keep
+ * their full visible header text. */
 @media (pointer: fine), (pointer: none) {
-  .ws-cell__header { flex-wrap: nowrap; min-height: 2.75rem; padding-right: min(17.5rem, 72%); }
+  .ws-cell__header { flex-wrap: nowrap; min-height: 2.75rem; }
+  .ws-cell[data-ws-state="live"]:has(.persea-unified-toolbar) .ws-cell__header { padding-right: calc(100% - 1.1rem); }
   .ws-cell__name, .ws-cell__hint, .ws-cell__scope { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* The floating bar reserves the right of this row, so inside what is left the
-     name is what survives. The scope flexes from a zero basis: it takes only
-     the room the name and the hint leave, and it is the first to ellipsise. */
   .ws-cell__scope { flex: 1 1 0; }
+  .ws-cell[data-ws-state="live"]:has(.persea-unified-toolbar) .ws-cell__name,
+  .ws-cell[data-ws-state="live"]:has(.persea-unified-toolbar) .ws-cell__hint,
+  .ws-cell[data-ws-state="live"]:has(.persea-unified-toolbar) .ws-cell__scope {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .ws-cell:not([data-ws-state="live"]) .ws-cell__mount .persea-unified-toolbar {
+    visibility: hidden;
+    pointer-events: none;
+  }
   .ws-cell__mount, .ws-cell__mount .persea-unified-terminal { overflow: visible; }
   .ws-cell__mount .persea-unified-terminal { position: relative; grid-template-rows: 0 auto auto minmax(0, 1fr) auto auto; }
   .ws-cell__mount .persea-unified-toolbar {
@@ -95,44 +171,18 @@
     box-sizing: border-box; width: min(17.5rem, 72%); height: 2.75rem; min-height: 0;
     gap: .25rem; padding: .1rem .2rem; border: 0; background: transparent;
   }
-  /* With six panes on screen the one thing a pane must say is which session it
-     is showing, so the tag takes the geometry readout's slot. The figure the
-     readout printed is the tag's own popover Size row, and every workspace
-     probe that reads the readout reads its textContent, which survives
-     display:none. The name ellipsises; the alias is dropped. */
   .ws-cell__mount .persea-unified-geometry { display: none; }
-  /* The one-time fit nudge is a sentence, and the row below is budgeted to the
-     pixel. It belongs to the full page; a cell drops it rather than let it push
-     a control on to the tag. */
   .ws-cell__mount .persea-unified-toolbar button.persea-unified-fit-hint { display: none; }
-  /* The toolbar is its own size container, and the attachment stylesheet puts a
-     319px floor under the tag because a 280px PAGE cannot hold it without
-     scrolling sideways. A cell's bar is not a page: it has dropped the readout
-     and the nudge, and it is sized to hold the rest. Measured at 17.5rem: five
-     controls (2 x 44px + 3 x 36px) plus four .2rem gaps is 208.8px, the toolbar
-     gap is 4px and a four-character tag is 54.6px, against a 273.6px content
-     box. The floor is lifted only above a 16rem (256px) box, so a split narrow
-     enough to break that budget hides the tag instead of letting the control
-     row, which comes later in document order, paint over it. The identity also
-     takes its own stacking context, so it cannot be overpainted at all. */
   @container (min-width: 16rem) {
     .ws-cell__mount .persea-unified-identity { display: flex; position: relative; z-index: 1; }
   }
-  /* In this row the tag is the item that yields. The controls carry the pane's
-     actions and keep their whole content box; the tag shrinks and ellipsises
-     into whatever the row has left, down to the dot plus a character or two.
-     Neither can be pushed out of the bar, which is what the F1 probe reads. */
   .ws-cell__mount .persea-unified-toolbar button.persea-unified-tag { flex: 0 1 auto; min-width: 2.5rem; max-width: 7rem; }
   .ws-cell__mount .persea-unified-tag__alias { display: none; }
   .ws-cell__mount .persea-unified-toolbar__controls { flex: 0 0 auto; justify-content: flex-end; gap: .2rem; }
-  /* The ↕ and ✎ boxes stay at 44px, which is what the workspace touch-target test
-     measures. ⇄, ☰ and ⋯ are single glyphs behind a fine pointer, where the
-     44px touch law does not apply, and the 8px each gives back is what buys the
-     tag its place in the row. */
   .ws-cell__mount .persea-unified-toolbar button { min-width: 36px; min-height: 44px; padding: .1rem .3rem; }
   .ws-cell__mount .persea-unified-toolbar button.persea-unified-fit-height,
   .ws-cell__mount .persea-unified-toolbar button.persea-unified-composer-toggle { min-width: 44px; }
-  .ws-cell__mount .persea-unified-toolbar__secondary { display: none; position: absolute; top: 100%; right: 0; z-index: 12; max-width: min(28rem, calc(100vw - 2rem)); padding: .45rem; flex-wrap: wrap; border: 1px solid #343844; border-radius: .4rem; background: #1b1e25; box-shadow: 0 10px 28px rgb(0 0 0 / 45%); }
+  .ws-cell__mount .persea-unified-toolbar__secondary { display: none; position: absolute; top: 100%; right: 0; z-index: 12; max-width: min(28rem, calc(100vw - 2rem)); padding: .45rem; flex-wrap: wrap; border: 1px solid var(--ws-border-strong); border-radius: .4rem; background: var(--ws-chrome); box-shadow: 0 10px 28px rgb(0 0 0 / 45%); }
   .ws-cell__mount .persea-unified-toolbar__secondary[data-open="true"] { display: flex; }
   .ws-cell__mount .persea-unified-toolbar button.persea-unified-toolbar__more { display: inline-block; }
   .ws-cell:focus-within { z-index: 7; overflow: visible; }
@@ -140,29 +190,36 @@
 
 /* Honest phone-class state: name, notice, one link per leaf,
  * zero cells, zero transports. */
-.ws-phone { display: flex; flex-direction: column; gap: .8rem; padding: 1rem; color: #e8f0f5; background: #081018; }
-.ws-phone__eyebrow { margin: 0; font: 700 .7rem/1.3 ui-monospace, monospace; letter-spacing: .08em; color: #7f98a6; text-transform: uppercase; }
+.ws-phone { display: flex; flex-direction: column; gap: .85rem; max-width: 44rem; margin: 0 auto; padding: 1.25rem 1rem; color: var(--ws-fg); background: var(--ws-bg); }
+.ws-phone__eyebrow { margin: 0; font: 700 .7rem/1.3 ui-monospace, monospace; letter-spacing: .08em; color: var(--ws-muted); text-transform: uppercase; }
 .ws-phone__title { margin: 0; font-size: 1.4rem; overflow-wrap: anywhere; }
-.ws-phone__notice { margin: 0; padding: .6rem .8rem; border-left: 3px solid #e8a85d; background: #1d1a12; color: #ffe0b2; line-height: 1.45; }
+.ws-phone__notice { margin: 0; padding: .65rem .85rem; border-left: 3px solid var(--ws-warn-border); border-radius: .4rem; background: var(--ws-warn-bg); color: var(--ws-warn-fg); line-height: 1.45; }
 .ws-phone__leaves { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
-.ws-phone__leaf { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .8rem; min-height: 44px; border: 1px solid #27485c; border-radius: .65rem; padding: .4rem .7rem; background: #0d1b25; }
-.ws-phone__leaf-name { font-weight: 700; overflow-wrap: anywhere; }
-.ws-phone__leaf-scope { color: #7f98a6; font: 600 .7rem/1.3 ui-monospace, monospace; }
-.ws-phone__leaf-state { margin-left: auto; color: #b9d8e8; font-size: .8rem; }
-.ws-phone__leaf-link { box-sizing: border-box; display: inline-flex; align-items: center; min-height: 44px; border: 1px solid #36566a; border-radius: .55rem; padding: .5rem .9rem; color: #eef8ff; background: #122533; text-decoration: none; }
-.ws-phone__leaf-link:focus-visible, .ws-phone__dashboard:focus-visible { outline: 3px solid #66d4ff; outline-offset: 2px; }
-.ws-phone__dashboard { align-self: flex-start; color: #9fd4ff; }
+.ws-phone__leaf { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .8rem; min-height: 44px; border: 1px solid var(--ws-border); border-radius: .65rem; padding: .45rem .75rem; background: var(--ws-surface); }
+.ws-phone__leaf-name { font-weight: 650; overflow-wrap: anywhere; }
+.ws-phone__leaf-scope { color: var(--ws-muted); font: 600 .7rem/1.3 ui-monospace, monospace; }
+.ws-phone__leaf-state { margin-left: auto; color: var(--ws-muted); font-size: .8rem; }
+.ws-phone__leaf-link { box-sizing: border-box; display: inline-flex; align-items: center; min-height: 44px; border: 1px solid var(--ws-border-strong); border-radius: .55rem; padding: .5rem .9rem; color: var(--ws-fg); background: var(--ws-chrome); text-decoration: none; }
+.ws-phone__leaf-link:focus-visible, .ws-phone__dashboard:focus-visible { outline: 3px solid var(--ws-accent); outline-offset: 2px; }
+.ws-phone__dashboard { align-self: flex-start; color: var(--ws-accent); }
 
 /* Workspace-level failure: full surface, visible copy, a way back. */
-.ws-unavailable { display: flex; flex-direction: column; gap: .6rem; padding: 1.2rem; color: #e8f0f5; background: #081018; }
+.ws-unavailable { display: flex; flex-direction: column; gap: .6rem; max-width: 44rem; margin: 0 auto; padding: 1.5rem 1rem; color: var(--ws-fg); background: var(--ws-bg); }
 .ws-unavailable__headline { margin: 0; font-size: 1.3rem; }
-.ws-unavailable__detail { margin: 0; max-width: 34rem; line-height: 1.45; color: #b7cbe0; }
-.ws-unavailable__code { margin: 0; font: 600 .72rem/1.4 ui-monospace, monospace; color: #7f98a6; }
-.ws-unavailable__dashboard { align-self: flex-start; color: #9fd4ff; }
+.ws-unavailable__detail { margin: 0; max-width: 34rem; line-height: 1.45; color: var(--ws-muted); }
+.ws-unavailable__code { margin: 0; font: 600 .72rem/1.4 ui-monospace, monospace; color: var(--ws-muted); }
+.ws-unavailable__dashboard { align-self: flex-start; color: var(--ws-accent); }
 
 @media (pointer: coarse) {
   .ws-divider--row { margin: 0 -18px; padding: 0 18px; }
   .ws-divider--column { margin: -18px 0; padding: 18px 0; }
+  .ws-root[data-ws-editing="false"] .ws-divider--row,
+  .ws-root[data-ws-editing="false"] .ws-divider--column,
+  .ws-divider[data-ws-disabled="true"].ws-divider--row,
+  .ws-divider[data-ws-disabled="true"].ws-divider--column {
+    margin: 0;
+    padding: 0;
+  }
   .ws-divider__grip { visibility: visible; }
   .ws-divider__nudge { min-width: 44px; min-height: 44px; }
   .ws-cell__action { min-width: 44px; min-height: 44px; }

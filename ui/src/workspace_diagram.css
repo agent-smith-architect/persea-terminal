@@ -1,0 +1,83 @@
+/* Miniature split-tree schematic — strictly class-based (zero inline style
+ * attributes), reusing integer weight classes (.ws-w-1 .. .ws-w-100). */
+
+.ws-mini {
+  box-sizing: border-box;
+  display: flex;
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  gap: 2px;
+  padding: 3px;
+  border: 1px solid var(--ws-mini-border, color-mix(in srgb, currentColor 24%, transparent));
+  border-radius: .45rem;
+  background: var(--ws-mini-bg, color-mix(in srgb, currentColor 5%, transparent));
+  overflow: hidden;
+}
+.ws-mini--decorative { pointer-events: none; }
+.ws-mini__split {
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  gap: 2px;
+}
+.ws-mini__split--row { flex-direction: row; }
+.ws-mini__split--column { flex-direction: column; }
+.ws-mini__track {
+  min-width: 0;
+  min-height: 0;
+  flex-shrink: 1;
+  flex-basis: 0;
+  display: flex;
+}
+.ws-mini__leaf {
+  box-sizing: border-box;
+  display: flex;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  align-items: center;
+  justify-content: center;
+  padding: 2px 4px;
+  border: 1px solid var(--ws-mini-cell-border, color-mix(in srgb, currentColor 22%, transparent));
+  border-radius: .25rem;
+  background: var(--ws-mini-cell-bg, color-mix(in srgb, currentColor 9%, transparent));
+  color: inherit;
+  font: 600 .65rem/1.15 ui-monospace, SFMono-Regular, Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-mini__leaf-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-mini__leaf--interactive {
+  appearance: none;
+  cursor: pointer;
+  min-height: 28px;
+}
+.ws-mini__leaf--interactive:hover {
+  border-color: var(--ws-mini-accent, #8fc7ff);
+}
+.ws-mini__leaf--interactive:focus-visible {
+  outline: 2px solid var(--ws-mini-accent, #8fc7ff);
+  outline-offset: 1px;
+}
+.ws-mini__leaf[data-ws-selected="true"] {
+  border-color: var(--ws-mini-accent, #8fc7ff);
+  background: color-mix(in srgb, var(--ws-mini-accent, #8fc7ff) 20%, transparent);
+}
+.ws-mini__leaf[data-ws-staged="added"] {
+  border-style: dashed;
+  border-color: var(--ws-mini-ok, #6cd69a);
+}
+.ws-mini__leaf[data-ws-availability="missing"],
+.ws-mini__leaf[data-ws-availability="blocked"] {
+  border-style: dashed;
+  opacity: .72;
+}

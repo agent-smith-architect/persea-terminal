@@ -17,8 +17,8 @@ import "./workspace.css";
 import { createFailureMessage, unifiedBlockedMessage, type UnifiedSessionProjection } from "./dashboard";
 import { UNIFIED_TAKEOVER_REASONS, boundedUnifiedReason, classifyUnifiedClose, unifiedCloseNotice, type UnifiedCloseClass, type UnifiedInventoryDetail } from "./unified_close_policy";
 import {
-  DIVIDER_NUDGE_STEP, dragDivider, leafEntries, normalizeWeights, nudgeDivider, pathLabel, validateWorkspaceTree, workspaceRefusalMessage,
-  type NodePath, type OnMissing, type WorkspaceLeaf, type WorkspaceNode, type WorkspaceRefusal, type WorkspaceSplit,
+  DIVIDER_NUDGE_STEP, dragDivider, leafEntries, normalizeWeights, nudgeDivider, pathLabel, splitChildSignatures, validateWorkspaceTree, workspaceRefusalMessage,
+  type NodePath, type OnMissing, type SplitDirection, type WorkspaceLeaf, type WorkspaceNode, type WorkspaceRefusal, type WorkspaceSplit,
 } from "./workspace_model";
 
 // --- Per-pane state. Resolution states are workspace-owned;
@@ -214,8 +214,15 @@ export type WorkspaceCell = Readonly<{
   state(): PaneState;
 }>;
 
+export type WorkspaceWeightChange = Readonly<{
+  path: NodePath;
+  direction: SplitDirection;
+  childSignatures: readonly string[];
+  weights: readonly number[];
+}>;
+
 export type WorkspaceLayoutHandlers = Readonly<{
-  onTreeChange?: (tree: WorkspaceNode, cause: "divider_drag" | "divider_nudge" | "divider_key") => void;
+  onTreeChange?: (tree: WorkspaceNode, cause: "divider_drag" | "divider_nudge" | "divider_key", change?: WorkspaceWeightChange) => void;
   onAffordance?: (cell: WorkspaceCell, affordance: PaneAffordance) => void;
   onCellRetired?: (cell: WorkspaceCell) => void;
 }>;
@@ -349,6 +356,8 @@ export class WorkspaceLayoutView {
   // The presentation renderer stays interactive by default for its standalone
   // harness/API. WorkspacePage explicitly seals it outside workspace edit mode.
   private editing = true;
+  private disabledSplits: ReadonlySet<string> = new Set();
+  private zoomed?: string;
   private readonly handlers: WorkspaceLayoutHandlers;
 
   constructor(private readonly host: HTMLElement, tree: WorkspaceNode, handlers: WorkspaceLayoutHandlers = {}) {
@@ -356,6 +365,7 @@ export class WorkspaceLayoutView {
     this.current = tree;
     this.root.setAttribute("role", "group");
     this.root.setAttribute("aria-label", "Workspace panes");
+    this.root.dataset.wsEditing = "true";
     host.replaceChildren(this.root);
     this.update(tree);
   }
@@ -363,10 +373,75 @@ export class WorkspaceLayoutView {
   tree(): WorkspaceNode { return this.current; }
   cell(key: string): WorkspaceCell | undefined { return this.cells.get(key); }
   allCells(): readonly WorkspaceCell[] { return [...this.cells.values()]; }
+  zoomedKey(): string | undefined { return this.zoomed; }
+
   setEditing(editing: boolean): void {
     this.editing = editing;
+    if (editing && this.zoomed !== undefined) this.setZoomed(undefined);
+    if (!editing) this.disabledSplits = new Set();
     this.root.dataset.wsEditing = editing ? "true" : "false";
-    for (const button of Array.from(this.root.querySelectorAll<HTMLButtonElement>(".ws-divider__nudge"))) button.disabled = !editing;
+    this.syncDividers();
+  }
+
+  // Disables specific live split dividers whose structure diverged from a
+  // staged draft so dragging an ambiguous seam is impossible.
+  setDisabledSplits(paths: ReadonlySet<string>): void {
+    this.disabledSplits = new Set(paths);
+    this.syncDividers();
+  }
+
+  // Presentation-only maximize: hides sibling tracks and dividers with static
+  // classes while keeping every mounted cell, socket, and toolbar node intact.
+  setZoomed(key: string | undefined): boolean {
+    const next = key !== undefined && this.cells.size > 1 && this.cells.has(key) ? key : undefined;
+    if (this.zoomed === next) {
+      this.applyZoom();
+      return this.zoomed !== undefined;
+    }
+    this.zoomed = next;
+    this.applyZoom();
+    return this.zoomed !== undefined;
+  }
+
+  private applyZoom(): void {
+    for (const track of Array.from(this.root.querySelectorAll<HTMLElement>(".ws-zoom-hidden"))) {
+      track.classList.remove("ws-zoom-hidden");
+    }
+    for (const cell of this.cells.values()) delete cell.element.dataset.wsZoomed;
+    const activeKey = this.zoomed;
+    const target = activeKey !== undefined && this.cells.size > 1 ? this.cells.get(activeKey) : undefined;
+    if (!target) {
+      this.zoomed = undefined;
+      delete this.root.dataset.wsZoomed;
+      return;
+    }
+    this.root.dataset.wsZoomed = "true";
+    target.element.dataset.wsZoomed = "true";
+    let cursor: HTMLElement | null = target.element;
+    while (cursor && cursor !== this.root) {
+      const parent: HTMLElement | null = cursor.parentElement;
+      if (parent) {
+        for (const sibling of Array.from(parent.children)) {
+          if (sibling instanceof HTMLElement && sibling !== cursor && sibling.classList.contains("ws-track")) {
+            sibling.classList.add("ws-zoom-hidden");
+          }
+        }
+      }
+      cursor = parent;
+    }
+  }
+
+  private syncDividers(): void {
+    for (const divider of Array.from(this.root.querySelectorAll<HTMLElement>(".ws-divider"))) {
+      const splitPath = divider.dataset.wsSplit ?? "";
+      const interactive = this.editing && !this.disabledSplits.has(splitPath);
+      divider.dataset.wsDisabled = interactive ? "false" : "true";
+      divider.setAttribute("role", interactive ? "separator" : "presentation");
+      divider.tabIndex = interactive ? 0 : -1;
+      for (const button of Array.from(divider.querySelectorAll<HTMLButtonElement>(".ws-divider__nudge"))) {
+        button.disabled = !interactive;
+      }
+    }
   }
 
   // Keyed reconciliation: a cell whose leaf survives keeps its element (and
@@ -382,8 +457,13 @@ export class WorkspaceLayoutView {
       cell.element.remove();
       this.cells.delete(key);
     }
+    if (this.zoomed !== undefined && (!this.cells.has(this.zoomed) || this.cells.size <= 1)) {
+      this.zoomed = undefined;
+    }
     this.splits.clear();
     this.root.replaceChildren(this.build(tree, []));
+    this.syncDividers();
+    this.applyZoom();
   }
 
   destroy(): void {
@@ -430,19 +510,22 @@ export class WorkspaceLayoutView {
 
   private divider(node: WorkspaceSplit, path: NodePath, index: number): HTMLElement {
     const divider = element("div", `ws-divider ws-divider--${node.direction}`);
-    divider.setAttribute("role", "separator");
+    const splitPath = pathLabel(path);
+    const interactive = this.editing && !this.disabledSplits.has(splitPath);
+    divider.setAttribute("role", interactive ? "separator" : "presentation");
     divider.setAttribute("aria-orientation", node.direction === "row" ? "vertical" : "horizontal");
     divider.setAttribute("aria-valuemin", "1");
     divider.setAttribute("aria-valuemax", "99");
     divider.setAttribute("aria-label", `Resize panes ${index + 1} and ${index + 2}`);
-    divider.tabIndex = 0;
-    divider.dataset.wsSplit = pathLabel(path);
+    divider.tabIndex = interactive ? 0 : -1;
+    divider.dataset.wsSplit = splitPath;
     divider.dataset.wsDivider = String(index);
+    divider.dataset.wsDisabled = interactive ? "false" : "true";
     const grip = element("div", "ws-divider__grip");
     const shrink = element("button", "ws-divider__nudge", node.direction === "row" ? "◀" : "▲");
     const grow = element("button", "ws-divider__nudge", node.direction === "row" ? "▶" : "▼");
     shrink.type = "button"; grow.type = "button";
-    shrink.disabled = !this.editing; grow.disabled = !this.editing;
+    shrink.disabled = !interactive; grow.disabled = !interactive;
     shrink.setAttribute("aria-label", `Shrink pane ${index + 1}`);
     grow.setAttribute("aria-label", `Grow pane ${index + 1}`);
     shrink.dataset.wsNudge = "-1"; grow.dataset.wsNudge = "1";
@@ -455,6 +538,7 @@ export class WorkspaceLayoutView {
     divider.addEventListener("pointerup", (event) => this.endDrag(event, divider));
     divider.addEventListener("pointercancel", (event) => this.endDrag(event, divider));
     divider.addEventListener("keydown", (event) => {
+      if (!this.editing || this.disabledSplits.has(splitPath)) return;
       const backward = node.direction === "row" ? "ArrowLeft" : "ArrowUp";
       const forward = node.direction === "row" ? "ArrowRight" : "ArrowDown";
       if (event.key !== backward && event.key !== forward) return;
@@ -465,7 +549,7 @@ export class WorkspaceLayoutView {
   }
 
   private startDrag(event: PointerEvent, divider: HTMLElement, path: NodePath, index: number): void {
-    if (!this.editing || event.button !== 0 || this.drag !== undefined) return;
+    if (!this.editing || this.disabledSplits.has(pathLabel(path)) || event.button !== 0 || this.drag !== undefined) return;
     if (event.target instanceof HTMLElement && event.target.closest(".ws-divider__nudge")) return;
     const container = this.splits.get(pathLabel(path));
     if (!container) return;
@@ -504,7 +588,7 @@ export class WorkspaceLayoutView {
   }
 
   private nudge(path: NodePath, index: number, delta: number, cause: "divider_nudge" | "divider_key"): void {
-    if (!this.editing) return;
+    if (!this.editing || this.disabledSplits.has(pathLabel(path))) return;
     const next = nudgeDivider(this.current, path, index, delta);
     if (!next.ok) return;
     this.commit(next.value, path, cause);
@@ -523,7 +607,15 @@ export class WorkspaceLayoutView {
     const split = this.findSplit(path);
     const container = this.splits.get(pathLabel(path));
     if (split && container) this.applyWeights(container, split);
-    this.handlers.onTreeChange?.(tree, cause);
+    const change: WorkspaceWeightChange | undefined = split
+      ? Object.freeze({
+        path: Object.freeze([...path]),
+        direction: split.direction,
+        childSignatures: splitChildSignatures(split),
+        weights: Object.freeze([...split.weights]),
+      })
+      : undefined;
+    this.handlers.onTreeChange?.(tree, cause, change);
   }
 }
 

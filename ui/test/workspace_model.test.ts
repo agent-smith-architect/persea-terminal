@@ -9,7 +9,7 @@ const path = require("node:path");
 import {
   DIVIDER_NUDGE_STEP, PANE_CAP, SPLIT_MAX_CHILDREN, WEIGHT_MAX, WEIGHT_MIN, WEIGHT_SCALE, WORKSPACE_STORE_VERSION,
   addLeaf, dragDivider, leaf, leafCount, leafEntries, nodeAt, normalizeWeights, nudgeDivider, parseWorkspace, parseWorkspaceTree,
-  removeLeaf, serializeWorkspace, serializeWorkspaceTree, sessionLabelProblem, setLeafAliasHint, setWeights, split, splitLeaf, unsplit, validateWorkspaceTree,
+  applySplitWeightsByMatch, arrangeWithPreset, availablePresetsForCount, removeLeaf, replaceLeafSession, serializeWorkspace, serializeWorkspaceTree, sessionLabelProblem, setLeafAliasHint, setWeights, split, splitChildSignatures, splitLeaf, swapLeaves, unsplit, validateWorkspaceTree,
   workspaceRefusalMessage,
   type SessionSelector, type WorkspaceNode, type WorkspaceRefusal, type WorkspaceResult,
 } from "../src/workspace_model";
@@ -352,6 +352,72 @@ const six: WorkspaceNode = split("row", [
   }
   // Class-based styling only: the renderer never writes a style attribute.
   assert.ok(!/\.style\b/.test(stripComments(fs.readFileSync(path.join(src, "workspace_layout.ts"), "utf8"))), "workspace_layout.ts must not touch element.style");
+}
+
+
+// --- applySplitWeightsByMatch: preserves staged draft aliases/edits and refuses diverged splits ---
+{
+  const base = split("row", [leaf(sel("a"), "offer"), leaf(sel("b"), "create")], [50, 50]);
+  const sigs = splitChildSignatures(base);
+  const aliased = expectOk(setLeafAliasHint(base, [0], "Primary"), "stage alias");
+  const merged = expectOk(applySplitWeightsByMatch(aliased, [], "row", sigs, [70, 30]), "merge matching weights into aliased draft");
+  if (merged.kind !== "split") throw new Error("expected split");
+  assert.deepEqual(merged.weights, [70, 30]);
+  assert.equal(merged.children[0]!.kind === "leaf" && merged.children[0]!.aliasHint, "Primary");
+  assert.equal(merged.children[1]!.kind === "leaf" && merged.children[1]!.onMissing, "create");
+
+  // Once a structural edit changes children or direction, live seam match fails closed.
+  const withThird = expectOk(addLeaf(aliased, leaf(sel("c")), "row"), "add third leaf");
+  expectRefusal(applySplitWeightsByMatch(withThird, [], "row", sigs, [60, 40]), "path_not_found", "added third child");
+  const swapped = expectOk(swapLeaves(aliased, [0], [1]), "swap leaves");
+  expectRefusal(applySplitWeightsByMatch(swapped, [], "row", sigs, [60, 40]), "path_not_found", "swapped children");
+  const flipped = split("column", [leaf(sel("a")), leaf(sel("b"))], [50, 50]);
+  expectRefusal(applySplitWeightsByMatch(flipped, [], "row", sigs, [60, 40]), "path_not_found", "flipped direction");
+}
+
+// --- swapLeaves & replaceLeafSession ---
+{
+  const nested = split("row", [
+    leaf(sel("a"), "offer", "Left"),
+    split("column", [leaf(sel("b"), "create", "Top"), leaf(sel("c"), "skip", "Bottom")], [40, 60]),
+  ], [55, 45]);
+  const swapped = expectOk(swapLeaves(nested, [0], [1, 1]), "swap across split levels");
+  assert.deepEqual(leafEntries(swapped).map((e) => [e.leaf.session.name, e.leaf.aliasHint, e.leaf.onMissing]), [
+    ["c", "Bottom", "skip"],
+    ["b", "Top", "create"],
+    ["a", "Left", "offer"],
+  ]);
+  assert.equal(swapped.kind === "split" && swapped.weights[0], 55);
+  assert.equal(swapped.kind === "split" && swapped.children[1]!.kind === "split" && swapped.children[1]!.weights[0], 40);
+
+  const replaced = expectOk(replaceLeafSession(nested, [1, 0], sel("d")), "replace leaf session");
+  assert.deepEqual(leafEntries(replaced).map((e) => [e.leaf.session.name, e.leaf.aliasHint, e.leaf.onMissing]), [
+    ["a", "Left", "offer"],
+    ["d", "Top", "create"],
+    ["c", "Bottom", "skip"],
+  ]);
+  expectRefusal(replaceLeafSession(nested, [1, 0], sel("a")), "duplicate_leaf", "replace duplicate");
+}
+
+// --- arrangeWithPreset: preserves whole leaves and stays within cap/arity/depth for 1..6 ---
+{
+  const all = ["a", "b", "c", "d", "e", "f"].map((name, idx) =>
+    leaf(sel(name), idx % 3 === 0 ? "offer" : idx % 3 === 1 ? "create" : "skip", `Label ${name}`),
+  );
+  for (let count = 1; count <= 6; count += 1) {
+    const subset = all.slice(0, count);
+    const presets = count === 1 ? (["grid"] as const) : availablePresetsForCount(count);
+    assert.ok(count === 1 || presets.length === 2, `count=${count} should offer 2 contextual presets`);
+    for (const preset of presets) {
+      const arranged = expectOk(arrangeWithPreset(subset, preset), `count=${count} preset=${preset}`);
+      const leaves = leafEntries(arranged);
+      assert.equal(leaves.length, count);
+      assert.deepEqual(
+        leaves.map((e) => [e.leaf.session.name, e.leaf.aliasHint, e.leaf.onMissing]),
+        subset.map((l) => [l.session.name, l.aliasHint, l.onMissing]),
+      );
+    }
+  }
 }
 
 process.stdout.write("workspace_model.test: PASS\n");
