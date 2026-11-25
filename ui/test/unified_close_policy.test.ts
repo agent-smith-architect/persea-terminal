@@ -241,6 +241,7 @@ assert.equal(unifiedCloseNotice("observe_mode").headline, "This view is read-onl
 assert.equal(unifiedCloseNotice("bad_liveness").headline, "The connection broke protocol");
 assert.equal(unifiedCloseNotice("bad_flow").headline, "The connection broke protocol");
 assert.equal(unifiedCloseNotice("unified_unavailable").headline, "Unified terminal unavailable");
+assert.equal(unifiedCloseNotice("broker_protocol").headline, "The session host broke protocol");
 assert.equal(unifiedCloseNotice("never_seen_before").headline, "This terminal is unavailable");
 
 // Reopen-flow terminal outcomes carry reviewed copy: the identity re-mint dead
