@@ -185,6 +185,7 @@ const NOTICES: Readonly<Record<string, UnifiedCloseNotice>> = Object.freeze({
   unified_unavailable: Object.freeze({ headline: "Unified terminal unavailable", detail: "This session cannot be opened through the unified terminal right now. The dashboard shows what is possible." }),
   stale_target: Object.freeze({ headline: "This session moved on", detail: "The session changed or ended while attaching. Pick it again from the dashboard." }),
   attach_failed: Object.freeze({ headline: "The session could not be attached", detail: "The session host refused this attachment. Try again from the dashboard." }),
+  broker_protocol: Object.freeze({ headline: "The session host broke protocol", detail: "The session host sent an unexpected attachment message. The session is still running; reopen it from the dashboard." }),
   lease_unavailable: Object.freeze({ headline: "Control could not be taken", detail: "This session could not be locked for typing. Try again from the dashboard." }),
   lease_lost: Object.freeze({ headline: "Control moved elsewhere", detail: "Another window took control of this session." }),
   bad_liveness: Object.freeze({ headline: "The connection broke protocol", detail: "This page sent a liveness message the session host could not read. Reopen the session from the dashboard." }),

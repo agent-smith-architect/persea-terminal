@@ -4,13 +4,17 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
+	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"persea-terminal/internal/attachmentwire"
+	"persea-terminal/internal/proto"
 	"persea-terminal/internal/terminal"
 )
 
@@ -108,5 +112,75 @@ func TestBinaryAttachmentHardProtocolBump(t *testing.T) {
 		if _, ok := parseWSAuthority(request); ok != (version == "persea-terminal.v3") {
 			t.Fatalf("page protocol %s acceptance=%v", version, ok)
 		}
+	}
+}
+
+func TestBinaryAttachmentFrontDoorPrePrepareOrder(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		send     func(net.Conn)
+		wantCode string
+	}{
+		{
+			name: "end_before_prepare_rejected_as_broker_protocol",
+			send: func(c net.Conn) {
+				payload, err := attachmentwire.Encode(terminal.Frame{Version: 1, Type: terminal.FrameEnd, Source: integrationSource, Epoch: 1, Reason: "fault"}, attachmentwire.ServerToBrowser)
+				if err == nil {
+					_ = proto.WriteFrame(c, proto.FrameAttachment, payload)
+				}
+			},
+			wantCode: "broker_protocol",
+		},
+		{
+			name: "control_error_after_attach_ok_delivers_attach_failed",
+			send: func(c net.Conn) {
+				_ = writeControl(c, proto.Control{Type: "error", Code: "attach_failed"})
+			},
+			wantCode: "attach_failed",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir, err := os.MkdirTemp("", "fd-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = os.RemoveAll(dir) })
+			sock := filepath.Join(dir, "b.sock")
+			ln, err := net.Listen("unix", sock)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = ln.Close() })
+			go func() {
+				c, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				defer c.Close()
+				if _, err := proto.ReadFrame(c); err != nil {
+					return
+				}
+				_ = writeControl(c, proto.Control{Type: "hello_ok", V: 1})
+				if _, err := proto.ReadFrame(c); err != nil {
+					return
+				}
+				_ = writeControl(c, proto.Control{Type: "attach_ok", Cols: 80, Rows: 24, InputMax: terminal.MaxInputBytes})
+				tc.send(c)
+				_, _ = proto.ReadFrame(c)
+			}()
+			front, addr := startFrontHTTP(t, sock)
+			handle, err := front.handles.mint(flowAuthority("pre-prepare-" + tc.name))
+			if err != nil {
+				t.Fatal(err)
+			}
+			ws := dialTerminalWS(t, front, addr, handle, "observe")
+			defer ws.Close()
+			if reason := readWSCloseReason(t, ws); reason != tc.wantCode {
+				t.Fatalf("close=%q want %q", reason, tc.wantCode)
+			}
+			if _, err := front.bindings.resolve(front.cfg.Ingress.OperatorLogin, integrationSource); err == nil {
+				t.Fatalf("source binding leaked on %s", tc.name)
+			}
+		})
 	}
 }

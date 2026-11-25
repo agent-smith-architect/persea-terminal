@@ -53,9 +53,11 @@ type unifiedAttachmentFrameWriter struct {
 	downstream *attachmentFrameWriter
 	provider   *UnifiedDevPaneEffects
 	session    string
-	epoch      *terminal.Epoch
-	prepared   bool
-	live       bool
+	epoch            *terminal.Epoch
+	prepared         bool
+	wirePrepared     bool
+	onInitialFailure func(string)
+	live             bool
 	closing    bool
 	source     string
 	epochID    uint64
@@ -254,9 +256,36 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 	}
 	writer.mu.Lock()
 	verdictClosed := false
+	initialFailCode := ""
+	transportBroken := false
 	defer func() {
+		var cancel func()
+		if initialFailCode != "" || transportBroken || (resultErr != nil && writer.tail != nil) {
+			if initialFailCode != "" || transportBroken {
+				writer.closing = true
+				writer.settleResizeLocked(writer.resize, terminal.ErrClosed)
+			}
+			if writer.tail != nil {
+				writer.releaseSnapshotLocked()
+				cancel = writer.cancel
+				writer.cancel = nil
+			}
+		}
 		writer.mu.Unlock()
+		if cancel != nil {
+			cancel()
+		}
 		if verdictClosed {
+			writer.finish()
+		} else if initialFailCode != "" {
+			if writer.onInitialFailure != nil {
+				writer.onInitialFailure(initialFailCode)
+			}
+			if writer.downstream != nil && writer.downstream.wire != nil {
+				_ = writer.downstream.wire.control(proto.Control{Type: "error", Code: initialFailCode})
+			}
+			writer.finish()
+		} else if transportBroken {
 			writer.finish()
 		}
 	}()
@@ -272,21 +301,15 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 		}
 		return false
 	}
-	defer func() {
-		if resultErr != nil && writer.tail != nil {
-			writer.releaseSnapshotLocked()
-			if writer.cancel != nil {
-				writer.cancel()
-				writer.cancel = nil
-			}
-		}
-	}()
 	switch frame.Type {
 	case terminal.FrameEnd:
 		if writer.closing {
 			return nil
 		}
 		writer.settleResizeLocked(writer.resize, terminal.ErrClosed)
+		if !writer.wirePrepared {
+			return nil
+		}
 		return writer.downstream.WriteFrame(ctx, raw)
 	case terminal.FramePrepare:
 		if writer.prepared {
@@ -312,8 +335,12 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 			}()
 			return nil
 		}
+		if writer.closing {
+			return terminal.ErrClosed
+		}
 		opening, err := writer.provider.openStream(writer.session, writer.lease, true, writer.resume)
 		if err != nil {
+			initialFailCode = "attach_failed"
 			return err
 		}
 		events, tail := opening.events, opening.tail
@@ -359,9 +386,17 @@ func (writer *unifiedAttachmentFrameWriter) WriteFrame(ctx context.Context, raw 
 		frame.Truncated = false
 		encoded, err := attachmentwire.Encode(frame, attachmentwire.ServerToBrowser)
 		if err != nil {
+			if !checkVerdict() && !writer.closing {
+				initialFailCode = "attach_failed"
+			}
 			return err
 		}
-		return writer.downstream.wire.frame(proto.FrameAttachment, encoded)
+		if err := writer.downstream.wire.frame(proto.FrameAttachment, encoded); err != nil {
+			transportBroken = true
+			return err
+		}
+		writer.wirePrepared = true
+		return nil
 	case terminal.FrameLive:
 		return nil
 	case terminal.FrameCommit:
@@ -593,6 +628,34 @@ func (writer *unifiedAttachmentFrameWriter) watchVerdict(tail *unifiedDevSubscri
 	case <-grace.C:
 	}
 	brokerLogf("component=broker event=subscriber_close_cut reason=%q limit=%q session=%q epoch=%d grace=%s", string(tail.closeReason()), string(tail.closeLimit()), writer.session, writer.epochID, unifiedSubscriberCloseGrace)
+	writer.finish()
+}
+
+// failBeforePrepare ends a unified attachment that failed before its initial
+// PREPARE frame was written downstream, sending at most one fatal control error
+// and unblocking the attachment loop instead of letting an early END violate
+// the front door's PREPARE-first protocol.
+func (writer *unifiedAttachmentFrameWriter) failBeforePrepare(code string) {
+	writer.mu.Lock()
+	if writer.closing || writer.wirePrepared {
+		writer.mu.Unlock()
+		return
+	}
+	writer.closing = true
+	writer.settleResizeLocked(writer.resize, terminal.ErrClosed)
+	writer.releaseSnapshotLocked()
+	cancel := writer.cancel
+	writer.cancel = nil
+	writer.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
+	if writer.onInitialFailure != nil {
+		writer.onInitialFailure(code)
+	}
+	if writer.downstream != nil && writer.downstream.wire != nil {
+		_ = writer.downstream.wire.control(proto.Control{Type: "error", Code: code})
+	}
 	writer.finish()
 }
 
@@ -2341,6 +2404,7 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 	if ctrl.Engine == "unified-dev" {
 		unifiedWriter = &unifiedAttachmentFrameWriter{
 			downstream: &attachmentFrameWriter{wire: writer}, provider: s.unified, session: d.ID, lease: readerLease, resume: ctrl.Resume,
+			onInitialFailure: func(code string) { logAttachment(code, ctrl.Authority, epochID) },
 			// A typed subscriber close ends the attachment from the tail
 			// goroutine: the loop below is parked in ReadFrame, and closing the
 			// connection is what returns it into the same teardown every
@@ -2396,8 +2460,12 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 	}
 	go func() {
 		if err := epoch.Start(ctx, terminal.CutInitial); err != nil {
-			logAttachment("attach_failed", ctrl.Authority, epochID)
-			_ = writer.control(proto.Control{Type: "error", Code: "attach_failed"})
+			if unifiedWriter != nil {
+				unifiedWriter.failBeforePrepare("attach_failed")
+			} else {
+				logAttachment("attach_failed", ctrl.Authority, epochID)
+				_ = writer.control(proto.Control{Type: "error", Code: "attach_failed"})
+			}
 			_ = epoch.Fault(err)
 			return
 		}
