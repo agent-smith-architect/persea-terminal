@@ -525,7 +525,8 @@ func guardedResizeArgs(authority proto.Authority, witness terminal.SourceWitness
 // a control client carries no process exit status (the post-issue witness
 // recheck is the sole rejection detector), and omitting the fallback run-shell
 // prevents tmux 3.6+ from printing an asynchronous failure line outside the
-// closed %begin/%end block when a stale guard evaluates false.
+// closed %begin/%end block when a stale guard evaluates false
+// (https://github.com/tmux/tmux/issues/5925).
 func guardedResizeControlArgs(authority proto.Authority, witness terminal.SourceWitness, columns, rows int) []string {
 	return guardedResizeArgs(authority, witness, columns, rows)[:5]
 }
