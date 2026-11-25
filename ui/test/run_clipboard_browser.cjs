@@ -89,6 +89,10 @@ async function main(){
           await shot(terminal,"text-preview");await button(terminal,"Cancel").click();assert((await inputs()).length===0,"Cancel must not send bytes");
           await openTerminal();await chooseText(terminal,"Shared across devices");assert(await terminal.getByLabel("Clipboard text",{exact:true}).inputValue()==="Shared across devices","Preview edits stay local");
           await button(terminal,"Cancel").click();assert((await inputs()).length===0,"Back must not send bytes");
+          // Add text in terminal mode also exposes direct Paste (manual-paste fallback) while Cancel sends nothing.
+          await button(terminal,"Add text").click();
+          assert(await button(terminal,"Paste text to terminal").isVisible(),"Terminal Add text view exposes explicit Paste action");
+          await button(terminal,"Cancel").click();assert((await inputs()).length===0,"Add text Cancel sends no bytes");
         });
         if(process.env.PERSEA_CLIPBOARD_CASE==="smoke")break;
         await check("Save edits shared text with zero input; row Paste sends once without Enter",async()=>{
@@ -155,6 +159,14 @@ async function main(){
           await clipboard(terminal).waitFor({state:"hidden"});
           await until(async()=>(await inputs()).at(-1)==="Editor direct paste","Editor Paste sends edited text directly without Enter");
           assert((await inputs()).length===inputsBefore+1,"Editor Paste emits one exact terminal input");
+          // Explicit Paste from inside Add text sends directly without Enter and shares in background.
+          await openTerminal();await button(terminal,"Add text").click();
+          await terminal.getByLabel("Text to add to shared clipboard",{exact:true}).fill("Manual add direct paste");
+          await button(terminal,"Paste text to terminal").click();
+          await clipboard(terminal).waitFor({state:"hidden"});
+          await until(async()=>(await inputs()).at(-1)==="Manual add direct paste","Add text Paste sends directly without Enter");
+          assert((await inputs()).length===inputsBefore+2,"Add text Paste emits one exact terminal input");
+          await until(async()=>(await get("/api/snippets")).items.some(i=>i.body==="Manual add direct paste"),"Add text Paste shares text in background");
           // Untrusted drop event on terminal must never stage images or send bytes.
           await terminal.locator(".persea-unified-terminal").evaluate(node=>{
             const dt=new DataTransfer();
@@ -172,7 +184,7 @@ async function main(){
           await openTerminal();await until(async()=>await clipboard(terminal).locator('[data-clipboard-item^="image:"]').count()===1,"second browser sees shared image");
           await clipboard(terminal).locator('[data-clipboard-item^="image:"]').locator('.persea-clipboard__open').click();await terminal.locator(".persea-clipboard__image").waitFor();
           await until(()=>terminal.locator(".persea-clipboard__image").evaluate(image=>image.complete&&image.naturalWidth>0),"shared image decodes");
-          assert(await button(terminal,"Insert image").isVisible(),"Terminal image preview exposes direct Insert image action");await shot(terminal,"image-preview");assert((await inputs()).length===4,"Image selection does not send input");
+          assert(await button(terminal,"Insert image").isVisible(),"Terminal image preview exposes direct Insert image action");await shot(terminal,"image-preview");assert((await inputs()).length===5,"Image selection does not send input");
         });
         await check("image Copy starts in trusted gesture and resolves promised PNG",async()=>{
           await button(terminal,"Done").click();
@@ -279,18 +291,18 @@ async function main(){
         });
         await check("row Insert image stages without sending",async()=>{
           const stagesBeforeRow=(await get("/__clipboard/control")).stages.length;await clipboard(terminal).locator('[data-clipboard-item^="image:"]').getByRole("button",{name:"Insert image",exact:true}).click();await until(async()=>(await get("/__clipboard/control")).stages.length===stagesBeforeRow+1,"explicit image staging");
-          assert((await inputs()).length===4,"Staging never sends a terminal path automatically");
+          assert((await inputs()).length===5,"Staging never sends a terminal path automatically");
           await shot(terminal,"composer-image");
           evidence.composerControls=await terminal.locator("button").evaluateAll(nodes=>nodes.filter(n=>n.getClientRects().length).map(n=>({text:n.textContent,label:n.getAttribute("aria-label")})));
           await terminal.getByRole("button",{name:"Remove image 1 of 1",exact:true}).click();
           assert(await terminal.getByRole("button",{name:/Remove image/}).count()===0,"Remove clears composer image");
-          assert((await inputs()).length===4,"Removing a staged image sends no input");
+          assert((await inputs()).length===5,"Removing a staged image sends no input");
         });
         await check("terminal menu opens the same Clipboard",async()=>{
           await terminal.getByRole("button",{name:"Hide composer — draft stays here",exact:true}).click();
           await terminal.getByRole("button",{name:"Quick actions",exact:true}).click();
           await terminal.getByRole("group",{name:"Terminal menu",exact:true}).getByRole("button",{name:"Open shared clipboard",exact:true}).click();
-          await chooseText(terminal,"Shared across devices");await button(terminal,"Cancel").click();assert((await inputs()).length===4,"Menu preview cancellation sends nothing");await button(terminal,"Close clipboard").click();
+          await chooseText(terminal,"Shared across devices");await button(terminal,"Cancel").click();assert((await inputs()).length===5,"Menu preview cancellation sends nothing");await button(terminal,"Close clipboard").click();
         });
         if(width===390){
           const nativeCopy=async(field,body,wanted,stale)=>{
@@ -305,7 +317,7 @@ async function main(){
             await until(async()=>(await get("/api/snippets")).items.some(item=>!before.some(old=>old.id===item.id)),"Native Copy creates shared text");await pause(150);
             const after=(await get("/api/snippets")).items,added=after.filter(item=>!before.some(old=>old.id===item.id));
             evidence.nativeCopy??=[];evidence.nativeCopy.push({engine:ENGINE,width,height,stale,events,added});
-            assert(added.length===1&&added[0].body===wanted,`Native Copy shares exactly selected text once: ${JSON.stringify(added)}`);assert((await inputs()).length===4,"Native Copy does not send terminal input");
+            assert(added.length===1&&added[0].body===wanted,`Native Copy shares exactly selected text once: ${JSON.stringify(added)}`);assert((await inputs()).length===5,"Native Copy does not send terminal input");
           };
           await check("trusted browser Copy from composer shares only selected substring",async()=>{
             await terminal.getByRole("button",{name:/^Open composer/}).click();await nativeCopy(terminal.locator(".attachment-page__composer-textarea"),"before COMPOSER_NATIVE_SELECTION after","COMPOSER_NATIVE_SELECTION",false);
@@ -335,7 +347,7 @@ async function main(){
           await clipboard(terminal).locator('[data-clipboard-item^="image:"]').getByRole("button",{name:"Insert image",exact:true}).click();await terminal.keyboard.press("Escape");
           await terminal.getByRole("button",{name:"Quick actions",exact:true}).click();await terminal.getByRole("button",{name:"Choose another session",exact:true}).click();await terminal.getByRole("button",{name:"Switch to beta",exact:true}).click();
           await until(async()=>(await get("/__fixture/control")).attachments.some(a=>a.session==="B"&&a.mode==="CONTROL"),"new session control");await pause(1700);
-          assert((await get("/__clipboard/control")).stages.length===stages,"Old image completion cannot stage for new target");assert(await terminal.getByRole("button",{name:/Remove image/}).count()===0,"New target composer has no old image");assert((await inputs()).length===4,"Switch sends no stale terminal input");await imageControl({delayReadMs:0});
+          assert((await get("/__clipboard/control")).stages.length===stages,"Old image completion cannot stage for new target");assert(await terminal.getByRole("button",{name:/Remove image/}).count()===0,"New target composer has no old image");assert((await inputs()).length===5,"Switch sends no stale terminal input");await imageControl({delayReadMs:0});
           await terminal.getByRole("button",{name:"Quick actions",exact:true}).click();await terminal.getByRole("button",{name:"Choose another session",exact:true}).click();await terminal.getByRole("button",{name:"Switch to alpha",exact:true}).click();
           await until(async()=>(await get("/__fixture/control")).attachments.at(-1)?.session==="A"&&(await get("/__fixture/control")).attachments.at(-1)?.mode==="CONTROL","return to alpha");
         });
@@ -354,7 +366,7 @@ async function main(){
           const row=clipboard(dashboard).locator(".persea-clipboard__item").filter({hasText:"Retention duplicate"});await row.getByRole("button",{name:"Delete item",exact:true}).click();await row.waitFor({state:"detached"});assert(!(await get("/api/snippets")).items.some(i=>i.id===initial.id),"Row delete removes exact item");
           const originalImage=(await get("/__clipboard/control")).items[0];await dashboard.evaluate(()=>{window.__clipboardMock.text="";window.__clipboardMock.image=true;});await button(dashboard,"Paste from device").click();await until(async()=>(await get("/__clipboard/control")).items[0]?.revision>originalImage.revision,"Duplicate image renewed");
           const repeatedImages=(await get("/__clipboard/control")).items;assert(repeatedImages.length===1&&repeatedImages[0].id===originalImage.id,"Image dedupe keeps stable ID");
-          assert((await inputs()).length===4,"Preferences, duplicates and deletion send zero extra bytes");
+          assert((await inputs()).length===5,"Preferences, duplicates and deletion send zero extra bytes");
         });
         if(width===390)await check("image expiry controls and urgent countdowns remain visible",async()=>{
           activePage=dashboard;const chooserPromise=dashboard.waitForEvent("filechooser");await button(dashboard,"Add image").click();const chooser=await chooserPromise;await chooser.setFiles({name:"expiry.png",mimeType:"image/png",buffer:Buffer.concat([PNG,Buffer.from("expiry")])});
@@ -367,7 +379,7 @@ async function main(){
           for(const [body,urgency]of [["Orange countdown","near"],["Red countdown","soon"]]){
             const row=clipboard(dashboard).locator(".persea-clipboard__item").filter({hasText:body});await row.waitFor();assert(await row.locator(".persea-clipboard__expiry").getAttribute("data-urgency")===urgency,"Countdown urgency: "+body);
           }
-          await dashboard.getByLabel("Find a clipboard item",{exact:true}).fill("countdown");await shot(dashboard,"expiry-countdowns");for(const body of ["Orange countdown","Red countdown"])await clipboard(dashboard).locator(".persea-clipboard__item").filter({hasText:body}).getByRole("button",{name:"Delete item",exact:true}).click();await dashboard.getByLabel("Find a clipboard item",{exact:true}).fill("");assert((await inputs()).length===4,"Image retention and delete send no terminal input");
+          await dashboard.getByLabel("Find a clipboard item",{exact:true}).fill("countdown");await shot(dashboard,"expiry-countdowns");for(const body of ["Orange countdown","Red countdown"])await clipboard(dashboard).locator(".persea-clipboard__item").filter({hasText:body}).getByRole("button",{name:"Delete item",exact:true}).click();await dashboard.getByLabel("Find a clipboard item",{exact:true}).fill("");assert((await inputs()).length===5,"Image retention and delete send no terminal input");
         });
         await check("clipboard mutation requests carry same-origin CSRF",async()=>{
           const stats=await get("/__clipboard/control"),writes=stats.requests.filter(r=>r.method!=="GET");
@@ -432,7 +444,7 @@ async function main(){
         if(width===390)await check("replay without a control grant cannot paste retained text",async()=>{
           await control({holdModeGrant:true});const fresh=(await get("/api/inventory")).realms[0].servers[0].sessions[0];const replay=await newPage("replay");activePage=replay;
           await replay.goto(`${fixture.origin}/terminal?engine=unified-dev#${new URLSearchParams({handle:fresh.handles.control,mode:"control",history:"1000",name:fresh.name,draft_scope:fixture.draftScope,engine:"unified-dev",image_realm:"local"})}`);await replay.waitForSelector(".persea-unified-xterm .xterm-helper-textarea");
-          await replay.locator(".persea-unified-toolbar-paste").click();assert(await button(replay,"Paste from this device").isDisabled(),"Replay disables Paste from this device before CONTROL grant");assert(await clipboard(replay).locator(".persea-clipboard__item").filter({hasText:"Shared across devices"}).getByRole("button",{name:"Paste text to terminal",exact:true}).isDisabled(),"Replay refuses text before CONTROL grant");assert((await inputs()).length===5,"Replay sends nothing beyond the explicit text and image insertions");await button(replay,"Close clipboard").click();await replay.close();await control({holdModeGrant:false});
+          await replay.locator(".persea-unified-toolbar-paste").click();assert(await button(replay,"Paste from this device").isDisabled(),"Replay disables Paste from this device before CONTROL grant");assert(await clipboard(replay).locator(".persea-clipboard__item").filter({hasText:"Shared across devices"}).getByRole("button",{name:"Paste text to terminal",exact:true}).isDisabled(),"Replay refuses text before CONTROL grant");assert((await inputs()).length===6,"Replay sends nothing beyond the explicit text and image insertions");await button(replay,"Close clipboard").click();await replay.close();await control({holdModeGrant:false});
         });
         const finalState=await get("/__fixture/control");assert(finalState.attachments.every(a=>a.resizes===0&&a.resizeRequests.length===0),"Final lifecycle actions never resize terminal");
       }catch(error){if(activePage&&!activePage.isClosed()){await shot(activePage,"failure");evidence.visible=await activePage.locator("body").innerText();evidence.selects=await activePage.locator(".persea-clipboard__item").evaluateAll(rows=>rows.map(row=>({id:row.dataset.clipboardItem,options:[...row.querySelectorAll("option")].map(o=>({value:o.value,disabled:o.disabled,selected:o.selected}))})));}throw error;}finally{for(const context of contexts)await context.close();}

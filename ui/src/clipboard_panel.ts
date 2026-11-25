@@ -454,7 +454,26 @@ export class ClipboardPanel {
     });
     this.content.replaceChildren(input, el("p", "persea-clipboard__note", "Available on your other devices. Matching content refreshes the existing item."));
     const cancel = this.button("Cancel", () => this.showList()); cancel.dataset.clipboardDismiss = "true";
-    this.footer.append(cancel, this.destinationButton("Save", () => { void this.addText(input.value); }, ""));
+    if (this.options.terminal) {
+      const save = this.button("Save", () => { void this.addText(input.value); });
+      const paste = this.destinationButton("Paste", (event) => {
+        const reason = this.unavailable(); if (reason) { this.notice(reason); return; }
+        const body = textBody(input.value);
+        const result = this.options.terminal!.send(body, event);
+        if (result.accepted) {
+          const shouldShare = this.textSnapshot.status !== "unavailable" && isStorableSnippetBody(body) && !this.alreadyShared(body);
+          this.close();
+          result.afterClose?.();
+          if (shouldShare) void this.options.text.createClip(body).catch(() => undefined);
+        } else {
+          this.notice(result.message);
+        }
+      });
+      paste.setAttribute("aria-label", "Paste text to terminal");
+      this.footer.append(cancel, save, paste);
+    } else {
+      this.footer.append(cancel, this.destinationButton("Save", () => { void this.addText(input.value); }, ""));
+    }
     input.focus({ preventScroll: true });
   }
   private showSettings(): void {

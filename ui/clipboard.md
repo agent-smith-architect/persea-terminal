@@ -72,9 +72,10 @@ must not make a freshly selected four-hour duration read as five hours.
 
 ## Terminal authority and cancellation
 
-Opening text enters an editor with Save and Cancel (plus an explicit Paste
-action in terminal mode). Save updates shared storage; Cancel returns to the
-list. Neither sends terminal input; only the explicit Paste action sends text.
+Opening or adding text enters an editor with Save and Cancel (plus an explicit
+Paste action in terminal mode). Save updates shared storage; Cancel returns to
+the list. Neither sends terminal input; only the explicit Paste action sends
+text (and shares storable added text in the background).
 Rows expose separate copy, paste, and delete actions; Delete is visually
 distinct. Text Paste uses the existing input boundary and adds no Enter. The
 existing unsafe multiline policy can route text to the composer for further
