@@ -4,6 +4,16 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+## 0.1.24 — 2026-11-25
+
+### Changed
+
+- **Direct Paste in Clipboard Add text:** In terminal mode, the **Add text** view now exposes an explicit **Paste** button alongside **Save** and **Cancel**, so pasting manually when browser clipboard reads are blocked takes one fewer step (delivering through the existing input boundary without Enter and sharing storable text in the background, while **Save** and **Cancel** continue to send zero input).
+
+### Testing notes
+
+- Verified in Chromium and WebKit across all five clipboard viewports (`run_clipboard_browser.cjs` and `run_unified_ergonomics_browser.cjs`): `Add text` exposes **Paste**, `Cancel` sends no input, and **Paste** sends directly without Enter while sharing in the background. Observed failing before the change. Not tested on a real iPhone.
+
 ## 0.1.23 — 2026-11-24
 
 ### Changed
