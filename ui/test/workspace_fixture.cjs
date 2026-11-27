@@ -100,6 +100,7 @@ function startWorkspaceFixture(ui, options = {}) {
     counters: { documents: 0, inventory: 0, csrf: 0, workspaceReads: 0, workspaceWrites: 0, handleRequests: 0, takeovers: 0, adoptions: 0, websockets: 0, replays: 0, sessionsCreated: 0, favicon: 0, requests: 0, preferencesGet: 0, preferencesPut: 0 },
     requestsByPath: {},
     holdInventoryMs: 0,
+    holdWorkspaceWriteMs: 0,
   };
 
   function makeSession(name, patch = {}) {
@@ -150,6 +151,7 @@ function startWorkspaceFixture(ui, options = {}) {
     state.preferencesCorrupt = false;
     snippets.reset();
     state.holdInventoryMs = 0;
+    state.holdWorkspaceWriteMs = 0;
     for (const name of names) makeSession(name);
   }
   // The /api/snippets store double (clipboard): ONE store for the whole document,
@@ -256,6 +258,7 @@ function startWorkspaceFixture(ui, options = {}) {
         if (input.workspace && typeof input.workspace.name === "string" && input.workspace.tree) putWorkspace(input.workspace.name, input.workspace.tree);
         if (typeof input.dropWorkspace === "string") state.workspaces.delete(input.dropWorkspace.toLowerCase());
         if (typeof input.holdInventoryMs === "number") state.holdInventoryMs = input.holdInventoryMs;
+        if (typeof input.holdWorkspaceWriteMs === "number") state.holdWorkspaceWriteMs = input.holdWorkspaceWriteMs;
         if (input.session) {
           const session = state.sessions.get(input.session);
           if (session) {
@@ -462,6 +465,12 @@ function startWorkspaceFixture(ui, options = {}) {
     if (request.method === "PUT" && workspaceMatch) {
       state.counters.workspaceWrites += 1;
       const body = await readJSON(request);
+      if (state.holdWorkspaceWriteMs > 0) {
+        const hold = state.holdWorkspaceWriteMs;
+        state.holdWorkspaceWriteMs = 0;
+        await new Promise((done) => setTimeout(done, hold));
+        if (response.destroyed) return;
+      }
       const current = [...state.workspaces.values()].find((record) => record.workspace_id === workspaceMatch[1]);
       if (request.headers["x-persea-csrf"] !== CSRF_TOKEN || !body || body.version !== 1 || typeof body.name !== "string" || !body.tree) { response.writeHead(400); response.end("invalid"); return; }
       if (!current) { response.writeHead(404); response.end("not found"); return; }
@@ -481,8 +490,6 @@ function startWorkspaceFixture(ui, options = {}) {
       if (request.headers["x-persea-csrf"] !== CSRF_TOKEN) { response.writeHead(400); response.end("invalid"); return; }
       if (!current) { response.writeHead(404); response.end("not found"); return; }
       if (request.headers["if-match"] !== `"${current.revision}"`) { response.setHeader("Content-Type", "application/json"); response.writeHead(409); response.end(JSON.stringify(current)); return; }
-      const owner = state.workspaces.get(body.name.toLowerCase());
-      if (owner && owner.workspace_id !== current.workspace_id) { response.setHeader("Content-Type", "application/json"); response.writeHead(409); response.end(JSON.stringify(owner)); return; }
       state.workspaces.delete(current.normalized_name);
       response.writeHead(204);
       response.end();

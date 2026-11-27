@@ -12,40 +12,64 @@
 //    left-aligned mini previews + scoped nav Left/Right focus + phone hides Duplicate.
 
 const assert = require("node:assert/strict");
+const http = require("node:http");
+const https = require("node:https");
 const path = require("node:path");
 const playwright = require("playwright");
 const chromiumPath = require("./browser_path.cjs");
 const { startWorkspaceFixture } = require("./workspace_fixture.cjs");
 
 const UI = path.resolve(__dirname, "..");
+const ENGINE = process.env.PERSEA_WORKSPACE_UX_ENGINE || "chromium";
+if (ENGINE !== "chromium" && ENGINE !== "webkit") {
+  throw new Error(`Unsupported PERSEA_WORKSPACE_UX_ENGINE: ${ENGINE}`);
+}
 
 function leaf(name) {
   return { kind: "leaf", session: { realm: "local", server: "private", name }, on_missing: "offer" };
 }
 
-async function postJSON(url, body) {
-  const res = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
+function requestJSON(url, method, body) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const mod = parsed.protocol === "https:" ? https : http;
+    const payload = body === undefined ? undefined : Buffer.from(JSON.stringify(body));
+    const req = mod.request(parsed, {
+      method,
+      rejectUnauthorized: false,
+      headers: payload ? { "Content-Type": "application/json", "Content-Length": payload.length } : {},
+    }, (res) => {
+      const chunks = [];
+      res.on("data", (chunk) => chunks.push(chunk));
+      res.on("end", () => {
+        const text = Buffer.concat(chunks).toString("utf8");
+        if (res.statusCode !== 200) {
+          reject(new Error(`fixture control ${url} returned ${res.statusCode}: ${text}`));
+          return;
+        }
+        resolve(JSON.parse(text));
+      });
+    });
+    req.on("error", reject);
+    if (payload) req.write(payload);
+    req.end();
   });
-  assert.equal(res.status, 200, `fixture control ${url} returned ${res.status}`);
-  return res.json();
 }
 
-async function getJSON(url) {
-  const res = await fetch(url);
-  assert.equal(res.status, 200, `fixture snapshot ${url} returned ${res.status}`);
-  return res.json();
-}
+const postJSON = (url, body) => requestJSON(url, "POST", body);
+const getJSON = (url) => requestJSON(url, "GET");
 
 async function main() {
-  const fixture = await startWorkspaceFixture(UI, { tls: false });
-  const browser = await playwright.chromium.launch({
-    executablePath: chromiumPath(),
-    headless: true,
-    args: ["--no-sandbox"],
-  });
+  const useTLS = ENGINE === "webkit";
+  const fixture = await startWorkspaceFixture(UI, { tls: useTLS });
+  const browser = ENGINE === "webkit"
+    ? await playwright.webkit.launch({ headless: true })
+    : await playwright.chromium.launch({
+      executablePath: chromiumPath(),
+      headless: true,
+      args: ["--no-sandbox"],
+    });
+  const contextOptions = (extra = {}) => ({ ...(useTLS ? { ignoreHTTPSErrors: true } : {}), ...extra });
   const control = (body) => postJSON(`${fixture.origin}/__fixture/control`, body);
   const snap = () => getJSON(`${fixture.origin}/__fixture/control`);
 
@@ -71,7 +95,7 @@ async function main() {
       const opsRecord = initialSnap.workspaces.find((w) => w.name === "Ops");
       assert.ok(opsRecord, "Ops record must exist");
 
-      const context = await browser.newContext({ viewport: { width: 1280, height: 800 } });
+      const context = await browser.newContext(contextOptions({ viewport: { width: 1280, height: 800 } }));
       const page = await context.newPage();
       const errors = [];
       page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
@@ -239,6 +263,128 @@ async function main() {
       assert.equal(renamedOps?.name, "Ops Final", "Ops itself must be renamed");
       assert.ok(intactOther && intactOther.tree.children[0].session.name === "ws03", "Other workspace must remain completely untouched");
 
+      // 7. Pending pane Display label without clicking "Set label": survives preset + Save, keeps focus live, refuses invalid on Save
+      await page.locator(".ws-workspace-edit").click();
+      await page.locator(".ws-editor:not([hidden])").waitFor();
+      const ws01Input = page.locator('.ws-editor__pane[data-ws-session="ws01"] .ws-editor__alias input');
+      await ws01Input.click();
+      await ws01Input.fill("Live typed label");
+      const liveAliasCheck = await page.evaluate(() => ({
+        focusedStill: document.activeElement?.closest(".ws-editor__pane")?.dataset.wsSession === "ws01"
+          && document.activeElement?.closest(".ws-editor__alias") !== null,
+        diagramText: document.querySelector(".ws-editor__diagram-frame")?.textContent ?? "",
+      }));
+      assert.equal(liveAliasCheck.focusedStill, true, "typing Display label must keep focus on that input");
+      assert.ok(liveAliasCheck.diagramText.includes("Live typed label"), `draft diagram must reflect typed label live (got ${JSON.stringify(liveAliasCheck.diagramText)})`);
+      await page.locator(".ws-editor__preset", { hasText: "Stacked" }).click();
+      const afterPresetVal = await page.locator('.ws-editor__pane[data-ws-session="ws01"] .ws-editor__alias input').inputValue();
+      assert.equal(afterPresetVal, "Live typed label", "typed label must survive preset layout change without clicking Set label");
+      await page.locator(".ws-editor__save").click();
+      await page.waitForFunction(() => document.querySelector(".ws-editor")?.hidden === true);
+      const savedLiveLabel = (await snap()).workspaces.find((w) => w.workspace_id === opsRecord.workspace_id);
+      assert.equal(savedLiveLabel.tree.direction, "column", "Stacked preset must persist");
+      assert.equal(savedLiveLabel.tree.children[0].alias_hint, "Live typed label", "typed label must persist on Save without clicking Set label");
+
+      // Invalid typed label (leading/trailing spaces) must be refused on Save with ZERO PUT
+      await page.locator(".ws-workspace-edit").click();
+      await page.locator(".ws-editor:not([hidden])").waitFor();
+      const writesBeforeInvalid = (await snap()).counters.workspaceWrites;
+      await page.locator('.ws-editor__pane[data-ws-session="ws02"] .ws-editor__alias input').fill("  padded  ");
+      await page.locator(".ws-editor__save").click();
+      await page.waitForFunction(() => /leading or trailing whitespace/i.test(document.querySelector(".ws-editor__status")?.textContent ?? ""));
+      assert.equal((await snap()).counters.workspaceWrites, writesBeforeInvalid, "invalid pending label must refuse Save with zero PUT");
+      await page.locator(".ws-editor__cancel").click();
+
+      // 8. Cancel-during-Save race: Cancel and header Edit button stay disabled while PUT is in flight
+      await page.locator(".ws-workspace-edit").click();
+      await page.locator(".ws-editor:not([hidden])").waitFor();
+      await page.locator(".ws-editor__preset", { hasText: "Side by side" }).click();
+      await control({ holdWorkspaceWriteMs: 350 });
+      await page.locator(".ws-editor__save").click();
+      const midSave = await page.evaluate(() => ({
+        saveDisabled: document.querySelector(".ws-editor__save")?.disabled,
+        cancelDisabled: document.querySelector(".ws-editor__cancel")?.disabled,
+        editDisabled: document.querySelector(".ws-workspace-edit")?.disabled,
+      }));
+      assert.equal(midSave.saveDisabled, true, "Save must disable while PUT is in flight");
+      assert.equal(midSave.cancelDisabled, true, "Cancel must disable while PUT is in flight");
+      assert.equal(midSave.editDisabled, true, "header Edit button must disable while PUT is in flight");
+      await page.waitForFunction(() => document.querySelector(".ws-editor")?.hidden === true);
+      const afterMidSave = await page.evaluate(() => ({
+        editDisabled: document.querySelector(".ws-workspace-edit")?.disabled,
+        hiddenHeaderDisplays: [...document.querySelectorAll(".ws-workspace-header [hidden]")].map((el) => getComputedStyle(el).display),
+      }));
+      assert.equal(afterMidSave.editDisabled, false, "header Edit button must re-enable after Save finishes");
+      assert.ok(afterMidSave.hiddenHeaderDisplays.every((d) => d === "none"), `hidden header controls must compute display:none (got ${JSON.stringify(afterMidSave.hiddenHeaderDisplays)})`);
+
+      // 9. Key-reconciled in-place pane switch -> one-click "Save switch" keeps live socket & zero RESIZE_REQUEST
+      const switchPane = async (paneSession, targetSession) => {
+        await page.locator(`.ws-cell[data-ws-session="${paneSession}"] .persea-unified-tag`).click();
+        const row = page.locator(`.ws-cell[data-ws-session="${paneSession}"] .persea-unified-identity__details:not([hidden]) .persea-session-switcher__row[aria-label="Switch to ${targetSession}"]`);
+        await row.waitFor({ state: "visible" });
+        await row.click();
+        await page.waitForFunction(
+          ([p, t]) => (document.querySelector(`.ws-cell[data-ws-session="${p}"]`)?.textContent ?? "").includes(`fixture-live ${t}`),
+          [paneSession, targetSession],
+        );
+      };
+      await switchPane("ws01", "ws03");
+      const beforeSaveSwitch = await snap();
+      const ws03LiveBefore = beforeSaveSwitch.attachments.find((a) => a.session === "ws03" && a.live);
+      assert.ok(ws03LiveBefore, "ws03 must have a live attachment after in-place switch");
+      const switchHeaderState = await page.evaluate(() => {
+        const btn = document.querySelector(".ws-workspace-save-switch");
+        const pillTag = document.querySelector('.ws-pane-pill[data-ws-session="ws01"] .ws-pane-pill__tag');
+        return {
+          pillTag: pillTag?.textContent ?? "",
+          btnHidden: btn?.hidden,
+          btnDisabled: btn?.disabled,
+          btnLabel: btn?.getAttribute("aria-label") ?? "",
+          btnDisplay: btn ? getComputedStyle(btn).display : null,
+        };
+      });
+      assert.equal(switchHeaderState.pillTag, "Switched");
+      assert.equal(switchHeaderState.btnHidden, false, "Save switch button must appear when designated pane is switched");
+      assert.equal(switchHeaderState.btnDisabled, false, "Save switch must be enabled for a non-duplicate target");
+      assert.ok(switchHeaderState.btnLabel.includes("ws03"), `Save switch aria-label must name ws03 (got ${switchHeaderState.btnLabel})`);
+
+      await page.locator(".ws-workspace-save-switch").click();
+      await page.waitForFunction(() => document.querySelector(".ws-workspace-save-switch")?.hidden === true
+        && !!document.querySelector('.ws-cell[data-ws-session="ws03"]'));
+      const afterSaveSwitch = await snap();
+      const ws03LiveAfter = afterSaveSwitch.attachments.find((a) => a.session === "ws03" && a.live);
+      assert.equal(ws03LiveAfter?.id, ws03LiveBefore.id, "Save switch must keep the EXACT same live WebSocket attachment (zero reconnect/remount)");
+      assert.ok(afterSaveSwitch.attachments.every((a) => a.resizes === 0), "Save switch must emit zero RESIZE_REQUEST");
+      const savedSwitchWs = afterSaveSwitch.workspaces.find((w) => w.workspace_id === opsRecord.workspace_id);
+      assert.equal(savedSwitchWs.tree.children[0].session.name, "ws03", "durable workspace must now reference ws03");
+      assert.equal(savedSwitchWs.tree.children[0].alias_hint, "Live typed label", "Save switch must preserve pane label");
+
+      // Duplicate target (switching pane 1 to ws02 which is already pane 2) -> Save switch disabled, zero PUT
+      await switchPane("ws03", "ws02");
+      const dupSwitchState = await page.evaluate(() => ({
+        hidden: document.querySelector(".ws-workspace-save-switch")?.hidden,
+        disabled: document.querySelector(".ws-workspace-save-switch")?.disabled,
+      }));
+      assert.equal(dupSwitchState.hidden, false, "Save switch button should explain why duplicate cannot be saved");
+      assert.equal(dupSwitchState.disabled, true, "Save switch must be disabled when target is already another pane");
+
+      // Switch pane 1 to ws04 -> open Edit -> "Use current" stages ws04 -> Save keeps live ws04 socket!
+      await switchPane("ws03", "ws04");
+      const ws04LiveBefore = (await snap()).attachments.find((a) => a.session === "ws04" && a.live);
+      assert.ok(ws04LiveBefore, "ws04 must be live after in-place switch");
+      await page.locator(".ws-workspace-edit").click();
+      await page.locator(".ws-editor:not([hidden])").waitFor();
+      const useCurrentBtn = page.locator('.ws-editor__pane[data-ws-session="ws03"] .ws-editor__use-current');
+      await useCurrentBtn.waitFor({ state: "visible" });
+      await useCurrentBtn.click();
+      await page.locator(".ws-editor__save").click();
+      await page.waitForFunction(() => document.querySelector(".ws-editor")?.hidden === true
+        && !!document.querySelector('.ws-cell[data-ws-session="ws04"]'));
+      const afterEditorSwitch = await snap();
+      const ws04LiveAfter = afterEditorSwitch.attachments.find((a) => a.session === "ws04" && a.live);
+      assert.equal(ws04LiveAfter?.id, ws04LiveBefore.id, "Editor Use current + Save must preserve live ws04 WebSocket without reconnect");
+      assert.ok(afterEditorSwitch.attachments.every((a) => a.resizes === 0), "Editor Use current + Save must emit zero RESIZE_REQUEST");
+
       assert.deepEqual(errors, [], `Workspace UX browser errors: ${JSON.stringify(errors)}`);
       await context.close();
     }
@@ -246,7 +392,7 @@ async function main() {
     // --- 6: Dashboard multi-session builder, passive availability, Duplicate, left-aligned previews, nav arrows, phone M5 ---
     {
       await control({ reset: true, sessions: ["ws01", "ws02", "ws03", "ws04"] });
-      const context = await browser.newContext({ viewport: { width: 1280, height: 900 } });
+      const context = await browser.newContext(contextOptions({ viewport: { width: 1280, height: 900 } }));
       const page = await context.newPage();
       const errors = [];
       page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
@@ -317,7 +463,7 @@ async function main() {
       await context.close();
 
       // Phone posture omits both Create form AND Duplicate button
-      const phoneCtx = await browser.newContext({ viewport: { width: 390, height: 844 }, screen: { width: 390, height: 844 }, hasTouch: true });
+      const phoneCtx = await browser.newContext(contextOptions({ viewport: { width: 390, height: 844 }, screen: { width: 390, height: 844 }, hasTouch: true }));
       const phonePage = await phoneCtx.newPage();
       await phonePage.emulateMedia({ reducedMotion: "no-preference" });
       await phonePage.goto(`${fixture.origin}/`);
@@ -335,7 +481,7 @@ async function main() {
       await phoneCtx.close();
     }
 
-    console.log("workspace UX & dashboard polish browser tests: PASS");
+    console.log(`workspace UX & dashboard polish browser tests (${ENGINE}): PASS`);
   } finally {
     await browser.close();
     await fixture.close();
