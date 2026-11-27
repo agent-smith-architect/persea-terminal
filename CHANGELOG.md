@@ -4,6 +4,24 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+## 0.1.26 — 2026-11-27
+
+### Changed
+
+- **Key-reconciled in-place save for switched workspace panes:** After switching a workspace pane to another session in-place, the workspace header now offers a one-click **Save switch** action (disabled when the target session is already open in another pane), and the visual editor offers **Use current** on that pane card. Saving updates the durable workspace layout and re-keys the live cell in place so the active terminal, scrollback, and WebSocket survive with zero reconnect or `RESIZE_REQUEST`.
+- **Workspace editor live label persistence:** Typing a pane **Display label** now updates the local draft and miniature layout diagram live without losing input focus, survives layout presets and other editor actions without requiring a separate **Set label** click, and visibly refuses invalid labels on **Save** without sending a write.
+
+### Fixed
+
+- **Workspace Cancel-during-Save race:** Disabling **Cancel** and the header **Edit workspace** button while a workspace `PUT` is in flight (and guarding editor state transitions against `saving`) prevents a late save response from colliding with a cancelled or reopened edit session.
+- **Hidden workspace header buttons:** Added explicit `[hidden] { display: none; }` rules for `.ws-workspace-header` controls so hidden buttons such as **Maximize** on single-pane workspaces and **Save switch** when unused never remain visible under `display: inline-flex`.
+- **Pane header accessible label on re-keying:** Updating a cell's leaf now keeps `.ws-cell__header`'s `aria-label` synchronized with the current session name.
+- **WebKit workspace test coverage:** Extended `run_workspace_ux_browser.cjs` to run in both Chromium and WebKit (over TLS) as part of `test:browser:workspace`, updated stale compact-toolbar assertions in `run_workspace_webkit_f11.cjs` to match the current 6-button toolbar and View disclosure, and fixed a stray `body` reference in `workspace_fixture.cjs`'s `DELETE` handler.
+
+### Testing notes
+
+- Verified full Go suite (`CGO_ENABLED=1 CC=/usr/bin/clang go test -race ./internal/... ./cmd/...` under a 20-byte `TMPDIR`), `host-config-test.py`, shell syntax checks, UI unit/contract suite (`npm test`), `ci_reachability.cjs`, `test:workspace-rotation-webkit`, and the full `test:browser:workspace` gate including Chromium + WebKit passes of `run_workspace_ux_browser.cjs` (observed red before the fixes, green after). Not tested on a real iPhone.
+
 ## 0.1.25 — 2026-11-25
 
 ### Changed
