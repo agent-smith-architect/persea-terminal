@@ -57,10 +57,30 @@ body.ws-document {
   text-decoration: none;
   cursor: pointer;
 }
-.ws-workspace-header button:hover,
+.ws-workspace-header button[hidden],
+.ws-workspace-header a[hidden],
+.ws-workspace-notice[hidden] { display: none; }
+.ws-workspace-header button:hover:not(:disabled),
 .ws-workspace-header a:hover { border-color: var(--ws-accent); }
+.ws-workspace-header button:disabled { opacity: .48; cursor: not-allowed; }
 .ws-workspace-header button:focus-visible,
 .ws-workspace-header a:focus-visible { outline: 2px solid var(--ws-accent); outline-offset: 2px; }
+.ws-workspace-save-switch {
+  border-color: var(--ws-ok-border);
+  background: var(--ws-ok-bg);
+  color: var(--ws-ok-fg);
+  font-weight: 650;
+}
+.ws-workspace-notice {
+  flex: 0 1 18rem;
+  min-width: 0;
+  margin: 0;
+  color: var(--ws-warn-fg);
+  font-size: .78rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .ws-workspace-zoom[aria-pressed="true"] {
   border-color: var(--ws-accent);
   background: color-mix(in srgb, var(--ws-accent) 18%, var(--ws-chrome));
@@ -293,6 +313,12 @@ body.ws-document {
 .ws-editor__alias .ws-editor__input { flex: 1 1 auto; }
 .ws-editor__pane-ops { display: flex; flex-wrap: wrap; flex: 1 1 100%; align-items: center; gap: .35rem; }
 .ws-editor__pane-ops .ws-editor__select { flex: 1 1 9rem; }
+.ws-editor__use-current {
+  border-color: var(--ws-ok-border) !important;
+  background: var(--ws-ok-bg) !important;
+  color: var(--ws-ok-fg) !important;
+  font-weight: 600;
+}
 .ws-editor__splits-disclosure {
   border: 1px solid var(--ws-border);
   border-radius: .5rem;

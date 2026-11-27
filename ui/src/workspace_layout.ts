@@ -230,6 +230,7 @@ export type WorkspaceLayoutHandlers = Readonly<{
 class CellView implements WorkspaceCell {
   readonly element = element("section", "ws-cell");
   readonly mount = element("div", "ws-cell__mount");
+  private readonly header = element("div", "ws-cell__header");
   private readonly badge = element("span", "ws-cell__badge");
   private readonly slot = element("div", "ws-cell__state");
   private readonly headline = element("p", "ws-cell__state-headline");
@@ -242,18 +243,19 @@ class CellView implements WorkspaceCell {
   private readonly name = element("span", "ws-cell__name");
   private readonly hint = element("span", "ws-cell__hint");
   private readonly scope = element("span", "ws-cell__scope");
+  private currentKey: string;
   private currentLeaf: WorkspaceLeaf;
   private current: PaneState = Object.freeze({ kind: "resolving" });
 
-  constructor(readonly key: string, leaf: WorkspaceLeaf, private readonly onAffordance: (cell: WorkspaceCell, affordance: PaneAffordance) => void) {
+  constructor(key: string, leaf: WorkspaceLeaf, private readonly onAffordance: (cell: WorkspaceCell, affordance: PaneAffordance) => void) {
+    this.currentKey = key;
     this.currentLeaf = leaf;
     const { session } = this.currentLeaf;
     this.element.setAttribute("aria-label", `Pane ${session.name}`);
     this.element.dataset.wsSession = session.name;
-    const header = element("div", "ws-cell__header");
-    header.tabIndex = 0;
-    header.setAttribute("aria-label", `Focus pane ${session.name}`);
-    header.append(this.name, this.hint, this.scope, this.badge);
+    this.header.tabIndex = 0;
+    this.header.setAttribute("aria-label", `Focus pane ${session.name}`);
+    this.header.append(this.name, this.hint, this.scope, this.badge);
     this.slot.setAttribute("role", "status");
     this.slot.setAttribute("aria-live", "polite");
     this.slot.append(this.headline, this.detail, this.code, this.actions);
@@ -265,19 +267,25 @@ class CellView implements WorkspaceCell {
     this.notice.append(this.noticeBadge, this.noticeDetail);
     const body = element("div", "ws-cell__body");
     body.append(this.mount, this.slot, this.notice);
-    this.element.append(header, body);
+    this.element.append(this.header, body);
     this.setLeaf(this.currentLeaf);
     this.setState(this.current);
   }
 
+  get key(): string { return this.currentKey; }
   get leaf(): WorkspaceLeaf { return this.currentLeaf; }
   state(): PaneState { return this.current; }
+
+  setKey(nextKey: string): void {
+    this.currentKey = nextKey;
+  }
 
   setLeaf(leaf: WorkspaceLeaf): void {
     this.currentLeaf = leaf;
     const { session } = leaf;
     this.element.setAttribute("aria-label", `Pane ${session.name}`);
     this.element.dataset.wsSession = session.name;
+    this.header.setAttribute("aria-label", `Focus pane ${session.name}`);
     this.name.textContent = session.name;
     this.hint.textContent = leaf.aliasHint ?? "";
     this.hint.hidden = leaf.aliasHint === undefined;
@@ -442,6 +450,21 @@ export class WorkspaceLayoutView {
         button.disabled = !interactive;
       }
     }
+  }
+
+  // Re-keys an existing mounted cell in place when a pane that already switched
+  // sessions in-place is saved under its new durable selector. Keeps the cell
+  // DOM, mounted terminal, and WebSocket intact across the subsequent update().
+  rekeyCell(oldKey: string, newKey: string, nextLeaf: WorkspaceLeaf): boolean {
+    if (oldKey === newKey || this.cells.has(newKey)) return false;
+    const cell = this.cells.get(oldKey);
+    if (!cell) return false;
+    this.cells.delete(oldKey);
+    cell.setKey(newKey);
+    cell.setLeaf(nextLeaf);
+    this.cells.set(newKey, cell);
+    if (this.zoomed === oldKey) this.zoomed = newKey;
+    return true;
   }
 
   // Keyed reconciliation: a cell whose leaf survives keeps its element (and

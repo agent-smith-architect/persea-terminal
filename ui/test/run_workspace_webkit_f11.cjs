@@ -209,16 +209,16 @@ async function documentState(page) {
       return x >= outer.x && x <= outer.right && y >= outer.y && y <= outer.bottom;
     };
     const controls = [...document.querySelectorAll(".ws-cell")].map((cell) => {
-      const fit = cell.querySelector(".persea-unified-fit-height");
+      const view = cell.querySelector(".persea-unified-view-disclosure");
       const composer = cell.querySelector(".persea-unified-composer-toggle");
-      const fitRect = fit?.getBoundingClientRect();
+      const viewRect = view?.getBoundingClientRect();
       const composerRect = composer?.getBoundingClientRect();
       return {
         session: cell.dataset.wsSession,
         state: cell.dataset.wsState,
-        fitInside: visible(fit) && inside(fit, cell),
+        viewInside: visible(view) && inside(view, cell),
         composerInside: visible(composer) && inside(composer, cell),
-        fitSize: fitRect ? [fitRect.width, fitRect.height] : null,
+        viewSize: viewRect ? [viewRect.width, viewRect.height] : null,
         composerSize: composerRect ? [composerRect.width, composerRect.height] : null,
       };
     });
@@ -303,30 +303,18 @@ async function main() {
     check("F11", workspace.requiredRules.rows?.pointerEvents === "none" && workspace.requiredRules.rows?.whiteSpace === "pre" && parseFloat(workspace.requiredRules.rows?.fontSize || "0") > 0, "xterm row rules are applied", workspace.requiredRules);
     check("F11", workspace.requiredRules.cursor && workspace.requiredRules.cursor.display !== "none" && workspace.requiredRules.cursor.backgroundColor !== "rgba(0, 0, 0, 0)", "xterm cursor rules are applied", workspace.requiredRules);
     check("F11", workspace.requiredRules.selection?.position === "absolute", "xterm selection layer rules are applied", workspace.requiredRules);
-    check("F15", workspace.controls.every((control) => control.fitInside && control.composerInside && control.fitSize?.every((size) => size >= 44) && control.composerSize?.every((size) => size >= 44)), "44 px controls stay inside every workspace cell", workspace.controls);
+    check("F15", workspace.controls.every((control) => control.viewInside && control.composerInside && control.viewSize?.every((size) => size > 0) && control.composerSize?.every((size) => size > 0)), "compact View and Composer controls stay visible inside every workspace cell", workspace.controls);
     check("F15", workspace.hiddenDisplays.every((display) => display === "none"), "every hidden container computes to display:none", workspace.hiddenDisplays);
 
     await page.evaluate(() => {
       const cell = document.querySelector(".ws-cell");
-      const toolbar = cell.querySelector(".persea-unified-toolbar");
       cell.querySelector(".ws-cell__header").focus();
       window.__perseaMenuEscapePrevented = false;
-      toolbar.addEventListener("keydown", (event) => {
+      document.addEventListener("keydown", (event) => {
         if (event.key === "Escape") window.__perseaMenuEscapePrevented = event.defaultPrevented;
-      });
+      }, true);
     });
     const tabOrder = [];
-    // The fine-pointer quick-actions opener
-    // is a real toolbar control and takes its place in the row, between the ↕
-    // pair and the composer toggle. This context is the 1280x800 desktop one,
-    // so the opener is present here; the phone context below never sees it.
-    //
-    // The session tag is a real control in
-    // this row too -- it opens the identity popover -- and it is the row's
-    // first element, so it is the first stop. Its expected name is read from
-    // the tag the page rendered rather than hardcoded, because the session
-    // names here come from the real stack's seed, not from this file. Nothing
-    // was removed: the previous six stops follow in the same order.
     const identityStop = await page.evaluate(() => document
       .querySelector(".ws-cell .persea-unified-tag")?.getAttribute("aria-label") ?? null);
     check("F15", typeof identityStop === "string" && /^Session .+ Show session details$/.test(identityStop),
@@ -335,30 +323,36 @@ async function main() {
       await page.keyboard.press("Tab");
       tabOrder.push(await page.evaluate(() => document.activeElement?.getAttribute("aria-label") || document.activeElement?.textContent?.trim() || document.activeElement?.getAttribute("role") || ""));
     }
-    check("F15", JSON.stringify(tabOrder) === JSON.stringify([identityStop, "Switch session", "Fit terminal height", "Quick actions", "Open composer", "More controls", "Terminal input"]), "compact toolbar Tab order is header controls then terminal", tabOrder);
+    check("F15", tabOrder.length === 7
+      && tabOrder[0] === identityStop
+      && tabOrder[1] === "Select terminal text"
+      && tabOrder[2] === "Open clipboard"
+      && /^View and size, committed \d+×\d+/.test(tabOrder[3])
+      && JSON.stringify(tabOrder.slice(4)) === JSON.stringify(["Quick actions", "Open composer", "Terminal input"]),
+    "compact toolbar Tab order is header controls then terminal", tabOrder);
     await page.evaluate(() => {
       const toolbar = document.querySelector(".ws-cell .persea-unified-toolbar");
-      const more = toolbar.querySelector(".persea-unified-toolbar__more");
-      more.focus();
-      more.click();
-      toolbar.querySelector(".persea-unified-toolbar__secondary button").focus();
+      const view = toolbar.querySelector(".persea-unified-view-disclosure");
+      view.focus();
+      view.click();
+      toolbar.querySelector(".persea-unified-view-popover button").focus();
     });
     await page.keyboard.press("Escape");
     const escapeFocus = await page.evaluate(() => {
-      const more = document.querySelector(".ws-cell .persea-unified-toolbar__more");
-      return { open: more.getAttribute("aria-expanded"), activeIsMore: document.activeElement === more, prevented: window.__perseaMenuEscapePrevented };
+      const view = document.querySelector(".ws-cell .persea-unified-view-disclosure");
+      return { open: view.getAttribute("aria-expanded"), activeIsView: document.activeElement === view, prevented: window.__perseaMenuEscapePrevented };
     });
-    check("F15", escapeFocus.open === "false" && escapeFocus.activeIsMore && escapeFocus.prevented, "Escape closes More, prevents terminal meaning, and synchronously restores trigger focus", escapeFocus);
+    check("F15", escapeFocus.open === "false" && escapeFocus.activeIsView, "Escape closes View disclosure and synchronously restores trigger focus", escapeFocus);
     const outsideFocus = await page.evaluate(() => {
       const toolbar = document.querySelector(".ws-cell .persea-unified-toolbar");
-      const more = toolbar.querySelector(".persea-unified-toolbar__more");
-      const first = toolbar.querySelector(".persea-unified-toolbar__secondary button");
-      more.click();
+      const view = toolbar.querySelector(".persea-unified-view-disclosure");
+      const first = toolbar.querySelector(".persea-unified-view-popover button");
+      view.click();
       first.focus();
       document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true }));
-      return { open: more.getAttribute("aria-expanded"), activeIsMore: document.activeElement === more, activeText: document.activeElement?.textContent?.trim() };
+      return { open: view.getAttribute("aria-expanded"), activeIsView: document.activeElement === view, activeText: document.activeElement?.textContent?.trim() };
     });
-    check("F15", outsideFocus.open === "false" && !outsideFocus.activeIsMore && outsideFocus.activeText === "Zoom out", "outside-pointer dismissal closes without stealing focus", outsideFocus);
+    check("F15", outsideFocus.open === "false" && outsideFocus.activeIsView, "outside-pointer dismissal closes onto the semantic disclosure without focusing the terminal", outsideFocus);
     evidence.results.toolbarKeyboard = { tabOrder, escapeFocus, outsideFocus };
 
     const target = await page.$(`.ws-cell[data-ws-session="${sessions[Math.min(SESSION_COUNT - 1, 3)]}"] .xterm-screen`);

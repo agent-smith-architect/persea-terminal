@@ -359,11 +359,14 @@ export class WorkspacePage {
   private draft?: WorkspaceNode;
   private draftName?: string;
   private selectedDraftKey?: string;
+  private readonly pendingAliases = new Map<string, string>();
   private editing = false;
   private saving = false;
   private workspaceTitle?: HTMLElement;
   private singlePaneLabel?: HTMLElement;
   private panePicker?: HTMLElement;
+  private headerNotice?: HTMLElement;
+  private saveSwitchButton?: HTMLButtonElement;
   private zoomButton?: HTMLButtonElement;
   private editButton?: HTMLButtonElement;
   private editor?: HTMLElement;
@@ -625,7 +628,19 @@ export class WorkspacePage {
       picker.addEventListener("keydown", (event) => this.handlePickerKeyDown(event));
       this.panePicker = picker;
 
+      const notice = element("output", "ws-workspace-notice");
+      notice.setAttribute("role", "status");
+      notice.setAttribute("aria-live", "polite");
+      notice.hidden = true;
+      this.headerNotice = notice;
+
       const actions = element("div", "ws-workspace-header__actions");
+      const saveSwitch = element("button", "ws-workspace-save-switch", "Save switch");
+      saveSwitch.type = "button";
+      saveSwitch.hidden = true;
+      saveSwitch.addEventListener("click", () => { void this.saveSwitchedPane(); });
+      this.saveSwitchButton = saveSwitch;
+
       const zoom = element("button", "ws-workspace-zoom", "Maximize");
       zoom.type = "button";
       zoom.setAttribute("aria-pressed", "false");
@@ -637,6 +652,7 @@ export class WorkspacePage {
       edit.type = "button";
       edit.setAttribute("aria-expanded", "false");
       edit.addEventListener("click", () => {
+        if (this.saving) return;
         if (this.editing) this.cancelEditing();
         else this.beginEditing();
       });
@@ -644,8 +660,8 @@ export class WorkspacePage {
 
       const dashboard = element("a", "ws-workspace-dashboard", "Dashboard");
       dashboard.href = "/";
-      actions.append(zoom, edit, dashboard);
-      header.append(this.workspaceTitle, this.singlePaneLabel, picker, actions);
+      actions.append(saveSwitch, zoom, edit, dashboard);
+      header.append(this.workspaceTitle, this.singlePaneLabel, picker, notice, actions);
       this.editor = element("section", "ws-editor");
       this.editor.hidden = true;
       this.root.append(header, this.editor, layoutHost);
@@ -776,9 +792,36 @@ export class WorkspacePage {
     return pane.identity !== undefined && !sameSession(pane.identity.selector, pane.leaf.session);
   }
 
+  private switchedPaneToSave(): PaneRuntime | undefined {
+    const active = this.designated ? this.panes.get(this.designated) : undefined;
+    if (active && this.paneIsSwitched(active)) return active;
+    const switched = [...this.panes.values()].filter((pane) => this.paneIsSwitched(pane));
+    return switched.length === 1 ? switched[0] : undefined;
+  }
+
   private renderPanePicker(): void {
     const entries = this.view ? leafEntries(this.view.tree()) : [];
     const zoomedKey = this.view?.zoomedKey();
+    if (this.saveSwitchButton) {
+      const activePane = this.switchedPaneToSave();
+      const canOffer = !this.editing && this.record !== undefined && this.options.workspaceAPI !== undefined
+        && activePane !== undefined;
+      if (!canOffer || !activePane?.identity || !this.record) {
+        this.saveSwitchButton.hidden = true;
+        this.saveSwitchButton.disabled = true;
+      } else {
+        const target = activePane.identity.selector;
+        const entry = leafEntries(this.record.tree).find((candidate) => candidate.key === activePane.cell.key);
+        const duplicate = entry !== undefined && !replaceLeafSession(this.record.tree, entry.path, target).ok;
+        const label = duplicate
+          ? `Cannot save ${target.name}: already another pane in this workspace`
+          : `Save ${target.name} in this pane`;
+        this.saveSwitchButton.hidden = false;
+        this.saveSwitchButton.disabled = this.saving || duplicate || entry === undefined;
+        this.saveSwitchButton.setAttribute("aria-label", label);
+        this.saveSwitchButton.title = label;
+      }
+    }
     if (this.zoomButton) {
       this.zoomButton.hidden = entries.length <= 1;
       this.zoomButton.setAttribute("aria-pressed", String(zoomedKey !== undefined));
@@ -860,7 +903,7 @@ export class WorkspacePage {
   }
 
   private toggleZoom(invoker?: HTMLElement): void {
-    if (!this.view || this.panes.size <= 1) return;
+    if (!this.view || this.panes.size <= 1 || this.saving) return;
     if (this.editing) this.cancelEditing();
     const currentlyZoomed = this.view.zoomedKey();
     if (currentlyZoomed !== undefined) {
@@ -1002,12 +1045,15 @@ export class WorkspacePage {
       },
       onIdentityReplaced: (next) => {
         pane.identity = next;
+        this.designated = pane.cell.key;
+        this.applyFocusMarks();
         this.renderPanePicker();
       },
       // terminal's hook is a VETO: the page's pointer rule decides whether a
       // COMMIT may claim focus at all; this policy only withholds it from
-      // every pane but the designated one.
-      claimFocusOnCommit: (context: CommitFocusContext) => context.pointerRuleClaims && key === this.designated,
+      // every pane but the designated one. Read pane.cell.key dynamically so
+      // in-place key reconciliation keeps the veto aligned with designated.
+      claimFocusOnCommit: (context: CommitFocusContext) => context.pointerRuleClaims && pane.cell.key === this.designated,
       observer: {
         openTransport: (generation) => {
           pane.transportGeneration = generation;
@@ -1166,11 +1212,52 @@ export class WorkspacePage {
     }
   }
 
+  private setHeaderNotice(message: string): void {
+    if (!this.headerNotice) return;
+    this.headerNotice.textContent = message;
+    this.headerNotice.hidden = message === "";
+  }
+
+  private async saveSwitchedPane(): Promise<void> {
+    if (this.saving || this.editing || this.torndown) return;
+    const api = this.options.workspaceAPI;
+    const record = this.record;
+    const pane = this.switchedPaneToSave();
+    if (!api || !record || !pane || !pane.identity || !this.paneIsSwitched(pane)) return;
+    const entry = leafEntries(record.tree).find((candidate) => candidate.key === pane.cell.key);
+    if (!entry) return;
+    const replaced = replaceLeafSession(record.tree, entry.path, pane.identity.selector);
+    if (!replaced.ok) {
+      this.setHeaderNotice(workspaceRefusalMessage(replaced.refusal));
+      this.renderPanePicker();
+      return;
+    }
+    this.saving = true;
+    this.setHeaderNotice("");
+    if (this.editButton) this.editButton.disabled = true;
+    if (this.saveSwitchButton) this.saveSwitchButton.disabled = true;
+    try {
+      const next = await api.update(record, record.name, replaced.value);
+      this.record = next;
+      this.updateTree(next.tree);
+      this.setHeaderNotice("");
+    } catch (error) {
+      const copy = workspaceAPIMessage(error, "saved");
+      this.setHeaderNotice(`${copy.headline}. ${copy.detail} (${copy.code})`);
+    } finally {
+      this.saving = false;
+      if (this.editButton) this.editButton.disabled = false;
+      this.renderPanePicker();
+    }
+  }
+
   private beginEditing(): void {
-    if (this.editing || !this.record || !this.options.workspaceAPI || !this.view) return;
+    if (this.editing || this.saving || !this.record || !this.options.workspaceAPI || !this.view) return;
     this.editing = true;
     this.draft = this.record.tree;
     this.draftName = this.record.name;
+    this.pendingAliases.clear();
+    this.setHeaderNotice("");
     this.selectedDraftKey = this.designated ?? leafEntries(this.draft)[0]?.key;
     this.view.setEditing(true);
     this.view.setDisabledSplits(new Set());
@@ -1180,11 +1267,12 @@ export class WorkspacePage {
   }
 
   private cancelEditing(): void {
-    if (!this.editing || !this.record || !this.view) return;
+    if (!this.editing || this.saving || !this.record || !this.view) return;
     this.editing = false;
     this.draft = undefined;
     this.draftName = undefined;
     this.selectedDraftKey = undefined;
+    this.pendingAliases.clear();
     // Divider weights are the only draft mutation reflected in the live DOM.
     // Restoring the durable tree keeps every keyed cell/controller intact.
     this.view.update(this.record.tree);
@@ -1199,6 +1287,40 @@ export class WorkspacePage {
     this.view.setDisabledSplits(divergedLiveSplits(this.view.tree(), this.draft));
   }
 
+  // Synchronizes every rendered or pending pane label into this.draft before a
+  // structural edit or Save so typed labels are never silently dropped. When
+  // strict=true (Save), an invalid label aborts with its exact refusal and key.
+  private flushPendingAliases(strict: boolean): Readonly<{ ok: true }> | Readonly<{ ok: false; key: string; message: string }> {
+    if (!this.draft) return Object.freeze({ ok: true });
+    if (this.editor) {
+      for (const paneEl of Array.from(this.editor.querySelectorAll<HTMLElement>(".ws-editor__pane"))) {
+        const key = paneEl.dataset.wsPaneKey;
+        const input = paneEl.querySelector<HTMLInputElement>(".ws-editor__alias input");
+        if (key && input) this.pendingAliases.set(key, input.value);
+      }
+    }
+    for (const [key, rawValue] of Array.from(this.pendingAliases.entries())) {
+      const entry = leafEntries(this.draft).find((candidate) => candidate.key === key);
+      if (!entry) {
+        this.pendingAliases.delete(key);
+        continue;
+      }
+      if (rawValue === (entry.leaf.aliasHint ?? "")) {
+        this.pendingAliases.delete(key);
+        continue;
+      }
+      const nextHint = rawValue === "" ? undefined : rawValue;
+      const result = setLeafAliasHint(this.draft, entry.path, nextHint);
+      if (!result.ok) {
+        if (strict) return Object.freeze({ ok: false, key, message: workspaceRefusalMessage(result.refusal) });
+        continue;
+      }
+      this.draft = result.value;
+      this.pendingAliases.delete(key);
+    }
+    return Object.freeze({ ok: true });
+  }
+
   private applyDraft(result: WorkspaceResult<WorkspaceNode>): void {
     if (!result.ok) {
       if (this.editorStatus) this.editorStatus.textContent = workspaceRefusalMessage(result.refusal);
@@ -1206,6 +1328,9 @@ export class WorkspacePage {
     }
     this.draft = result.value;
     const keys = new Set(leafEntries(this.draft).map((entry) => entry.key));
+    for (const key of Array.from(this.pendingAliases.keys())) {
+      if (!keys.has(key)) this.pendingAliases.delete(key);
+    }
     if (this.selectedDraftKey && !keys.has(this.selectedDraftKey)) {
       this.selectedDraftKey = leafEntries(this.draft)[0]?.key;
     }
@@ -1325,6 +1450,7 @@ export class WorkspacePage {
         const button = element("button", "ws-editor__preset", presetLabel(preset, draftEntries.length));
         button.type = "button";
         button.addEventListener("click", () => {
+          this.flushPendingAliases(false);
           const currentDraft = this.draft ?? draft;
           const currentLeaves = leafEntries(currentDraft).map((entry) => entry.leaf);
           this.applyDraft(arrangeWithPreset(currentLeaves, preset));
@@ -1393,13 +1519,56 @@ export class WorkspacePage {
 
       const aliasLabel = element("label", "ws-editor__alias", "Display label");
       const alias = element("input", "ws-editor__input");
-      alias.value = entry.leaf.aliasHint ?? "";
+      alias.value = this.pendingAliases.get(entry.key) ?? entry.leaf.aliasHint ?? "";
       alias.placeholder = "Optional pane label";
+      alias.addEventListener("input", () => {
+        this.pendingAliases.set(entry.key, alias.value);
+        const currentDraft = this.draft ?? draft;
+        const currentEntry = leafEntries(currentDraft).find((candidate) => candidate.key === entry.key);
+        if (!currentEntry) return;
+        const nextHint = alias.value === "" ? undefined : alias.value;
+        const updated = setLeafAliasHint(currentDraft, currentEntry.path, nextHint);
+        if (updated.ok) {
+          this.draft = updated.value;
+          this.pendingAliases.delete(entry.key);
+          this.refreshEditorDiagram();
+          if (this.editorStatus) this.editorStatus.textContent = "Local draft changed. Save to make it durable.";
+        }
+      });
       const setAlias = element("button", "ws-editor__alias-save", "Set label");
       setAlias.type = "button";
-      setAlias.addEventListener("click", () => this.applyDraft(setLeafAliasHint(this.draft ?? draft, entry.path, alias.value === "" ? undefined : alias.value)));
+      setAlias.addEventListener("click", () => {
+        const currentDraft = this.draft ?? draft;
+        const currentEntry = leafEntries(currentDraft).find((candidate) => candidate.key === entry.key);
+        if (!currentEntry) return;
+        this.pendingAliases.delete(entry.key);
+        this.applyDraft(setLeafAliasHint(currentDraft, currentEntry.path, alias.value === "" ? undefined : alias.value));
+      });
       aliasLabel.append(alias, setAlias);
       item.append(aliasLabel);
+
+      const livePane = this.panes.get(entry.key);
+      if (livePane && this.paneIsSwitched(livePane) && livePane.identity) {
+        const switchedSelector = livePane.identity.selector;
+        if (replaceLeafSession(draft, entry.path, switchedSelector).ok) {
+          const switchedAlias = globalAliasForSelector(snapshot, switchedSelector);
+          const switchedLabel = switchedAlias && switchedAlias !== switchedSelector.name
+            ? `${switchedAlias} (${switchedSelector.name})`
+            : switchedSelector.name;
+          const useCurrent = element("button", "ws-editor__use-current", `Use current (${switchedLabel})`);
+          useCurrent.type = "button";
+          useCurrent.addEventListener("click", () => {
+            this.flushPendingAliases(false);
+            const currentDraft = this.draft ?? draft;
+            const currentEntry = leafEntries(currentDraft).find((candidate) => candidate.key === entry.key);
+            if (!currentEntry) return;
+            this.applyDraft(replaceLeafSession(currentDraft, currentEntry.path, switchedSelector));
+          });
+          const switchRow = element("div", "ws-editor__pane-ops");
+          switchRow.append(useCurrent);
+          item.append(switchRow);
+        }
+      }
 
       if (draftEntries.length > 1) {
         const swapRow = element("div", "ws-editor__pane-ops");
@@ -1481,11 +1650,22 @@ export class WorkspacePage {
     if (this.saving) return;
     const api = this.options.workspaceAPI;
     const record = this.record;
-    const draft = this.draft;
     const name = this.draftName ?? record?.name;
-    if (!api || !record || !draft || !name || !this.editorStatus) return;
+    if (!api || !record || !this.draft || !name || !this.editorStatus) return;
+    const flushed = this.flushPendingAliases(true);
+    if (!flushed.ok) {
+      this.editorStatus.textContent = flushed.message;
+      const badInput = this.editor?.querySelector<HTMLInputElement>(`.ws-editor__pane[data-ws-pane-key="${CSS.escape(flushed.key)}"] .ws-editor__alias input`);
+      badInput?.focus({ preventScroll: true });
+      return;
+    }
+    const draft = this.draft;
     this.saving = true;
     button.disabled = true;
+    const cancelBtn = this.editor?.querySelector<HTMLButtonElement>(".ws-editor__cancel");
+    if (cancelBtn) cancelBtn.disabled = true;
+    if (this.editButton) this.editButton.disabled = true;
+    if (this.saveSwitchButton) this.saveSwitchButton.disabled = true;
     this.editorStatus.textContent = "Saving workspace…";
     try {
       const next = await api.update(record, name, draft);
@@ -1495,6 +1675,7 @@ export class WorkspacePage {
       this.draft = undefined;
       this.draftName = undefined;
       this.selectedDraftKey = undefined;
+      this.pendingAliases.clear();
       this.updateTree(next.tree);
       this.view?.setEditing(false);
       this.editButton?.setAttribute("aria-expanded", "false");
@@ -1527,6 +1708,7 @@ export class WorkspacePage {
             this.record = currentRecord;
             this.draft = currentRecord.tree;
             this.draftName = currentRecord.name;
+            this.pendingAliases.clear();
             this.updateTree(currentRecord.tree);
             this.view?.setDisabledSplits(new Set());
             if (this.workspaceTitle) this.workspaceTitle.textContent = currentRecord.name;
@@ -1547,13 +1729,19 @@ export class WorkspacePage {
       this.saving = false;
       const currentSave = this.editor?.querySelector<HTMLButtonElement>(".ws-editor__save");
       if (currentSave) currentSave.disabled = false;
+      const currentCancel = this.editor?.querySelector<HTMLButtonElement>(".ws-editor__cancel");
+      if (currentCancel) currentCancel.disabled = false;
+      if (cancelBtn) cancelBtn.disabled = false;
+      if (this.editButton) this.editButton.disabled = false;
       button.disabled = false;
+      this.renderPanePicker();
     }
   }
 
   // Structural layout updates from the workspace editor: the view keeps
-  // surviving cell elements, and this page
-  // restores focus and selection to the pane that held them.
+  // surviving cell elements (and re-keys a switched pane whose live session
+  // matches its new durable leaf so the active socket never reconnects), and
+  // this page restores focus and selection to the pane that held them.
   updateTree(tree: WorkspaceNode): boolean {
     const view = this.view;
     if (!view) return false;
@@ -1571,6 +1759,28 @@ export class WorkspacePage {
         const range = selection.getRangeAt(i);
         ranges.push({ startContainer: range.startContainer, startOffset: range.startOffset, endContainer: range.endContainer, endOffset: range.endOffset });
       }
+    }
+    // Key reconciliation for in-place switched panes: if an outgoing durable
+    // key currently holds a live controller attached to an incoming durable
+    // key not yet owned by another pane, transfer that cell/runtime in place
+    // before view.update() so its WebSocket and terminal survive untouched.
+    const nextByKey = new Map(verdict.value.map((entry) => [entry.key, entry]));
+    const rekeys: { oldKey: string; newKey: string; pane: PaneRuntime; nextLeaf: WorkspaceLeaf }[] = [];
+    const claimedNewKeys = new Set<string>();
+    for (const [oldKey, pane] of this.panes) {
+      if (nextByKey.has(oldKey) || !pane.controller || !pane.identity) continue;
+      const liveKey = sessionKey(pane.identity.selector);
+      const nextEntry = nextByKey.get(liveKey);
+      if (!nextEntry || this.panes.has(liveKey) || claimedNewKeys.has(liveKey)) continue;
+      claimedNewKeys.add(liveKey);
+      rekeys.push({ oldKey, newKey: liveKey, pane, nextLeaf: nextEntry.leaf });
+    }
+    for (const { oldKey, newKey, pane, nextLeaf } of rekeys) {
+      if (!view.rekeyCell(oldKey, newKey, nextLeaf)) continue;
+      this.panes.delete(oldKey);
+      pane.leaf = nextLeaf;
+      this.panes.set(newKey, pane);
+      if (this.designated === oldKey) this.designated = newKey;
     }
     view.update(tree);
     for (const entry of verdict.value) {
