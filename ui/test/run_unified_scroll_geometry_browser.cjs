@@ -1204,11 +1204,15 @@ async function runMobilePhoneChrome(cdp, report, failures) {
     if (!menu.opener || menu.opener.expanded !== "true" || !menu.sheet || !menu.sheet.visible) note(`${width}: the opener did not reveal the sheet`, { opener: menu.opener, sheet: menu.sheet });
     if (menu.sheet && menu.sheet.layer !== "absolute") note(`${width}: the sheet is in flow`, menu.sheet);
     if (menu.sheet && (menu.sheet.left < -0.5 || menu.sheet.right > width + 0.5)) note(`${width}: the sheet lands outside the viewport`, menu.sheet);
-	for (const label of ["Clipboard", "Keys", "Composer"]) {
+	for (const label of ["Keys", "Attach image", "Keyboard settings", "Help"]) {
 	  const button = menu.sheetTiles.find((candidate) => candidate && candidate.text === label);
       if (!button || !button.visible) note(`${width}/sheet: ${label} is not visible`, button);
       else if (button.left < -0.5 || button.right > width + 0.5) note(`${width}/sheet: ${label} lands outside the viewport`, { button, width });
 	  if (button && button.visible && (button.height < 44 || button.width < 44)) note(`${width}/sheet: ${label} is below the 44px touch target`, button);
+	}
+	for (const duplicate of ["Clipboard", "Composer", "Switch session", "Dashboard"]) {
+	  const button = menu.sheetTiles.find((candidate) => candidate && candidate.text === duplicate);
+	  if (button && button.visible) note(`${width}/sheet: duplicate ${duplicate} tile remained in Quick actions`, button);
 	}
 	for (const label of ["Select", "Open clipboard"]) {
 	  const button = menu.primaryControls.find((candidate) => candidate && (candidate.text === label || candidate.label.startsWith(label)));
@@ -1261,19 +1265,19 @@ async function runMobilePhoneChrome(cdp, report, failures) {
     else target(`${width}/composer: autocorrect toggle`, c.modeToggle);
     inside(`${width}/composer: ➤`, c.send, width);
     inside(`${width}/composer: ⊕`, c.attach, width);
-    inside(`${width}/composer: ⌫`, c.clear, width);
+    inside(`${width}/composer: Clear`, c.clear, width);
     // Vertically too: a long wrapped draft must not push the chrome row under
     // the keyboard (the shell is pinned to the 508px visual viewport here).
-    for (const [label, box] of [["➤", c.send], ["⊕", c.attach], ["⌫", c.clear]]) {
+    for (const [label, box] of [["➤", c.send], ["⊕", c.attach], ["Clear", c.clear]]) {
       if (box && box.visible && (box.bottom > composer.shellBottom + 0.5 || (composer.keybarTop !== null && box.bottom > composer.keybarTop + 0.5))) {
         note(`${width}/composer: ${label} sits below the pinned shell or under the key bar`, { box, shellBottom: composer.shellBottom, keybarTop: composer.keybarTop });
       }
     }
     target(`${width}/composer: ➤`, c.send);
     target(`${width}/composer: ⊕`, c.attach);
-    target(`${width}/composer: ⌫`, c.clear);
+    target(`${width}/composer: Clear`, c.clear);
     if (c.send && c.send.visible && c.send.right < c.footer.right - 1) note(`${width}: ➤ is not the chrome row's right edge`, { send: c.send, footer: c.footer });
-    if (c.attach && c.clear && c.send && !(c.attach.right <= c.clear.left + 0.5 && c.clear.right <= c.send.left + 0.5)) note(`${width}: the actions are not ordered ⊕ ⌫ ➤`, c);
+    if (c.attach && c.clear && c.send && !(c.clear.right <= c.attach.left + 0.5 && c.attach.right <= c.send.left + 0.5)) note(`${width}: the actions are not ordered Clear ⊕ ➤`, c);
     for (const button of c.headerButtons) {
       if (button && button.visible) {
         inside(`${width}/composer: header ${button.text}`, button, width);
@@ -1302,7 +1306,7 @@ async function runMobilePhoneChrome(cdp, report, failures) {
     else {
       inside(`${width}/crowded: Fix`, k.fix, width);
       if (width >= 360 && k.fix.scrollWidth > k.fix.clientWidth + 1) note(`${width}: Fix was squeezed`, k.fix);
-      if (k.send && k.fix.right > k.attach.left + 0.5) note(`${width}: Fix overlaps the actions`, { fix: k.fix, attach: k.attach });
+      if (k.send && k.clear && k.fix.right > k.clear.left + 0.5) note(`${width}: Fix overlaps the actions`, { fix: k.fix, clear: k.clear });
     }
     if (k.footer.scrollWidth > k.footer.clientWidth + 1) note(`${width}/crowded: the composer chrome row scrolls`, k.footer);
     if (k.send && k.send.right < k.footer.right - 1) note(`${width}/crowded: ➤ left the row's right edge`, { send: k.send, footer: k.footer });

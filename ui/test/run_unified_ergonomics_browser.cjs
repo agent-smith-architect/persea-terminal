@@ -126,7 +126,7 @@ const STATE = `(() => {
   if (sheet) for (const t of sheet.querySelectorAll(".persea-unified-sheet__tile")) {
     const label = t.querySelector(".persea-unified-sheet__label")?.textContent ?? "";
     const labelNode = t.querySelector(".persea-unified-sheet__label");
-    tiles[label] = { disabled: t.disabled, reason: t.querySelector(".persea-unified-sheet__reason")?.textContent ?? "", rect: rect(t), pressed: t.getAttribute("aria-pressed"), labelClipped: !!labelNode && labelNode.scrollWidth > labelNode.clientWidth, ariaLabel: t.getAttribute("aria-label") };
+    tiles[label] = { disabled: t.disabled, hidden: t.hidden, reason: t.querySelector(".persea-unified-sheet__reason")?.textContent ?? "", rect: rect(t), pressed: t.getAttribute("aria-pressed"), labelClipped: !!labelNode && labelNode.scrollWidth > labelNode.clientWidth, ariaLabel: t.getAttribute("aria-label") };
   }
   return {
     href: location.href, ready: document.readyState,
@@ -310,7 +310,7 @@ class Tab extends BaseTab {
     if (keyIDs[label]) {
       const opened = await this.evaluate(`!document.querySelector('.persea-terminal-keys').hidden`);
       if (!opened) { await this.tap(await this.tilePoint("Keys")); await delay(100); }
-      const keyControl = async id => this.pointFor(`document.querySelector('.persea-terminal-keys [data-key-control=' + ${JSON.stringify(JSON.stringify(id))} + ']')`);
+      const keyControl = async id => this.pointFor(`document.querySelector('.persea-terminal-keys [data-key-control=' + ${JSON.stringify(JSON.stringify(id))} + ']') || document.querySelector('.persea-unified-keybar-row [data-bar-key=' + ${JSON.stringify(JSON.stringify(id))} + ']')`);
       if (await this.evaluate(`document.querySelector('.persea-terminal-keys').dataset.view !== 'All keys'`)) { await this.tap(await keyControl("view:All keys")); await delay(70); }
       const group = await this.evaluate(`document.querySelector('.persea-terminal-keys').dataset.group`);
       if (group !== "Navigation") { await this.tap(await keyControl("key-group")); await this.tap(await keyControl("choose-group:Navigation")); await delay(70); }
@@ -513,8 +513,11 @@ async function main() {
     evidence.qf1d.open.openerRect = open.openerRect;
     if (evidence.qf1d.open.tilesUnderOpener.length) fail("sheet-focus", "the opener covers sheet tiles while the sheet is open", { tiles: evidence.qf1d.open.tilesUnderOpener, opener: open.openerRect, sheet: open.sheetRect });
     if (open.openerRect && open.sheetRect && open.openerRect.y + open.openerRect.h > open.sheetRect.y + 0.5) fail("sheet-focus", "the opener is not above the sheet it opens", { opener: open.openerRect, sheet: open.sheetRect });
-	for (const label of ["Clipboard", "Keys", "Composer", "Dashboard", "Switch session", "Attach image", "Show keyboard", "Hide keyboard"]) {
-      if (!open.tiles[label]) fail("sheet-focus", `sheet tile ${label} is absent`, Object.keys(open.tiles));
+	for (const label of ["Keys", "Attach image", "Keyboard settings", "Help"]) {
+      if (!open.tiles[label] || open.tiles[label].hidden) fail("sheet-focus", `sheet tile ${label} is absent`, Object.keys(open.tiles));
+    }
+	for (const duplicate of ["Clipboard", "Composer", "Dashboard", "Switch session", "Show keyboard"]) {
+      if (open.tiles[duplicate]) fail("sheet-focus", `duplicate or retired tile ${duplicate} remained in Quick actions`, Object.keys(open.tiles));
     }
 	const primaryClipboard = await tabA.evaluate(`(() => {
 	  const select = document.querySelector(".persea-unified-select-context");
@@ -535,14 +538,11 @@ async function main() {
     evidence.qf1d.open.placeholders = placeholders;
     evidence.qf1d.open.headings = open.sheetHeadings;
     if (placeholders.length || placeholderReasons.length) fail("sheet-focus", "placeholder (coming-soon) tiles render", { placeholders, placeholderReasons });
-    // terminal moved Keyboard to the front so it lands inside the initial sheet
-    // viewport; clipboard touch-focus below measures that it actually does.
-	if (open.sheetHeadings.join(" ") !== "Tools Keyboard Sessions Settings and help") fail("sheet-focus", "the task menu's sections are not Tools, Keyboard, Sessions, Settings and help", open.sheetHeadings);
+    if (open.sheetHeadings.length !== 0) fail("sheet-focus", "the streamlined Quick actions sheet should not render redundant section headings", open.sheetHeadings);
     if (["Snippets", "Clips", "Escape", "Tab", "Control"].some(label => open.tiles[label])) fail("sheet-focus", "retired storage tiles or individual key tiles remain in the task menu", Object.keys(open.tiles));
     if (open.tiles.Prev || open.tiles.Next) fail("sheet-focus", "arbitrary Prev/Next session cycling remains in Quick actions", { Prev: open.tiles.Prev, Next: open.tiles.Next });
     if (open.tiles[IMAGE_TILE] && (!open.tiles[IMAGE_TILE].disabled || !/Images unavailable/.test(open.tiles[IMAGE_TILE].reason))) fail("sheet-focus", "Attach image is not disabled with its staging reason", open.tiles[IMAGE_TILE]);
-    if (open.tiles["Show keyboard"]?.disabled) fail("sheet-focus", "Show keyboard is disabled with the keyboard closed", open.tiles["Show keyboard"]);
-    if (!open.tiles["Hide keyboard"]?.disabled) fail("sheet-focus", "Hide keyboard is enabled with the keyboard closed", open.tiles["Hide keyboard"]);
+    if (!open.tiles["Hide keyboard"]?.hidden) fail("sheet-focus", "Hide keyboard is shown with the keyboard closed", open.tiles["Hide keyboard"]);
     await shot(tabA, "phone-02-terminal-sheet-open");
     // Outside tap: the gap in the toolbar between ↕ (or its hint) and ✎.
     const gapX = ((open.fitHintVisible ? open.fitHintRect.x + open.fitHintRect.w : open.fitRect.x + open.fitRect.w) + open.composerToggleRect.x) / 2;
@@ -668,9 +668,9 @@ async function main() {
         try { const f = JSON.parse(String(data)); if (f && f.source && f.epoch) { socket = this; source = f.source; epoch = f.epoch; } } catch {}
         return originalSend.call(this, data);
       };
-      const tile = document.querySelector('.persea-terminal-keys');
+      const tile = document.querySelector('.persea-unified-terminal');
       const inject = (event) => {
-        if (!event.target.closest('[data-key-control="key:escape:0"]')) return;
+        if (!event.target.closest('[data-key-control="key:escape:0"], [data-bar-key="key:escape:0"]')) return;
         if (!socket || !source) return;
         const rows = document.querySelector(".xterm-rows")?.children.length ?? 24;
         originalSend.call(socket, JSON.stringify({ type: "RESIZE_REQUEST", version: 1, source, epoch, columns: 80, rows }));
@@ -1069,7 +1069,7 @@ async function main() {
     };
     const openList = async () => {
       let state = await clipboardState();
-      if (!state.visible) { await tabA.tapTile("Clipboard"); await waitClipboard(value => value.visible); }
+      if (!state.visible) { await tabA.activate(await tabA.state(), await tabA.pointFor(`document.querySelector('.persea-unified-toolbar-paste')`)); await waitClipboard(value => value.visible); }
       else if (state.draft !== null) await clipboardAction("Cancel");
       return waitClipboard(value => value.visible && value.draft === null);
     };
@@ -1172,7 +1172,7 @@ async function main() {
       if(result.state.activeKind==='xterm')fail('clipboard-touch-focus','coarse Send summoned native terminal input',result.state.activeKind);
     }
     for(const keyboardOpen of [false,true]) {
-      if(keyboardOpen){await closeClipboard();await tabA.tapTile('Show keyboard');await tabA.emulate(PHONE_KEYBOARD,true);await delay(100);}
+      if(keyboardOpen){await closeClipboard();await tabA.evaluate(`document.querySelector('.xterm-helper-textarea')?.focus({preventScroll:true})`);await tabA.emulate(PHONE_KEYBOARD,true);await delay(100);}
     for(const [label,body] of [['multi','line one\nline two'],['tabbed','col\tvalue']]) {
       const result=await send(body);clipboard.f2[label]={delta:result.delta,draft:result.state.composerDraft};
       if(result.delta!=='' || result.state.composerDraft!==body || !result.state.composerOpen)fail('clipboard-send-no-return',`${label} did not remain in this pane's guarded composer`,clipboard.f2[label]);
@@ -1217,7 +1217,7 @@ async function main() {
     if(reconnected.delta!=='echo zero')fail('clipboard-local-editing','fresh preview did not target the reconnected attachment',reconnected.delta);
     await control({snippetDelayMs:1500});await closeClipboard();await tabA.navigate(unifiedURL(await freshControlHandle()));
     assert((await tabA.waitUntil(isLive)).state,'clipboard-local-editing: fresh page did not commit');
-    await tabA.tapTile('Clipboard');await delay(100);const readsAtDispose=(await store()).get;
+    await tabA.activate(await tabA.state(), await tabA.pointFor(`document.querySelector('.persea-unified-toolbar-paste')`));await delay(100);const readsAtDispose=(await store()).get;
     await tabA.navigate(origin+'/');await delay(2200);const readsAfterDispose=(await store()).get;
     clipboard.f1.disposal={readsAtDispose,readsAfterDispose};
     if(readsAfterDispose>readsAtDispose+1)fail('clipboard-local-editing','disposed pane kept polling shared text',clipboard.f1.disposal);
@@ -1495,7 +1495,7 @@ async function main() {
     // imply terminal Paste or resize; permission denial opens no editor.
     for(const keyboardOpen of [false,true]) {
       await freshClipboardPage();await installClipboardStub();
-      if(keyboardOpen){await tabA.tapTile('Show keyboard');await tabA.emulate(PHONE_KEYBOARD,true);await delay(100);}
+      if(keyboardOpen){await tabA.evaluate(`document.querySelector('.xterm-helper-textarea')?.focus({preventScroll:true})`);await tabA.emulate(PHONE_KEYBOARD,true);await delay(100);}
       const before=await wire(),focusBefore=(await tabA.state()).focusCalls;
       await tabA.activate(await tabA.state(),await tabA.pointFor(`document.querySelector('.persea-unified-toolbar-paste')`));
       const readsBeforeImport=await tabA.evaluate('window.__clipboardDevice.reads');if(readsBeforeImport!==0)fail('clipboard-explicit-import','Paste read the device clipboard before explicit Import',readsBeforeImport);
@@ -1517,12 +1517,12 @@ async function main() {
     // Clipboard. The menu no longer embeds a long saved-text list.
     clipboard.j5=[];
     for(const keyboardOpen of [false,true]) {
-      if(keyboardOpen){await tabA.tapTile('Show keyboard');await tabA.emulate(PHONE_KEYBOARD,true);await delay(100);}
+      if(keyboardOpen){await tabA.evaluate(`document.querySelector('.xterm-helper-textarea')?.focus({preventScroll:true})`);await tabA.emulate(PHONE_KEYBOARD,true);await delay(100);}
       await openSheet();const taskMenu=await tabA.state();
-      const label=keyboardOpen?'Hide keyboard':'Show keyboard',tile=taskMenu.tiles[label];
-      const inside=tile?.rect&&taskMenu.sheetRect&&tile.rect.y>=taskMenu.sheetRect.y-.5&&tile.rect.y+tile.rect.h<=taskMenu.sheetRect.y+taskMenu.sheetRect.h+.5;
-      const measured={keyboardOpen,label,headings:taskMenu.sheetHeadings,inside,scroll:taskMenu.sheetScroll};clipboard.j5.push(measured);
-      if(!inside)fail('clipboard touch-focus','applicable keyboard action requires discovering a menu scroll',measured);
+      const label=keyboardOpen?'Hide keyboard':'Keys',tile=taskMenu.tiles[label];
+      const inside=tile&&!tile.hidden&&tile.rect&&taskMenu.sheetRect&&tile.rect.y>=taskMenu.sheetRect.y-.5&&tile.rect.y+tile.rect.h<=taskMenu.sheetRect.y+taskMenu.sheetRect.h+.5;
+      const measured={keyboardOpen,label,hideHidden:taskMenu.tiles['Hide keyboard']?.hidden,headings:taskMenu.sheetHeadings,inside,scroll:taskMenu.sheetScroll};clipboard.j5.push(measured);
+      if(!inside || (!keyboardOpen && !taskMenu.tiles['Hide keyboard']?.hidden))fail('clipboard touch-focus','applicable keyboard action requires discovering a menu scroll or leaked closed-state Hide keyboard',measured);
       await tabA.tap((await tabA.state()).openerRect);await delay(100);
     }
     await tabA.emulate(DESKTOP,false);await freshClipboardPage({},false);const fine=await tabA.state();clipboard.f9.finePointer={openerVisible:fine.openerVisible,puckPresent:fine.puckPresent};

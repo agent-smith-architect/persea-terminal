@@ -16,24 +16,17 @@ const MODULE = process.env.PERSEA_PLAYWRIGHT_MODULE || require.resolve("playwrig
 const EVIDENCE = path.resolve(process.env.PERSEA_TERMINAL_CONTROLS_EVIDENCE_DIR || path.join(os.tmpdir(), `persea-terminal_controls-${ENGINE}`));
 const MUTANT = process.env.PERSEA_TERMINAL_CONTROLS_MUTANT || "";
 const MUTANTS = new Set([
-  "no-keybox-bank-entry",
   "clipped-status-notice",
   "native-key-echo-lost",
-  "f12-keycode", "double-function-dispatch", "no-control-gate", "no-bank-reset", "row-drift", "second-row",
-  "typography-refocus", "selection-loss", "typography-input", "typography-resize", "popover-in-flow",
-  "no-cas", "clamp-enabled", "conflict-lie", "unavailable-lie", "function-active-lie",
-  "function-hidden-reachable", "keyboard-back-focus", "standard-marker", "no-typography-claim",
-  "keyboard-entry-focus", "no-typography-competitor-close", "no-typography-lifecycle-close",
-  "composer-overflow-visible", "theme-border-collapse", "theme-status-collapse", "popover-no-flip",
-  "bank-pointerdown-activation", "portal-controls-downsize", "theme-weak-palette",
-  "function-bank-retains-ctrl", "typography-native-disable", "typography-stale-frame-restore",
-  "function-bank-ctrl-enabled", "sheet-gesture-generation-fence",
+  "f12-keycode", "no-control-gate", "row-drift", "second-row",
+  "selection-loss", "standard-marker", "composer-overflow-visible",
+  "typography-stale-frame-restore", "sheet-gesture-generation-fence",
   "keyboard-activation-generation-fence", "keyboard-canceled-tombstone",
   "standard-key-generation-fence", "paste-generation-fence", "keyboard-enter-repeat-provenance",
   "keyboard-canceled-release-retirement", "toolbar-composer-generation-fence",
-  "composer-control-generation-fence", "session-generation-provider-omission", "session-sheet-generation-provider-omission",
+  "composer-control-generation-fence", "session-generation-provider-omission",
   "keyboard-unrelated-key-provenance", "tap-pointer-identity",
-  "transport-key-authority-reset", "typography-layout-reanchor",
+  "transport-key-authority-reset",
 ]);
 const THEME_IDS = Object.freeze(["default", "rose-pine", "rose-pine-dawn", "solarized-dark", "gruvbox-dark", "one-dark", "dracula", "catppuccin-mocha"]);
 const F_BYTES = Object.freeze(["\x1bOP", "\x1bOQ", "\x1bOR", "\x1bOS", "\x1b[15~", "\x1b[17~", "\x1b[18~", "\x1b[19~", "\x1b[20~", "\x1b[21~", "\x1b[23~", "\x1b[24~"]);
@@ -224,35 +217,18 @@ async function prepareFixtureUI() {
           const file = path.basename(args.path);
           if (MUTANT === "f12-keycode" && file === "unified_key_bar.ts") source = replace(source, 'f12: { key: "F12", code: "F12", keyCode: 123 }', 'f12: { key: "F12", code: "F12", keyCode: 122 }', 1, MUTANT), touched += 1;
           if (MUTANT === "no-control-gate" && file === "unified_terminal_page.ts") {
-            source = replace(source, " || !this.controlGranted || this.options.capabilityMode", " || false || this.options.capabilityMode", 1, MUTANT);
+            source = replace(source, "if (!this.controlGranted) {", "if (false) {", 1, MUTANT);
             source = replace(source, "this.selectMode || !availability.canInject", "this.selectMode || false", 1, MUTANT);
             source = replace(source, "authority !== this.keyInteractionGeneration || !this.composerAvailability().canInject", "authority !== this.keyInteractionGeneration", 1, MUTANT);
             touched += 1;
           }
-          if (MUTANT === "row-drift" && file === "unified_terminal_page.ts") source = replace(source, "    this.keyRow = keyRow;", "    keyRow.firstElementChild?.remove();\n    this.keyRow = keyRow;", 1, MUTANT), touched += 1;
+          if (MUTANT === "row-drift" && file === "unified_terminal_page.ts") source = replace(source, "    this.renderCtrlLatch();\n    if (focused)", "    this.keyRow.firstElementChild?.remove();\n    this.renderCtrlLatch();\n    if (focused)", 1, MUTANT), touched += 1;
           if (MUTANT === "second-row" && file === "unified_terminal_page.ts") source = replace(source, "keyBar.append(keyRow, keyBankToggle);", "keyBar.append(keyRow.cloneNode(true), keyRow, keyBankToggle);", 1, MUTANT), touched += 1;
           if (MUTANT === "clipped-status-notice" && file === "attachment_page.css") source += '\n.persea-unified-toast { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }\n', touched += 1;
           if (MUTANT === "native-key-echo-lost" && file === "unified_terminal_page.ts") source = replace(source, 'this.iosBackspace.onXtermKeyHandled(domEvent, key)', 'this.iosBackspace.onXtermKeyHandled(domEvent)', 1, MUTANT), touched += 1;
-          if (MUTANT === "typography-refocus" && file === "composer.ts") source = replace(source, /(this\.onToggleTypography,\n\s*)\(\) => undefined,/, "$1() => this.restoreTextareaFocus(),", 1, MUTANT), touched += 1;
           if (MUTANT === "selection-loss" && file === "composer.ts") source = replace(source, "this.textarea.setSelectionRange(selectionStart, selectionEnd, selectionDirection);", 'this.textarea.setSelectionRange(0, 0, "none");', 1, MUTANT), touched += 1;
-          if (MUTANT === "typography-input" && file === "unified_terminal_page.ts") source = replace(source, "    this.applyComposerFontSize(value, saving);", '    this.applyComposerFontSize(value, saving);\n    this.sendKeyBarKey("tab");', 1, MUTANT), touched += 1;
-          if (MUTANT === "typography-resize" && file === "unified_terminal_page.ts") source = replace(source, "    this.applyComposerFontSize(value, saving);", '    this.applyComposerFontSize(value, saving);\n    const resizeTarget = this.prepared;\n    if (resizeTarget) this.send({ type: "RESIZE_REQUEST", version: 1, source: resizeTarget.source, epoch: resizeTarget.epoch, columns: this.committedColumns, rows: this.committedRows });', 1, MUTANT), touched += 1;
-          if (MUTANT === "popover-in-flow" && file === "composer.ts") source = replace(source, "      options.page.append(this.typographyPopover);", '      this.typographyRoot.append(this.typographyPopover);\n      this.typographyPopover.style.position = "static";', 1, MUTANT), touched += 1;
-          if (MUTANT === "no-cas" && file === "operator_preferences.ts") source = replace(source, '"If-Match": `"${revision}"`', '"X-Mutant-If-Match": `"${revision}"`', 1, MUTANT), touched += 1;
-          if (MUTANT === "clamp-enabled" && file === "composer.ts") source = replace(source, "setUnavailable(plus, !state.enabled || saving || state.size >= COMPOSER_FONT_SIZE_MAX);", "setUnavailable(plus, !state.enabled || saving);", 1, MUTANT), touched += 1;
-          if (MUTANT === "conflict-lie" && file === "unified_terminal_page.ts") source = replace(source, /snapshot\.status === "conflict"\n\s*\? "conflict"/, 'snapshot.status === "conflict"\n        ? "ready"', 1, MUTANT), touched += 1;
-          if (MUTANT === "unavailable-lie" && file === "unified_terminal_page.ts") source = replace(source, /snapshot\.status === "unavailable"\n\s*\? "unavailable"/, 'snapshot.status === "unavailable"\n          ? "ready"', 1, MUTANT), touched += 1;
           if (MUTANT === "standard-marker" && file === "unified_terminal_page.ts") source = replace(source, "    this.keyRow = keyRow;", '    keyRow.dataset.bank = "standard";\n    this.keyRow = keyRow;', 1, MUTANT), touched += 1;
-          if (MUTANT === "no-typography-claim" && file === "unified_terminal_page.ts") source = replace(source, '      claimTypographyPopover: () => this.claimPopover("typography"),', '      claimTypographyPopover: () => undefined,', 1, MUTANT), touched += 1;
-          if (MUTANT === "no-typography-competitor-close" && file === "unified_terminal_page.ts") source = replace(source, '    if (owner !== "typography") this.composer?.closeTypographyPopover(true);', '    if (false) this.composer?.closeTypographyPopover(true);', 1, MUTANT), touched += 1;
-          if (MUTANT === "no-typography-lifecycle-close" && file === "unified_terminal_page.ts") source = replace(source, '    if (!this.explainerPopover.hidden) this.closeExplainer(true);\n    this.composer?.closeTypographyPopover(true);', '    if (!this.explainerPopover.hidden) this.closeExplainer(true);', 1, MUTANT), touched += 1;
           if (MUTANT === "composer-overflow-visible" && file === "unified_terminal_composer.css") source = replace(source, '  box-shadow: none;\n  overflow: hidden;\n}', '  box-shadow: none;\n  overflow: visible;\n}', 1, MUTANT), touched += 1;
-          if (MUTANT === "theme-border-collapse" && file === "unified_terminal_composer.css") source = replace(source, '  border: 1px solid var(--persea-chrome-control-border);', '  border: 1px solid var(--persea-chrome-bg);', 1, MUTANT), touched += 1;
-          if (MUTANT === "theme-status-collapse" && file === "unified_terminal_composer.css") source = replace(source, '  color: var(--persea-chrome-notice-fg);\n}', '  color: var(--persea-chrome-bg);\n}', 1, MUTANT), touched += 1;
-          if (MUTANT === "popover-no-flip" && file === "composer.ts") source = replace(source, '    const above = roomAbove >= measured.height || roomAbove > roomBelow;', '    const above = true;', 1, MUTANT), touched += 1;
-          if (MUTANT === "portal-controls-downsize" && file === "unified_terminal_composer.css") source = replace(source, '  .persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button {\n    min-width: 44px;\n    min-height: 44px;\n  }', '  .persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button {\n    min-width: 40px;\n    min-height: 40px;\n  }', 1, MUTANT), touched += 1;
-          if (MUTANT === "theme-weak-palette" && file === "app.css") source = replace(source, '  --persea-chrome-control-border: var(--persea-accent);', '  --persea-chrome-control-border: color-mix(in srgb, var(--persea-chrome-fg) 38%, var(--persea-chrome-bg));', 1, MUTANT), touched += 1;
-          if (MUTANT === "typography-native-disable" && file === "composer.ts") source = replace(source, "      button.disabled = false;", "      button.disabled = unavailable;", 1, MUTANT), touched += 1;
           if (MUTANT === "typography-stale-frame-restore" && file === "composer.ts") source = replace(source, '      if (gestureActive || this.textareaGestureActive()\n        || this.typographyInteractionGeneration !== interactionGeneration\n        || this.textarea.value !== value\n        || this.textarea.selectionStart !== selectionStart\n        || this.textarea.selectionEnd !== selectionEnd\n        || this.textarea.selectionDirection !== selectionDirection) return;', '      if (false) return;', 1, MUTANT), touched += 1;
           if (MUTANT === "sheet-gesture-generation-fence" && file === "tap_activation.ts") source = replace(source, '    if (!event.isTrusted || !isLive() || capture.generation !== interactionGeneration()) return;', '    if (!event.isTrusted || !isLive()) return;', 1, MUTANT), touched += 1;
           if (MUTANT === "keyboard-activation-generation-fence" && file === "tap_activation.ts") source = replace(source, '  const generationIsCurrent = (capture: Exclude<KeyboardActivationState, Readonly<{ kind: "idle" }>>): boolean =>\n    capture.generation === interactionGeneration();', '  const generationIsCurrent = (_capture: Exclude<KeyboardActivationState, Readonly<{ kind: "idle" }>>): boolean => true;', 1, MUTANT), touched += 1;
@@ -264,26 +240,19 @@ async function prepareFixtureUI() {
           if (MUTANT === "composer-control-generation-fence" && file === "composer.ts") source = replace(source, '      this.options.interactionGeneration,\n    );\n    return button;', '      () => 0,\n    );\n    return button;', 1, MUTANT), touched += 1;
           if (MUTANT === "session-generation-provider-omission" && file === "session_switcher.ts") {
             source = replace(source, '  interactionGeneration(): number;', '  interactionGeneration?(): number;', 1, MUTANT);
-            source = replace(source, '}, () => undefined, () => !button.disabled, this.options.interactionGeneration);', '}, () => undefined, () => !button.disabled, () => this.options.interactionGeneration?.() ?? 0);', 1, MUTANT);
+            source = replace(source, '}, () => undefined, () => !button.disabled && button.isConnected, this.options.interactionGeneration);', '}, () => undefined, () => !button.disabled && button.isConnected, () => this.options.interactionGeneration?.() ?? 0);', 1, MUTANT);
             touched += 1;
           }
-          if (MUTANT === "session-generation-provider-omission" && file === "unified_terminal_page.ts") source = replace(source, '        select: (session) => { void this.selectSession(session, "tag"); },\n        interactionGeneration: () => this.keyInteractionGeneration,', '        select: (session) => { void this.selectSession(session, "tag"); },', 1, MUTANT), touched += 1;
-          if (MUTANT === "session-sheet-generation-provider-omission" && file === "session_switcher.ts") {
-            source = replace(source, '  interactionGeneration(): number;', '  interactionGeneration?(): number;', 1, MUTANT);
-            source = replace(source, '}, () => undefined, () => !button.disabled, this.options.interactionGeneration);', '}, () => undefined, () => !button.disabled, () => this.options.interactionGeneration?.() ?? 0);', 1, MUTANT);
-            touched += 1;
-          }
-          if (MUTANT === "session-sheet-generation-provider-omission" && file === "unified_terminal_page.ts") source = replace(source, '        select: (session) => { void this.selectSession(session, "sheet"); },\n        interactionGeneration: () => this.keyInteractionGeneration,', '        select: (session) => { void this.selectSession(session, "sheet"); },', 1, MUTANT), touched += 1;
-          if (MUTANT === "standard-key-generation-fence" && file === "unified_terminal_page.ts") source = replace(source, "bindTapActivation(button, activate, () => {}, () => !this.closed, () => this.keyInteractionGeneration)", "bindTapActivation(button, activate, () => {}, () => !this.closed, () => 0)", 1, MUTANT), touched += 1;
+          if (MUTANT === "session-generation-provider-omission" && file === "unified_terminal_page.ts") source = replace(source, '        select: (session) => { void this.selectSession(session); },\n        interactionGeneration: () => this.keyInteractionGeneration,', '        select: (session) => { void this.selectSession(session); },', 1, MUTANT), touched += 1;
+          if (MUTANT === "standard-key-generation-fence" && file === "unified_terminal_page.ts") source = replace(source, "bindTapActivation(button, activate, () => {}, () => !this.closed && !document.hidden, () => this.keyInteractionGeneration, repeat)", "bindTapActivation(button, activate, () => {}, () => !this.closed && !document.hidden, () => 0, repeat)", 1, MUTANT), touched += 1;
           if (MUTANT === "paste-generation-fence" && file === "unified_terminal_page.ts") source = replace(source, '      () => !this.closed && !paste.disabled,\n      () => this.keyInteractionGeneration,', '      () => !this.closed && !paste.disabled,\n      () => 0,', 1, MUTANT), touched += 1;
           if (MUTANT === "keyboard-enter-repeat-provenance" && file === "tap_activation.ts") source = replace(source, '    if (event.repeat) {\n      if (state.kind === "idle") {\n        state = Object.freeze({ kind: "canceled", key, generation: interactionGeneration(), released: false, pendingClick: true });\n      } else if (state.key === key && !state.released) {\n        state = Object.freeze({ ...state, pendingClick: true });\n      }\n      return;\n    }', '    if (event.repeat) {\n      clear();\n      return;\n    }', 1, MUTANT), touched += 1;
-          if (MUTANT === "typography-layout-reanchor" && file === "composer.ts") source = replace(source, '    this.typographyPositionFrame = window.requestAnimationFrame(() => {', '    return;\n    this.typographyPositionFrame = window.requestAnimationFrame(() => {', 1, MUTANT), touched += 1;
           return { contents: source, loader: file.endsWith(".css") ? "css" : "ts", resolveDir: path.dirname(args.path) };
         });
       },
     }],
   });
-  const expectedTouches = MUTANT === "session-generation-provider-omission" || MUTANT === "session-sheet-generation-provider-omission" ? 2 : 1;
+  const expectedTouches = MUTANT === "session-generation-provider-omission" ? 2 : 1;
   assert(touched === expectedTouches, `${MUTANT} mutant touched ${touched} source modules, expected ${expectedTouches}`);
   fs.writeFileSync(path.join(dist, "app.meta.json"), JSON.stringify(result.metafile));
   const cleanup = () => fs.rmSync(root, { recursive: true, force: true });
@@ -412,12 +381,9 @@ async function main() {
         const active = document.activeElement;
         const textarea = q(".attachment-page__composer-textarea");
         const helper = q(".xterm-helper-textarea");
-        const popover = q(".attachment-page__composer-typography-popover");
-        const trigger = q(".attachment-page__composer-typography-trigger");
         const standardRow = q(".persea-unified-keybar-row");
         const catalog = q('.persea-terminal-keys:not([hidden])[data-view="Fn"][data-group="Function"]');
         const row = catalog?.querySelector(".persea-terminal-keys__grid") || standardRow;
-        const triggerStyle = trigger ? getComputedStyle(trigger) : null;
         const expectedNonce = q('meta[name="persea-style-nonce"]')?.getAttribute("content") || "";
         return {
           active: active === textarea ? "composer" : active === helper ? "xterm" : active === document.body ? "body" : active?.className || active?.tagName || "none",
@@ -425,14 +391,7 @@ async function main() {
           composerOpen: q(".attachment-page__composer")?.dataset.open,
           composerMode: q(".attachment-page__composer")?.dataset.mode,
           composerFont: q(".persea-unified-terminal")?.dataset.composerFont,
-          popoverHidden: popover?.hidden,
-          popoverStatus: popover?.dataset.status,
-          popoverPlacement: popover?.dataset.placement || null,
-          popoverMessage: q(".attachment-page__composer-typography-status")?.value || "",
-          triggerExpanded: trigger?.getAttribute("aria-expanded"),
-          triggerText: trigger?.textContent || "", triggerLabel: trigger?.getAttribute("aria-label") || "",
-          triggerPaint: triggerStyle ? { background: triggerStyle.backgroundColor, border: triggerStyle.borderColor, shadow: triggerStyle.boxShadow } : null,
-          triggerRect: rect(trigger), popoverRect: rect(popover), panelRect: rect(q(".attachment-page__composer")),
+          panelRect: rect(q(".attachment-page__composer")),
           headerRect: rect(q(".attachment-page__composer-header")), closeRect: rect(q(".attachment-page__composer-close")),
           selection: textarea ? { start: textarea.selectionStart, end: textarea.selectionEnd, direction: textarea.selectionDirection, top: textarea.scrollTop, left: textarea.scrollLeft } : null,
           visualHeight: window.visualViewport?.height || window.innerHeight,
@@ -452,20 +411,6 @@ async function main() {
           sheetHidden: q(".persea-unified-sheet")?.hidden,
           viewHidden: q(".persea-unified-view-popover")?.hidden,
           announcement: q(".persea-unified-keybar-announcement")?.textContent || "",
-          plusDisabled: q('[aria-label="Increase composer text size"]')?.getAttribute("aria-disabled") === "true",
-          minusDisabled: q('[aria-label="Decrease composer text size"]')?.getAttribute("aria-disabled") === "true",
-          resetDisabled: q('.attachment-page__composer-typography-reset')?.getAttribute("aria-disabled") === "true",
-          plusNativeDisabled: q('[aria-label="Increase composer text size"]')?.disabled,
-          minusNativeDisabled: q('[aria-label="Decrease composer text size"]')?.disabled,
-          resetNativeDisabled: q('.attachment-page__composer-typography-reset')?.disabled,
-          popoverControls: popover ? Array.from(popover.querySelectorAll("button"), (node) => ({
-            label: node.getAttribute("aria-label") || node.textContent?.trim() || "",
-            disabled: node.disabled || node.getAttribute("aria-disabled") === "true",
-            nativeDisabled: node.disabled,
-            ariaDisabled: node.getAttribute("aria-disabled") === "true",
-            rect: rect(node),
-          })) : [],
-          sizeActionInPopover: popover?.contains(q(".attachment-page__composer-size")) === true,
           styleCount: document.querySelectorAll("style").length,
           invalidStyleNonces: Array.from(document.querySelectorAll("style")).filter((node) => node.nonce !== expectedNonce).length,
           horizontalOverflow: document.documentElement.scrollWidth > window.innerWidth + 1,
@@ -566,19 +511,34 @@ async function main() {
         await page.locator(".persea-unified-quick-actions").click();
         const keysTile = page.getByRole("button", { name: "Open Terminal Keys", exact: true });
         await keysTile.scrollIntoViewIfNeeded();
+        const sheetCapped = await page.evaluate(() => {
+          const sheet = document.querySelector(".persea-unified-sheet");
+          return sheet ? sheet.scrollHeight > sheet.clientHeight + 1 : false;
+        });
         const tileBefore = await keysTile.boundingBox();
-        const press = { x: tileBefore.x + tileBefore.width / 2, y: tileBefore.y + 4 };
+        const press = sheetCapped
+          ? { x: tileBefore.x + tileBefore.width / 2, y: tileBefore.y + 4 }
+          : { x: tileBefore.x + tileBefore.width / 2, y: tileBefore.y + tileBefore.height - 4 };
         await page.mouse.move(press.x, press.y);
         await page.mouse.down();
-        await page.evaluate(() => new Promise((resolve) => {
-          document.querySelector(".persea-unified-connection").textContent = "Loading history…";
+        await page.evaluate((capped) => new Promise((resolve) => {
+          if (capped) document.querySelector(".persea-unified-connection").textContent = "Loading history…";
+          else {
+            const output = document.querySelector(".persea-unified-sheet__scrollback output");
+            if (output) output.textContent = "Reloading available recorded history from the session…";
+          }
           requestAnimationFrame(() => requestAnimationFrame(resolve));
-        }));
+        }), sheetCapped);
         const tileMoved = await keysTile.boundingBox();
         await page.mouse.up();
         const keysOpened = await page.locator(".persea-terminal-keys").waitFor({ state: "visible", timeout: 2_000 }).then(() => true, () => false);
-        await page.evaluate(() => { document.querySelector(".persea-unified-connection").textContent = ""; });
-        assert(press.y < tileMoved.y, `${shape.name}: status line did not move the Keys tile from under the pointer: ${JSON.stringify({ tileBefore, tileMoved, press })}`);
+        await page.evaluate(() => {
+          document.querySelector(".persea-unified-connection").textContent = "";
+          const output = document.querySelector(".persea-unified-sheet__scrollback output");
+          if (output) output.textContent = "";
+        });
+        const movedOffPointer = sheetCapped ? press.y < tileMoved.y : press.y > tileMoved.y + tileMoved.height;
+        assert(movedOffPointer, `${shape.name}: status line did not move the Keys tile from under the pointer: ${JSON.stringify({ sheetCapped, tileBefore, tileMoved, press })}`);
         assert(keysOpened, `${shape.name}: a still press on Keys was lost when a status line moved the tile`);
         await page.getByRole("button", { name: "Terminal Keys" }).click();
         await page.locator(".persea-terminal-keys").waitFor({ state: "hidden" });
@@ -587,166 +547,44 @@ async function main() {
         await control({ releaseMode: true });
       }
 
-      // Composer disclosure: open/close from an unfocused posture, then change
-      // from a focused textarea with a nontrivial selection and scroll offset.
+      // Composer controls: Code/Prose mode toggle (smart punctuation Fix gated
+      // to Code mode only), Clear hidden when empty, phone view-disclosure
+      // non-overflow, and live composer font preference updates preserving
+      // focus, selection, and scroll posture.
       await openComposer();
-      await page.evaluate(() => document.activeElement?.blur());
-      await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-      const unfocusedBefore = await uiState();
       const wireBeforeOpen = wire(await snapshot());
-      const typographyListenerBaseline = detailed && !MUTANT
-        ? await page.evaluate(() => window.__terminal_controlsTypographyListenerLedger.active()) : null;
-      const typographyListenerDelta = async () => {
-        const active = await page.evaluate(() => window.__terminal_controlsTypographyListenerLedger.active());
-        return active.filter((item) => !typographyListenerBaseline.some((baseline) => baseline.key === item.key));
-      };
-      const assertTypographyListeners = async (expectedOpen, phase) => {
-        const delta = await typographyListenerDelta();
-        const actual = delta.map(({ target, type, capture }) => `${target}:${type}:${capture}`).sort();
-        const expected = expectedOpen ? ["document:pointerdown:false", "document:keydown:true", "window:resize:false", "viewport:resize:false", "viewport:scroll:false"].sort() : [];
-        assert(JSON.stringify(actual) === JSON.stringify(expected),
-          `${shape.name}: typography global listeners do not match ${phase} lifecycle: ${JSON.stringify({ expected, actual })}`);
-        return delta;
-      };
-      await page.locator(".attachment-page__composer-typography-trigger").click();
-      const open = await uiState();
-      if (typographyListenerBaseline) caseEvidence.typographyListenerLifecycle = {
-        closedBaseline: typographyListenerBaseline,
-        open: await assertTypographyListeners(true, "open"),
-        disposal: "source-reviewed; pagehide is not a Composer.dispose browser proof",
-      };
-      assert(open.active === unfocusedBefore.active, `${shape.name}: typography opening changed focus (${unfocusedBefore.active} -> ${open.active})`);
-      assert(open.popoverHidden === false && open.triggerExpanded === "true", `${shape.name}: typography popover did not open`);
-      assert(open.triggerText === "11" && /text size 11 pixels/i.test(open.triggerLabel), `${shape.name}: disclosure does not communicate current size`);
-      assert(JSON.stringify(open.triggerPaint) !== JSON.stringify(unfocusedBefore.triggerPaint), `${shape.name}: open disclosure has no active-state paint`);
-      assert(open.visualHeight === unfocusedBefore.visualHeight && open.keyBarHidden === unfocusedBefore.keyBarHidden, `${shape.name}: typography opening raised or changed the keyboard`);
-      assert(open.invalidStyleNonces === 0, `${shape.name}: a style node is outside the CSP nonce boundary`);
-      assert(stableBox(unfocusedBefore.panelRect, open.panelRect) && stableBox(unfocusedBefore.headerRect, open.headerRect) && stableBox(unfocusedBefore.triggerRect, open.triggerRect), `${shape.name}: opening typography moved composer boxes: ${JSON.stringify({ before: unfocusedBefore, open })}`);
-      assert(open.sizeActionInPopover, `${shape.name}: displaced panel-height action is not inside typography popover`);
-      assert(open.popoverRect && open.popoverRect.x >= open.visualRect.x - 0.75 && open.popoverRect.right <= open.visualRect.right + 0.75 && open.popoverRect.y >= open.visualRect.y - 0.75 && open.popoverRect.bottom <= open.visualRect.bottom + 0.75, `${shape.name}: typography popover escaped the visual viewport: ${JSON.stringify({ popover: open.popoverRect, viewport: open.visualRect })}`);
-      assert(open.popoverPlacement === "top", `${shape.name}: bottom-anchored typography did not prefer the space above`);
-      const minimum = shape.touch ? 44 : 40;
-      assert(open.triggerRect.width >= minimum && open.triggerRect.height >= minimum, `${shape.name}: typography disclosure is under ${minimum}px`);
-      if (shape.touch) {
-        assert(open.popoverControls.length >= 4 && open.popoverControls.every((control) => control.rect?.width >= 44 && control.rect?.height >= 44), `${shape.name}: portal control under 44px on coarse pointer: ${JSON.stringify(open.popoverControls)}`);
-      }
-      // Competing disclosures claim the page's single-popover owner.
-      const quickActions = page.locator(".persea-unified-quick-actions");
-      await quickActions.focus();
-      await page.keyboard.press("Enter");
-      let coordinated = await uiState();
-      assert(coordinated.popoverHidden === true && coordinated.sheetHidden === false, `${shape.name}: sheet did not close typography through the shared owner`);
-      await page.keyboard.press("Enter");
-      await page.locator(".attachment-page__composer-typography-trigger").click();
-      await page.locator(".persea-unified-view-disclosure").click();
-      coordinated = await uiState();
-      assert(coordinated.popoverHidden === true && coordinated.viewHidden === false, `${shape.name}: View did not close typography through the shared owner`);
-      const typographyTrigger = page.locator(".attachment-page__composer-typography-trigger");
-      await typographyTrigger.focus();
-      await page.keyboard.press("Enter");
-      coordinated = await uiState();
-      assert(coordinated.popoverHidden === false && coordinated.viewHidden === true, `${shape.name}: typography did not close View through the shared owner`);
-      const preFlip = coordinated;
-
-      // Move only the anchored panel's paint to exercise the opposite vertical
-      // placement; transforms do not participate in layout, so restoring it
-      // also verifies that the portal never shifted the composer.
-      const flipped = await page.evaluate(() => {
-        const anchorRoot = document.querySelector(".attachment-page__composer-typography");
-        const trigger = document.querySelector(".attachment-page__composer-typography-trigger");
-        const before = trigger.getBoundingClientRect();
-        anchorRoot.style.transform = `translateY(${12 - before.top}px)`;
-        window.visualViewport.dispatchEvent(new Event("resize"));
-        const popover = document.querySelector(".attachment-page__composer-typography-popover");
-        const rect = popover.getBoundingClientRect();
-        return { placement: popover.dataset.placement, rect: { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom } };
-      });
-      assert(flipped.placement === "bottom" && flipped.rect.y >= -0.75 && flipped.rect.bottom <= open.visualRect.bottom + 0.75, `${shape.name}: typography did not flip below a top anchor: ${JSON.stringify(flipped)}`);
-      await page.evaluate(() => {
-        document.querySelector(".attachment-page__composer-typography").style.removeProperty("transform");
-        window.visualViewport.dispatchEvent(new Event("scroll"));
-      });
-      const restoredPopover = await uiState();
-      assert(stableBox(preFlip.panelRect, restoredPopover.panelRect) && stableBox(preFlip.headerRect, restoredPopover.headerRect), `${shape.name}: portal positioning shifted the composer after restore: ${JSON.stringify({ before: { panel: preFlip.panelRect, header: preFlip.headerRect }, restored: { panel: restoredPopover.panelRect, header: restoredPopover.headerRect } })}`);
-      if (detailed && (!MUTANT || MUTANT === "typography-layout-reanchor")) {
-        // Composer auto-grow and a face change move the fixed portal's anchor
-        // without a window/visual-viewport event. The post-layout position
-        // frame must follow both changes and remain clamped to the same visual
-        // viewport instead of leaving a stale overlay over the draft.
-        const anchorGap = (state) => state.popoverPlacement === "top"
-          ? state.triggerRect.y - state.popoverRect.bottom
-          : state.popoverRect.y - state.triggerRect.bottom;
-        const assertAnchored = (state, label) => {
-          const gap = anchorGap(state);
-          assert(Math.abs(gap - 6) <= 1.25
-            && state.popoverRect.x >= state.visualRect.x - 0.75 && state.popoverRect.right <= state.visualRect.right + 0.75
-            && state.popoverRect.y >= state.visualRect.y - 0.75 && state.popoverRect.bottom <= state.visualRect.bottom + 0.75,
-          `${shape.name}: typography portal did not follow composer layout (${label}): ${JSON.stringify({ gap, state })}`);
-          return gap;
-        };
-        await page.evaluate(() => {
-          window.__terminal_controlsUnexpectedLayoutResize = 0;
-          window.__terminal_controlsLayoutResizeListener = () => { window.__terminal_controlsUnexpectedLayoutResize += 1; };
-          window.addEventListener("resize", window.__terminal_controlsLayoutResizeListener);
-          const popover = document.querySelector(".attachment-page__composer-typography-popover");
-          if (!(popover instanceof HTMLElement)) throw new Error("typography layout probe is missing");
-          // Seed a stale portal coordinate. Auto-grow is the only event that
-          // follows; a post-layout anchor pass must repair it without relying
-          // on a synthetic resize notification.
-          popover.style.left = "8px";
-          popover.style.top = "8px";
-        });
-        const beforeAutoGrow = await uiState();
-        await page.locator(".attachment-page__composer-textarea").fill(Array.from({ length: 12 }, (_, index) => `layout line ${index + 1}`).join("\n"));
-        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-        const afterAutoGrow = await uiState();
-        const autoGrowGap = assertAnchored(afterAutoGrow, "auto-grow");
-        assert(Math.abs(afterAutoGrow.panelRect.height - beforeAutoGrow.panelRect.height) >= 2,
-          `${shape.name}: typography auto-grow proof did not reflow the panel: ${JSON.stringify({ beforeAutoGrow, afterAutoGrow })}`);
-
-        const beforeLayoutFont = await snapshot();
-        await page.evaluate(() => {
-          const terminal = document.querySelector(".persea-unified-terminal");
-          const popover = document.querySelector(".attachment-page__composer-typography-popover");
-          if (!(terminal instanceof HTMLElement) || !(popover instanceof HTMLElement)) throw new Error("typography font probe is missing");
-          window.__terminal_controlsFontLayoutProbe = false;
-          window.__terminal_controlsFontLayoutObserver = new MutationObserver(() => {
-            if (terminal.dataset.composerFont !== "12") return;
-            window.__terminal_controlsFontLayoutProbe = true;
-            popover.style.left = "8px";
-            popover.style.top = "8px";
-            window.__terminal_controlsFontLayoutObserver.disconnect();
-          });
-          window.__terminal_controlsFontLayoutObserver.observe(terminal, { attributes: true, attributeFilter: ["data-composer-font"] });
-        });
-        await page.getByRole("button", { name: "Increase composer text size" }).click();
-        await waitSnapshot((value) => value.counters.preferencesPut === beforeLayoutFont.counters.preferencesPut + 1);
-        await page.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "12"
-          && document.querySelector(".attachment-page__composer-typography-popover")?.dataset.status === "ready");
-        await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
-        const afterLayoutFont = await uiState();
-        const fontGap = assertAnchored(afterLayoutFont, "font change");
-        const layoutSignals = await page.evaluate(() => {
-          window.removeEventListener("resize", window.__terminal_controlsLayoutResizeListener);
-          delete window.__terminal_controlsLayoutResizeListener;
-          window.__terminal_controlsFontLayoutObserver.disconnect();
-          return { unexpectedResizeEvents: window.__terminal_controlsUnexpectedLayoutResize, fontProbe: window.__terminal_controlsFontLayoutProbe };
-        });
-        assert(layoutSignals.unexpectedResizeEvents === 0 && layoutSignals.fontProbe === true,
-          `${shape.name}: typography portal did not follow composer layout (font frame): ${JSON.stringify(layoutSignals)}`);
-        await page.getByRole("button", { name: "Reset composer text size to 11 pixels" }).click();
-        await page.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "11"
-          && document.querySelector(".attachment-page__composer-typography-popover")?.dataset.status === "ready");
-        caseEvidence.typographyLayoutReanchor = { before: beforeAutoGrow, autoGrow: afterAutoGrow, font: afterLayoutFont, autoGrowGap, fontGap, layoutSignals };
-      }
-      await page.evaluate(() => document.activeElement?.blur());
-      const closeFocusBefore = (await uiState()).active;
-      await shot("composer-popover");
-      await page.locator(".attachment-page__composer-typography-trigger").click();
-      assert((await uiState()).active === closeFocusBefore, `${shape.name}: typography close changed focus`);
-      if (typographyListenerBaseline) caseEvidence.typographyListenerLifecycle.closed = await assertTypographyListeners(false, "closed");
-
+      const styleCount = (await uiState()).styleCount;
+      const viewButtonFit = await page.locator(".persea-unified-view-disclosure").evaluate((node) => ({
+        text: node.textContent?.trim() || "",
+        scrollWidth: node.scrollWidth,
+        clientWidth: node.clientWidth,
+        overflow: node.scrollWidth > node.clientWidth + 1,
+      }));
+      assert(!viewButtonFit.overflow, `${shape.name}: view-disclosure geometry label overflows its button: ${JSON.stringify(viewButtonFit)}`);
+      const emptyComposerState = await page.evaluate(() => ({
+        modeText: document.querySelector(".attachment-page__composer-mode-toggle")?.textContent?.trim(),
+        clearHidden: document.querySelector(".attachment-page__composer-clear")?.hidden,
+        typographyPresent: document.querySelectorAll(".attachment-page__composer-typography-trigger, .attachment-page__composer-size").length,
+      }));
+      assert(emptyComposerState.modeText === "Code" && emptyComposerState.clearHidden === true && emptyComposerState.typographyPresent === 0,
+        `${shape.name}: streamlined composer initial state drifted: ${JSON.stringify(emptyComposerState)}`);
       const textarea = page.locator(".attachment-page__composer-textarea");
+      await textarea.fill("\u201cquoted\u201d");
+      const codeSmartState = await page.evaluate(() => ({
+        clearHidden: document.querySelector(".attachment-page__composer-clear")?.hidden,
+        fixVisible: Array.from(document.querySelectorAll(".attachment-page__composer-actions button")).some((b) => !b.hidden && b.textContent?.trim() === "Fix"),
+      }));
+      assert(codeSmartState.clearHidden === false && codeSmartState.fixVisible === true,
+        `${shape.name}: Code mode did not reveal Clear and smart-punctuation Fix: ${JSON.stringify(codeSmartState)}`);
+      await page.locator(".attachment-page__composer-mode-toggle").click();
+      const proseSmartState = await page.evaluate(() => ({
+        modeText: document.querySelector(".attachment-page__composer-mode-toggle")?.textContent?.trim(),
+        fixVisible: Array.from(document.querySelectorAll(".attachment-page__composer-actions button")).some((b) => !b.hidden && b.textContent?.trim() === "Fix"),
+      }));
+      assert(proseSmartState.modeText === "Prose" && proseSmartState.fixVisible === false,
+        `${shape.name}: Prose mode did not suppress smart-punctuation Fix: ${JSON.stringify(proseSmartState)}`);
+      await page.locator(".attachment-page__composer-mode-toggle").click();
+
       await textarea.fill("zero one two three four five six seven eight nine\nline two\nline three\nline four\nline five\nline six\nline seven\nline eight");
       await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
       await page.evaluate(() => {
@@ -756,21 +594,8 @@ async function main() {
         node.scrollTop = Math.max(1, node.scrollHeight - node.clientHeight);
         node.scrollLeft = 0;
       });
-      const selectionBefore = (await uiState()).selection;
-      await page.locator(".attachment-page__composer-typography-trigger").click();
-      if (typographyListenerBaseline) caseEvidence.typographyListenerLifecycle.reopened = await assertTypographyListeners(true, "reopened");
-      await page.keyboard.press("Escape");
-      const escaped = await uiState();
-      assert(escaped.popoverHidden === true && escaped.composerOpen === "true" && escaped.active === "composer", `${shape.name}: Escape did not close only the typography disclosure`);
-      assert(escaped.selection.start === selectionBefore.start && escaped.selection.end === selectionBefore.end, `${shape.name}: Escape changed the textarea selection`);
-      if (typographyListenerBaseline) {
-        caseEvidence.typographyListenerLifecycle.escapeClosed = await assertTypographyListeners(false, "Escape-closed");
-        await page.evaluate(() => {
-          window.__terminal_controlsTypographyListenerLedger.stop();
-          delete window.__terminal_controlsTypographyListenerLedger;
-        });
-      }
-      await page.locator(".attachment-page__composer-typography-trigger").click();
+      const open = await uiState();
+      const selectionBefore = open.selection;
       let observer;
       if (detailed) {
         observer = await context.newPage();
@@ -780,11 +605,6 @@ async function main() {
         await observer.goto(terminalURL(await fresh("observe"), "observe"), { waitUntil: "load" });
         await observer.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent?.includes("fixture-live"), undefined, { timeout: 10_000 });
       }
-      const beforePlus = await snapshot();
-      const preferenceGetsBeforeActions = pagePreferenceGets;
-      const styleCount = (await uiState()).styleCount;
-      // Keep the original selectionBefore invariant; these action-local metrics
-      // distinguish earlier disclosure drift from typography/layout restoration.
       const typographyScrollMetrics = () => page.evaluate(() => {
         const node = document.querySelector(".attachment-page__composer-textarea");
         if (!(node instanceof HTMLTextAreaElement)) return null;
@@ -797,17 +617,15 @@ async function main() {
         };
       });
       const immediateBeforePlus = await typographyScrollMetrics();
-      await page.getByRole("button", { name: "Increase composer text size" }).click();
-      const afterPlus = await waitSnapshot((value) => value.counters.preferencesPut === beforePlus.counters.preferencesPut + 1);
-      const plusOperation = afterPlus.preferenceOperations.at(-1);
-      assert(plusOperation.composer_font_size === 12 && plusOperation.if_match === `"${beforePlus.preferences.revision}"` && plusOperation.outcome === "saved", `${shape.name}: typography PUT/CAS drifted: ${JSON.stringify(plusOperation)}`);
-      await page.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "12" && document.querySelector(".attachment-page__composer-typography-popover")?.dataset.status === "ready");
-      if (observer) await observer.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "12", undefined, { timeout: 5_000 });
-      // Saving the preference precedes the frame that repairs font reflow.
-      // Observe that repair before asserting the original selection posture.
-      await page.waitForFunction(top => {
-        const textarea = document.querySelector(".attachment-page__composer-textarea");
-        return textarea instanceof HTMLTextAreaElement && Math.abs(textarea.scrollTop - top) <= 1;
+      await publishPreference({ composer_font_size: 12 });
+      await page.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "12");
+      if (observer) {
+        await observer.evaluate(() => window.dispatchEvent(new StorageEvent("storage", { key: "persea-terminal.operator-preferences-hint.v1" })));
+        await observer.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "12", undefined, { timeout: 5_000 });
+      }
+      await page.waitForFunction((top) => {
+        const node = document.querySelector(".attachment-page__composer-textarea");
+        return node instanceof HTMLTextAreaElement && Math.abs(node.scrollTop - top) <= 1;
       }, selectionBefore.top, { polling: "raf", timeout: 5_000 });
       const changed = await uiState();
       assert(changed.active === "composer", `${shape.name}: typography change moved focus from textarea`);
@@ -815,56 +633,11 @@ async function main() {
       assert(changed.composerMode === open.composerMode, `${shape.name}: typography change altered Code/Prose mode`);
       assert(changed.styleCount === styleCount, `${shape.name}: typography action created a CSP style node`);
       assert(changed.visualHeight === open.visualHeight && changed.keyBarHidden === open.keyBarHidden, `${shape.name}: typography change raised or changed the keyboard`);
-      await page.getByRole("button", { name: "Reset composer text size to 11 pixels" }).click();
-      const afterReset = await waitSnapshot((value) => value.counters.preferencesPut === afterPlus.counters.preferencesPut + 1);
-      await page.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "11"
-        && document.querySelector(".attachment-page__composer-typography-popover")?.dataset.status === "ready");
-      assert(afterReset.preferenceOperations.at(-1).composer_font_size === 11, `${shape.name}: Reset did not store explicit 11px`);
-      assert(afterReset.preferences.composer_font_size === 11 && afterReset.preferences.stored === true, `${shape.name}: explicit default 11px was collapsed into an implicit default`);
-      let keyboardSuccess;
-      if (detailed) {
-        const plusLabel = "Increase composer text size";
-        const resetLabel = "Reset composer text size to 11 pixels";
-
-        const beforeKeyboardPlus = await snapshot();
-        await control({ holdPreferencePuts: 1 });
-        await page.getByRole("button", { name: plusLabel }).focus();
-        await page.keyboard.press("Enter");
-        await waitSnapshot((value) => value.pendingPreferencePuts === 1);
-        const plusSaving = await uiState();
-        assert(plusSaving.activeLabel === plusLabel && plusSaving.plusDisabled === true && plusSaving.plusNativeDisabled === false,
-          `${shape.name}: typography keyboard focus destination became unusable while Plus saved: ${JSON.stringify(plusSaving)}`);
-        await control({ releasePreferencePut: true });
-        const afterKeyboardPlus = await waitSnapshot((value) => value.counters.preferencesPut === beforeKeyboardPlus.counters.preferencesPut + 1
-          && value.preferenceOperations.at(-1)?.outcome === "saved");
-        await page.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "12"
-          && document.querySelector(".attachment-page__composer-typography-popover")?.dataset.status === "ready");
-        const plusSettled = await uiState();
-        assert(plusSettled.activeLabel === plusLabel && plusSettled.plusNativeDisabled === false,
-          `${shape.name}: typography keyboard focus was not retained after Plus success: ${JSON.stringify(plusSettled)}`);
-
-        const beforeKeyboardReset = afterKeyboardPlus;
-        await control({ holdPreferencePuts: 1 });
-        await page.getByRole("button", { name: resetLabel }).focus();
-        await page.keyboard.press("Space");
-        await waitSnapshot((value) => value.pendingPreferencePuts === 1);
-        const resetSaving = await uiState();
-        assert(resetSaving.activeLabel === resetLabel && resetSaving.resetDisabled === true && resetSaving.resetNativeDisabled === false,
-          `${shape.name}: typography keyboard focus was not retained while Reset saved: ${JSON.stringify(resetSaving)}`);
-        await control({ releasePreferencePut: true });
-        await waitSnapshot((value) => value.counters.preferencesPut === beforeKeyboardReset.counters.preferencesPut + 1
-          && value.preferenceOperations.at(-1)?.outcome === "saved");
-        await page.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "11"
-          && document.querySelector(".attachment-page__composer-typography-popover")?.dataset.status === "ready");
-        const resetSettled = await uiState();
-        assert(resetSettled.activeLabel === resetLabel && resetSettled.resetDisabled === true && resetSettled.resetNativeDisabled === false,
-          `${shape.name}: typography keyboard focus was not retained after Reset success/default bound: ${JSON.stringify(resetSettled)}`);
-        keyboardSuccess = { plusSaving, plusSettled, resetSaving, resetSettled };
-      }
+      await publishPreference({ composer_font_size: 11 });
+      await page.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "11");
       const wireAfterComposer = wire(await snapshot());
       assert(wireAfterComposer.inputs === wireBeforeOpen.inputs && wireAfterComposer.resizes === wireBeforeOpen.resizes && wireAfterComposer.attachments === wireBeforeOpen.attachments + (observer ? 1 : 0), `${shape.name}: composer controls touched terminal wire: ${JSON.stringify({ wireBeforeOpen, wireAfterComposer })}`);
-      assert(pagePreferenceGets === preferenceGetsBeforeActions, `${shape.name}: typography activations created a second preference fetch loop`);
-      caseEvidence.composer = { open, changed, plusOperation, keyboardSuccess, wireBeforeOpen, wireAfterComposer, crossTab: observer ? "12" : null };
+      caseEvidence.composer = { open, changed, viewButtonFit, emptyComposerState, codeSmartState, proseSmartState, wireBeforeOpen, wireAfterComposer, crossTab: observer ? "12" : null };
       if (observer) await observer.close();
 
       if (detailed) {
@@ -939,150 +712,66 @@ async function main() {
           await interleaveTypography("caret", 14),
           await interleaveTypography("scroll", 15),
         ];
-
-        // Range/default boundaries remain keyboard-focusable and honest via
-        // aria-disabled, but Enter and Space are activation-guarded and never
-        // clamp into another PUT.
-        await publishPreference({ composer_font_size: 24 });
-        await page.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "24");
-        const upperBefore = await snapshot();
-        const plusLabel = "Increase composer text size";
-        await page.getByRole("button", { name: plusLabel }).focus();
-        await page.keyboard.press("Enter");
-        await page.keyboard.press("Space");
-        await delay(80);
-        const upper = await uiState();
-        const upperAfter = await snapshot();
-        assert(upper.plusDisabled === true && upper.plusNativeDisabled === false && upper.activeLabel === plusLabel
-          && upperAfter.counters.preferencesPut === upperBefore.counters.preferencesPut,
-        `${shape.name}: plus bound is not focusable aria-disabled with guarded activation: ${JSON.stringify({ upper, before: upperBefore.counters, after: upperAfter.counters })}`);
-        await publishPreference({ composer_font_size: 9 });
-        await page.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "9");
-        const lowerBefore = await snapshot();
-        const minusLabel = "Decrease composer text size";
-        await page.getByRole("button", { name: minusLabel }).focus();
-        await page.keyboard.press("Space");
-        await page.keyboard.press("Enter");
-        await delay(80);
-        const lower = await uiState();
-        const lowerAfter = await snapshot();
-        assert(lower.minusDisabled === true && lower.minusNativeDisabled === false && lower.activeLabel === minusLabel
-          && lowerAfter.counters.preferencesPut === lowerBefore.counters.preferencesPut,
-        `${shape.name}: minus bound is not focusable aria-disabled with guarded activation: ${JSON.stringify({ lower, before: lowerBefore.counters, after: lowerAfter.counters })}`);
         await publishPreference({ composer_font_size: 11 });
-        await page.waitForFunction(() => document.querySelector(".persea-unified-terminal")?.dataset.composerFont === "11");
-        const resetBefore = await snapshot();
-        const resetLabel = "Reset composer text size to 11 pixels";
-        await page.getByRole("button", { name: resetLabel }).focus();
-        await page.keyboard.press("Enter");
-        await page.keyboard.press("Space");
-        await delay(80);
-        const resetBound = await uiState();
-        const resetAfter = await snapshot();
-        assert(resetBound.resetDisabled === true && resetBound.resetNativeDisabled === false && resetBound.activeLabel === resetLabel
-          && resetAfter.counters.preferencesPut === resetBefore.counters.preferencesPut,
-        `${shape.name}: Reset bound is not focusable aria-disabled with guarded activation: ${JSON.stringify({ resetBound, before: resetBefore.counters, after: resetAfter.counters })}`);
-        caseEvidence.typographyBounds = { upper, lower, reset: resetBound };
       }
 
-      // Every curated theme paints the same open, bounded controls at every
-      // required width in both engines. No theme may introduce a new style
-      // node or horizontal page overflow.
+      // Every curated theme paints the open composer and toolbar cleanly at
+      // every required width in both engines with no new style node or overflow.
       caseEvidence.themeControls = [];
       for (const id of THEME_IDS) {
-          await publishPreference({ theme: id });
-          await page.waitForFunction((theme) => document.querySelector(".persea-unified-terminal")?.dataset.theme === theme, id);
-          const themeState = await page.evaluate(() => {
-            const trigger = document.querySelector(".attachment-page__composer-typography-trigger");
-            const popover = document.querySelector(".attachment-page__composer-typography-popover");
-            const status = document.querySelector(".attachment-page__composer-typography-status");
-            const component = document.querySelector('[aria-label="Decrease composer text size"]');
-            const style = getComputedStyle(trigger);
-            const panel = getComputedStyle(popover);
-            const componentStyle = getComputedStyle(component);
-            const rect = popover.getBoundingClientRect();
-            const normal = {
-              border: panel.borderColor,
-              status: getComputedStyle(status).color,
-              component: {
-                color: componentStyle.color,
-                background: componentStyle.backgroundColor,
-                border: componentStyle.borderColor,
-              },
-            };
-            popover.dataset.status = "conflict";
-            status.hidden = false;
-            const alert = { border: getComputedStyle(popover).borderColor, status: getComputedStyle(status).color };
-            popover.dataset.status = "ready";
-            status.hidden = true;
-            const viewport = window.visualViewport;
-            const x = viewport?.offsetLeft || 0;
-            const y = viewport?.offsetTop || 0;
-            const width = viewport?.width || window.innerWidth;
-            const height = viewport?.height || window.innerHeight;
-            return { theme: document.querySelector(".persea-unified-terminal").dataset.theme, triggerColor: style.color, triggerBackground: style.backgroundColor, border: style.borderColor, popoverColor: panel.color, popoverBackground: panel.backgroundColor, normal, alert, rect: { x: rect.x, y: rect.y, right: rect.right, bottom: rect.bottom }, viewport: { x, y, right: x + width, bottom: y + height }, overflow: document.documentElement.scrollWidth > window.innerWidth + 1, styles: document.querySelectorAll("style").length };
-          });
-          const themeContrast = {
-            text: contrast(themeState.popoverColor, themeState.popoverBackground),
-            status: contrast(themeState.normal.status, themeState.popoverBackground),
-            alert: contrast(themeState.alert.status, themeState.popoverBackground),
-            border: contrast(themeState.normal.border, themeState.popoverBackground),
-            componentText: contrast(themeState.normal.component.color, themeState.normal.component.background),
-            componentFill: contrast(themeState.normal.component.background, themeState.popoverBackground),
-            componentBorder: contrast(themeState.normal.component.border, themeState.popoverBackground),
+        await publishPreference({ theme: id });
+        await page.waitForFunction((theme) => document.querySelector(".persea-unified-terminal")?.dataset.theme === theme, id);
+        const themeState = await page.evaluate(() => {
+          const dock = document.querySelector(".persea-unified-composer-dock");
+          const panel = document.querySelector(".attachment-page__composer");
+          const textareaNode = document.querySelector(".attachment-page__composer-textarea");
+          const modeBtn = document.querySelector(".attachment-page__composer-mode-toggle");
+          const statusNode = document.querySelector(".attachment-page__composer-status");
+          const dockStyle = getComputedStyle(dock);
+          const textStyle = getComputedStyle(textareaNode);
+          const btnStyle = getComputedStyle(modeBtn);
+          const normalStatusColor = getComputedStyle(statusNode).color;
+          const prevContent = panel.dataset.content;
+          panel.dataset.content = "guard";
+          const guardStatusColor = getComputedStyle(statusNode).color;
+          panel.dataset.content = prevContent;
+          return {
+            theme: document.querySelector(".persea-unified-terminal").dataset.theme,
+            dockBg: dockStyle.backgroundColor,
+            textColor: textStyle.color,
+            textBg: textStyle.backgroundColor,
+            btnColor: btnStyle.color,
+            btnBg: btnStyle.backgroundColor,
+            normalStatusColor,
+            guardStatusColor,
+            overflow: document.documentElement.scrollWidth > window.innerWidth + 1,
+            styles: document.querySelectorAll("style").length,
           };
-          assert(!themeState.overflow
-            && themeState.rect.x >= themeState.viewport.x - 0.75 && themeState.rect.right <= themeState.viewport.right + 0.75
-            && themeState.rect.y >= themeState.viewport.y - 0.75 && themeState.rect.bottom <= themeState.viewport.bottom + 0.75
-            && themeContrast.text >= 4.5 && themeContrast.status >= 4.5 && themeContrast.alert >= 4.5 && themeContrast.border >= 3
-            && themeContrast.componentText >= 4.5 && themeContrast.componentFill > 1.02 && themeContrast.componentBorder >= 3
-            && themeState.normal.border !== themeState.alert.border && themeState.styles === styleCount,
-          `${shape.name}: ${id} typography semantic contrast/containment failed: ${JSON.stringify({ themeState, themeContrast })}`);
-          themeState.contrast = themeContrast;
-          caseEvidence.themeControls.push(themeState);
-          await shot(`theme-${id}`);
+        });
+        const themeContrast = {
+          textarea: contrast(themeState.textColor, themeState.textBg),
+          button: contrast(themeState.btnColor, themeState.btnBg),
+          status: contrast(themeState.normalStatusColor, themeState.dockBg),
+          guard: contrast(themeState.guardStatusColor, themeState.dockBg),
+        };
+        assert(!themeState.overflow && themeContrast.textarea >= 4.5 && themeContrast.button >= 4.5
+          && themeContrast.status >= 4.5 && themeContrast.guard >= 4.5 && themeState.styles === styleCount,
+          `${shape.name}: ${id} composer theme contrast/containment failed: ${JSON.stringify({ themeState, themeContrast })}`);
+        themeState.contrast = themeContrast;
+        caseEvidence.themeControls.push(themeState);
+        await shot(`theme-${id}`);
       }
 
       if (detailed) {
-        // Conflict reverts to server authority and names the collision.
         await publishPreference({ theme: "default", composer_font_size: 11 });
-        const conflictBefore = await snapshot();
-        await control({ holdPreferencePuts: 1 });
-        const conflictLabel = "Increase composer text size";
-        await page.getByRole("button", { name: conflictLabel }).focus();
-        await page.keyboard.press("Space");
-        await waitSnapshot((value) => value.pendingPreferencePuts === 1);
-        const optimistic = await uiState();
-        assert(optimistic.composerFont === "12" && optimistic.popoverStatus === "saving"
-          && optimistic.activeLabel === conflictLabel && optimistic.plusDisabled === true && optimistic.plusNativeDisabled === false,
-        `${shape.name}: conflict-saving typography focus/state is not immediate and honest: ${JSON.stringify(optimistic)}`);
-        await control({ preferences: { composer_font_size: 16, revision: conflictBefore.preferences.revision + 1, stored: true, available: true }, releasePreferencePut: true });
-        const conflictAfter = await waitSnapshot((value) => value.preferenceOperations.at(-1)?.outcome === "conflict");
-        await page.waitForFunction(() => document.querySelector(".attachment-page__composer-typography-popover")?.dataset.status !== "saving");
-        const conflict = await uiState();
-        assert(conflict.composerFont === "16" && conflict.popoverStatus === "conflict" && /changed elsewhere/i.test(conflict.popoverMessage)
-          && conflict.activeLabel === conflictLabel && conflict.plusNativeDisabled === false,
-        `${shape.name}: conflict status/value is not honest (including focus): ${JSON.stringify(conflict)}`);
-        assert(conflictAfter.counters.preferencesPut === conflictBefore.counters.preferencesPut + 1, `${shape.name}: conflict activation did not issue exactly one PUT`);
-
-        // A mid-write outage retains the attempted local face and says page-only.
-        const unavailableBefore = await snapshot();
-        await control({ holdPreferencePuts: 1 });
-        const unavailableLabel = "Decrease composer text size";
-        await page.getByRole("button", { name: unavailableLabel }).focus();
-        await page.keyboard.press("Enter");
-        await waitSnapshot((value) => value.pendingPreferencePuts === 1);
-        const unavailableSaving = await uiState();
-        assert(unavailableSaving.activeLabel === unavailableLabel && unavailableSaving.minusDisabled === true && unavailableSaving.minusNativeDisabled === false,
-          `${shape.name}: typography keyboard focus was not retained while Minus saved: ${JSON.stringify(unavailableSaving)}`);
-        await control({ preferencesAvailable: false, releasePreferencePut: true });
-        const unavailableAfter = await waitSnapshot((value) => value.preferenceOperations.at(-1)?.outcome === "unavailable");
-        await page.waitForFunction(() => document.querySelector(".attachment-page__composer-typography-popover")?.dataset.status !== "saving");
-        const unavailable = await uiState();
-        assert(unavailable.composerFont === "15" && unavailable.popoverStatus === "unavailable" && /page only|unavailable/i.test(unavailable.popoverMessage)
-          && unavailable.activeLabel === unavailableLabel && unavailable.minusDisabled === true && unavailable.minusNativeDisabled === false,
-        `${shape.name}: unavailable status/value is not honest (including focus): ${JSON.stringify(unavailable)}`);
-        assert(unavailableAfter.counters.preferencesPut === unavailableBefore.counters.preferencesPut + 1, `${shape.name}: unavailable activation did not issue exactly one PUT`);
+        await control({ preferencesAvailable: false });
+        await page.locator(".persea-unified-view-disclosure").click();
+        await page.locator(".persea-unified-view-popover").waitFor({ state: "visible" });
+        await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+        await page.waitForFunction(() => {
+          const node = document.querySelector(".persea-unified-toast");
+          return node instanceof HTMLElement && !node.hidden && /preferences unavailable/.test(node.textContent || "");
+        }, undefined, { timeout: 5_000 });
         const notice = await page.locator(".persea-unified-toast").evaluate((node) => {
           const rect = node.getBoundingClientRect();
           return { text: node.textContent, hidden: node.hidden, width: node.clientWidth, height: node.clientHeight,
@@ -1094,18 +783,7 @@ async function main() {
         `${shape.name}: status notice clips its explanation: ${JSON.stringify(notice)}`);
         caseEvidence.statusNotice = notice;
         await shot("complete-status-notice");
-        await page.setViewportSize({ width: shape.width, height: keyboardHeight });
-        await page.waitForFunction(() => {
-          const popover = document.querySelector(".attachment-page__composer-typography-popover");
-          const viewport = window.visualViewport;
-          if (!popover || !viewport) return false;
-          const rect = popover.getBoundingClientRect();
-          return rect.top >= viewport.offsetTop - 1 && rect.bottom <= viewport.offsetTop + viewport.height + 1;
-        });
-        const reducedError = await uiState();
-        assert(reducedError.popoverRect.y >= reducedError.visualRect.y - 0.75 && reducedError.popoverRect.bottom <= reducedError.visualRect.bottom + 0.75 && reducedError.popoverRect.x >= reducedError.visualRect.x - 0.75 && reducedError.popoverRect.right <= reducedError.visualRect.right + 0.75, `${shape.name}: wrapped unavailable status escaped the reduced visual viewport: ${JSON.stringify(reducedError)}`);
-        await page.setViewportSize({ width: shape.width, height: shape.height });
-        caseEvidence.preferenceFailures = { optimistic, conflict, unavailableSaving, unavailable, reducedError };
+        await page.locator(".persea-unified-view-disclosure").click();
       }
 
       if (shape.touch) {
@@ -1122,6 +800,28 @@ async function main() {
         const directBefore = allInputs(await snapshot());
         await page.getByRole("button", { name: "Terminal Keys", exact: true }).tap();
         assert(await page.locator('.persea-terminal-keys[data-view="Favorites"]').isVisible(), `${shape.name}: fresh Keys did not open Favorites`);
+        // All keys -> Navigation omits keys already on the visible accessory bar
+        // unless a modifier is armed or compact-strip mode hides the bar row.
+        await page.locator('.persea-terminal-keys [data-key-control="view:All keys"]').tap();
+        const barRowVisible = await page.evaluate(() => {
+          const bar = document.querySelector(".persea-unified-keybar");
+          const row = document.querySelector(".persea-unified-keybar-row");
+          return Boolean(bar && !bar.hidden && row && !row.hidden);
+        });
+        const navUnarmed = await page.locator('.persea-terminal-keys__grid button').allTextContents();
+        if (barRowVisible) {
+          assert(navUnarmed.length === 8 && !navUnarmed.includes("Esc") && !navUnarmed.includes("⇥"),
+            `${shape.name}: Navigation duplicated visible key-bar keys: ${JSON.stringify(navUnarmed)}`);
+        } else {
+          assert(navUnarmed.length === 14 && navUnarmed.includes("Esc") && navUnarmed.includes("⇥"),
+            `${shape.name}: compact-strip Navigation hid keys when bar row was hidden: ${JSON.stringify(navUnarmed)}`);
+        }
+        await page.locator('.persea-terminal-keys [data-key-control="modifier:ctrl"]').tap();
+        const navArmed = await page.locator('.persea-terminal-keys__grid button').allTextContents();
+        assert(navArmed.length === 14 && navArmed.includes("Esc") && navArmed.includes("⇥"),
+          `${shape.name}: arming Ctrl did not restore full Navigation keys: ${JSON.stringify(navArmed)}`);
+        await page.locator('.persea-terminal-keys [data-key-control="modifier:ctrl"]').tap();
+        await page.locator('.persea-terminal-keys [data-key-control="view:Favorites"]').tap();
         await page.getByRole("button", { name: "Terminal Keys", exact: true }).tap();
         assert(allInputs(await snapshot()).length === directBefore.length, `${shape.name}: Keys disclosure sent input`);
         await openComposer();
@@ -1471,12 +1171,12 @@ async function main() {
           // its original capture ensures the eventual click remains stale
           // after a disclosure cut instead of being mistaken for AT input.
           if (!(await uiState()).sheetHidden) await page.locator(".persea-unified-quick-actions").click();
-          if ((await uiState()).bank !== "function") await enterFunctionBank();
-          const unrelatedF1 = page.getByRole("button", { name: "F1", exact: true });
-          await unrelatedF1.focus();
+          if ((await uiState()).bank === "function") await page.getByRole("button", { name: "Terminal Keys", exact: true }).click();
+          const unrelatedKey = page.locator('.persea-unified-keybar-row button[title="Esc"]');
+          await unrelatedKey.focus();
           await page.evaluate(() => {
-            const button = document.querySelector('.persea-terminal-keys button[aria-label="F1"]');
-            if (!(button instanceof HTMLButtonElement)) throw new Error("unrelated-key F1 is missing");
+            const button = document.querySelector('.persea-unified-keybar-row button[title="Esc"]');
+            if (!(button instanceof HTMLButtonElement)) throw new Error("unrelated-key Esc is missing");
             window.__terminal_controlsUnrelatedKeyFence = [];
             for (const type of ["keydown", "keyup", "click"]) button.addEventListener(type, (event) => window.__terminal_controlsUnrelatedKeyFence.push({
               type, trusted: event.isTrusted, key: event.key || null, detail: event.detail ?? null,
@@ -1498,13 +1198,12 @@ async function main() {
             && unrelatedEvents.some((event) => event.type === "keyup" && event.key === "a" && event.trusted),
           `${shape.name}: unrelated key erased held keyboard activation provenance: ${JSON.stringify({ unrelatedDelta, unrelatedEvents })}`);
           await page.locator(".persea-unified-quick-actions").click();
-          await enterFunctionBank();
           const unrelatedTapBefore = allInputs(await snapshot());
-          await unrelatedF1.click();
+          await unrelatedKey.click();
           const unrelatedTapAfter = await waitSnapshot((value) => allInputs(value).length >= unrelatedTapBefore.length + 1);
           const unrelatedTapDelta = allInputs(unrelatedTapAfter).slice(unrelatedTapBefore.length);
-          assert(unrelatedTapDelta.length === 1 && unrelatedTapDelta[0] === F_BYTES[0],
-            `${shape.name}: unrelated-key fence changed fresh F1 behavior: ${JSON.stringify(unrelatedTapDelta)}`);
+          assert(unrelatedTapDelta.length === 1 && unrelatedTapDelta[0] === "\x1b",
+            `${shape.name}: unrelated-key fence changed fresh Esc behavior: ${JSON.stringify(unrelatedTapDelta)}`);
           caseEvidence.unrelatedKeyFence = { delta: unrelatedDelta, tapDelta: unrelatedTapDelta, events: unrelatedEvents };
         }
         if (detailed && (!MUTANT || MUTANT === "tap-pointer-identity" || MUTANT === "sheet-gesture-generation-fence")) {
@@ -1548,11 +1247,11 @@ async function main() {
           await page.locator(".persea-unified-quick-actions").click();
           caseEvidence.pointerIdentityFence = { staleDelta: pointerAfterStale, finalDelta: pointerFinalDelta, events: pointerEvents };
         }
-        if (detailed && (!MUTANT || MUTANT === "session-generation-provider-omission" || MUTANT === "session-sheet-generation-provider-omission")) {
-          // Both renderings of the persistent session switcher receive the
-          // page's authority. The test-only display override keeps the prior
-          // row rendered when its owner closes, so focus/visibility cannot
-          // accidentally mask a missing generation fence.
+        if (detailed && (!MUTANT || MUTANT === "session-generation-provider-omission")) {
+          // The canonical session switcher receives the page's authority. The
+          // test-only display override keeps the prior row rendered when its
+          // owner closes, so focus/visibility cannot accidentally mask a
+          // missing generation fence.
           await control({ switchSessions: true, holdModeGrant: false });
           if (!(await uiState()).sheetHidden) await page.locator(".persea-unified-quick-actions").click();
           await page.setViewportSize({ width: 1280, height: 800 });
@@ -1592,33 +1291,6 @@ async function main() {
             `${shape.name}: identity SessionSwitcher keyboard activation crossed disclosure generation: ${JSON.stringify({ tagSwitcherName })}`);
           await page.evaluate(() => document.querySelector("#terminal_controls-session-tag-focus-probe")?.remove());
           await page.locator(".persea-unified-quick-actions").click();
-
-          await page.locator(".persea-unified-quick-actions").click();
-          await page.locator(".persea-unified-sheet").waitFor({ state: "visible" });
-          await page.getByRole("button", { name: "Choose another session", exact: true }).click();
-          const sheetRoot = page.locator(".persea-unified-sheet .persea-session-switcher");
-          const sheetBeta = sheetRoot.locator('.persea-session-switcher__row[aria-label="Switch to beta"]');
-          await sheetBeta.waitFor({ state: "visible" });
-          await page.evaluate((nonce) => {
-            const style = document.createElement("style");
-            style.id = "terminal_controls-session-sheet-focus-probe";
-            style.nonce = nonce;
-            style.textContent = ".persea-unified-sheet[hidden] { display: block !important; }";
-            document.head.append(style);
-          }, STYLE_NONCE);
-          await sheetBeta.focus();
-          await page.keyboard.down("Space");
-          const sheetCompetingBox = await tag.boundingBox();
-          assert(sheetCompetingBox, `${shape.name}: sheet switcher competing disclosure is missing`);
-          await page.touchscreen.tap(sheetCompetingBox.x + sheetCompetingBox.width / 2, sheetCompetingBox.y + sheetCompetingBox.height / 2);
-          await page.waitForFunction(() => document.querySelector(".persea-unified-identity__details")?.hidden === false);
-          await page.keyboard.up("Space");
-          await delay(120);
-          const sheetSwitcherName = await page.locator(".persea-unified-tag__name").textContent();
-          assert(sheetSwitcherName === "alpha",
-            `${shape.name}: sheet SessionSwitcher keyboard activation crossed disclosure generation: ${JSON.stringify({ sheetSwitcherName })}`);
-          await page.evaluate(() => document.querySelector("#terminal_controls-session-sheet-focus-probe")?.remove());
-          if (await page.locator(".persea-unified-identity__details").getAttribute("hidden") === null) await tag.click();
           if (!MUTANT) {
             // The tag's list: hold a row, close the panel from the keyboard
             // (or close and reopen it), release. The press ends with the panel.
@@ -1644,38 +1316,7 @@ async function main() {
           }
           await page.evaluate(() => document.querySelector("#terminal_controls-session-host-probe")?.remove());
           await page.setViewportSize({ width: shape.width, height: shape.height });
-          caseEvidence.sessionSwitcherGenerationFence = { tag: tagSwitcherName, sheet: sheetSwitcherName };
-        }
-        if (detailed && !MUTANT) {
-          // A row press belongs to the list as it was shown. The pressed row
-          // keeps its release when the layout moves it, so closing the list
-          // while the mouse is held, or closing and reopening it, must end the
-          // press instead of switching the session.
-          await control({ switchSessions: true, holdModeGrant: false });
-          if ((await uiState()).sheetHidden) await page.locator(".persea-unified-quick-actions").click();
-          const listToggle = page.getByRole("button", { name: "Choose another session", exact: true });
-          const sheetList = page.locator(".persea-unified-sheet .persea-session-switcher");
-          const rowPress = {};
-          for (const variant of ["closed", "reopened"]) {
-            if (await sheetList.isHidden()) await listToggle.click();
-            const beta = sheetList.locator('.persea-session-switcher__row[aria-label="Switch to beta"]');
-            await beta.waitFor({ state: "visible" });
-            await beta.scrollIntoViewIfNeeded();
-            const row = await beta.boundingBox();
-            await listToggle.focus();
-            await page.mouse.move(row.x + row.width / 2, row.y + row.height / 2);
-            await page.mouse.down();
-            await page.keyboard.press("Enter");
-            const hidden = await sheetList.isHidden();
-            if (variant === "reopened") await page.keyboard.press("Enter");
-            await page.mouse.up();
-            await delay(200);
-            rowPress[variant] = { hidden, session: await page.locator(".persea-unified-tag__name").textContent() };
-            assert(hidden && rowPress[variant].session === "alpha",
-              `${shape.name}: a held session row switched the session after its list ${variant}: ${JSON.stringify(rowPress)}`);
-          }
-          if (!(await uiState()).sheetHidden) await page.locator(".persea-unified-quick-actions").click();
-          caseEvidence.sessionRowPressAcrossDisclosure = rowPress;
+          caseEvidence.sessionSwitcherGenerationFence = { tag: tagSwitcherName };
         }
         if (detailed && (!MUTANT || MUTANT === "standard-key-generation-fence" || MUTANT === "keyboard-activation-generation-fence")) {
           // Standard-row controls share the same generation authority. A held
@@ -1858,7 +1499,6 @@ async function main() {
               `${shape.name}: standard-bank Ctrl did not arm for reconnect authority proof: ${JSON.stringify(reconnectCtrlArmed)}`);
           }
           await openComposer();
-          await page.locator(".attachment-page__composer-typography-trigger").click();
           let lifecycleKeyboardBefore;
           if (!MUTANT) {
             const lifecycleDisclosure = page.locator(".persea-unified-quick-actions");
@@ -1900,10 +1540,10 @@ async function main() {
           const reset = await page.evaluate(() => {
             const row = document.querySelector(".persea-unified-keybar-row");
             const nodes = Array.from(row.children);
-            return { labels: nodes.map((node) => node.textContent), sameNodes: Array.isArray(window.__terminal_controlsStandardNodes) && nodes.every((node, index) => node === window.__terminal_controlsStandardNodes[index]), bank: row.getAttribute("data-bank"), attributes: Array.from(row.attributes, (attribute) => [attribute.name, attribute.value]), typographyClosed: document.querySelector(".attachment-page__composer-typography-popover")?.hidden };
+            return { labels: nodes.map((node) => node.textContent), sameNodes: Array.isArray(window.__terminal_controlsStandardNodes) && nodes.every((node, index) => node === window.__terminal_controlsStandardNodes[index]), bank: row.getAttribute("data-bank"), attributes: Array.from(row.attributes, (attribute) => [attribute.name, attribute.value]) };
           });
           const originalAttributes = await page.evaluate(() => window.__terminal_controlsStandardRowAttributes);
-          assert(reset.labels.join(" ") === "Esc ⇥ Ctrl ← ↓ ↑ →" && reset.sameNodes && reset.bank === null && reset.typographyClosed === true && JSON.stringify(reset.attributes) === JSON.stringify(originalAttributes), `${shape.name}: reconnect did not restore exact row/popover lifecycle state: ${JSON.stringify(reset)}`);
+          assert(reset.labels.join(" ") === "Esc ⇥ Ctrl ← ↓ ↑ →" && reset.sameNodes && reset.bank === null && JSON.stringify(reset.attributes) === JSON.stringify(originalAttributes), `${shape.name}: reconnect did not restore exact row lifecycle state: ${JSON.stringify(reset)}`);
           let reconnectAuthority;
           if (reconnectCtrlArmed) {
             await delay(120);
@@ -1921,12 +1561,11 @@ async function main() {
           caseEvidence.reconnectReset = reset;
           caseEvidence.reconnectKeyAuthority = reconnectAuthority;
 
-          await page.locator(".attachment-page__composer-typography-trigger").click();
           await control({ closeLive: "generation_failed" });
           await page.waitForFunction(() => document.querySelector(".persea-unified-notice")?.hidden === false, undefined, { timeout: 8_000 });
           const failed = await uiState();
-          assert(failed.popoverHidden === true && failed.bank === null && failed.rowAttributes.length === 1 && failed.rowAttributes[0][0] === "class", `${shape.name}: terminal failure left typography/bank presentation alive: ${JSON.stringify(failed)}`);
-          caseEvidence.failureReset = { popoverHidden: failed.popoverHidden, bank: failed.bank, rowAttributes: failed.rowAttributes };
+          assert(failed.bank === null && failed.rowAttributes.length === 1 && failed.rowAttributes[0][0] === "class", `${shape.name}: terminal failure left bank presentation alive: ${JSON.stringify(failed)}`);
+          caseEvidence.failureReset = { bank: failed.bank, rowAttributes: failed.rowAttributes };
         } else {
           const beforeInputs = allInputs(await snapshot());
           await page.getByRole("button", { name: "F1", exact: true }).click();

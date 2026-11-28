@@ -106,8 +106,7 @@ async function main() {
           page.on('request', request => { if (request.method() === 'POST' && new URL(request.url()).pathname === '/api/session-adoptions') adoptionDepths.push(request.postDataJSON()); });
           await control({ sessionBState: 'adoptable' });
           const switchTo = async (name, scope) => {
-            await openMenu();
-            await page.getByRole('button', { name: 'Choose another session', exact: true }).click();
+            await page.locator('.persea-unified-tag').click();
             await page.getByRole('button', { name: `Switch to ${name}`, exact: true }).click();
             await page.waitForFunction(expected => new URLSearchParams(location.hash.slice(1)).get('draft_scope') === expected, scope);
             await page.waitForFunction(() => document.querySelector('.xterm-rows')?.textContent.includes('fixture-live') || document.querySelector('.xterm-rows')?.textContent.includes('beta-live'));

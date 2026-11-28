@@ -2289,18 +2289,17 @@ test("composer_mobile_repair_structure_is_shared_bounded_and_operator_vocabulary
     assert(helper.includes(`addEventListener("${type}"`), `shared activation helper lost ${type}`);
   }
   assert(composer.includes("this.resizePercent > 0 ? cap")
-    && composer.includes('this.setResizePercent(this.size === "expanded" ? 45 : 25)')
+    && composer.includes('this.size = this.resizePercent >= 25 ? "expanded" : "compact"')
     && css.includes('[data-sent-reopened="true"]:not([hidden])')
     && css.includes('[data-composer="open"] .attachment-page__keybar-handle { display: none; }')
     && css.includes('[data-sent-reopened="true"] .attachment-page__composer-header {\n  display: flex;\n}'),
-  "meaningful size or N3/N4/N11 secondary repair is absent");
+  "meaningful resize or N3/N4/N11 secondary repair is absent");
   assert(css.includes("html, body, #app")
     && (css.match(/overscroll-behavior: none;/g) ?? []).length >= 2
-    && composer.includes('this.button(">_", "Code input", this.onToggleMode')
-    && composer.includes('this.modeButton.textContent = prose ? "Aa" : ">_"')
+    && composer.includes('this.button("Code", "Code input", this.onToggleMode')
+    && composer.includes('this.modeButton.textContent = prose ? "Prose" : "Code"')
     && !css.includes(".attachment-page__composer-mode-caption")
     && composer.includes("button.title = label")
-    && css.includes(".attachment-page__compose-tab { font-size: 16px; }")
     && css.includes(".attachment-page__composer button,\n  .attachment-page__composer output {\n    font-size: 16px;"),
   "overscroll containment or Composer affordance labels are absent");
   for (const visible of [

@@ -1,54 +1,6 @@
 import type { LogicalKey } from "./continuous_surface/types";
 
 /**
- * The unified terminal's accessory key row. A phone keyboard has no arrows,
- * Esc, Tab, Home, End or Ctrl, and a modifierless tap cannot position the
- * cursor, so this row is the actual means of navigating a terminal on a phone
- * rather than a convenience. Key set and order mirror the legacy attachment
- * page bar: escapes first, then the arrow cluster under the thumb. The page
- * inserts the Ctrl latch after tab and the ✎ composer toggle last.
- */
-export type KeyBarEntry = Readonly<{ label: string; key: LogicalKey; title: string }>;
-
-export const UNIFIED_KEY_BAR_PRIMARY: readonly KeyBarEntry[] = Object.freeze([
-  Object.freeze({ label: "esc", key: "escape" as LogicalKey, title: "Escape" }),
-  Object.freeze({ label: "tab", key: "tab" as LogicalKey, title: "Tab" }),
-  Object.freeze({ label: "←", key: "arrow-left" as LogicalKey, title: "Left" }),
-  Object.freeze({ label: "↓", key: "arrow-down" as LogicalKey, title: "Down" }),
-  Object.freeze({ label: "↑", key: "arrow-up" as LogicalKey, title: "Up" }),
-  Object.freeze({ label: "→", key: "arrow-right" as LogicalKey, title: "Right" }),
-]);
-
-/**
- * The remaining named keys. The bar keeps esc tab ctrl ← ↓ ↑ → in its
- * Standard bank with a fixed Fn switch. These extra keys live on the
- * quick-actions sheet, which is reachable with the keyboard closed — paging
- * through output is a read-only act and must not require raising the keyboard
- * first. F1–F12 use a temporary bank in the same row and therefore are not
- * duplicated here.
- */
-export const UNIFIED_SHEET_KEYS: readonly KeyBarEntry[] = Object.freeze([
-  Object.freeze({ label: "home", key: "home" as LogicalKey, title: "Home" }),
-  Object.freeze({ label: "end", key: "end" as LogicalKey, title: "End" }),
-  Object.freeze({ label: "pgup", key: "page-up" as LogicalKey, title: "Page up" }),
-  Object.freeze({ label: "pgdn", key: "page-down" as LogicalKey, title: "Page down" }),
-  Object.freeze({ label: "del", key: "delete" as LogicalKey, title: "Delete" }),
-  Object.freeze({ label: "bksp", key: "backspace" as LogicalKey, title: "Backspace" }),
-]);
-
-/** The temporary function-key bank shown in the one existing accessory row. */
-export const UNIFIED_FUNCTION_KEYS: readonly KeyBarEntry[] = Object.freeze(
-  Array.from({ length: 12 }, (_, index) => {
-    const number = index + 1;
-    return Object.freeze({
-      label: `F${number}`,
-      key: `f${number}` as LogicalKey,
-      title: `Function key F${number}`,
-    });
-  }),
-);
-
-/**
  * Descriptor for a synthetic keydown aimed at xterm's hidden textarea. The
  * bytes are deliberately NOT encoded here: xterm's keyboard evaluator reads
  * its own tracked DEC private modes, so dispatching the logical key is what

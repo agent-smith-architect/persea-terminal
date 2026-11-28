@@ -162,6 +162,7 @@ export class KeyboardSettings {
     }
     const note = el("p", "keyboard-settings__scope-note", this.scope === "shared" ? "Defaults for every terminal and device." : "All terminals in this browser. Other devices keep their own settings.");
     const body = el("div", "keyboard-settings__body");
+    body.append(scope, note);
     if (this.confirmingClose) {
       const confirmation = el("div", "keyboard-settings__notice", "Discard unsaved changes?");
       confirmation.append(button("Keep editing", () => { this.confirmingClose = false; this.nextFocus = "close"; this.render(); }), button("Discard changes", () => this.close())); body.append(confirmation);
@@ -202,7 +203,7 @@ export class KeyboardSettings {
     const save = button(this.busy ? "Saving…" : this.scope === "shared" ? "Save for all devices" : "Save for this device", () => void this.save()); save.className = "keyboard-settings__save"; save.disabled = this.busy || !this.draft.dirty || this.draft.conflict || (this.scope === "shared" && !this.service.snapshot().available);
     footer.append(status, save);
     if (this.busy) { body.inert = true; restore.disabled = true; }
-    this.element.replaceChildren(header, scope, note, body, footer); body.scrollTop = scroll;
+    this.element.replaceChildren(header, body, footer); body.scrollTop = scroll;
     if (active) {
       const controls = Array.from(this.element.querySelectorAll<HTMLElement>("[data-settings-control]"));
       const target = controls.find((node) => node.dataset.settingsControl === active && !(node instanceof HTMLButtonElement && node.disabled)) ?? controls.find((node) => node.dataset.settingsControl === `section:${this.section}`) ?? close;

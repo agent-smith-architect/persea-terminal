@@ -68,10 +68,10 @@
 .persea-unified-composer-dock {
   min-width: 0;
 }
-
-/* The legacy edge tab is replaced by the key-bar and toolbar toggles; if it
-   rendered here, the "closed" dock row would gain height. */
-.persea-unified-composer-dock .attachment-page__compose-tab { display: none; }
+.persea-unified-composer-dock[data-composer="open"] {
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 18%, var(--persea-chrome-bg, #1b1e25));
+  background: var(--persea-chrome-bg, #1b1e25);
+}
 
 .persea-unified-composer-dock .attachment-page__composer {
   position: static;
@@ -79,7 +79,11 @@
   left: auto;
   right: auto;
   bottom: auto;
-  /* One chrome row instead of two: the header's symbolic buttons sit beside
+  box-sizing: border-box;
+  width: min(68rem, 100%);
+  max-width: 100%;
+  margin-inline: auto;
+  /* One chrome row instead of two: the header's mode pill sits beside
      the footer. The header takes the first, content-sized column so that the
      footer — whose ➤ is the row's rightmost primary — owns the flexible
      remainder. The explicit placements below are inert in the sent state,
@@ -88,11 +92,10 @@
   grid-template-rows: auto auto auto auto;
   gap: .25rem .35rem;
   max-height: var(--persea-composer-inset-budget, 20rem);
-  padding: .3rem .4rem;
+  padding: .3rem .5rem;
   border: 0;
-  border-top: 1px solid #343844;
   border-radius: 0;
-  background: #1b1e25;
+  background: transparent;
   box-shadow: none;
   overflow: hidden;
 }
@@ -127,8 +130,9 @@
      keyboard. An absolute clamp sizes the row to the clamp. */
   max-height: 6rem;
   padding: .25rem .4rem;
-  border-color: #596171;
-  background: #10131a;
+  border-color: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 28%, var(--persea-chrome-bg, #1b1e25));
+  background: var(--persea-terminal-bg, #10131a);
+  color: var(--persea-chrome-fg, #f3f4f6);
   /* The operator's composer face, defaulted one step below the 14px this
      rule used to hardcode for a fine pointer. The coarse-pointer floor below
      is not negotiable by this preference. */
@@ -188,95 +192,29 @@
   min-width: 40px;
   min-height: 40px;
   padding: .2rem .35rem;
-  border-color: #596171;
-  background: #282d38;
+  border-color: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 28%, var(--persea-chrome-bg, #1b1e25));
+  background: var(--persea-chrome-control-bg, #282d38);
+  color: var(--persea-chrome-fg, #f3f4f6);
 }
-.persea-unified-composer-dock .attachment-page__composer-typography {
-  position: relative;
-  flex: none;
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-mode-toggle {
+  padding-inline: .6rem;
+  font: 600 .78rem/1 system-ui, sans-serif;
 }
-.persea-unified-composer-dock .attachment-page__composer-typography-trigger {
-  font: 700 .8rem/1 ui-monospace, monospace;
-  font-variant-numeric: tabular-nums;
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-clear {
+  padding-inline: .55rem;
+  color: var(--persea-chrome-muted-fg, #aeb9cc);
+  font: 600 .76rem/1 system-ui, sans-serif;
 }
-.persea-unified-terminal > .attachment-page__composer-typography-popover {
-  position: fixed;
-  z-index: 80;
-  display: grid;
-  width: min(15rem, calc(100vw - 1rem));
-  box-sizing: border-box;
-  gap: .45rem;
-  padding: .65rem;
-  border: 1px solid var(--persea-chrome-control-border);
-  border-radius: .55rem;
-  background: var(--persea-chrome-bg);
-  color: var(--persea-chrome-fg);
-  box-shadow: 0 14px 36px rgb(0 0 0 / 55%);
-  overflow: auto;
-  overscroll-behavior: contain;
+.persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-clear[hidden] {
+  display: none;
 }
-.persea-unified-terminal > .attachment-page__composer-typography-popover[hidden] { display: none; }
-.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button {
-  min-width: 40px;
-  min-height: 40px;
-  padding: .2rem .35rem;
-  border-color: var(--persea-chrome-control-border);
-  background: var(--persea-chrome-control-bg);
-  color: var(--persea-chrome-fg);
-}
-.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button[aria-disabled="true"] {
-  cursor: not-allowed;
-  opacity: .65;
-}
-.persea-unified-terminal > .attachment-page__composer-typography-popover[aria-busy="true"] .attachment-page__button[aria-disabled="true"] {
-  cursor: wait;
-}
-.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-label {
-  font: 700 .78rem/1.2 ui-monospace, monospace;
-}
-.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-stepper,
-.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-actions {
-  display: flex;
-  align-items: center;
-  gap: .4rem;
-}
-.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-current {
-  flex: 1 1 auto;
-  min-width: 3.5rem;
-  text-align: center;
-  font: 700 .82rem/1 ui-monospace, monospace;
-  font-variant-numeric: tabular-nums;
-}
-.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-actions .attachment-page__button {
-  flex: 1 1 0;
-  white-space: nowrap;
-}
-.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-status {
-  min-height: 1em;
-  color: var(--persea-chrome-muted-fg);
-  font: 600 .68rem/1.3 ui-monospace, monospace;
-  overflow-wrap: anywhere;
-}
-.persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__composer-typography-status[hidden] { display: none; }
-.persea-unified-terminal > .attachment-page__composer-typography-popover:is(
-  [data-status="conflict"], [data-status="unavailable"], [data-status="refused"]
-) {
-  border-color: var(--persea-chrome-notice-fg);
-}
-.persea-unified-terminal > .attachment-page__composer-typography-popover:is(
-  [data-status="conflict"], [data-status="unavailable"], [data-status="refused"]
-) .attachment-page__composer-typography-status {
-  color: var(--persea-chrome-notice-fg);
-}
-/* Hide is neutral navigation, not a mode or resize choice. Its box is 44px on
-   every pointer so the internal and external ways out have equal reach. */
 .persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-close {
   border-color: transparent;
   background: transparent;
   color: var(--persea-chrome-muted-fg, #c5d5ec);
+  font-size: 1.15rem;
+  line-height: 1;
 }
-/* The semantic marker makes the same target law independently testable
-   without applying the unified dock's presentation to the legacy host. */
 .attachment-page__composer.attachment-page__composer--symbolic .attachment-page__composer-header-actions .attachment-page__composer-close {
   min-width: 44px;
   min-height: 44px;
@@ -290,16 +228,7 @@
   outline-offset: 2px;
   border-color: var(--persea-accent, #8fc7ff);
 }
-/* Scoped to the unified dock: the legacy page keeps its pinned compact
-   header geometry and presentation. */
 @media (pointer: coarse) {
-  /* The typography panel is a page-owned portal, not a dock descendant. Keep
-     every one of its enabled and disabled actions inside the same 44px target
-     law as the composer header controls. */
-  .persea-unified-terminal > .attachment-page__composer-typography-popover .attachment-page__button {
-    min-width: 44px;
-    min-height: 44px;
-  }
   .persea-unified-composer-dock .attachment-page__composer .attachment-page__button,
   .persea-unified-composer-dock .attachment-page__composer-mode .attachment-page__button,
   .persea-unified-composer-dock .attachment-page__composer-header-actions .attachment-page__button {
@@ -411,8 +340,9 @@
   flex: none;
 }
 .persea-unified-composer-dock .attachment-page__composer-mode .attachment-page__button[aria-pressed="true"] {
-  border-color: #e6edf3;
-  background: #38404f;
+  border-color: var(--persea-accent, #8fc7ff);
+  background: color-mix(in srgb, var(--persea-accent, #8fc7ff) 22%, var(--persea-chrome-bg, #1b1e25));
+  color: var(--persea-chrome-fg, #f3f4f6);
 }
 .persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-send {
   min-width: 2.75rem;
@@ -421,13 +351,18 @@
   color: #eaf5ff;
 }
 .persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-send:disabled {
-  border-color: #596171;
-  background: #1b1e25;
-  color: #6f8599;
+  border-color: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 20%, var(--persea-chrome-bg, #1b1e25));
+  background: var(--persea-chrome-bg, #1b1e25);
+  color: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 45%, var(--persea-chrome-bg, #1b1e25));
 }
 
 .persea-unified-composer-dock .attachment-page__composer-status {
   font-size: .68rem;
+  color: var(--persea-chrome-muted-fg, #c5d5ec);
+}
+.persea-unified-composer-dock .attachment-page__composer[data-content="guard"] .attachment-page__composer-status,
+.persea-unified-composer-dock .attachment-page__composer[data-content="blocked"] .attachment-page__composer-status {
+  color: var(--persea-chrome-danger-fg, #ffb4ab);
 }
 
 /* The chip strip in the unified dock's explicitly-placed grid: with
@@ -451,13 +386,13 @@
   grid-row: 5;
 }
 .persea-unified-composer-dock .attachment-page__composer-chip {
-  border-color: #596171;
-  background: #282d38;
-  color: #f3f4f6;
+  border-color: color-mix(in srgb, var(--persea-chrome-fg, #f3f4f6) 28%, var(--persea-chrome-bg, #1b1e25));
+  background: var(--persea-chrome-control-bg, #282d38);
+  color: var(--persea-chrome-fg, #f3f4f6);
 }
 .persea-unified-composer-dock .attachment-page__composer-chip[data-status="failed"] {
-  border-color: #7a3b3b;
-  color: #ffb4ab;
+  border-color: var(--persea-chrome-danger-fg, #ffb4ab);
+  color: var(--persea-chrome-danger-fg, #ffb4ab);
 }
 .persea-unified-composer-dock .attachment-page__composer-chip-button {
   border-color: #596171;

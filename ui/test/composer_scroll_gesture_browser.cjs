@@ -82,7 +82,7 @@ module.exports = async function composerScrollGestures(browser, engine) {
         window.requestAnimationFrame = (callback) => { heldFrames.set(++serial, callback); return serial; };
         window.cancelAnimationFrame = (id) => { heldFrames.delete(id); savedCancelRAF(id); };
         window.beforePublication = composer.textarea.scrollTop;
-        composer.applyTypographyState({ size: 12, status: "ready", message: "", enabled: true });
+        composer.applyFontSize(12);
         // Let measurement finish before moving the thumb. Only the final
         // typography repair remains held, so geometry cannot move the thumb.
         const pending = [...heldFrames.entries()];
@@ -138,7 +138,7 @@ module.exports = async function composerScrollGestures(browser, engine) {
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         const callbacks = [];
         window.requestAnimationFrame = (callback) => { callbacks.push(callback); return 200000 + callbacks.length; };
-        composer.applyTypographyState({ size: 13, status: "ready", message: "", enabled: true });
+        composer.applyFontSize(13);
         // Same layout-notification ordering as the main Controls regression.
         // After each completion path, a new repair must be allowed again.
         t.scrollTop = 200;
@@ -200,7 +200,7 @@ module.exports = async function composerScrollGestures(browser, engine) {
         const saved = window.requestAnimationFrame;
         const callbacks = [];
         window.requestAnimationFrame = (callback) => { callbacks.push(callback); return 300000 + callbacks.length; };
-        composer.applyTypographyState({ size: 13, status: "ready", message: "", enabled: true });
+        composer.applyFontSize(13);
         // Force a layout scroll between publication and repair so a skipped
         // repair cannot pass simply because the browser kept the old offset.
         t.scrollTop = 200;

@@ -21,18 +21,18 @@
 .keyboard-settings__header { display: flex; align-items: center; justify-content: space-between; padding: 12px 20px 4px; flex: none; }
 .keyboard-settings__header h2 { margin: 0; font-size: 22px; font-weight: 650; }
 .keyboard-settings__header button { font-size: 25px; background: transparent; border-color: transparent; width: 44px; padding: 0; }
-.keyboard-settings__scope { display: flex; gap: 5px; margin: 8px 20px 0; padding: 4px; background: #10151c; border-radius: 10px; flex: none; }
+.keyboard-settings__scope { display: flex; gap: 5px; margin: 4px 0 0; padding: 4px; background: #10151c; border-radius: 10px; }
 .keyboard-settings__scope button { flex: 1; border-color: transparent; background: transparent; }
-.keyboard-settings__scope-note { color: var(--keys-muted); margin: 8px 20px 12px; font-size: 13px; flex: none; }
+.keyboard-settings__scope-note { color: var(--keys-muted); margin: 8px 0 12px; font-size: 13px; }
 .keyboard-settings__body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 20px 20px; }
 .keyboard-settings__preview { background: #10151c; border: 1px solid #303b49; border-radius: 10px; padding: 10px; margin-bottom: 18px; }
 .keyboard-settings__eyebrow { display: block; color: var(--keys-muted); font-size: 10px; font-weight: 650; letter-spacing: .09em; margin-bottom: 8px; }
 .keyboard-settings__preview-row { display: flex; gap: 3px; min-width: 0; }
 .keyboard-settings__preview-keys { display: flex; flex: 1; gap: 3px; min-width: 0; overflow-x: auto; padding-bottom: 2px; }
-.keyboard-settings__key { display: flex; align-items: center; justify-content: center; min-width: 42px; min-height: 40px; padding: 4px 7px; border: 1px solid #3c4655; border-radius: 6px; background: #29323e; white-space: nowrap; font: 600 12px/1.2 system-ui, sans-serif; }
+.keyboard-settings__key { flex: 1 1 0; display: flex; align-items: center; justify-content: center; min-width: 30px; min-height: 36px; padding: 3px 4px; border: 1px solid #3c4655; border-radius: 6px; background: #29323e; white-space: nowrap; font: 600 11px/1.2 system-ui, sans-serif; }
 .keyboard-settings__key--modifier { color: #d9d0bc; background: #303038; }
-.keyboard-settings__key--navigation { flex: none; color: #c7d9ee; background: #2a384a; }
-.keyboard-settings__key[data-key-glyph="true"] { font-size: 18px; }
+.keyboard-settings__key--navigation { flex: none; min-width: 38px; padding: 3px 6px; color: #c7d9ee; background: #2a384a; }
+.keyboard-settings__key[data-key-glyph="true"] { font-size: 15px; }
 .keyboard-settings__tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--keys-border); margin-bottom: 10px; padding-bottom: 8px; }
 .keyboard-settings__tabs button { flex: 1; background: transparent; border-color: transparent; }
 .keyboard-settings__note { margin: 10px 0; color: var(--keys-muted); font-size: 13px; }
@@ -65,8 +65,6 @@
 @media (max-width: 600px) {
   .keyboard-settings { width: 100%; height: 100dvh; margin: 0; border: 0; border-radius: 0; }
   .keyboard-settings__header { padding: max(10px, env(safe-area-inset-top)) 14px 2px; }
-  .keyboard-settings__scope { margin-inline: 14px; }
-  .keyboard-settings__scope-note { margin-inline: 14px; }
   .keyboard-settings__body { padding-inline: 14px; }
   .keyboard-settings__footer { padding-inline: 14px; }
   .keyboard-settings__footer .keyboard-settings__save { flex: 1; }

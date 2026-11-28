@@ -1,8 +1,5 @@
 import {
   CtrlLatch,
-  UNIFIED_FUNCTION_KEYS,
-  UNIFIED_KEY_BAR_PRIMARY,
-  UNIFIED_SHEET_KEYS,
   latchedCtrlKeyFor,
   unifiedKeyDescriptor,
   type UnifiedKeyDescriptor,
@@ -17,27 +14,6 @@ const assert = {
     if (!value) throw new Error(message);
   },
 };
-
-// --- key set parity with the legacy attachment page bar ---------------------
-
-assert.equal(
-  UNIFIED_KEY_BAR_PRIMARY.map((entry) => `${entry.label}:${String(entry.key)}`).join(","),
-  "esc:escape,tab:tab,←:arrow-left,↓:arrow-down,↑:arrow-up,→:arrow-right",
-  "primary key row drifted from the legacy bar",
-);
-// The bar is exactly eight keys (esc tab ctrl ← ↓ ↑ → Fn); the remaining named
-// keys live on the quick-actions sheet, reachable with the keyboard closed.
-assert.equal(
-  UNIFIED_SHEET_KEYS.map((entry) => `${entry.label}:${String(entry.key)}`).join(","),
-  "home:home,end:end,pgup:page-up,pgdn:page-down,del:delete,bksp:backspace",
-  "sheet key set drifted",
-);
-assert.equal(UNIFIED_KEY_BAR_PRIMARY.length + 2, 8, "the bar (primary keys + ctrl + ✎) must be exactly eight keys");
-assert.equal(
-  UNIFIED_FUNCTION_KEYS.map((entry) => `${entry.label}:${String(entry.key)}`).join(","),
-  "F1:f1,F2:f2,F3:f3,F4:f4,F5:f5,F6:f6,F7:f7,F8:f8,F9:f9,F10:f10,F11:f11,F12:f12",
-  "function-key bank drifted",
-);
 
 // --- named descriptor mapping ------------------------------------------------
 // The descriptors carry logical keys, never encoded bytes: xterm's evaluator

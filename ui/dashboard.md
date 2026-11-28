@@ -196,13 +196,16 @@ entry prevents that alias from returning. At the store limit, a new alias
 replaces the oldest detached entry; running aliases are retained.
 
 The terminal tag and page title use the current alias from the session list.
-Opening the tag refreshes that list. The alias leads the tag in bold; the tmux
-name follows on wide screens and is hidden on phones. The compact Alias row shows
-the current name or None. Edit opens a field with Save, Clear when a name exists,
-and Cancel. Save or Cancel returns to the compact row. Revision conflicts preserve
-a draft and offer Reload saved alias. Name
-conflicts explain that another running session uses the alias. The same wording
-appears in the dashboard and in the optional alias step after session creation.
+Opening the tag refreshes that list and shows a compact top bar with
+**Dashboard** and a collapsible **Session info** drawer (which holds alias
+editing and session facts; observe-only pages expand it by default). The alias
+leads the tag in bold; the tmux name follows on wide screens and is hidden on
+phones. Inside Session info, the compact Alias row shows the current name or
+None. Edit opens a field with Save, Clear when a name exists, and Cancel. Save
+or Cancel returns to the compact row. Revision conflicts preserve a draft and
+offer Reload saved alias. Name conflicts explain that another running session
+uses the alias. The same wording appears in the dashboard and in the optional
+alias step after session creation.
 
 Alias store version 2 records session names and the last incarnation on which
 each alias was shown. Older stores are replaced with an empty version 2 store
@@ -232,10 +235,17 @@ It is shared between this origin's tabs and applied to later opens. An active
 terminal changes its own retention only after the operator changes its selector;
 another tab cannot unexpectedly shrink a reader's active buffer.
 
-The shared menu retains natural ordering within its existing realm/server
-groups. Current-session facts are disclosed separately; search and the Dashboard
-action remain outside the scrolling list. Existing admission, trusted activation,
-Control and geometry rules still govern every selection.
+The in-terminal session menu lists sessions as compact single-line rows within
+their existing realm/server groups: shared favorites carry a star and sort first
+by default, followed by natural name ordering, with a compact output-recency
+timestamp (`now`, `3m`, `2h`, `2d`) or a **Current** pill on the right and full
+dimensions/attachment metadata on hover. A sort toggle (`⇅`) beside Refresh
+switches between default (favorites first, then natural name) and latest-output
+order without adding extra inventory requests. Current-session facts and alias
+editing sit inside the collapsible **Session info** drawer; search, sort,
+Refresh, and the Dashboard action remain outside the scrolling list. Existing
+admission, trusted activation, Control and geometry rules still govern every
+selection.
 
 ## Verification
 

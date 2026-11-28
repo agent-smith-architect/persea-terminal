@@ -58,13 +58,16 @@ async function workspaceCase(browser, engine, evidence) {
     await page.waitForFunction(count => document.querySelectorAll('.ws-cell[data-ws-state="live"] .xterm-rows').length === count, names.length);
     const pane = page.locator('.ws-cell').nth(0), tag = pane.locator('.persea-unified-tag'), alias = pane.locator('.persea-unified-tag__alias');
     const editor = pane.locator('.persea-unified-identity__alias');
+    const infoToggle = pane.getByRole('button', { name: 'Session info', exact: true });
     const edit = editor.getByRole('button', { name: 'Edit alias for current session', exact: true });
     const input = editor.getByRole('textbox', { name: 'Alias for current session', exact: true });
     await tag.click();
+    await infoToggle.click();
     await whenEnabled(page, edit);
     assert(await alias.textContent() === 'Research', 'workspace pane does not show its alias');
     const held = hold = holdNext();
     await tag.click(); await tag.click();
+    await infoToggle.click();
     await held.fetched;
     await edit.click(); await input.fill('Deploy');
     await editor.getByRole('button', { name: 'Save', exact: true }).click();
@@ -185,12 +188,15 @@ async function run(engine) {
       assert(await page.locator('.persea-unified-tag__alias').isVisible(), 'Phone CSS hides the current alias');
       assert(await page.title() === 'Research · Persea Terminal', 'Title ignored inventory alias');
       const editor = page.locator('.persea-unified-identity__alias');
+      const infoToggle = page.getByRole('button', { name: 'Session info', exact: true });
       const input = editor.getByRole('textbox', { name: 'Alias for current session', exact: true });
       const edit = editor.getByRole('button', { name: 'Edit alias for current session', exact: true });
+      assert(!await editor.isVisible(), 'Session info drawer must start collapsed so the session list leads');
+      await infoToggle.click();
       assert(!await input.isVisible() && await edit.isVisible(), 'Alias editor must start compact');
       assert(await editor.locator('.persea-unified-identity__alias-value').innerText() === 'Research', 'Compact alias row omitted the current alias');
-      const order = await editor.evaluate(el => ({ dashboardY: el.parentElement.querySelector('[aria-label="Open the dashboard"]').getBoundingClientRect().top, aliasY: el.getBoundingClientRect().top, detailsY: el.parentElement.querySelector('.persea-unified-identity__current-details').getBoundingClientRect().top }));
-      assert(order.dashboardY < order.aliasY && order.aliasY < order.detailsY, 'Dashboard, alias and current details are out of order');
+      const order = await page.locator('.persea-unified-identity__details').evaluate(el => ({ dashboardY: el.querySelector('[aria-label="Open the dashboard"]').getBoundingClientRect().top, aliasY: el.querySelector('.persea-unified-identity__alias').getBoundingClientRect().top, factsY: el.querySelector('.persea-unified-identity__facts').getBoundingClientRect().top }));
+      assert(order.dashboardY < order.aliasY && order.aliasY < order.factsY, 'Dashboard, alias and current details are out of order');
       const requestsBeforeCancel = state.requests.length;
       await edit.click(); await input.fill('Discard this draft');
       await editor.getByRole('button', { name: 'Cancel', exact: true }).click();
@@ -216,11 +222,12 @@ async function run(engine) {
         el.scrollTop = 0; room.dashboardTop = el.querySelector('[aria-label="Open the dashboard"]').getBoundingClientRect().top - el.getBoundingClientRect().top;
         return room;
       });
+      // Check both collapsed and expanded Session info drawer states.
+      await infoToggle.click();
       for (const open of [false, true]) {
-        if (open) await page.locator('.persea-unified-identity__current-details > summary').click();
+        if (open) await infoToggle.click();
         const room = await listRoom();
         assert(room.list + 0.5 >= room.firstRowBottom && room.listBottom <= room.panelBottom + 0.5 && room.dashboardTop >= 0 && room.dashboardTop < 16 && room.userScrollable, `${name}: session list squeezed (details ${open ? 'open' : 'closed'}): ${JSON.stringify(room)}`);
-        if (open) await page.locator('.persea-unified-identity__current-details > summary').click();
       }
       await shot('terminal-editor');
       const tag = await page.locator('.persea-unified-tag').evaluate(el => {
@@ -264,6 +271,7 @@ async function run(engine) {
           try { const response = await route.fetch(); fetched(); await held; await route.fulfill({ response }); } catch { /* the page dropped the request */ } finally { handled(); }
         }, { times: 1 });
         await page.locator('.persea-unified-tag').click(); await page.locator('.persea-unified-tag').click();
+        await infoToggle.click();
         await heldFetched;
         await edit.click(); await input.fill('Fresh');
         await editor.getByRole('button', { name: 'Save', exact: true }).click();
@@ -323,6 +331,7 @@ async function run(engine) {
         }, { times: 1 });
         state.holdReply = reply;
         await page.locator('.persea-unified-tag').click(); await page.locator('.persea-unified-tag').click();
+        await infoToggle.click();
         await partial.fetched;
         await edit.click(); await input.fill('After a partial list');
         await editor.getByRole('button', { name: 'Save', exact: true }).click();

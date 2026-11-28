@@ -283,28 +283,30 @@ async function newerIntentSurvives(): Promise<CaseResult> {
 // control-lifecycle/R3/R4 lifecycle pin. The controller owns these transitions; using
 // its internal seam here avoids a fake reimplementation while still mounting
 // and destroying the real xterm page in a browser. destroy() must synchronously
-// restore the original row and close the page-owned typography disclosure
-// before terminal teardown removes its portal.
+// restore the original row and close any page-owned disclosure before terminal
+// teardown removes the shell.
 async function destroyRestoresPresentation(): Promise<CaseResult> {
   const mounted = await mount();
   const internals = mounted.page as unknown as {
     keyBar: HTMLElement;
     keyRow: HTMLElement;
     keysPanel: { open: boolean; element: HTMLElement; showAll(group: string): void };
-    composer: { typographyOpen: boolean; typographyPopover?: HTMLElement; setTypographyOpen(open: boolean): void };
+    viewPopover: HTMLElement;
+    viewPopoverOpen: boolean;
+    setViewPopover(open: boolean): void;
     popoverOwner: string;
   };
   const originalNodes = Array.from(internals.keyRow.children);
   const originalAttributes = Array.from(internals.keyRow.attributes, (attribute) => [attribute.name, attribute.value]);
   internals.keyBar.hidden = false;
   internals.keysPanel.showAll("Function");
-  internals.composer.setTypographyOpen(true);
+  internals.setViewPopover(true);
   const entered = {
     bank: internals.keysPanel.element.dataset.group,
-    typographyOpen: internals.composer.typographyOpen,
+    viewOpen: internals.viewPopoverOpen,
     owner: internals.popoverOwner,
   };
-  const popover = internals.composer.typographyPopover;
+  const popover = internals.viewPopover;
   mounted.page.destroy();
   const restoredNodes = Array.from(internals.keyRow.children);
   const detail = {
@@ -314,8 +316,8 @@ async function destroyRestoresPresentation(): Promise<CaseResult> {
     attributes: Array.from(internals.keyRow.attributes, (attribute) => [attribute.name, attribute.value]),
     originalAttributes,
     keysOpen: internals.keysPanel.open,
-    typographyOpen: internals.composer.typographyOpen,
-    popoverConnected: popover?.isConnected ?? false,
+    viewOpen: internals.viewPopoverOpen,
+    popoverHidden: popover.hidden,
     owner: internals.popoverOwner,
   };
   mounted.root.remove();
@@ -359,7 +361,7 @@ function judge(results: readonly CaseResult[]): string[] {
     failures.push(`newer: the card's select or status line did not follow the newest pick ${JSON.stringify(newer)}`);
   }
   const entered = lifecycle.entered as Record<string, unknown>;
-  if (entered.bank !== "Function" || entered.typographyOpen !== true || entered.owner !== "typography") {
+  if (entered.bank !== "Function" || entered.viewOpen !== true || entered.owner !== "view") {
     failures.push(`lifecycle: the setup never entered both transient states ${JSON.stringify(lifecycle)}`);
   }
   if (lifecycle.labels !== undefined && (lifecycle.labels as string[]).join(" ") !== "Esc ⇥ Ctrl ← ↓ ↑ →") {
@@ -369,8 +371,8 @@ function judge(results: readonly CaseResult[]): string[] {
     || JSON.stringify(lifecycle.attributes) !== JSON.stringify(lifecycle.originalAttributes)) {
     failures.push(`lifecycle: destroy did not restore the original node identities/attributes ${JSON.stringify(lifecycle)}`);
   }
-  if (lifecycle.typographyOpen !== false || lifecycle.popoverConnected !== false || lifecycle.owner !== "none") {
-    failures.push(`lifecycle: destroy left a disclosure owner or portal alive ${JSON.stringify(lifecycle)}`);
+  if (lifecycle.viewOpen !== false || lifecycle.popoverHidden !== true || lifecycle.owner !== "none") {
+    failures.push(`lifecycle: destroy left a disclosure owner or popover alive ${JSON.stringify(lifecycle)}`);
   }
   return failures;
 }

@@ -2,12 +2,12 @@ import type { UnifiedViewportInsetSource, InsertTextResult, UnifiedTerminalPageO
 export type { UnifiedViewportInsetSource, InsertTextResult, UnifiedTerminalPageOptions } from "./unified_terminal_options";
 import type { WidthRefitResult, WidthRefitAttempt, PendingWidthRefit, UnifiedGeometryAction, UnifiedGeometryAvailabilityCode, UnifiedGeometryAvailability, UnifiedGeometryAvailabilityInput, GeometryFormView } from "./unified_terminal_geometry_types";
 export type { WidthRefitResult, WidthRefitAttempt, UnifiedGeometryAction, UnifiedGeometryAvailabilityCode, UnifiedGeometryAvailability, UnifiedGeometryAvailabilityInput } from "./unified_terminal_geometry_types";
-import type { CopyToClipsResult, UnifiedPopoverOwner, UnifiedExplainerTopic, ScrollAnchor, FontIntent, ComposerFontIntent, InputTraceEntry } from "./unified_terminal_state_types";
+import type { CopyToClipsResult, UnifiedPopoverOwner, UnifiedExplainerTopic, ScrollAnchor, FontIntent, InputTraceEntry } from "./unified_terminal_state_types";
 import { Terminal } from "@xterm/xterm";
 import type { FinalizeCause, PortSendResult } from "./attachment_port";
 import type { AttachmentTransportSink, ReconnectStatus } from "./websocket_attachment_transport";
 import { MAX_FIT_CELLS, MAX_FIT_ROWS, MAX_INPUT_BYTES, MIN_FIT_ROWS, validVerticalFit, validateServerFrame, type BrowserFrame, type Prepare, type ServerFrame, type StreamPosition } from "./attachment_protocol";
-import { Composer, normalizeComposedText, type ComposerAvailability, type ComposerInjectionResult, type ComposerTypographyState } from "./composer";
+import { Composer, normalizeComposedText, type ComposerAvailability, type ComposerInjectionResult } from "./composer";
 import { triageClipboardItems, type ComposerStagedImage } from "./composer_attachments";
 import { IOSBackspaceRouter, syntheticInsertTextEvent } from "./continuous_surface/ios_backspace_router";
 import type { LogicalKey } from "./continuous_surface/types";
@@ -18,7 +18,9 @@ import { clipboardIcon } from "./clipboard_icons";
 import "./terminal_menu.css";
 import "./scrollback_control.css";
 import { createScrollbackControl, readScrollbackRows, readTerminalScrollbackRows, saveTerminalScrollbackRows, terminalScrollbackOverride, type ScrollbackRows } from "./scrollback_preferences";
-import { COMPOSER_FONT_SIZE_MAX, COMPOSER_FONT_SIZE_MIN, DEFAULT_COMPOSER_FONT_SIZE, type OperatorPreferenceOutcome, type OperatorPreferenceSnapshot, type OperatorPreferenceSubscription } from "./operator_preferences";
+import { DEFAULT_COMPOSER_FONT_SIZE, type OperatorPreferenceOutcome, type OperatorPreferenceSnapshot, type OperatorPreferenceSubscription } from "./operator_preferences";
+import { boundedFetch } from "./bounded_fetch";
+import { parseDashboardFavorites } from "./dashboard_favorites";
 import { commitFocusClaim, pointerRuleClaims, type CommitFocusContext } from "./unified_focus_claim";
 import { createPreferencesStore } from "./preferences";
 import { TerminalKeysPanel } from "./terminal_keys_panel";
@@ -304,10 +306,18 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private readonly identityName: HTMLSpanElement;
   private readonly identityAlias: HTMLSpanElement;
   private readonly identityDetails: HTMLElement;
+  private readonly identityInfoToggle: HTMLButtonElement;
+  private readonly identityInfoDrawer: HTMLElement;
+  private identityInfoOpen = false;
   private readonly identityFacts: HTMLDListElement;
   private readonly identitySessionList: HTMLElement;
   private readonly identitySessionStatus: HTMLElement;
   private identitySessionSwitcher?: SessionSwitcherView;
+  private sessionFavoritesLoaded = false;
+  private sessionFavoritesRevision = -1;
+  private sessionFavoritesWantedRevision = -1;
+  private sessionFavoritesAbort?: AbortController;
+  private sessionFavoritesRequest?: Promise<void>;
   // What the popover currently lists. Rows are rebuilt only when this changes,
   // so a repeated render never replaces the DOM under a reading operator.
   private identityDetailsKey = "";
@@ -497,15 +507,10 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private readonly sheet: HTMLElement;
   private sheetOpen = false;
   private readonly sheetImageTile: HTMLButtonElement;
-  private readonly sheetShowKeyboardTile: HTMLButtonElement;
   private readonly sheetHideKeyboardTile: HTMLButtonElement;
   private readonly sheetStatus: HTMLElement;
-  private readonly sheetClipboardTile: HTMLButtonElement;
   private readonly clipboardPanel?: ClipboardPanel;
   private clipboardRestoreTerminalFocus = false;
-  private readonly sessionSwitcher?: SessionSwitcherView;
-  private readonly sheetSwitchTile?: HTMLButtonElement;
-  private sessionSwitcherOpen = false;
   private sessionInventoryLoaded = false;
   private sessionInventory?: SessionSwitcherInventory;
   private sessionInventoryAbort?: AbortController;
@@ -544,13 +549,10 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // same service; these arrays contain the fine-pointer and coarse-pointer
   // views of that one record, never independent stores.
   private preferenceSubscription?: OperatorPreferenceSubscription;
-  // The composer face. Like the theme, it is presentation this page
-  // applies immediately and a record it then writes; the applied value is a
-  // custom property on the shell, so the stylesheet owns every face rule and
-  // this page owns only the number.
+  // The composer face follows the dashboard Appearance preference. The applied
+  // value is a custom property on the shell, so the stylesheet owns every face
+  // rule and this page owns only the number.
   private composerFontPreference = DEFAULT_COMPOSER_FONT_SIZE;
-  private composerFontIntentID = 0;
-  private composerFontIntent?: ComposerFontIntent;
   // The font preference this page currently honours: an explicit size that
   // overrides auto-fit on every load, reattach and resize, or `null` for auto,
   // where the viewport decides.
@@ -616,13 +618,52 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     const identitySessionStatus = document.createElement("p");
     identitySessionStatus.className = "persea-unified-identity__session-status";
     identitySessionStatus.setAttribute("role", "status");
-    const currentDetails = document.createElement("details");
-    currentDetails.className = "persea-unified-identity__current-details";
-    const currentSummary = document.createElement("summary"); currentSummary.textContent = "Current session details";
-    currentDetails.append(currentSummary, identityFacts);
+    const identityBar = document.createElement("div");
+    identityBar.className = "persea-unified-identity__bar";
+    if (!options.workspaceCell) {
+      const dashboard = document.createElement("button");
+      dashboard.type = "button";
+      dashboard.className = "persea-unified-identity__bar-btn persea-unified-identity__dashboard";
+      const dashboardIcon = document.createElement("span");
+      dashboardIcon.className = "persea-unified-identity__dashboard-icon";
+      dashboardIcon.setAttribute("aria-hidden", "true");
+      dashboardIcon.textContent = "▦";
+      dashboard.append(dashboardIcon, "Dashboard");
+      dashboard.title = "Open the dashboard";
+      dashboard.setAttribute("aria-label", "Open the dashboard");
+      this.cleanupListeners.push(bindTapActivation(dashboard, (event) => {
+        if (event.isTrusted) window.location.assign("/");
+      }, () => undefined, () => !this.closed, () => this.keyInteractionGeneration));
+      identityBar.append(dashboard);
+    }
+    const identityInfoDrawer = document.createElement("div");
+    identityInfoDrawer.className = "persea-unified-identity__drawer";
+    identityInfoDrawer.id = `persea-unified-identity-info-${(toolbarSerial += 1)}`;
+    const defaultInfoOpen = options.sessionSwitch === undefined;
+    identityInfoDrawer.hidden = !defaultInfoOpen;
+    this.identityInfoOpen = defaultInfoOpen;
+    const identityInfoToggle = document.createElement("button");
+    identityInfoToggle.type = "button";
+    identityInfoToggle.className = "persea-unified-identity__bar-btn persea-unified-identity__info-toggle";
+    const infoIcon = document.createElement("span");
+    infoIcon.setAttribute("aria-hidden", "true");
+    infoIcon.textContent = "ⓘ";
+    identityInfoToggle.append(infoIcon, "Session info");
+    identityInfoToggle.title = "Show alias and current session details";
+    identityInfoToggle.setAttribute("aria-label", "Session info");
+    identityInfoToggle.setAttribute("aria-expanded", String(defaultInfoOpen));
+    identityInfoToggle.setAttribute("aria-controls", identityInfoDrawer.id);
+    this.cleanupListeners.push(bindTapActivation(
+      identityInfoToggle,
+      () => this.setIdentityInfo(!this.identityInfoOpen),
+      () => undefined,
+      () => !this.closed,
+      () => this.keyInteractionGeneration,
+    ));
+    identityBar.append(identityInfoToggle);
     const aliasEditor = this.createAliasEditor();
-    identityDetails.append(aliasEditor);
-    identityDetails.append(currentDetails, identitySessionStatus, identitySessionList);
+    identityInfoDrawer.append(aliasEditor, identityFacts);
+    identityDetails.append(identityBar, identityInfoDrawer, identitySessionList, identitySessionStatus);
     const tag = document.createElement("button");
     tag.type = "button";
     tag.className = "persea-unified-tag";
@@ -653,6 +694,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.identityName = tagName;
     this.identityAlias = tagAlias;
     this.identityDetails = identityDetails;
+    this.identityInfoToggle = identityInfoToggle;
+    this.identityInfoDrawer = identityInfoDrawer;
     this.identityFacts = identityFacts;
     this.identitySessionList = identitySessionList;
     this.identitySessionStatus = identitySessionStatus;
@@ -964,6 +1007,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         this.scheduleReconcile();
       },
       preferencesChanged: () => this.renderKeyBar(),
+      barRowVisible: () => !this.keyBar.hidden && !this.keyRow.hidden,
       keyboardOpen: () => this.keyboardOpen,
       settingsReturnFocus: () => this.quickActionsToggle,
       hideKeyboard: () => {
@@ -1172,39 +1216,17 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     );
     this.sheet = quick.sheet;
     this.sheetImageTile = quick.imageTile;
-    this.sheetShowKeyboardTile = quick.showKeyboardTile;
     this.sheetHideKeyboardTile = quick.hideKeyboardTile;
     this.sheetStatus = quick.status;
-    this.sheetClipboardTile = quick.clipboardTile;
-    this.sessionSwitcher = quick.sessionSwitcher;
-    this.sheetSwitchTile = quick.switchTile;
     if (options.sessionSwitch) {
-      const identityActions = document.createElement("div");
-      identityActions.className = "persea-unified-identity__session-actions";
-      const dashboard = document.createElement("button");
-      dashboard.type = "button";
-      const dashboardIcon = document.createElement("span");
-      dashboardIcon.className = "persea-unified-identity__dashboard-icon";
-      dashboardIcon.setAttribute("aria-hidden", "true");
-      dashboardIcon.textContent = "▦";
-      dashboard.append(dashboardIcon, "Dashboard");
-      dashboard.title = "Open the dashboard";
-      dashboard.setAttribute("aria-label", "Open the dashboard");
-      this.cleanupListeners.push(bindTapActivation(dashboard, (event) => {
-        if (event.isTrusted) window.location.assign("/");
-      }, () => undefined, () => !this.closed, () => this.keyInteractionGeneration));
       const list = document.createElement("div");
-      identityActions.append(dashboard);
-      // The way back to the dashboard leads the popover, above the alias, the
-      // current session and the list, so it is the first thing in view.
-      this.identityDetails.prepend(identityActions);
       this.identitySessionList.append(list);
       const switcher = new SessionSwitcherView({
         root: list,
         surface: this.identityDetails,
         currentDraftScope: () => this.options.sessionSwitch?.currentDraftScope() ?? null,
         blockedMessage: (session) => this.options.sessionSwitch?.blockedMessage(session) ?? "Unified terminal unavailable",
-        select: (session) => { void this.selectSession(session, "tag"); },
+        select: (session) => { void this.selectSession(session); },
         interactionGeneration: () => this.keyInteractionGeneration,
       });
       this.cleanupListeners.push(bindTapActivation(
@@ -1631,11 +1653,6 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         preferencesStore.update(withStoredDensity(preferencesStore.snapshot().preferences, preferences));
       },
       initialComposerFontSize: this.composerFontPreference,
-      updateComposerFontSize: (size) => this.requestComposerFontSize(size),
-      claimTypographyPopover: () => this.claimPopover("typography"),
-      releaseTypographyPopover: () => {
-        if (this.popoverOwner === "typography") this.popoverOwner = "none";
-      },
       onOpenChange: (open) => {
         composerDock.dataset.composer = open ? "open" : "closed";
         for (const toggle of this.composerToggles) {
@@ -1695,24 +1712,14 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
 
   // --- operator preferences (preferences) -----------------------------------------
 
-  // The composer face picker. Same shape and the same intent/settlement
-  // discipline as the theme picker: apply immediately so the operator sees the
-  // face they chose, write the record, and let the matching publication be the
-  // sole authority once the write settles.
-  // Applying is one custom property on the shell plus a data attribute that
-  // makes the applied value readable without parsing a style. The stylesheet
-  // owns what the face actually becomes — notably the coarse-pointer floor,
-  // which no number here may go under.
-  private applyComposerFontSize(size: number, state?: ComposerTypographyState): void {
+  // Applying the dashboard composer text size is one custom property on the
+  // shell plus a data attribute that makes the applied value readable without
+  // parsing a style. The stylesheet owns what the face actually becomes —
+  // notably the coarse-pointer floor, which no number here may go under.
+  private applyComposerFontSize(size: number): void {
     this.composerFontPreference = size;
-    const typographyState = state ?? Object.freeze({
-      size,
-      status: "ready",
-      message: "",
-      enabled: this.options.preferences !== undefined,
-    });
     if (this.composer) {
-      this.composer.applyTypographyState(typographyState);
+      this.composer.applyFontSize(size);
     } else {
       this.shell.style.setProperty("--persea-composer-font-size", `${size}px`);
       this.shell.dataset.composerFont = String(size);
@@ -1756,70 +1763,19 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       if (fontPreference === null) this.autoFitFont();
       else this.applyFontSize(fontPreference, this.captureAnchor());
     }
-    const composerFont = this.composerFontIntent?.value ?? snapshot.preferences.composerFontSize;
-    const status: ComposerTypographyState["status"] = this.composerFontIntent !== undefined || snapshot.status === "loading"
-      ? "saving"
-      : snapshot.status === "conflict"
-        ? "conflict"
-        : snapshot.status === "unavailable"
-          ? "unavailable"
-          : "ready";
-    const message = status === "saving" ? "Saving text size…" : status === "ready" ? "" : snapshot.message;
-    this.applyComposerFontSize(composerFont, Object.freeze({
-      size: composerFont,
-      status,
-      message,
-      enabled: snapshot.available,
-    }));
-  }
-
-  private requestComposerFontSize(value: number): void {
-    if (!Number.isInteger(value) || value < COMPOSER_FONT_SIZE_MIN || value > COMPOSER_FONT_SIZE_MAX) return;
-    const preferences = this.options.preferences;
-    if (preferences === undefined || !preferences.snapshot().available || this.composerFontIntent !== undefined) return;
-    const preview = preferences.preview?.({ composerFontSize: value });
-    const intent = Object.freeze({ id: ++this.composerFontIntentID, value, ...(preview === undefined ? {} : { preview }) });
-    this.composerFontIntent = intent;
-    const saving = Object.freeze({ size: value, status: "saving" as const, message: "Saving text size…", enabled: true });
-    this.applyComposerFontSize(value, saving);
-    void preferences.update({ composerFontSize: value }, intent.preview).then(
-      (outcome) => this.settleComposerFontIntent(intent, outcome),
-      () => this.discardComposerFontIntent(intent),
-    );
-  }
-
-  private settleComposerFontIntent(intent: ComposerFontIntent, outcome: OperatorPreferenceOutcome): void {
-    if (this.closed || this.composerFontIntent?.id !== intent.id) return;
-    this.composerFontIntent = undefined;
-    this.applyPreferences(this.options.preferences!.snapshot());
-    if (outcome === "conflict") this.showToast("Text size not saved — changed on another device");
-    else if (outcome === "unavailable") this.showToast("Text size applied for this page only — preferences unavailable");
-    else if (outcome === "refused") this.showToast("Text size could not be saved");
-  }
-
-  private discardComposerFontIntent(intent: ComposerFontIntent): void {
-    if (this.closed || this.composerFontIntent?.id !== intent.id) return;
-    this.composerFontIntent = undefined;
-    this.applyPreferences(this.options.preferences!.snapshot());
-    this.showToast("Text size could not be saved");
+    this.applyComposerFontSize(snapshot.preferences.composerFontSize);
   }
 
   // --- quick actions: the sheet -----------------------------------------------
   //
-  // The toolbar's opener reveals a grid sheet — Keys · View ·
-  // Sessions · Saved text · Image · Keyboard. Every tile reuses an existing
-  // path: Keys tiles go through sendKeyBarKey (a synthetic keydown xterm
-  // evaluates against its tracked DEC modes — measured to work with the
-  // textarea unfocused, P0-a), ↕ is a second button on the toolbar's trusted-
-  // click guard, View tiles are the ⋯ panel's items, Image opens the composer
-  // with its picker, Keyboard is the one deliberate focus/blur. Opening,
-  // closing and dismissing the sheet make no focus call: the element that had
-  // focus keeps it, so the keyboard state is exactly what it was.
+  // The toolbar's opener reveals secondary terminal tools that do not already
+  // have a dedicated primary control on the top bar: Keys, Attach image,
+  // Hide keyboard (while open), Keyboard settings, Help, and Scrollback.
+  // Opening, closing and dismissing the sheet make no focus call: the element
+  // that had focus keeps it, so the keyboard state is exactly what it was.
   private buildQuickActions(opener: HTMLButtonElement): Readonly<{
     dock: HTMLElement; sheet: HTMLElement; status: HTMLElement;
-    clipboardTile: HTMLButtonElement; imageTile: HTMLButtonElement;
-    showKeyboardTile: HTMLButtonElement; hideKeyboardTile: HTMLButtonElement;
-    sessionSwitcher?: SessionSwitcherView; switchTile?: HTMLButtonElement;
+    imageTile: HTMLButtonElement; hideKeyboardTile: HTMLButtonElement;
   }> {
     const sheet = document.createElement("section");
     sheet.className = "persea-unified-sheet persea-unified-sheet--menu";
@@ -1835,31 +1791,16 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       const reason = document.createElement("span"); reason.className = "persea-unified-sheet__reason";
       button.append(symbol, name, reason); button.title = title; button.setAttribute("aria-label", title); return button;
     };
-    const section = (heading: string, tiles: readonly HTMLElement[]): HTMLElement => {
-      const block = document.createElement("section"); block.className = "persea-unified-sheet__section";
-      const head = document.createElement("h3"); head.className = "persea-unified-sheet__heading"; head.textContent = heading;
-      const grid = document.createElement("div"); grid.className = "persea-unified-sheet__grid"; grid.append(...tiles);
-      block.append(head, grid); block.hidden = tiles.every((item) => item.hidden); return block;
-    };
     const bind = (button: HTMLButtonElement, action: (event: Event) => void | boolean): void => this.bindSheetTap(button, action);
     const heading = document.createElement("div"); heading.className = "persea-unified-sheet__menu-heading";
     const title = document.createElement("h2"); title.textContent = "Terminal";
     const close = tile("×", "Close", "Close terminal menu"); bind(close, () => this.setSheet(false)); heading.append(title, close);
-    const clipboardTile = tile("⎘", "Clipboard", "Open shared clipboard");
-    bind(clipboardTile, () => { this.openClipboard(); return false; });
-    const keys = tile("⇥", "Keys", "Open Terminal Keys");
+    const keys = tile("⌨", "Keys", "Open Terminal Keys");
     bind(keys, () => { this.setSheet(false); this.openKeys(); return false; });
-    const composer = tile("✎", "Composer", "Open composer");
-    bind(composer, (event) => { this.setSheet(false); this.composer?.openFromTrustedEvent(event); return false; });
     const imageTile = tile("⊕", "Attach image", "Attach an image in the composer");
     this.cleanupListeners.push(bindGenerationFencedClickActivation(imageTile, (event) => {
       if (!event.isTrusted || this.closed || !this.composer) return;
       if (this.composer.openImagePickerFromTrustedEvent(event)) this.setSheet(false);
-    }, () => !this.closed, () => this.keyInteractionGeneration));
-    const showKeyboardTile = tile("⌨", "Show keyboard", "Show keyboard");
-    this.cleanupListeners.push(bindGenerationFencedClickActivation(showKeyboardTile, (event) => {
-      if (!event.isTrusted || this.closed) return;
-      this.focusTerminalPreservingKeyboard(); this.setSheet(false);
     }, () => !this.closed, () => this.keyInteractionGeneration));
     const hideKeyboardTile = tile("⌄", "Hide keyboard", "Hide keyboard");
     this.cleanupListeners.push(bindGenerationFencedClickActivation(hideKeyboardTile, (event) => {
@@ -1869,29 +1810,12 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       if (active instanceof HTMLElement && this.shell.contains(active)) active.blur();
       this.renderSheetState();
     }, () => !this.closed, () => this.keyInteractionGeneration));
-    let sessionSwitcher: SessionSwitcherView | undefined; let switchTile: HTMLButtonElement | undefined;
-    const sessionTiles: HTMLButtonElement[] = [];
-    const sessionList = document.createElement("div"); sessionList.hidden = true;
-    if (!this.options.workspaceCell) {
-      const dashboard = tile("▦", "Dashboard", "Open the dashboard");
-      bind(dashboard, (event) => { if (event.isTrusted) window.location.assign("/"); }); sessionTiles.push(dashboard);
-    }
-    if (this.options.sessionSwitch) {
-      switchTile = tile("⇄", "Switch session", "Choose another session");
-      bind(switchTile, () => { void this.openSessionSwitcher(false); }); sessionTiles.push(switchTile);
-      sessionSwitcher = new SessionSwitcherView({
-        root: sessionList,
-        surface: sheet,
-        currentDraftScope: () => this.options.sessionSwitch?.currentDraftScope() ?? null,
-        blockedMessage: (session) => this.options.sessionSwitch?.blockedMessage(session) ?? "Unified terminal unavailable",
-        select: (session) => { void this.selectSession(session, "sheet"); },
-        interactionGeneration: () => this.keyInteractionGeneration,
-      });
-      this.bindSheetTap(sessionSwitcher.refresh, () => { void this.openSessionSwitcher(true); });
-    }
     const keyboardSettings = tile("⚙", "Keyboard settings", "Keyboard settings: shared defaults and this device");
     bind(keyboardSettings, () => { this.setSheet(false); this.keysPanel.openSettings(); return false; });
     const help = tile("ⓘ", "Help", "Explain terminal controls"); bind(help, () => { this.openExplainer(undefined, help); return false; });
+    const actionsGrid = document.createElement("div");
+    actionsGrid.className = "persea-unified-sheet__grid";
+    actionsGrid.append(keys, imageTile, keyboardSettings, help, hideKeyboardTile);
     const scrollback = document.createElement("section"); scrollback.className = "persea-unified-sheet__scrollback";
     const scrollbackStatus = document.createElement("output"); scrollbackStatus.setAttribute("role", "status");
     const chooseHistory = (rows: ScrollbackRows, inherit: boolean): void => {
@@ -1917,9 +1841,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.setSheet(false); return false;
     });
     scrollback.append(historyControl.label, historyHelp, reloadHistory, scrollbackStatus);
-    sheet.append(heading, status, section("Tools", [clipboardTile, keys, composer, imageTile]),
-      section("Keyboard", [showKeyboardTile, hideKeyboardTile]), section("Sessions", sessionTiles), sessionList,
-      section("Settings and help", [keyboardSettings, help]), scrollback);
+    sheet.append(heading, status, actionsGrid, scrollback);
     const onOutsidePointer = (event: PointerEvent): void => {
       if (!this.sheetOpen) return;
       const target = event.target as Node | null;
@@ -1933,12 +1855,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     document.addEventListener("pointerdown", onOutsidePointer, true); document.addEventListener("keydown", onEscape, true);
     this.cleanupListeners.push(() => document.removeEventListener("pointerdown", onOutsidePointer, true), () => document.removeEventListener("keydown", onEscape, true));
     const dock = document.createElement("div"); dock.className = "persea-unified-quick"; dock.append(sheet);
-    return Object.freeze({ dock, sheet, status, clipboardTile, imageTile, showKeyboardTile, hideKeyboardTile,
-      ...(sessionSwitcher && switchTile ? { sessionSwitcher, switchTile } : {}) });
-  }
-
-  private sessionSwitcherRoot(): HTMLElement | undefined {
-    return this.sessionSwitcher?.search.parentElement?.parentElement ?? undefined;
+    return Object.freeze({ dock, sheet, status, imageTile, hideKeyboardTile });
   }
 
   private createAliasEditor(): HTMLFormElement {
@@ -2069,18 +1986,42 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     }
   }
 
-  private async openSessionSwitcher(refresh: boolean): Promise<void> {
-    if (this.closed || !this.options.sessionSwitch || !this.sessionSwitcher) return;
-    const root = this.sessionSwitcherRoot();
-    if (!root) return;
-    const open = refresh || !this.sessionSwitcherOpen;
-    // A press on a row belongs to the list as it was shown when pressed.
-    if (open !== this.sessionSwitcherOpen) this.keyInteractionGeneration++;
-    this.sessionSwitcherOpen = open;
-    root.hidden = !open;
-    if (!open) return;
-    if (!refresh) this.sessionSwitcher.revealCurrent();
-    await this.loadSessionInventory(refresh);
+  private async loadSessionFavorites(wantedRevision: number): Promise<void> {
+    if (this.closed || !this.identitySessionSwitcher) return;
+    this.sessionFavoritesWantedRevision = Math.max(this.sessionFavoritesWantedRevision, wantedRevision);
+    if (this.sessionFavoritesRequest) return this.sessionFavoritesRequest;
+    const requestedWanted = this.sessionFavoritesWantedRevision;
+    const controller = new AbortController();
+    this.sessionFavoritesAbort = controller;
+    let request: Promise<void> | undefined;
+    request = (async () => {
+      try {
+        const response = await boundedFetch("/api/dashboard-preferences", {
+          method: "GET",
+          cache: "no-store",
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
+        if (!response.ok || this.closed || controller.signal.aborted || this.sessionFavoritesAbort !== controller) return;
+        const record = parseDashboardFavorites(await response.json(), response.headers.get("ETag"));
+        if (this.closed || controller.signal.aborted || this.sessionFavoritesAbort !== controller) return;
+        if (!record.available) return;
+        this.sessionFavoritesLoaded = true;
+        this.sessionFavoritesRevision = Math.max(this.sessionFavoritesRevision, record.revision);
+        this.identitySessionSwitcher?.setFavorites(new Set(record.favorites));
+      } catch {
+        // Favorites enhance ordering when available; failure never blocks session switching.
+      } finally {
+        if (this.sessionFavoritesAbort === controller) this.sessionFavoritesAbort = undefined;
+        if (this.sessionFavoritesRequest === request) this.sessionFavoritesRequest = undefined;
+        if (!this.closed && this.sessionFavoritesWantedRevision > requestedWanted
+          && this.sessionFavoritesWantedRevision > this.sessionFavoritesRevision) {
+          void this.loadSessionFavorites(this.sessionFavoritesWantedRevision);
+        }
+      }
+    })();
+    this.sessionFavoritesRequest = request;
+    await request;
   }
 
   currentScrollbackRows(): ScrollbackRows { return this.scrollbackRows; }
@@ -2114,7 +2055,6 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     }
     const readAfter = this.sessionInventoryReadAfter = this.aliasFence;
     const loading = refresh ? "Refreshing sessions…" : "Loading sessions…";
-    this.sheetStatus.textContent = loading;
     this.identitySessionStatus.textContent = loading;
     const controller = new AbortController();
     this.sessionInventoryAbort = controller;
@@ -2126,13 +2066,14 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
         this.sessionInventory = inventory;
         this.sessionInventoryLoaded = true;
         if ((inventory.readOrder ?? 0) > this.aliasFence) this.updateAliasSession(inventory);
-        this.sessionSwitcher?.setInventory(inventory);
         this.identitySessionSwitcher?.setInventory(inventory);
-        this.sheetStatus.textContent = "";
+        if (this.identitySessionSwitcher && inventory.favoritesRevision !== undefined
+          && (!this.sessionFavoritesLoaded || inventory.favoritesRevision > this.sessionFavoritesRevision)) {
+          void this.loadSessionFavorites(inventory.favoritesRevision);
+        }
         this.identitySessionStatus.textContent = "";
       } catch {
         if (!controller.signal.aborted && !this.closed) {
-          this.sheetStatus.textContent = "Inventory unavailable";
           this.identitySessionStatus.textContent = "Inventory unavailable";
         }
       } finally {
@@ -2144,29 +2085,24 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     await request;
   }
 
-  private async selectSession(session: DashboardSession, surface: "sheet" | "tag"): Promise<void> {
+  private async selectSession(session: DashboardSession): Promise<void> {
     if (this.closed || !this.options.sessionSwitch) return;
     if (this.sessionSwitchPending) {
-      this.sheetStatus.textContent = "Switching…";
       this.identitySessionStatus.textContent = "Switching…";
       return;
     }
     this.sessionSwitchPending = true;
-    this.sheetStatus.textContent = `Switching to ${session.name}…`;
     this.identitySessionStatus.textContent = `Switching to ${session.name}…`;
     this.renderSheetState();
     try {
       const result = await this.options.sessionSwitch.select(session);
       if (this.closed) return;
       if (!result.ok) {
-        this.sheetStatus.textContent = result.message;
         this.identitySessionStatus.textContent = result.message;
         return;
       }
-      this.sessionSwitcher?.render();
       this.identitySessionSwitcher?.render();
-      if (surface === "sheet") this.setSheet(false);
-      else this.setIdentityDetails(false);
+      this.setIdentityDetails(false);
     } finally {
       this.sessionSwitchPending = false;
       this.renderSheetState();
@@ -2191,10 +2127,6 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.sheetStatus.textContent = "";
       this.syncScrollbackControl();
       this.renderSheetState();
-    } else {
-      this.sessionSwitcherOpen = false;
-      const sessionSwitcher = this.sessionSwitcherRoot();
-      if (sessionSwitcher) sessionSwitcher.hidden = true;
     }
     if (!open && this.popoverOwner === "sheet") this.popoverOwner = "none";
   }
@@ -2202,9 +2134,6 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // Every tile that can be unavailable renders why, on the tile.
   private renderSheetState(): void {
     if (this.closed) return;
-    // `reason` is what the tile says; `disable` is whether it stops working.
-    // They are usually the same, but not always: clipboard-store-recovery needs a tile that
-    // reports an outage and stays usable, because what it opens still works.
     const setAvailability = (button: HTMLButtonElement, reason: string, disable = reason !== ""): void => {
       const available = !disable;
       button.disabled = disable;
@@ -2215,20 +2144,9 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       if (reasonNode) reasonNode.textContent = reason;
     };
     setAvailability(this.sheetImageTile, this.composer?.canAttachImages ? "" : "Images unavailable for this session");
-    const textEntryFocused = this.pageTextEntryFocused();
-    setAvailability(this.sheetShowKeyboardTile, textEntryFocused ? "Keyboard is already open" : "");
-    setAvailability(this.sheetHideKeyboardTile, textEntryFocused || this.keyboardOpen ? "" : "Keyboard is closed");
-    this.sheetShowKeyboardTile.hidden = textEntryFocused || this.keyboardOpen;
-    this.sheetHideKeyboardTile.hidden = !this.sheetShowKeyboardTile.hidden;
-    setAvailability(this.sheetClipboardTile, this.options.snippets ? "" : "Shared clipboard unavailable", !this.options.snippets);
-    const switchReason = this.sessionSwitchPending ? "Switching…" : "";
-    if (this.sheetSwitchTile) setAvailability(this.sheetSwitchTile, switchReason);
-    // Hide a category when none of its items are visible.
-    for (const block of Array.from(this.sheet.querySelectorAll<HTMLElement>(".persea-unified-sheet__section"))) {
-      const grid = block.querySelector<HTMLElement>(".persea-unified-sheet__grid");
-      const items = grid === null ? [] : Array.from(grid.children).filter((child): child is HTMLElement => child instanceof HTMLElement);
-      block.hidden = items.every((item) => item.hidden);
-    }
+    const keyboardVisible = this.pageTextEntryFocused() || this.keyboardOpen;
+    setAvailability(this.sheetHideKeyboardTile, keyboardVisible ? "" : "Keyboard is closed");
+    this.sheetHideKeyboardTile.hidden = !keyboardVisible;
   }
 
   // The state that makes an explicit Fit unavailable, for the tile's reason.
@@ -3105,6 +3023,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.keyInteractionGeneration++;
     this.keyBar.hidden = !visible;
     this.keysPanel.cancelModifiers();
+    this.keysPanel.barVisibilityChanged();
     if (this.sheetOpen) this.renderSheetState();
   }
 
@@ -3664,7 +3583,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.hideFailureNotice();
     this.loadingPanel.hidden = false;
     this.updateGeometryControl();
-    this.sessionSwitcher?.render();
+    this.setIdentityInfo(this.options.sessionSwitch === undefined);
+    this.identitySessionSwitcher?.render();
   }
 
   sessionSwitchState(): Readonly<{
@@ -3746,6 +3666,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.takeoverController = undefined;
     this.sessionInventoryAbort?.abort();
     this.sessionInventoryAbort = undefined;
+    this.sessionFavoritesAbort?.abort();
+    this.sessionFavoritesAbort = undefined;
     this.restoreKeyboardOnCommit = false;
     this.clipboardPanel?.dispose();
     this.preferenceSubscription?.dispose();
@@ -3753,7 +3675,6 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     if (this.fontSaveTimer !== undefined) clearTimeout(this.fontSaveTimer);
     this.fontSaveTimer = undefined;
     this.fontIntent = undefined;
-    this.composerFontIntent = undefined;
     for (const feedback of this.copyFeedback.values()) feedback.dispose();
     this.copyFeedback.clear();
     this.copyAnnouncementAttempts.clear();
@@ -4072,6 +3993,15 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     }));
   }
 
+  private setIdentityInfo(open: boolean): void {
+    if (this.identityInfoOpen === open) return;
+    this.keyInteractionGeneration++;
+    this.identityInfoOpen = open;
+    this.identityInfoDrawer.hidden = !open;
+    this.identityInfoToggle.setAttribute("aria-expanded", String(open));
+    if (open) this.renderIdentityDetails(this.connectionPhase());
+  }
+
   // Presentation only, exactly like the overflow popover: it writes its own
   // hidden flag and the tag's expanded state. The popover is positioned, so
   // opening it changes no box the ResizeObserver watches.
@@ -4083,6 +4013,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     if (open) {
       this.renderIdentityDetails(this.connectionPhase());
       if (this.options.aliasSession || this.options.sessionSwitch) void this.loadSessionInventory(true);
+    } else {
+      this.setIdentityInfo(this.options.sessionSwitch === undefined);
     }
     this.identityDetails.hidden = !open;
     if (open) this.identitySessionSwitcher?.revealCurrent();
@@ -4344,7 +4276,6 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     if (!this.identityDetails.hidden) this.setIdentityDetails(false, true);
     if (this.sheetOpen) this.setSheet(false, true);
     if (!this.explainerPopover.hidden) this.closeExplainer(true);
-    this.composer?.closeTypographyPopover(true);
     this.popoverOwner = "none";
   }
 
@@ -4353,7 +4284,6 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     if (owner !== "tag" && !this.identityDetails.hidden) this.setIdentityDetails(false, true);
     if (owner !== "sheet" && this.sheetOpen) this.setSheet(false, true);
     if (owner !== "explainer" && !this.explainerPopover.hidden) this.closeExplainer(true);
-    if (owner !== "typography") this.composer?.closeTypographyPopover(true);
     this.popoverOwner = owner;
   }
 
@@ -5101,6 +5031,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.keyRow.hidden = compact;
       if (compact) this.keyBar.insertBefore(panel, this.keyBankToggle);
       else this.shell.insertBefore(panel, this.keyBar);
+      this.keysPanel.barVisibilityChanged();
       this.composer?.remeasureInset();
     }
     if (!this.keysPanel.open) return;

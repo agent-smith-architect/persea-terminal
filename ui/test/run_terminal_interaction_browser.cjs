@@ -248,8 +248,7 @@ async function main() {
       // Synthetic input events model only the browser-side mechanism: real
       // acceleration remains an iPhone hardware gate.
       if (shape.name === "phone-390") {
-        await openSheet();
-        await tile("Clipboard").click();
+        await pasteAction().click();
         for (let attempt = 0; attempt < 100 && (await snapshot()).snippets.get === 0; attempt += 1) await delay(20);
         assert((await snapshot()).snippets.get > 0, `${shape.name}: snippet/clipboard service did not reach its ready snapshot`);
         await page.locator(".persea-clipboard").getByRole("button", { name: "Close clipboard", exact: true }).click();
@@ -344,9 +343,11 @@ async function main() {
       await page.locator(".persea-unified-tag").click();
       await page.locator(".persea-unified-identity__details").waitFor({ state: "visible" });
       await page.locator(".persea-unified-identity__details .persea-session-switcher").waitFor({ state: "visible" });
-      assert(await page.locator(".persea-unified-identity__session-actions").getByRole("button", { name: "Open the dashboard" }).isVisible(),
+      assert(await page.locator(".persea-unified-identity__bar").getByRole("button", { name: "Open the dashboard" }).isVisible(),
         `${shape.name}: tag popover lacks Dashboard`);
-      assert(await page.locator(".persea-unified-identity__session-actions").getByRole("button", { name: /Prev|Next/ }).count() === 0,
+      assert(await page.locator(".persea-unified-identity__bar").getByRole("button", { name: "Session info" }).isVisible(),
+        `${shape.name}: tag popover lacks Session info toggle`);
+      assert(await page.locator(".persea-unified-identity__bar").getByRole("button", { name: /Prev|Next/ }).count() === 0,
         `${shape.name}: tag popover retained arbitrary Prev/Next`);
       assert(sameBox(beforeTag, await toolbarBox()), `${shape.name}: tag popover changed toolbar box`);
       assert(sameShell(beforeTagShell, await shellBoxes()), `${shape.name}: tag popover shifted terminal shell`);
@@ -360,12 +361,12 @@ async function main() {
       const savedGetsBefore = (await snapshot()).snippets.get;
       await page.waitForTimeout(100);
       assert(selectionLabels.length === 0, `${shape.name}: Quick actions duplicated contextual selection controls: ${JSON.stringify(selectionLabels)}`);
-      assert(await tile("Clipboard").isVisible() && !await page.locator(".persea-clipboard").isVisible()
+      assert(await tile("Keys").isVisible() && !await page.locator(".persea-clipboard").isVisible()
+        && await tile("Clipboard").count() === 0 && await tile("Composer").count() === 0
+        && await tile("Dashboard").count() === 0 && await tile("Switch session").count() === 0
         && await tile("Snippets").count() === 0 && await tile("Clips").count() === 0,
-      `${shape.name}: task menu must expose one closed Clipboard route`);
+      `${shape.name}: task menu must expose concise secondary controls without duplicating primary toolbar routes`);
       assert((await snapshot()).snippets.get === savedGetsBefore, `${shape.name}: closed Saved text polled`);
-      const sessionLabels = await page.locator(".persea-unified-sheet__section").filter({ hasText: "Sessions" }).locator(".persea-unified-sheet__label").allTextContents();
-      assert(sessionLabels[0] === "Dashboard", `${shape.name}: Dashboard is not first: ${JSON.stringify(sessionLabels)}`);
       assert(await selectAction().isVisible() && await pasteAction().isVisible(), `${shape.name}: primary contextual Select/Paste actions are absent`);
       assert(await page.locator(".persea-unified-select__strip, .persea-unified-select__copy, .persea-unified-select__copy-screen").count() === 0,
         `${shape.name}: frozen overlay retained duplicate Copy/Done controls`);

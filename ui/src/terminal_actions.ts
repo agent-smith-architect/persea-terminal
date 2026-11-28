@@ -98,6 +98,7 @@ export function planKey(chord: KeyChord): KeyPlan | string {
 }
 
 const ctrl = (key: string): TerminalActionEntry => keyAction(key, { ...NO_MODIFIERS, ctrl: true });
+const shift = (key: string): TerminalActionEntry => keyAction(key, { ...NO_MODIFIERS, shift: true });
 const seq = (provider: PrefixProvider, key: string, label: string): TerminalActionEntry => ({
   id: `${provider}:${key}`, label, group: "Sequences", action: { kind: "sequence", prefix: provider, keys: [{ key, modifiers: NO_MODIFIERS }] },
 });
@@ -135,7 +136,7 @@ export function resolveAction(id: string): TerminalActionEntry | undefined {
   } catch { return undefined; }
 }
 export const KEY_PRESETS: Readonly<Record<string, readonly string[]>> = Object.freeze({
-  Terminal: [ctrl("c").id, ctrl("d").id, keyAction("enter").id, keyAction("home").id, keyAction("end").id, keyAction("page-up").id, keyAction("page-down").id, keyAction("f1").id],
+  Terminal: [ctrl("c").id, ctrl("d").id, keyAction("enter").id, shift("tab").id, ctrl("r").id, ctrl("l").id, keyAction("home").id, keyAction("end").id, keyAction("page-up").id, keyAction("page-down").id],
   Shell: [ctrl("a").id, ctrl("e").id, ctrl("u").id, ctrl("w").id, ctrl("r").id, ctrl("c").id, ctrl("d").id, ctrl("l").id],
   Vim: [keyAction("escape").id, ctrl("[").id, ctrl("r").id, ctrl("d").id, ctrl("u").id, keyAction(":").id, keyAction("/").id],
   tmux: [ctrl("b").id, "tmux:n", "tmux:p", "tmux:o", keyAction("escape").id],
