@@ -238,6 +238,31 @@ async function main(): Promise<void> {
     assert.equal(c.requests.length, 2, "403 did not retry exactly once");
     assert.equal((c.requests[1].init.headers as Record<string, string>)["X-Persea-CSRF"], "token-refreshed", "retry reused the stale token");
   }
+  // Expired CSRF cookie (token() throws) triggers one pre-POST refresh and succeeds.
+  {
+    const c = client([respond(201, goodHeaders, { ...validResponseBody })]);
+    const expiredCSRF = {
+      token: () => { throw new Error("CSRF cookie unavailable"); },
+      refresh: c.csrf.refresh,
+    };
+    const staged = await stageSessionImage("desk-a7", uploadFile, new AbortController().signal, c.fetcher, expiredCSRF);
+    assert.equal(staged.path, STAGED_PATH, "expired-cookie upload did not yield the staged path");
+    assert.equal(c.refreshes, 1, "expired-cookie upload did not refresh CSRF once");
+    assert.equal(c.requests.length, 1, "expired-cookie upload sent an extra request");
+    assert.equal((c.requests[0].init.headers as Record<string, string>)["X-Persea-CSRF"], "token-refreshed", "expired-cookie upload did not attach refreshed token");
+  }
+  // A 403 after an already-refreshed expired cookie does not loop or re-refresh.
+  {
+    const c = client([respond(403, {}, null)]);
+    const expiredCSRF = {
+      token: () => { throw new Error("CSRF cookie unavailable"); },
+      refresh: c.csrf.refresh,
+    };
+    const error = await stageSessionImage("desk-a7", uploadFile, new AbortController().signal, c.fetcher, expiredCSRF).then(() => undefined, (e: unknown) => e);
+    assert.ok(error instanceof ImageStagingError && error.kind === "unavailable", "post-refresh 403 did not refuse closed");
+    assert.equal(c.refreshes, 1, "post-refresh 403 refreshed more than once");
+    assert.equal(c.requests.length, 1, "post-refresh 403 retried unexpectedly");
+  }
   // A second 403 is a refusal, never a loop.
   {
     const c = client([respond(403, {}, null), respond(403, {}, null)]);

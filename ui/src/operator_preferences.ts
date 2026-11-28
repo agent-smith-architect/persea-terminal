@@ -6,8 +6,8 @@
 // inert except for reading a presentation-only local hint. Server authority
 // always replaces that hint before a pane is constructed by the production
 // boot paths.
-import { csrfToken } from "./csrf_refresh";
-import { boundedFetchWithin } from "./bounded_fetch";
+import { csrfTokenOrRefresh } from "./csrf_refresh";
+import { boundedFetch, boundedFetchWithin } from "./bounded_fetch";
 import { DEFAULT_UNIFIED_THEME, isUnifiedThemeID, type UnifiedThemeID } from "./unified_themes";
 import { DEFAULT_TERMINAL_POSITION, isTerminalPosition, type TerminalPosition } from "./terminal_position";
 
@@ -247,7 +247,7 @@ export class OperatorPreferencesService implements OperatorPreferencePort {
   private loadPromise: Promise<void> | undefined;
   private mutation: Promise<OperatorPreferenceOutcome> = Promise.resolve("saved");
   private readonly fetcher: (input: string, init: RequestInit) => Promise<Response>;
-  private readonly csrf: () => string;
+  private readonly csrf: () => string | Promise<string>;
   private readonly storage: OperatorPreferencesServiceOptions["storage"];
   private readonly counters = { gets: 0, puts: 0, conflicts: 0, publications: 0 };
 
@@ -255,7 +255,8 @@ export class OperatorPreferencesService implements OperatorPreferencePort {
     // The terminal waits for these before its first fit, so they get a short
     // budget that covers the body too; past it the page uses its defaults.
     this.fetcher = options.fetch ?? boundedFetchWithin(options.requestTimeoutMs ?? 5_000);
-    this.csrf = options.csrf ?? csrfToken;
+    const csrfFetch = options.fetch ?? boundedFetch;
+    this.csrf = options.csrf ?? (() => csrfTokenOrRefresh(undefined, csrfFetch));
     this.storage = options.storage ?? browserStorage();
     const hint = readHint(this.storage);
     const record = Object.freeze({
@@ -470,13 +471,15 @@ export class OperatorPreferencesService implements OperatorPreferencePort {
 
   private async attempt(next: OperatorPreferences, revision: number): Promise<WriteSettlement> {
     try {
+      const tokenOrPromise = this.csrf();
+      const token = typeof tokenOrPromise === "string" ? tokenOrPromise : await tokenOrPromise;
       const response = await this.request({
         method: "PUT",
         cache: "no-store",
         credentials: "same-origin",
         headers: {
           "Content-Type": "application/json",
-          "X-Persea-CSRF": this.csrf(),
+          "X-Persea-CSRF": token,
           "If-Match": `"${revision}"`,
         },
         body: JSON.stringify({

@@ -1,5 +1,5 @@
-import { csrfToken } from "./csrf_refresh";
-import { boundedFetch, boundedTransfer } from "./bounded_fetch";
+import { refreshCSRFToken } from "./csrf_refresh";
+import { boundedFetch, boundedTransfer, boundedTransferBlob } from "./bounded_fetch";
 import { deviceOrigin, sanitizeSnippetOrigin } from "./snippet_client";
 import { isClipboardRetentionSeconds, type ClipboardRetentionSeconds } from "./clipboard_retention";
 
@@ -84,7 +84,7 @@ export class ClipboardImages {
   private generation = 0;
   private readonly fetcher: NonNullable<Options["fetch"]>;
   private readonly transfer: NonNullable<Options["fetch"]>;
-  private readonly csrf: NonNullable<Options["csrf"]>;
+  private readonly csrf: () => string | Promise<string>;
   private readonly origin: string;
   private readonly foreground = (): void => {
     if (document.visibilityState === "visible" && this.live > 0) void this.refresh();
@@ -93,7 +93,7 @@ export class ClipboardImages {
   constructor(private readonly options: Options = {}) {
     this.fetcher = options.fetch ?? boundedFetch;
     this.transfer = options.fetch ?? boundedTransfer;
-    this.csrf = options.csrf ?? csrfToken;
+    this.csrf = options.csrf ?? (() => refreshCSRFToken(undefined, this.fetcher));
     this.origin = sanitizeSnippetOrigin(options.origin ?? (typeof window === "undefined" ? "" : deviceOrigin(window)));
     if (typeof document !== "undefined") document.addEventListener("visibilitychange", this.foreground);
   }
@@ -169,15 +169,19 @@ export class ClipboardImages {
   }
   async file(image: ClipboardImage): Promise<File> {
     if (image.expiresAt !== null && Date.parse(image.expiresAt) <= Date.now()) throw new ClipboardImageError(404);
-    const response = await this.request(clipboardImageURL(image), "GET", undefined, {}, true);
-    const blob = await response.blob();
+    const { response, blob } = await boundedTransferBlob(
+      clipboardImageURL(image),
+      { method: "GET", headers: {}, cache: "no-store", credentials: "same-origin" },
+      this.options.fetch ? (input, init) => this.options.fetch!(String(input), init ?? {}) : undefined,
+    );
+    if (!response.ok) throw new ClipboardImageError(response.status);
     if (blob.type !== image.mediaType || blob.size !== image.byteSize) throw new ClipboardImageError(415);
     return new File([blob], clipboardImageFilename(image), { type: image.mediaType });
   }
   private async request(path: string, method: string, body?: Blob | string, extraHeaders: Record<string, string> = {}, transfer = false): Promise<Response> {
     const headers: Record<string,string> = { ...extraHeaders };
     if (body !== undefined) {
-      headers["X-Persea-CSRF"] = this.csrf();
+      headers["X-Persea-CSRF"] = await this.csrf();
       headers["Content-Type"] = typeof body === "string" ? "application/json" : body.type;
       if (method === "POST" && this.origin) headers["X-Persea-Clipboard-Origin"] = this.origin;
     }

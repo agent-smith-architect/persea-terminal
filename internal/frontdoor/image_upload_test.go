@@ -796,3 +796,120 @@ func TestInventoryAdvertisesImageUploadGateAndRelaysBrokerCapability(t *testing.
 		}
 	}
 }
+
+type slowChunkReader struct {
+	data  []byte
+	chunk int
+	delay time.Duration
+}
+
+func (r *slowChunkReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, io.EOF
+	}
+	if r.delay > 0 {
+		time.Sleep(r.delay)
+	}
+	n := r.chunk
+	if n <= 0 || n > len(p) {
+		n = len(p)
+	}
+	if n > len(r.data) {
+		n = len(r.data)
+	}
+	copy(p[:n], r.data[:n])
+	r.data = r.data[n:]
+	return n, nil
+}
+
+func TestImageUploadExtendsSlowHTTPReadAndBrokerStagingDeadlines(t *testing.T) {
+	payload := oraclePNG(t, 1, 1)
+	want := oracleStagedControl("image/png", len(payload))
+	dir := shortTestDir(t)
+	socket := filepath.Join(dir, "slow-stage.sock")
+	listener, err := net.Listen("unix", socket)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = listener.Close() })
+	brokerErr := make(chan error, 1)
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			brokerErr <- err
+			return
+		}
+		defer conn.Close()
+		_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+		if _, err := proto.ReadFrame(conn); err != nil {
+			brokerErr <- err
+			return
+		}
+		if err := writeControl(conn, proto.Control{Type: "hello_ok", V: 1}); err != nil {
+			brokerErr <- err
+			return
+		}
+		if _, err := proto.ReadFrame(conn); err != nil {
+			brokerErr <- err
+			return
+		}
+		frame, err := proto.ReadFrame(conn)
+		if err != nil || frame.Type != proto.FrameImage {
+			brokerErr <- fmt.Errorf("image frame: %v", err)
+			return
+		}
+		// Exceed BrokerSetupTimeout (2s) during broker staging to verify the
+		// frontdoor widened the Unix-socket deadline after hello.
+		time.Sleep(BrokerSetupTimeout + 200*time.Millisecond)
+		brokerErr <- writeControl(conn, want)
+	}()
+
+	cfg := oracleFrontConfig(socket, proto.MaxImage)
+	s := newServer(cfg, ".", cfg.Ingress.CanonicalHost)
+	s.imageTransferTimeout = 5 * time.Second
+	s.brokerImageStageTimeout = 5 * time.Second
+
+	httpLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{
+		Handler:           s.handler(),
+		ConnContext:       func(ctx context.Context, _ net.Conn) context.Context { return context.WithValue(ctx, ingressKey{}, ingressIdentity{uid: cfg.Ingress.PeerUID}) },
+		ReadHeaderTimeout: 500 * time.Millisecond,
+		ReadTimeout:       120 * time.Millisecond,
+		WriteTimeout:      120 * time.Millisecond,
+	}
+	go func() { _ = srv.Serve(httpLn) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	// Drip upload slower than http.Server.ReadTimeout (120ms) and wait for a
+	// broker staging reply slower than WriteTimeout (120ms) and BrokerSetupTimeout (2s).
+	reader := &slowChunkReader{data: payload, chunk: len(payload)/4 + 1, delay: 60 * time.Millisecond}
+	req, err := http.NewRequest(http.MethodPost, "http://"+httpLn.Addr().String()+"/api/session-images?realm="+oracleImageRealm, reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Host = "localhost"
+	req.Header.Set("X-Forwarded-Host", cfg.Ingress.CanonicalHost)
+	req.Header.Set("X-Forwarded-Proto", "http")
+	req.Header.Set("Tailscale-User-Login", cfg.Ingress.OperatorLogin)
+	req.Header.Set("Origin", externalOrigin(cfg.Ingress))
+	req.Header.Set("Sec-Fetch-Site", "same-origin")
+	req.Header.Set("Cookie", csrfCookie+"="+oracleCSRF)
+	req.Header.Set("X-Persea-CSRF", oracleCSRF)
+	req.Header.Set("Content-Type", "image/png")
+
+	resp, err := (&http.Client{Timeout: 8 * time.Second}).Do(req)
+	if err != nil {
+		t.Fatalf("slow image upload failed: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated {
+		body, _ := io.ReadAll(resp.Body)
+		t.Fatalf("status=%d want=201 body=%q", resp.StatusCode, string(body))
+	}
+	if err := <-brokerErr; err != nil {
+		t.Fatalf("broker staging exchange error: %v", err)
+	}
+}

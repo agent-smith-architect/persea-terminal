@@ -110,6 +110,7 @@ func (s *Server) createClipboardImage(w http.ResponseWriter, r *http.Request) {
 		}
 		retention = value
 	}
+	s.extendImageTransferDeadlines(w, true, true)
 	body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, int64(s.cfg.ImageUploadMaxBytes)))
 	if err != nil {
 		var tooLarge *http.MaxBytesError
@@ -142,6 +143,7 @@ func (s *Server) getClipboardImage(w http.ResponseWriter, r *http.Request) {
 	if !s.clipboardImageReady(w) {
 		return
 	}
+	s.extendImageTransferDeadlines(w, false, true)
 	record, body, err := s.clipboardImages.get(id)
 	if err != nil {
 		writeClipboardImageError(w, err)

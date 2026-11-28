@@ -481,7 +481,7 @@
 .persea-unified-identity__session-status:empty { display: none; }
 .persea-unified-identity__sessions { display: flex; flex-direction: column; min-height: 9rem; }
 .persea-unified-identity__sessions > div { display: flex; flex-direction: column; min-height: 0; }
-.persea-unified-identity__dashboard-icon { color: #9cc9f2; font-size: 1rem; line-height: 1; }
+.persea-unified-identity__dashboard-icon { color: var(--persea-accent, #9cc9f2); font-size: 1rem; line-height: 1; }
 .persea-unified-identity__sessions .persea-session-switcher { display: flex; flex-direction: column; min-height: 0; }
 .persea-unified-identity__sessions .persea-session-switcher__controls { flex: 0 0 auto; }
 .persea-unified-identity__sessions .persea-session-switcher__list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }

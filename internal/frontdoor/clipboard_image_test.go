@@ -8,6 +8,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -590,4 +591,118 @@ func TestClipboardImageStoredMetadataIsClosed(t *testing.T) {
 		reopened.close()
 		t.Fatal("invalid UTF-8 image metadata accepted on restart")
 	}
+}
+
+func TestClipboardImageUploadAndDownloadExtendHTTPDeadlines(t *testing.T) {
+	s := clipboardImageServer(t)
+	s.imageTransferTimeout = 3 * time.Second
+
+	httpLn, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &http.Server{
+		Handler:           s.handler(),
+		ConnContext:       func(ctx context.Context, _ net.Conn) context.Context { return context.WithValue(ctx, ingressKey{}, ingressIdentity{uid: s.cfg.Ingress.PeerUID}) },
+		ReadHeaderTimeout: 500 * time.Millisecond,
+		ReadTimeout:       120 * time.Millisecond,
+		WriteTimeout:      120 * time.Millisecond,
+	}
+	go func() { _ = srv.Serve(httpLn) }()
+	t.Cleanup(func() { _ = srv.Close() })
+
+	baseURL := "http://" + httpLn.Addr().String()
+	attachHeaders := func(req *http.Request, media string) {
+		req.Host = "localhost"
+		req.Header.Set("X-Forwarded-Host", s.cfg.Ingress.CanonicalHost)
+		req.Header.Set("X-Forwarded-Proto", "http")
+		req.Header.Set("Tailscale-User-Login", s.cfg.Ingress.OperatorLogin)
+		req.Header.Set("Origin", externalOrigin(s.cfg.Ingress))
+		req.Header.Set("Sec-Fetch-Site", "same-origin")
+		req.Header.Set("Cookie", csrfCookie+"="+oracleCSRF)
+		req.Header.Set("X-Persea-CSRF", oracleCSRF)
+		if media != "" {
+			req.Header.Set("Content-Type", media)
+		}
+	}
+
+	// Upload a clipboard image slower than http.Server.ReadTimeout/WriteTimeout (120ms).
+	payload := oraclePNG(t, 4, 4)
+	uploadReq, err := http.NewRequest(http.MethodPost, baseURL+"/api/clipboard/images", &slowChunkReader{data: payload, chunk: len(payload)/4 + 1, delay: 60 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachHeaders(uploadReq, "image/png")
+	client := &http.Client{Timeout: 5 * time.Second}
+	uploadResp, err := client.Do(uploadReq)
+	if err != nil {
+		t.Fatalf("slow clipboard image upload failed: %v", err)
+	}
+	uploadBody, err := io.ReadAll(uploadResp.Body)
+	uploadResp.Body.Close()
+	if err != nil || uploadResp.StatusCode != http.StatusCreated {
+		t.Fatalf("upload status=%d err=%v body=%q", uploadResp.StatusCode, err, string(uploadBody))
+	}
+	var record clipboardImageRecord
+	if err := decodeStrict(uploadBody, &record); err != nil {
+		t.Fatalf("decode upload record: %v", err)
+	}
+
+	// Download a larger clipboard image with slow client reads exceeding WriteTimeout.
+	// Store a ~1 MiB valid PNG payload so kernel socket buffers cannot swallow the
+	// entire response before the client's slow reader paces the server write.
+	largeImg := bytes.Repeat([]byte{0x42}, 1<<20)
+	largePayload := append(oracleWebP(), largeImg...)
+	largePayload = largePayload[:1<<20]
+	largeRecord, err := s.clipboardImages.create("image/webp", largePayload, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	downloadReq, err := http.NewRequest(http.MethodGet, baseURL+"/api/clipboard/images/"+largeRecord.ID, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachHeaders(downloadReq, "")
+	downloadResp, err := client.Do(downloadReq)
+	if err != nil {
+		t.Fatalf("clipboard image download failed: %v", err)
+	}
+	defer downloadResp.Body.Close()
+	if downloadResp.StatusCode != http.StatusOK {
+		t.Fatalf("download status=%d want=200", downloadResp.StatusCode)
+	}
+	var got bytes.Buffer
+	buf := make([]byte, 64*1024)
+	for {
+		n, readErr := downloadResp.Body.Read(buf)
+		if n > 0 {
+			got.Write(buf[:n])
+			time.Sleep(15 * time.Millisecond)
+		}
+		if errors.Is(readErr, io.EOF) {
+			break
+		}
+		if readErr != nil {
+			t.Fatalf("slow clipboard image download read failed after %d bytes: %v", got.Len(), readErr)
+		}
+	}
+	if !bytes.Equal(got.Bytes(), largePayload) {
+		t.Fatalf("downloaded %d bytes, want %d exact bytes", got.Len(), len(largePayload))
+	}
+
+	// Non-image route still enforces the short http.Server.ReadTimeout (120ms).
+	slowSnippet := []byte(`{"body":"hello"}`)
+	nonImageReq, err := http.NewRequest(http.MethodPost, baseURL+"/api/snippets", &slowChunkReader{data: slowSnippet, chunk: 4, delay: 80 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	attachHeaders(nonImageReq, "application/json")
+	nonImageResp, err := client.Do(nonImageReq)
+	if err == nil {
+		defer nonImageResp.Body.Close()
+		if nonImageResp.StatusCode == http.StatusCreated || nonImageResp.StatusCode == http.StatusOK {
+			t.Fatalf("non-image route bypassed short ReadTimeout: status=%d", nonImageResp.StatusCode)
+		}
+	}
+	_ = record
 }

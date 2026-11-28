@@ -1,4 +1,5 @@
 import { boundedFetch } from "./bounded_fetch";
+import { refreshCSRFToken } from "./csrf_refresh";
 
 export type DashboardAlias = Readonly<{
   aliasId: string; displayAlias: string; revision: number; state: string;
@@ -56,8 +57,9 @@ export type AliasOutcome = Readonly<{ ok: true; alias?: DashboardAlias }>
 export async function saveAlias(alias: DashboardAlias | undefined, handle: string, displayAlias?: string, fetcher: FetchLike = boundedFetch): Promise<AliasOutcome> {
   try {
     const request = aliasRequest(alias, handle, displayAlias);
+    const token = await refreshCSRFToken(undefined, fetcher);
     const response = await fetcher(request.url, { ...request.init,
-      headers: { ...(request.init.headers as Record<string, string>), "X-Persea-CSRF": csrfToken() }, cache: "no-store", credentials: "same-origin" });
+      headers: { ...(request.init.headers as Record<string, string>), "X-Persea-CSRF": token }, cache: "no-store", credentials: "same-origin" });
     if (response.ok) return response.status === 204 ? { ok: true } : { ok: true, alias: parseAliasRecord(await response.json()) };
     const code = aliasErrorCode(await response.text());
     let current: DashboardAlias | undefined;

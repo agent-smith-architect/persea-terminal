@@ -18,7 +18,7 @@
 // and `cache: "no-store"` on every method. There is exactly one `fetch` call
 // site in this module, and no other module in the UI speaks to /api/snippets.
 
-import { csrfToken } from "./csrf_refresh";
+import { refreshCSRFToken } from "./csrf_refresh";
 import { boundedFetch } from "./bounded_fetch";
 import { isClipboardRetentionSeconds, type ClipboardRetentionSeconds } from "./clipboard_retention";
 
@@ -378,7 +378,7 @@ export class SnippetService implements SnippetServicePort {
   private oscInFlight = false;
   private pollsInFlight = 0;
   private readonly fetcher: (input: string, init: RequestInit) => Promise<Response>;
-  private readonly csrf: () => string;
+  private readonly csrf: () => string | Promise<string>;
   private readonly clipboard: Readonly<{ writeText(text: string): Promise<void> }> | undefined;
   private readonly origin: string;
   private readonly pollIntervalMs: number;
@@ -394,7 +394,7 @@ export class SnippetService implements SnippetServicePort {
 
   constructor(options: SnippetServiceOptions = {}) {
     this.fetcher = options.fetch ?? boundedFetch;
-    this.csrf = options.csrf ?? csrfToken;
+    this.csrf = options.csrf ?? (() => refreshCSRFToken(undefined, this.fetcher));
     this.clipboard = options.clipboard;
     this.origin = sanitizeSnippetOrigin(options.origin ?? "");
     this.pollIntervalMs = options.pollIntervalMs ?? SNIPPET_POLL_MS;
@@ -696,12 +696,12 @@ export class SnippetService implements SnippetServicePort {
    * and the exact JSON content type on mutations, and nothing else. This is
    * the only fetch call site in the UI that names /api/snippets.
    */
-  private send(path: string, method: string, body?: unknown): Promise<Response> {
+  private async send(path: string, method: string, body?: unknown): Promise<Response> {
     this.counters.requests += 1;
     const headers: Record<string, string> = {};
     if (body !== undefined) {
       headers["Content-Type"] = "application/json";
-      headers["X-Persea-CSRF"] = this.csrf();
+      headers["X-Persea-CSRF"] = await this.csrf();
     }
     return this.fetcher(path, {
       method,

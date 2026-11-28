@@ -140,13 +140,18 @@ export const OFFLINE_RETRY_MS = 15_000;
 export const OFFLINE_EARLY_RETRY_MS = 5_000;
 export const OFFLINE_EARLY_WINDOW_MS = 120_000;
 // The first connection has no reconnect attempt around it to bound it: a
-// handshake still pending after this long goes to normal recovery.
+// handshake still pending after this long goes to normal recovery. Reconnect
+// attempts also bound their handshake and post-open admission phases
+// separately so a high-RTT link is not aborted mid-handshake by the endpoint
+// resolution budget.
 export const OPEN_DEADLINE_MS = 10_000;
+export const ADMISSION_DEADLINE_MS = 10_000;
 // A wake signal brings the next OFFLINE probe forward, but never closer than
 // this to the previous attempt's start: signals can arrive in bursts (focus,
 // visibility and online together, or a page toggled repeatedly), and each
 // probe costs the server an endpoint mint.
 export const OFFLINE_WAKE_SPACING_MS = 3_000;
+export const OFFLINE_WAKE_JITTER_MS = 500;
 // A connection ends a loss episode only once its view has caught up and then
 // stayed up this long (one full liveness proof lifetime). Catching up is the
 // first MODE after COMMIT, which follows the whole history backlog. A
@@ -288,8 +293,10 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
         if (socket.readyState === SOCKET_OPEN) {
           return this.closeCurrent(socket, generation, "liveness_unavailable", true) ? "TRANSPORT_LOST" : "CLOSED";
         }
-      } else if (!liveness.heartbeat.beforeInput()) {
-        return "TRANSPORT_LOST";
+      } else {
+        const gate = liveness.heartbeat.beforeInput();
+        if (gate === "REPROOF_PENDING") return "SATURATED";
+        if (gate !== "ALLOW") return "TRANSPORT_LOST";
       }
     }
     let payload: string;
@@ -495,6 +502,9 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     if (attempt) {
       attempt.socket = socket;
       attempt.generation = generation;
+      // Endpoint resolution succeeded; transition from the resolve budget to
+      // the socket handshake (or admission if already open) budget.
+      this.armAttemptDeadline(attempt, socket.readyState === SOCKET_CONNECTING ? OPEN_DEADLINE_MS : ADMISSION_DEADLINE_MS);
     }
     this.sink.openTransport(generation);
     socket.addEventListener("open", () => this.onOpen(socket, generation));
@@ -514,6 +524,11 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
   private onOpen(socket: AttachmentWebSocket, generation: number): void {
     if (this.socket !== socket || generation !== this.generation || this.closedGeneration === generation) return;
     this.clearOpenDeadline();
+    if (this.activeAttempt?.socket === socket) {
+      // Socket handshake succeeded; give PREPARE -> READY -> COMMIT its own
+      // bounded admission deadline.
+      this.armAttemptDeadline(this.activeAttempt, ADMISSION_DEADLINE_MS);
+    }
     this.cancelLiveness();
     const heartbeat = new TransportLiveness(
       (payload) => socket.send(payload),
@@ -819,19 +834,24 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
   }
 
   // Connectivity or the page may be back: probe now instead of waiting for
-  // the slow timer, spaced from the previous attempt. A signal only ever
-  // brings the pending probe forward, so a burst collapses into one probe.
+  // the slow timer, spaced from the previous attempt and jittered across
+  // waking panes so a multi-pane workspace does not collide on the same
+  // millisecond. A signal only ever brings the pending probe forward, so a
+  // burst collapses into one probe without shrinking its jitter.
   private onWake(): void {
     if (this.retryDisabled || !this.offline || this.activeAttempt) return;
     const now = this.retryRuntime.now();
     const spacing = this.lastAttemptStartedAt === undefined ? 0 : this.lastAttemptStartedAt + OFFLINE_WAKE_SPACING_MS - now;
-    const delay = Math.max(0, spacing);
-    // Keep an armed probe only while it is still due ahead. One already past
-    // due by the clock has not fired because the device slept with the timer
-    // paused; waking must replace it rather than wait for it.
-    if (this.retryTimer !== undefined && this.retryDueAt !== undefined && now < this.retryDueAt && this.retryDueAt <= now + delay) return;
+    const baseDelay = Math.max(0, spacing);
+    const earliest = now + baseDelay;
+    // Keep an armed probe only while it is still due ahead and already inside
+    // this wake's jitter window. One already past due by the clock has not
+    // fired because the device slept with the timer paused; waking must
+    // replace it rather than wait for it.
+    if (this.retryTimer !== undefined && this.retryDueAt !== undefined && now < this.retryDueAt && this.retryDueAt <= earliest + OFFLINE_WAKE_JITTER_MS) return;
+    const wakeJitter = Math.round(Math.min(1, Math.max(0, this.random())) * OFFLINE_WAKE_JITTER_MS);
     this.clearRetryTimer();
-    this.scheduleReconnect(delay);
+    this.scheduleReconnect(baseDelay + wakeJitter);
   }
 
   private armRetry(token: number, delay: number): void {
@@ -960,10 +980,7 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
     };
     this.activeAttempt = attempt;
     this.lastAttemptStartedAt = this.retryRuntime.now();
-    attempt.deadlineTimer = this.retryRuntime.setTimeout(() => {
-      attempt.deadlineTimer = undefined;
-      this.expireAttempt(attempt);
-    }, MAX_RECONNECT_ATTEMPT_MS);
+    this.armAttemptDeadline(attempt, MAX_RECONNECT_ATTEMPT_MS);
     this.sink?.reconnectStatus?.(Object.freeze({ state: "ATTEMPTING", attempt: attempt.attempt }));
     try {
       const endpoint = await this.resolveReconnectEndpoint(attempt);
@@ -991,6 +1008,14 @@ export class WebSocketAttachmentTransport implements AttachmentPagePort {
       }
       this.scheduleReconnect();
     }
+  }
+
+  private armAttemptDeadline(attempt: ReconnectAttempt, timeoutMs: number): void {
+    if (attempt.deadlineTimer !== undefined) this.retryRuntime.clearTimeout(attempt.deadlineTimer);
+    attempt.deadlineTimer = this.retryRuntime.setTimeout(() => {
+      attempt.deadlineTimer = undefined;
+      this.expireAttempt(attempt);
+    }, timeoutMs);
   }
 
   private attemptIsCurrent(attempt: ReconnectAttempt): boolean {

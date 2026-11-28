@@ -467,10 +467,7 @@ button[data-copy-state="failed"] {
       font-size: 0.68rem;
     }
     .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-quick-actions,
-    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-composer-toggle,
-    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-toolbar__more,
-    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-phone-view,
-    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-fit-height {
+    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-composer-toggle {
       width: 44px;
       min-width: 44px;
       max-width: 44px;
@@ -492,20 +489,10 @@ button[data-copy-state="failed"] {
       min-width: 53px;
       max-width: 53px;
     }
-    .persea-unified-toolbar button.persea-unified-fit-height { margin-right: 0; }
     .persea-unified-toolbar button.persea-unified-fit-hint { display: none; }
     .persea-unified-toolbar > .persea-unified-toolbar__controls > .persea-unified-geometry:not(.persea-unified-geometry--phone) {
       display: none;
     }
-    .persea-unified-toolbar button.persea-unified-phone-view { display: inline-block; }
-    .persea-unified-toolbar__secondary[data-open="true"] { display: flex; }
-    .persea-unified-toolbar__secondary .persea-unified-geometry--phone { display: inline-block; }
-  }
-}
-@media (pointer: coarse) {
-  @container (min-width: 720px) {
-    /* A wide coarse pointer (tablet) keeps the secondary controls inline. */
-    .persea-unified-toolbar__secondary[data-open] { display: contents; }
   }
 }
 

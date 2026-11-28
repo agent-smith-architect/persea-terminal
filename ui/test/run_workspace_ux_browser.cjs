@@ -389,6 +389,32 @@ async function main() {
       await context.close();
     }
 
+    // --- 5b: 3-column workspace at 1024px keeps leftmost pane's session switcher inside viewport ---
+    {
+      await control({
+        reset: true,
+        sessions: ["ws01", "ws02", "ws03"],
+        preferences: { theme: "rose-pine-dawn", revision: 1, stored: true, available: true },
+        workspace: {
+          name: "Trio",
+          tree: { kind: "split", direction: "row", weights: [34, 33, 33], children: [leaf("ws01"), leaf("ws02"), leaf("ws03")] },
+        },
+      });
+      const context = await browser.newContext(contextOptions({ viewport: { width: 1024, height: 768 } }));
+      const page = await context.newPage();
+      await page.goto(`${fixture.origin}/workspace?engine=unified-dev#name=Trio`);
+      await page.locator(".ws-landing__open").click();
+      await page.waitForFunction(() => document.querySelectorAll('.ws-cell[data-ws-state="live"] .xterm-rows').length === 3);
+      await page.locator('.ws-cell[data-ws-session="ws01"] .persea-unified-tag').click();
+      const switcherBox = await page.locator('.ws-cell[data-ws-session="ws01"] .persea-unified-identity__details:not([hidden])').evaluate((node) => {
+        const r = node.getBoundingClientRect();
+        return { left: r.left, right: r.right, width: r.width, viewport: innerWidth };
+      });
+      assert.ok(switcherBox.left >= 0 && switcherBox.right <= switcherBox.viewport + 1,
+        `leftmost 3-col workspace switcher escaped viewport: ${JSON.stringify(switcherBox)}`);
+      await context.close();
+    }
+
     // --- 6: Dashboard multi-session builder, passive availability, Duplicate, left-aligned previews, nav arrows, phone M5 ---
     {
       await control({ reset: true, sessions: ["ws01", "ws02", "ws03", "ws04"] });

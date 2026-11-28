@@ -142,11 +142,13 @@ async function main() {
     await live(expired, "a page ended by server proof expiry");
 
     // A4: a timed-out attempt closes its socket with a code the browser sends.
+    // Post-open admission now has a 10s deadline (ADMISSION_DEADLINE_MS), so
+    // hold PREPARE for 11s to verify timeout + clean application close code.
     await newScenario("abandoned_attempt");
     const slow = await open();
-    await control({ holdPrepareMs: 6_000, closeLive: "websocket_read" });
+    await control({ holdPrepareMs: 11_000, closeLive: "websocket_read" });
     await lost(slow);
-    await live(slow, "the page after one slow attempt", LIVE_BOUND_MS + 6_000);
+    await live(slow, "the page after one slow attempt", LIVE_BOUND_MS + 11_000);
     const history = await attachments();
     const abandoned = history.find((attachment) => attachment.closeReason === "reconnect_attempt_timeout");
     assert(abandoned, `the timed-out attempt never closed its socket: ${JSON.stringify(history.map(({ id, closeReason, live, takeover }) => ({ id, closeReason, live, takeover })))}`);

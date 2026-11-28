@@ -1,4 +1,4 @@
-import { csrfToken } from "./csrf_refresh";
+import { refreshCSRFToken } from "./csrf_refresh";
 import { boundedFetch } from "./bounded_fetch";
 import { isClipboardRetentionSeconds, type ClipboardRetentionSeconds } from "./clipboard_retention";
 
@@ -29,7 +29,7 @@ export class ClipboardPreferencesService {
   private current: ClipboardPreferencesSnapshot = Object.freeze({ status: "idle", defaultRetentionSeconds: 1800, revision: 0 });
   private readonly listeners = new Set<(snapshot: ClipboardPreferencesSnapshot) => void>();
   private readonly fetcher: NonNullable<ClipboardPreferencesOptions["fetch"]>;
-  private readonly csrf: () => string;
+  private readonly csrf: () => string | Promise<string>;
   private readonly visibilityDocument?: Document;
   private inFlight?: Promise<void>;
   private saveInFlight?: Promise<ClipboardPreferencesOutcome>;
@@ -41,7 +41,7 @@ export class ClipboardPreferencesService {
 
   constructor(options: ClipboardPreferencesOptions = {}) {
     this.fetcher = options.fetch ?? boundedFetch;
-    this.csrf = options.csrf ?? csrfToken;
+    this.csrf = options.csrf ?? (() => refreshCSRFToken(undefined, this.fetcher));
     this.visibilityDocument = options.document ?? (typeof document === "undefined" ? undefined : document);
     this.visibilityDocument?.addEventListener("visibilitychange", this.foreground);
   }
@@ -117,10 +117,13 @@ export class ClipboardPreferencesService {
     return outcome;
   }
 
-  private request(method: "GET" | "PUT", body?: unknown): Promise<Response> {
+  private async request(method: "GET" | "PUT", body?: unknown): Promise<Response> {
+    const headers: Record<string, string> = body === undefined
+      ? {}
+      : { "Content-Type": "application/json", "X-Persea-CSRF": await this.csrf() };
     return this.fetcher("/api/clipboard/preferences", {
       method, cache: "no-store", credentials: "same-origin",
-      headers: body === undefined ? {} : { "Content-Type": "application/json", "X-Persea-CSRF": this.csrf() },
+      headers,
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
   }

@@ -36,16 +36,25 @@ const SnapshotByteLimit = 2 * 1024 * 1024
 const InventorySessionLimit = 128
 const SetupTimeout = 2 * time.Second
 const AttachSetupTimeout = SetupTimeout
+const ImageStageTimeout = 15 * time.Second
 const AttachedReadTimeout = 100 * time.Second
 
 type Server struct {
-	socketPath    string
-	config        config.Broker
-	images        *imageStager
-	panes         *paneRegistry
-	birth         sessionBirthEffect
-	unified       *UnifiedDevPaneEffects
-	inventoryTurn atomic.Uint64
+	socketPath        string
+	config            config.Broker
+	images            *imageStager
+	panes             *paneRegistry
+	birth             sessionBirthEffect
+	unified           *UnifiedDevPaneEffects
+	inventoryTurn     atomic.Uint64
+	imageStageTimeout time.Duration
+}
+
+func (s *Server) imageStageDeadline() time.Duration {
+	if s.imageStageTimeout > 0 {
+		return s.imageStageTimeout
+	}
+	return ImageStageTimeout
 }
 
 type unifiedAttachmentFrameWriter struct {
@@ -1804,6 +1813,12 @@ func (s *Server) handleConn(conn net.Conn) {
 				_ = writer.control(proto.Control{Type: proto.ControlImageRefused, Code: proto.ImageRefusalTooLarge})
 				continue
 			}
+			// Widen the connection deadline for up to MaxImage transfer +
+			// temp-write/fsync/rename/dir-fsync, then restore SetupTimeout
+			// before reading any subsequent control command on this socket.
+			if err := conn.SetDeadline(time.Now().Add(s.imageStageDeadline())); err != nil {
+				return
+			}
 			image, err := proto.ReadFrame(conn)
 			if err != nil {
 				if errors.Is(err, proto.ErrInvalidFrame) {
@@ -1816,10 +1831,18 @@ func (s *Server) handleConn(conn net.Conn) {
 				return
 			}
 			if s.images == nil {
-				_ = writer.control(proto.Control{Type: proto.ControlImageRefused, Code: proto.ImageRefusalImagesDisabled})
+				if writer.control(proto.Control{Type: proto.ControlImageRefused, Code: proto.ImageRefusalImagesDisabled}) != nil {
+					return
+				}
+				if err := conn.SetDeadline(time.Now().Add(SetupTimeout)); err != nil {
+					return
+				}
 				continue
 			}
 			if writer.control(s.images.stage(ctrl.MediaType, image.Payload)) != nil {
+				return
+			}
+			if err := conn.SetDeadline(time.Now().Add(SetupTimeout)); err != nil {
 				return
 			}
 		case "inventory":
@@ -2423,7 +2446,7 @@ func (s *Server) attachValidated(conn net.Conn, writer *lockedWriter, server con
 	inputs := newInputLedger()
 	epochConfig := terminal.Config{
 		QuietInterval: 500 * time.Millisecond, MaximumInterval: 2 * time.Second,
-		CutTimeout: 5 * time.Second, Clock: terminal.RealClock{}, HistoryRows: *ctrl.HistoryLimit, HistoryRowsSet: true,
+		CutTimeout: 10 * time.Second, Clock: terminal.RealClock{}, HistoryRows: *ctrl.HistoryLimit, HistoryRowsSet: true,
 		InputSettled: func(id uint64, outcome terminal.InputOutcome) { inputs.settle(id, pumpInputResult(outcome)) },
 	}
 	if attachmentEffects == nil {

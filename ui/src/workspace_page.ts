@@ -17,7 +17,7 @@
 import { installTapFeedback } from "./tap_feedback";
 import { boundedFetch, RequestTimeoutError } from "./bounded_fetch";
 import "./workspace_page.css";
-import { csrfToken } from "./csrf_refresh";
+import { refreshCSRFToken } from "./csrf_refresh";
 import { filterSessionList, unifiedBlockedMessage, unifiedTerminalURL, type DashboardInventory, type DashboardSession, type HistoryChoice } from "./dashboard";
 import { ADOPTION_HISTORY_ROWS, readScrollbackRows, readTerminalScrollbackRows } from "./scrollback_preferences";
 import { stageSessionImage } from "./image_staging_client";
@@ -380,6 +380,9 @@ export class WorkspacePage {
   private shortcutActive = false;
   private readonly onWindowKeyDown = (event: KeyboardEvent): void => this.handleCaptureKeyDown(event);
   private readonly onWindowKeyUp = (event: KeyboardEvent): void => this.handleCaptureKeyUp(event);
+  private readonly onVisibilityChange = (): void => {
+    if (!this.torndown && this.win.document.visibilityState === "visible") void this.refreshPresentation();
+  };
 
   constructor(private readonly options: WorkspacePageOptions) {
     this.root = options.root;
@@ -714,7 +717,13 @@ export class WorkspacePage {
     this.presentationGeneration = snapshot.generation;
     await Promise.all(entries.map((entry) => this.attachLeaf(entry, snapshot)));
     this.renderPanePicker();
-    if (!this.torndown) this.presentationTimer = this.win.setInterval(() => { void this.refreshPresentation(); }, PRESENTATION_REFRESH_MS);
+    if (!this.torndown) {
+      this.win.document.addEventListener("visibilitychange", this.onVisibilityChange);
+      this.presentationTimer = this.win.setInterval(() => {
+        if (this.win.document.visibilityState !== "visible") return;
+        void this.refreshPresentation();
+      }, PRESENTATION_REFRESH_MS);
+    }
   }
 
   private handleCaptureKeyDown(event: KeyboardEvent): void {
@@ -956,11 +965,15 @@ export class WorkspacePage {
     this.renderPanePicker();
   }
 
+  private paneIsActive(pane: PaneRuntime): boolean {
+    return !this.torndown && this.panes.get(pane.cell.key) === pane;
+  }
+
   // Per-leaf admission: resolve → adopt if adoptable → mount own controller.
   // Every outcome renders in the cell; a sibling is never touched.
   private async attachLeaf(entry: LeafEntry, snapshot: InventorySnapshot): Promise<void> {
     const pane = this.panes.get(entry.key);
-    if (!pane || this.torndown) return;
+    if (!pane || !this.paneIsActive(pane)) return;
     const resolution = resolveLeaf(snapshot, entry.leaf.session);
     pane.cell.setState(resolutionPaneState(resolution, entry.leaf));
     this.renderPanePicker();
@@ -971,7 +984,7 @@ export class WorkspacePage {
     pane.identity = resolution.identity;
     if (projection.state === "adoptable") {
       const adopted = await this.adopt(pane, resolution.identity);
-      if (!adopted || this.torndown) return;
+      if (!adopted || !this.paneIsActive(pane)) return;
     }
     this.mountController(entry.key, pane, resolution);
   }
@@ -979,20 +992,24 @@ export class WorkspacePage {
   // Adoption is the one pre-attach mutation a leaf may perform, and it is per
   // pane: a 429 or a refusal delays or fails THIS pane only.
   private async adopt(pane: PaneRuntime, identity: ResolvedPaneIdentity): Promise<boolean> {
-    while (!this.torndown) {
+    while (this.paneIsActive(pane)) {
       pane.adoptAttempts += 1;
       let status = 0;
       try {
+        const csrf = await refreshCSRFToken();
+        if (!this.paneIsActive(pane)) return false;
         const response = await boundedFetch("/api/session-adoptions", {
           method: "POST", cache: "no-store", credentials: "same-origin",
-          headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrfToken() },
+          headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrf },
           body: JSON.stringify({ realm: identity.selector.realm, server: identity.selector.server, session_id: identity.sessionId, history_rows: ADOPTION_HISTORY_ROWS }),
         });
+        if (!this.paneIsActive(pane)) return false;
         status = response.status;
         if (response.ok) return true;
       } catch {
         status = 0;
       }
+      if (!this.paneIsActive(pane)) return false;
       if (status === 429 && pane.adoptAttempts < ADOPT_MAX_ATTEMPTS) {
         pane.cell.setState(Object.freeze({ kind: "rate_limited" }));
         this.renderPanePicker();
@@ -1143,20 +1160,32 @@ export class WorkspacePage {
     const { session } = pane.leaf;
     pane.cell.setState(Object.freeze({ kind: "resolving" }));
     this.renderPanePicker();
+    let csrf: string;
+    try {
+      csrf = await refreshCSRFToken();
+    } catch {
+      if (!this.paneIsActive(pane)) return;
+      pane.cell.setState(Object.freeze({ kind: "create_failed", code: "unreachable", status: 0 }));
+      this.renderPanePicker();
+      return;
+    }
+    if (!this.paneIsActive(pane)) return;
     let response: Response;
     try {
       response = await boundedFetch("/api/sessions", {
         method: "POST", cache: "no-store", credentials: "same-origin",
-        headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrfToken() },
+        headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrf },
         body: JSON.stringify({ realm: session.realm, server: session.server, name: session.name }),
       });
     } catch (error) {
+      if (!this.paneIsActive(pane)) return;
       pane.cell.setState(error instanceof RequestTimeoutError
         ? Object.freeze({ kind: "failed", reason: "create_outcome_unknown" })
         : Object.freeze({ kind: "create_failed", code: "unreachable", status: 0 }));
       this.renderPanePicker();
       return;
     }
+    if (!this.paneIsActive(pane)) return;
     if (response.status !== 201) {
       const code = (await response.text().catch(() => "")).trim();
       pane.cell.setState(Object.freeze({ kind: "create_failed", code: /^[a-z][a-z0-9_]{0,63}$/.test(code) ? code : "create_failed", status: response.status }));
@@ -1840,6 +1869,7 @@ export class WorkspacePage {
     this.torndown = true;
     this.win.removeEventListener("keydown", this.onWindowKeyDown, { capture: true });
     this.win.removeEventListener("keyup", this.onWindowKeyUp, { capture: true });
+    this.win.document.removeEventListener("visibilitychange", this.onVisibilityChange);
     if (this.presentationTimer !== undefined) this.win.clearInterval(this.presentationTimer);
     this.presentationTimer = undefined;
     this.preferenceSub?.dispose();

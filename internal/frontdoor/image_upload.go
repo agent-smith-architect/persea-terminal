@@ -24,7 +24,40 @@ import (
 	"persea-terminal/internal/proto"
 )
 
-const maxImageDimension = 16384
+const (
+	maxImageDimension              = 16384
+	defaultImageTransferTimeout    = 120 * time.Second
+	defaultBrokerImageStageTimeout = 15 * time.Second
+)
+
+func (s *Server) imageTransferDuration() time.Duration {
+	if s.imageTransferTimeout > 0 {
+		return s.imageTransferTimeout
+	}
+	return defaultImageTransferTimeout
+}
+
+func (s *Server) brokerImageStageDuration() time.Duration {
+	if s.brokerImageStageTimeout > 0 {
+		return s.brokerImageStageTimeout
+	}
+	return defaultBrokerImageStageTimeout
+}
+
+// extendImageTransferDeadlines widens per-request read/write deadlines on
+// large binary image endpoints without loosening the tight http.Server
+// defaults (ReadHeaderTimeout=5s, ReadTimeout/WriteTimeout=15s) that protect
+// all ordinary routes.
+func (s *Server) extendImageTransferDeadlines(w http.ResponseWriter, read, write bool) {
+	rc := http.NewResponseController(w)
+	deadline := time.Now().Add(s.imageTransferDuration())
+	if read {
+		_ = rc.SetReadDeadline(deadline)
+	}
+	if write {
+		_ = rc.SetWriteDeadline(deadline)
+	}
+}
 
 var allowedImageMediaTypes = map[string]bool{
 	"image/gif":  true,
@@ -62,6 +95,7 @@ func (s *Server) stageSessionImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.extendImageTransferDeadlines(w, true, true)
 	limited := http.MaxBytesReader(w, r.Body, int64(s.cfg.ImageUploadMaxBytes))
 	body, err := io.ReadAll(limited)
 	if err != nil {
@@ -83,7 +117,7 @@ func (s *Server) stageSessionImage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	result, err := requestRealmImageStage(r.Context(), realm, sniffed, body)
+	result, err := requestRealmImageStageWithTimeout(r.Context(), realm, sniffed, body, s.brokerImageStageDuration())
 	if err != nil {
 		http.Error(w, "image staging unavailable", http.StatusServiceUnavailable)
 		return
@@ -137,6 +171,10 @@ func validImageDimensions(media string, body []byte) bool {
 }
 
 func requestRealmImageStage(ctx context.Context, realm config.Realm, media string, body []byte) (proto.Control, error) {
+	return requestRealmImageStageWithTimeout(ctx, realm, media, body, defaultBrokerImageStageTimeout)
+}
+
+func requestRealmImageStageWithTimeout(ctx context.Context, realm config.Realm, media string, body []byte, stageTimeout time.Duration) (proto.Control, error) {
 	conn, err := dial(realm.Socket, realm.BrokerUID)
 	if err != nil {
 		return proto.Control{}, err
@@ -157,6 +195,12 @@ func requestRealmImageStage(ctx context.Context, realm config.Realm, media strin
 		return proto.Control{}, err
 	}
 	if err := hello(conn); err != nil {
+		return proto.Control{}, err
+	}
+	if stageTimeout <= 0 {
+		stageTimeout = defaultBrokerImageStageTimeout
+	}
+	if err := conn.SetDeadline(time.Now().Add(stageTimeout)); err != nil {
 		return proto.Control{}, err
 	}
 	if err := writeControl(conn, proto.Control{Type: proto.ControlImageStage, MediaType: media, Bytes: len(body)}); err != nil {

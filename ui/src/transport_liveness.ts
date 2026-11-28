@@ -72,10 +72,13 @@ export class TransportLiveness {
   private timerEventWallAt?: number;
   private unsubscribeWake?: () => void;
   private outstandingNonce?: string;
+  private outstandingNonceEpoch = 0;
   private monotonicExpiresAt?: number;
   private wallExpiresAt?: number;
   private lastMonotonicNow?: number;
   private lastWallNow?: number;
+  private wallReproofRequired = false;
+  private wallStepEpoch = 0;
 
   constructor(
     private readonly sendText: (payload: string) => void,
@@ -103,10 +106,13 @@ export class TransportLiveness {
     this.unsubscribeWake?.();
     this.unsubscribeWake = undefined;
     this.outstandingNonce = undefined;
+    this.outstandingNonceEpoch = 0;
     this.monotonicExpiresAt = undefined;
     this.wallExpiresAt = undefined;
     this.lastMonotonicNow = undefined;
     this.lastWallNow = undefined;
+    this.wallReproofRequired = false;
+    this.wallStepEpoch = 0;
   }
 
   receive(payload: string): "ORDINARY" | "CONSUMED" | "FAILED" {
@@ -123,7 +129,16 @@ export class TransportLiveness {
       this.fail("liveness_timeout");
       return "FAILED";
     }
+    const answeredEpoch = this.outstandingNonceEpoch;
     this.outstandingNonce = undefined;
+    if (this.wallReproofRequired && answeredEpoch < this.wallStepEpoch) {
+      // This PONG answered a PING sent before the backward wall-clock step.
+      // Issue a fresh challenge stamped at the current epoch before reopening INPUT.
+      this.clearTimer();
+      this.sendChallenge(observed);
+      return this.state === "ACTIVE" ? "CONSUMED" : "FAILED";
+    }
+    this.wallReproofRequired = false;
     this.clearTimer();
     this.monotonicExpiresAt = observed.monotonic + TRANSPORT_LIVENESS_PROOF_MS;
     this.wallExpiresAt = observed.wall + TRANSPORT_LIVENESS_PROOF_MS;
@@ -136,16 +151,24 @@ export class TransportLiveness {
     return "CONSUMED";
   }
 
-  beforeInput(): boolean {
-    if (this.state !== "ACTIVE") return false;
+  beforeInput(): "ALLOW" | "REPROOF_PENDING" | "FAILED" {
+    if (this.state !== "ACTIVE") return "FAILED";
     const observed = this.observeClocks();
-    if (!observed) return false;
+    if (!observed) return "FAILED";
     if (this.expired(observed)) {
       this.fail("liveness_timeout");
-      return false;
+      return "FAILED";
+    }
+    if (this.wallReproofRequired) {
+      if (this.outstandingNonce === undefined) {
+        this.sendChallenge(observed);
+      } else {
+        this.reconcileTimer(observed);
+      }
+      return this.state === "ACTIVE" ? "REPROOF_PENDING" : "FAILED";
     }
     this.reconcileTimer(observed);
-    return this.state === "ACTIVE";
+    return this.state === "ACTIVE" ? "ALLOW" : "FAILED";
   }
 
   private sendChallenge(observed: Readonly<{ monotonic: number; wall: number }>): void {
@@ -171,6 +194,7 @@ export class TransportLiveness {
       return;
     }
     this.outstandingNonce = nonce;
+    this.outstandingNonceEpoch = this.wallStepEpoch;
     this.scheduleEvent("EXPIRY", this.monotonicExpiresAt, this.wallExpiresAt, observed);
   }
 
@@ -182,6 +206,10 @@ export class TransportLiveness {
       this.fail("liveness_timeout");
       return;
     }
+    if (this.wallReproofRequired && this.outstandingNonce === undefined) {
+      this.sendChallenge(observed);
+      return;
+    }
     this.reconcileTimer(observed);
   }
 
@@ -189,10 +217,26 @@ export class TransportLiveness {
     const monotonic = this.runtime.now();
     const wall = this.runtime.wallNow();
     if (!Number.isFinite(monotonic) || !Number.isFinite(wall)
-      || (this.lastMonotonicNow !== undefined && monotonic < this.lastMonotonicNow)
-      || (this.lastWallNow !== undefined && wall < this.lastWallNow)) {
+      || (this.lastMonotonicNow !== undefined && monotonic < this.lastMonotonicNow)) {
       this.fail("liveness_clock_anomaly");
       return undefined;
+    }
+    if (this.lastWallNow !== undefined && wall < this.lastWallNow) {
+      // A backward NTP/NITZ wall-clock adjustment must neither accept INPUT on
+      // unproved wall time nor drop an otherwise healthy connection. Retain
+      // the existing monotonic expiry, clamp wall deadlines conservatively to
+      // the new wall origin, and require a fresh nonce PONG issued after this
+      // step before INPUT.
+      this.wallStepEpoch += 1;
+      this.wallReproofRequired = true;
+      if (this.monotonicExpiresAt !== undefined) {
+        const remainingMonotonic = Math.max(0, this.monotonicExpiresAt - monotonic);
+        this.wallExpiresAt = Math.min(this.wallExpiresAt ?? wall + remainingMonotonic, wall + remainingMonotonic);
+      }
+      if (this.timerEventMonotonicAt !== undefined) {
+        const remainingEvent = Math.max(0, this.timerEventMonotonicAt - monotonic);
+        this.timerEventWallAt = Math.min(this.timerEventWallAt ?? wall + remainingEvent, wall + remainingEvent);
+      }
     }
     this.lastMonotonicNow = monotonic;
     this.lastWallNow = wall;

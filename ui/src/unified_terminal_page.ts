@@ -271,9 +271,19 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private selectionEdgeActive = false;
   private nativeInput: "wheel" | "touch" | undefined;
   private writesInFlight = 0;
+  private lastQueuedWrite?: { generation: number; callbacks: Array<() => void> };
   private fitting = false;
   private replaying = false;
   private reconcileFrame: number | undefined;
+  private liveScrollFrame: number | undefined;
+  private pendingLiveScroll?: { generation: number; followTail: boolean; anchor: ScrollAnchor };
+  private lastLiveSyncAt = -Infinity;
+  private lastSyncedScrollTop = 0;
+  private lastHostHeight = "";
+  private lastHostWidth = "";
+  private lastHostTop = "";
+  private lastRangeHeight = "";
+  private lastRangeWidth = "";
   private activeBufferType: "normal" | "alternate" = "normal";
   private normalAnchor: ScrollAnchor = { bufferType: "normal", row: 0, fraction: 0, scalarRemainder: 0, following: true };
   private generation = 0;
@@ -1434,7 +1444,25 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     // Enter and Ctrl+C clear xterm's textarea synchronously; reseed after.
     this.terminalDisposables.push(this.terminal.onKey(({ key, domEvent }) => this.iosBackspace.onXtermKeyHandled(domEvent, key)));
 
-    const onViewportScroll = () => this.applyCanonicalScroll();
+    const onViewportScroll = () => {
+      if (this.liveScrollFrame !== undefined) {
+        // Ignore the asynchronous scroll event fired by our own programmatic
+        // scrollTop assignment (or horizontal-only scroll) while a LIVE sync
+        // is pending: applyCanonicalScroll against a not-yet-resized scrollRange
+        // would push host.style.top past scrollRange and break isFollowingTail().
+        if (Math.abs(this.viewport.scrollTop - this.lastSyncedScrollTop) <= 1 && this.nativeInput === undefined) {
+          return;
+        }
+        const userAnchor = this.captureAnchor();
+        this.pendingLiveScroll = { generation: this.generation, followTail: userAnchor.following, anchor: userAnchor };
+        if (userAnchor.following) {
+          this.lastSyncedScrollTop = this.viewport.scrollTop;
+          return;
+        }
+      }
+      this.lastSyncedScrollTop = this.viewport.scrollTop;
+      this.applyCanonicalScroll();
+    };
     viewport.addEventListener("scroll", onViewportScroll, { passive: true });
     this.cleanupListeners.push(() => viewport.removeEventListener("scroll", onViewportScroll));
 
@@ -3060,6 +3088,9 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.resetKeyInteractionAuthorityForLifecycle();
     this.retireInput(true);
     this.generation = generation;
+    this.lastQueuedWrite = undefined;
+    this.lastLiveSyncAt = -Infinity;
+    this.cancelLiveScrollSync();
     this.inputs = { generation, sent: 0, settled: 0, retired: false, waiting: new Map() };
     this.prepared = undefined;
     this.committed = false;
@@ -3175,8 +3206,17 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.inOrder(generation, "LIVE_WRITE_FAILED", frame.data, () => {
         if (this.closed) return;
         this.advanceResume(generation, position, bytes);
-        if (anchor.bufferType === this.terminal.buffer.active.type) this.syncNativeScroll(anchor.following, anchor);
-        else this.scheduleReconcile();
+        if (anchor.bufferType === this.terminal.buffer.active.type) {
+          const now = typeof performance !== "undefined" ? performance.now() : 0;
+          if (this.writesInFlight === 0 && now - this.lastLiveSyncAt >= 16) {
+            this.lastLiveSyncAt = now;
+            this.syncNativeScroll(anchor.following, anchor);
+          } else {
+            this.scheduleLiveScrollSync(generation, anchor);
+          }
+        } else {
+          this.scheduleReconcile();
+        }
       });
       return "ENQUEUED";
     }
@@ -3281,14 +3321,20 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     return name ? `Reconnecting to ${name}…` : "Connection lost — reconnecting…";
   }
 
-  // The flow acknowledgement point for a delivered frame. xterm runs write
-  // callbacks in order, so an empty write completes only after every write
-  // the frame caused, replay and output alike, has been parsed. A frame for a
+  // The flow acknowledgement point for a delivered frame. When this frame (or
+  // an earlier one in the same generation) already queued an xterm write via
+  // inOrder, piggyback the flow acknowledgement onto that write's completion
+  // callback instead of scheduling an extra empty terminal.write(""). Fall
+  // back to an empty write only when no inOrder write is queued. A frame for a
   // superseded generation is consumed at once: its socket is gone and the
   // transport can no longer send for it.
   afterConsumed(generation: number, done: () => void): void {
     if (this.closed || generation !== this.generation) {
       done();
+      return;
+    }
+    if (this.lastQueuedWrite && this.lastQueuedWrite.generation === generation) {
+      this.lastQueuedWrite.callbacks.push(done);
       return;
     }
     this.terminal.write("", this.guardedWriteCallback(generation, "LIVE_WRITE_FAILED", done));
@@ -3301,9 +3347,13 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   // writesInFlight counts what is queued.
   private inOrder(generation: number, cause: FinalizeCause, data: string | Uint8Array, applied: () => void): void {
     this.writesInFlight++;
+    const slot = { generation, callbacks: [] as Array<() => void> };
+    this.lastQueuedWrite = slot;
     this.terminal.write(data, this.guardedWriteCallback(generation, cause, () => {
+      if (this.lastQueuedWrite === slot) this.lastQueuedWrite = undefined;
       this.writesInFlight--;
       applied();
+      for (const callback of slot.callbacks) callback();
     }));
   }
 
@@ -3685,6 +3735,8 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.setTypingPaused(false);
     if (this.toastTimer !== undefined) clearTimeout(this.toastTimer);
     if (this.reconcileFrame !== undefined) cancelAnimationFrame(this.reconcileFrame);
+    this.cancelLiveScrollSync();
+    this.lastQueuedWrite = undefined;
     this.resizeObserver.disconnect();
     for (const dispose of this.terminalDisposables.splice(0)) dispose.dispose();
     for (const cleanup of this.cleanupListeners.splice(0)) cleanup();
@@ -4646,7 +4698,38 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     };
   }
 
+  private cancelLiveScrollSync(): void {
+    if (this.liveScrollFrame !== undefined) cancelAnimationFrame(this.liveScrollFrame);
+    this.liveScrollFrame = undefined;
+    this.pendingLiveScroll = undefined;
+  }
+
+  private scheduleLiveScrollSync(generation: number, anchor: ScrollAnchor): void {
+    if (this.closed || generation !== this.generation) return;
+    // Always keep the latest captured anchor so a newer scrolled-up position
+    // is never rewound by an earlier queued LIVE frame.
+    this.pendingLiveScroll = { generation, followTail: anchor.following, anchor };
+    if (this.liveScrollFrame !== undefined) return;
+    this.liveScrollFrame = requestAnimationFrame(() => {
+      this.liveScrollFrame = undefined;
+      const pending = this.pendingLiveScroll;
+      this.pendingLiveScroll = undefined;
+      if (this.closed || this.replaying || this.fitting) return;
+      const targetGeneration = pending?.generation ?? this.generation;
+      if (targetGeneration !== this.generation) return;
+      this.guardedWriteCallback(targetGeneration, "LIVE_WRITE_FAILED", () => {
+        this.lastLiveSyncAt = typeof performance !== "undefined" ? performance.now() : 0;
+        if (pending) this.syncNativeScroll(pending.followTail, pending.anchor);
+        else {
+          const current = this.captureAnchor();
+          this.syncNativeScroll(current.following, current);
+        }
+      })();
+    });
+  }
+
   private syncNativeScroll(followTail: boolean, requestedAnchor?: ScrollAnchor): void {
+    this.cancelLiveScrollSync();
     if (this.closed) return;
     const grid = this.measureGrid();
     if (grid === undefined) {
@@ -4657,11 +4740,19 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     const previousHeight = this.cellHeightPixels || measured;
     const anchor = requestedAnchor ?? this.captureAnchor();
     this.cellHeightPixels = measured;
-    this.host.style.height = `${grid.height}px`;
-    this.host.style.width = `${grid.width}px`;
-    // The stylesheet centres a narrow grid from this value; see the
-    // data-terminal-position rules for .persea-unified-xterm.
-    this.host.style.setProperty("--persea-unified-grid-width", `${grid.width}px`);
+    const hostHeight = `${grid.height}px`;
+    const hostWidth = `${grid.width}px`;
+    if (this.lastHostHeight !== hostHeight) {
+      this.host.style.height = hostHeight;
+      this.lastHostHeight = hostHeight;
+    }
+    if (this.lastHostWidth !== hostWidth) {
+      this.host.style.width = hostWidth;
+      // The stylesheet centres a narrow grid from this value; see the
+      // data-terminal-position rules for .persea-unified-xterm.
+      this.host.style.setProperty("--persea-unified-grid-width", hostWidth);
+      this.lastHostWidth = hostWidth;
+    }
     const buffer = this.terminal.buffer.active;
     const viewportHeight = this.viewport.clientHeight;
     // Sizing the last screen by grid height rather than viewport height is what
@@ -4675,8 +4766,15 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     // grid with no free space gets no offset.
     this.gridFreeHeight = Math.max(0, viewportHeight - grid.height);
     this.gridOffsetY = centersVertically(this.terminalPosition) ? Math.floor(this.gridFreeHeight / 2) : 0;
-    this.scrollRange.style.height = `${rangeHeight}px`;
-    this.scrollRange.style.width = `${grid.width}px`;
+    const rangeHeightPx = `${rangeHeight}px`;
+    if (this.lastRangeHeight !== rangeHeightPx) {
+      this.scrollRange.style.height = rangeHeightPx;
+      this.lastRangeHeight = rangeHeightPx;
+    }
+    if (this.lastRangeWidth !== hostWidth) {
+      this.scrollRange.style.width = hostWidth;
+      this.lastRangeWidth = hostWidth;
+    }
     // Read the range back from layout rather than trusting the height just
     // written. clientHeight is reported as a whole number, so under page zoom
     // it understates a fractional content box and the computed maximum lands
@@ -4699,6 +4797,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       targetTop = Math.min(this.viewport.scrollTop, maximumTop);
     }
     this.viewport.scrollTop = Math.max(0, Math.min(maximumTop, targetTop));
+    this.lastSyncedScrollTop = this.viewport.scrollTop;
     this.applyCanonicalScroll();
   }
 
@@ -4720,7 +4819,11 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     const target = this.viewport.scrollTop >= maximumTop - 1
       ? buffer.baseY
       : Math.max(0, Math.min(buffer.baseY, Math.floor((this.viewport.scrollTop + 0.001) / cellHeight)));
-    this.host.style.top = `${target * cellHeight + this.gridOffsetY}px`;
+    const hostTop = `${target * cellHeight + this.gridOffsetY}px`;
+    if (this.lastHostTop !== hostTop) {
+      this.host.style.top = hostTop;
+      this.lastHostTop = hostTop;
+    }
     // Font measurement can make xterm reconcile its own scrollbar after our
     // last projection. Its live viewport must agree too; the cached row alone
     // cannot prove that the requested history is still what it is painting.
@@ -4773,6 +4876,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     if (cellHeight === undefined) return;
     const row = Math.max(0, Math.min(this.terminal.buffer.active.baseY, Math.floor(line)));
     this.viewport.scrollTop = row * cellHeight;
+    this.lastSyncedScrollTop = this.viewport.scrollTop;
     this.applyCanonicalScroll();
   }
 
