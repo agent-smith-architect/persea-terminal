@@ -791,7 +791,13 @@ async function main(): Promise<void> {
       };
       const screenMatchesTmux = async () => visibleLines((await pageState()).rows) === visibleLines(command("tmux", ["-S", tmuxSocket, "capture-pane", "-p", "-t", target]));
       command("tmux", ["-S", tmuxSocket, "send-keys", "-t", target, "kill %1", "Enter"]);
-      await until(`quiet screen before the drop at ${rate}`, screenMatchesTmux, 60_000);
+      try {
+        await until(`quiet screen before the drop at ${rate}`, screenMatchesTmux, 60_000);
+      } catch (error) {
+        const state = await pageState();
+        const tmuxScreen = visibleLines(command("tmux", ["-S", tmuxSocket, "capture-pane", "-p", "-t", target]));
+        throw new Error(`${error instanceof Error ? error.message : String(error)} (phase=${state.phase} notice=${state.notice} conn=${JSON.stringify(state.connection)} pageTail=${JSON.stringify(visibleLines(state.rows).slice(-240))} tmuxTail=${JSON.stringify(tmuxScreen.slice(-240))})`);
+      }
       assert(shapedLink.pairs.size === 1, `expected one shaped terminal link, found ${shapedLink.pairs.size}`);
       const reconnectIndex = attachments.length, offersBefore = upgradeOffers.length;
       const droppedAt = Date.now();

@@ -279,6 +279,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
   private pendingLiveScroll?: { generation: number; followTail: boolean; anchor: ScrollAnchor };
   private lastLiveSyncAt = -Infinity;
   private lastSyncedScrollTop = 0;
+  private syncedBaseY = 0;
   private lastHostHeight = "";
   private lastHostWidth = "";
   private lastHostTop = "";
@@ -1445,19 +1446,22 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     this.terminalDisposables.push(this.terminal.onKey(({ key, domEvent }) => this.iosBackspace.onXtermKeyHandled(domEvent, key)));
 
     const onViewportScroll = () => {
-      if (this.liveScrollFrame !== undefined) {
+      if (this.liveScrollFrame !== undefined || this.writesInFlight > 0) {
         // Ignore the asynchronous scroll event fired by our own programmatic
-        // scrollTop assignment (or horizontal-only scroll) while a LIVE sync
-        // is pending: applyCanonicalScroll against a not-yet-resized scrollRange
-        // would push host.style.top past scrollRange and break isFollowingTail().
+        // scrollTop assignment (or horizontal-only scroll) while LIVE writes or
+        // a deferred LIVE sync are pending: applyCanonicalScroll against a
+        // not-yet-resized scrollRange would push host.style.top past
+        // scrollRange and break isFollowingTail().
         if (Math.abs(this.viewport.scrollTop - this.lastSyncedScrollTop) <= 1 && this.nativeInput === undefined) {
           return;
         }
-        const userAnchor = this.captureAnchor();
-        this.pendingLiveScroll = { generation: this.generation, followTail: userAnchor.following, anchor: userAnchor };
-        if (userAnchor.following) {
-          this.lastSyncedScrollTop = this.viewport.scrollTop;
-          return;
+        if (this.liveScrollFrame !== undefined) {
+          const userAnchor = this.captureAnchor();
+          this.pendingLiveScroll = { generation: this.generation, followTail: userAnchor.following, anchor: userAnchor };
+          if (userAnchor.following) {
+            this.lastSyncedScrollTop = this.viewport.scrollTop;
+            return;
+          }
         }
       }
       this.lastSyncedScrollTop = this.viewport.scrollTop;
@@ -4771,6 +4775,7 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
       this.scrollRange.style.height = rangeHeightPx;
       this.lastRangeHeight = rangeHeightPx;
     }
+    this.syncedBaseY = buffer.baseY;
     if (this.lastRangeWidth !== hostWidth) {
       this.scrollRange.style.width = hostWidth;
       this.lastRangeWidth = hostWidth;
@@ -4816,9 +4821,14 @@ export class UnifiedTerminalPage implements AttachmentTransportSink {
     // carrying the cursor. History above the tail keeps the cell arithmetic,
     // where landing a fraction of a row out is invisible.
     const maximumTop = Math.max(0, this.viewport.scrollHeight - this.viewport.clientHeight);
+    // scrollRange is sized for syncedBaseY. While xterm has parsed newer LIVE
+    // output whose syncNativeScroll has not run yet, clamp projection to
+    // syncedBaseY so host.style.top cannot stretch viewport.scrollHeight past
+    // scrollRange and break isFollowingTail().
+    const maxRow = Math.min(buffer.baseY, this.syncedBaseY);
     const target = this.viewport.scrollTop >= maximumTop - 1
-      ? buffer.baseY
-      : Math.max(0, Math.min(buffer.baseY, Math.floor((this.viewport.scrollTop + 0.001) / cellHeight)));
+      ? maxRow
+      : Math.max(0, Math.min(maxRow, Math.floor((this.viewport.scrollTop + 0.001) / cellHeight)));
     const hostTop = `${target * cellHeight + this.gridOffsetY}px`;
     if (this.lastHostTop !== hostTop) {
       this.host.style.top = hostTop;
