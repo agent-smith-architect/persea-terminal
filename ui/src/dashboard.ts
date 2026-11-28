@@ -43,7 +43,8 @@ export function parseHistoryChoice(value: string | null): HistoryChoice {
   if (match === undefined) throw new Error(HISTORY_CHOICE_ERROR);
   return match;
 }
-import { csrfToken, parseAliasRecord, saveAlias, type DashboardAlias } from "./alias_client";
+import { parseAliasRecord, saveAlias, type DashboardAlias } from "./alias_client";
+import { refreshCSRFToken } from "./csrf_refresh";
 import { boundedFetch, RequestTimeoutError } from "./bounded_fetch";
 export { csrfToken, aliasRequest } from "./alias_client";
 export type { DashboardAlias } from "./alias_client";
@@ -1458,9 +1459,10 @@ export class Dashboard {
     this.gate.setMutating(true);
     assignText(status, "Opening…");
     try {
+      const csrf = await refreshCSRFToken(undefined, this.fetcher);
       const response = await this.fetcher("/api/session-adoptions", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrfToken() },
+        headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrf },
         body: JSON.stringify({ realm: session.realm, server: session.server, session_id: session.sessionId, history_rows: ADOPTION_HISTORY_ROWS }),
         cache: "no-store",
         credentials: "same-origin",
@@ -1614,9 +1616,16 @@ export class Dashboard {
     this.creationPanel.querySelector(".session-create-open")?.replaceChildren();
     assignText(status, "Creating…");
     try {
+      let csrf: string;
+      try {
+        csrf = await refreshCSRFToken(undefined, this.fetcher);
+      } catch {
+        assignText(status, "The request could not be completed.");
+        return;
+      }
       const response = await this.fetcher("/api/sessions", {
         method: "POST",
-        headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrfToken() },
+        headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrf },
         body: JSON.stringify({ realm: server.realm, server: server.label, name }),
         cache: "no-store",
         credentials: "same-origin",

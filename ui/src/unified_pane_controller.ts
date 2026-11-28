@@ -703,9 +703,11 @@ export class UnifiedPaneController {
     try {
       if (session.unified.state === "adoptable") {
         this.counters.adoptions += 1;
+        const csrf = await refreshCSRFToken(switchAbort.signal);
+        if (operation !== this.operationToken || this.disposed) return Object.freeze({ ok: false, message: "Switch superseded" });
         const response = await boundedFetch("/api/session-adoptions", {
           method: "POST", cache: "no-store", credentials: "same-origin",
-          headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrfToken() },
+          headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrf },
           body: JSON.stringify({ realm: session.realm, server: session.server, session_id: session.sessionId, history_rows: ADOPTION_HISTORY_ROWS }),
           signal: switchAbort.signal,
         });
@@ -827,9 +829,14 @@ export class UnifiedPaneController {
     const session = resolution.session;
     if (session.unified?.state === "adoptable") {
       this.counters.adoptions += 1;
+      const csrf = await refreshCSRFToken(signal);
+      if (operation !== this.operationToken || this.disposed) {
+        this.observeAuthorityResult("identity_remint", "discarded", operation, key);
+        throw new DOMException("identity superseded", "AbortError");
+      }
       const adopt = await boundedFetch("/api/session-adoptions", {
         method: "POST", cache: "no-store", credentials: "same-origin",
-        headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrfToken() },
+        headers: { "Content-Type": "application/json", "X-Persea-CSRF": csrf },
         body: JSON.stringify({ realm: session.realm, server: session.server, session_id: session.sessionId, history_rows: ADOPTION_HISTORY_ROWS }), signal,
       });
       this.observeAuthorityResult("identity_remint", "resolved", operation, key);

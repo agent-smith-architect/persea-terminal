@@ -93,8 +93,16 @@ export async function stageSessionImage(
   );
   let response: ImageStagingResponse;
   try {
-    response = await post(csrf.token());
-    if (response.status === 403) {
+    let refreshed = false;
+    let token: string;
+    try {
+      token = csrf.token();
+    } catch {
+      refreshed = true;
+      token = await csrf.refresh(signal);
+    }
+    response = await post(token);
+    if (response.status === 403 && !refreshed) {
       response = await post(await csrf.refresh(signal));
     }
   } catch (error) {

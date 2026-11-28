@@ -1,4 +1,4 @@
-import { csrfToken } from "./csrf_refresh";
+import { refreshCSRFToken } from "./csrf_refresh";
 import { boundedFetch } from "./bounded_fetch";
 import { readSessionDiscovery, saveSessionDiscovery } from "./session_discovery";
 import { sessionScopeIdentity } from "./session_memory";
@@ -42,7 +42,7 @@ export class DashboardFavorites {
   private epoch = 0;
   private disposed = false;
 
-  constructor(private readonly fetcher: FetchPort = boundedFetch, private readonly csrf = csrfToken) {}
+  constructor(private readonly fetcher: FetchPort = boundedFetch, private readonly csrf?: () => string) {}
 
   snapshot(): DashboardFavoritesSnapshot {
     return Object.freeze({ ...this.current, loaded: this.loaded, pending: Object.freeze([...this.pending]), message: this.message });
@@ -117,9 +117,10 @@ export class DashboardFavorites {
       }
       const revision = this.current.revision;
       try {
+        const token = this.csrf ? this.csrf() : await refreshCSRFToken(undefined, this.fetcher);
         const response = await this.fetcher("/api/dashboard-preferences", {
           method: "PUT", cache: "no-store", credentials: "same-origin",
-          headers: { "Content-Type": "application/json", "X-Persea-CSRF": this.csrf(), "If-Match": `"${revision}"` },
+          headers: { "Content-Type": "application/json", "X-Persea-CSRF": token, "If-Match": `"${revision}"` },
           body: JSON.stringify({ version: 1, favorites }),
         });
         if (!response.ok && response.status !== 412) throw new Error("Favorites unavailable");

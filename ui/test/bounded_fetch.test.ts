@@ -1,4 +1,4 @@
-import { RequestTimeoutError, boundedFetchWithin, type Fetch } from "../src/bounded_fetch";
+import { RequestTimeoutError, boundedFetchWithin, boundedTransferBlob, type Fetch } from "../src/bounded_fetch";
 
 const assert = (value: unknown, message: string): void => { if (!value) throw new Error(message); };
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -82,6 +82,28 @@ async function main(): Promise<void> {
     cancelled.abort();
     const response = await boundedFetchWithin(5_000, fetcher)(new Request("http://localhost/api/inventory", { signal: cancelled.signal }), { signal: null });
     assert(response.status === 200 && !seen[0]!.aborted, "an explicit null signal did not replace the Request's");
+  }
+  {
+    // boundedTransferBlob reads response.blob() once without calling response.clone().
+    let clones = 0;
+    let blobReads = 0;
+    const raw = new Uint8Array([1, 2, 3, 4]);
+    const fetcher: Fetch = async () => {
+      const response = new Response(raw, { status: 200, headers: { "Content-Type": "image/png" } });
+      response.clone = () => { clones += 1; throw new Error("clone must not be called"); };
+      const origBlob = response.blob.bind(response);
+      response.blob = () => { blobReads += 1; return origBlob(); };
+      return response;
+    };
+    const { response, blob } = await boundedTransferBlob("/api/clipboard/images/test", {}, fetcher, 200);
+    assert(response.status === 200 && clones === 0 && blobReads === 1 && blob.size === 4 && blob.type === "image/png",
+      "boundedTransferBlob cloned or double-read the binary response");
+  }
+  {
+    // boundedTransferBlob enforces the body-read deadline and cancels stalled transfers.
+    const { fetcher, seen } = server("stalled-body");
+    const error = await outcome(boundedTransferBlob("/api/clipboard/images/stalled", {}, fetcher, 25));
+    assert(error instanceof RequestTimeoutError && seen[0]!.aborted, "boundedTransferBlob did not time out a stalled body");
   }
   console.log("bounded fetch tests passed");
 }

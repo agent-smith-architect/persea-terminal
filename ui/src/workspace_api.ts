@@ -1,4 +1,4 @@
-import { csrfToken } from "./csrf_refresh";
+import { refreshCSRFToken } from "./csrf_refresh";
 import { boundedFetch } from "./bounded_fetch";
 import { parseWorkspaceTree, serializeWorkspace, WORKSPACE_STORE_VERSION, type WorkspaceNode } from "./workspace_model";
 import { boundedWorkspaceName } from "./workspace_url";
@@ -111,21 +111,24 @@ export class WorkspaceAPI {
   }
 
   async delete(record: Pick<WorkspaceRecord, "workspaceId" | "revision">, signal?: AbortSignal): Promise<void> {
+    const token = await refreshCSRFToken(signal, this.fetcher);
     const response = await this.fetcher(`/api/workspaces/${encodeURIComponent(record.workspaceId)}`, {
       method: "DELETE", cache: "no-store", credentials: "same-origin", signal,
-      headers: { "If-Match": `"${record.revision}"`, "X-Persea-CSRF": csrfToken() },
+      headers: { "If-Match": `"${record.revision}"`, "X-Persea-CSRF": token },
     });
     if (!response.ok) throw await failure(response);
   }
 
   private async mutate(url: string, method: "POST" | "PUT", name: string, tree: WorkspaceNode, revision: number | undefined, signal?: AbortSignal): Promise<WorkspaceRecord> {
+    const body = mutationBody(name, tree);
+    const token = await refreshCSRFToken(signal, this.fetcher);
     const response = await this.fetcher(url, {
       method, cache: "no-store", credentials: "same-origin", signal,
       headers: {
-        "Content-Type": "application/json", "X-Persea-CSRF": csrfToken(),
+        "Content-Type": "application/json", "X-Persea-CSRF": token,
         ...(revision === undefined ? {} : { "If-Match": `"${revision}"` }),
       },
-      body: mutationBody(name, tree),
+      body,
     });
     if (!response.ok) throw await failure(response);
     try { return parseRecord(await response.json(), "workspace response"); } catch { throw new WorkspaceAPIError("unavailable", response.status); }

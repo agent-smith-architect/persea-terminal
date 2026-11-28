@@ -1,4 +1,4 @@
-import { csrfToken } from "./csrf_refresh";
+import { refreshCSRFToken } from "./csrf_refresh";
 import { boundedFetch } from "./bounded_fetch";
 import { DEFAULT_KEY_PREFERENCES, KEY_PREFERENCES_KEY, prefixSequence, resolveAction, validPrefixName, validateKeyPreferences } from "./terminal_actions";
 
@@ -145,9 +145,16 @@ export class KeyboardPreferencesService {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.options.timeoutMs ?? 5000);
     try {
+      const headers: Record<string, string> = method === "PUT"
+        ? {
+          "Content-Type": "application/json",
+          "X-Persea-CSRF": this.options.csrf ? this.options.csrf() : await refreshCSRFToken(controller.signal, this.fetcher),
+          "If-Match": `"${revision}"`,
+        }
+        : {};
       const response = await this.fetcher("/api/keyboard-preferences", {
         method, credentials: "same-origin", cache: "no-store", signal: controller.signal,
-        headers: method === "PUT" ? { "Content-Type": "application/json", "X-Persea-CSRF": (this.options.csrf ?? csrfToken)(), "If-Match": `"${revision}"` } : {},
+        headers,
         ...(preferences ? { body: JSON.stringify(preferences) } : {}),
       });
       return { response, value: await response.json() };

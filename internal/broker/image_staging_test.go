@@ -827,3 +827,74 @@ func TestInventoryAdvertisesImageStagingCapability(t *testing.T) {
 		}
 	}
 }
+
+func TestBrokerImageStageExtendsDeadlinePastSetupTimeoutAndRestoresAfter(t *testing.T) {
+	dir := shortTempDir(t)
+	stagingDir := filepath.Join(dir, "img")
+	stager, err := newImageStager(stagingDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	origSync := stager.fileSync
+	stager.fileSync = func(file *os.File) error {
+		time.Sleep(SetupTimeout + 200*time.Millisecond)
+		return origSync(file)
+	}
+
+	socketPath := filepath.Join(dir, "broker.sock")
+	listener, err := net.Listen("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := &Server{
+		socketPath: socketPath,
+		config: config.Broker{
+			Realm: "r", FrontUID: uint32(os.Getuid()), FrontUIDConfigured: true,
+			ImageStagingDir: stagingDir,
+		},
+		images:            stager,
+		imageStageTimeout: 5 * time.Second,
+	}
+	done := make(chan error, 1)
+	go func() {
+		for {
+			conn, acceptErr := listener.Accept()
+			if acceptErr != nil {
+				done <- acceptErr
+				return
+			}
+			go srv.handleConn(conn)
+		}
+	}()
+	t.Cleanup(func() {
+		_ = listener.Close()
+		<-done
+	})
+
+	conn, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(6 * time.Second))
+	imageControl(t, conn, proto.Control{Type: "hello", V: 1})
+	if got := readImageControl(t, conn); got.Type != "hello_ok" {
+		t.Fatalf("hello response = %+v", got)
+	}
+
+	got := exchangeImage(t, conn, "image/png", len(imagePNG), proto.FrameImage, imagePNG)
+	if got.Type != proto.ControlImageStaged {
+		t.Fatalf("slow image stage failed: %+v", got)
+	}
+
+	// After image staging finishes, the broker must restore SetupTimeout (2s)
+	// so an idle connection is still closed promptly.
+	idleStart := time.Now()
+	_ = conn.SetReadDeadline(time.Now().Add(SetupTimeout + time.Second))
+	one := make([]byte, 1)
+	_, readErr := conn.Read(one)
+	elapsed := time.Since(idleStart)
+	if readErr == nil || elapsed > SetupTimeout+750*time.Millisecond {
+		t.Fatalf("post-stage idle connection did not restore SetupTimeout: err=%v elapsed=%v", readErr, elapsed)
+	}
+}

@@ -47,3 +47,34 @@ export const boundedFetch: Fetch = boundedFetchWithin(REQUEST_DEADLINE_MS);
 // bytes than a small JSON exchange; on a slow link it needs a larger budget.
 export const TRANSFER_DEADLINE_MS = 120_000;
 export const boundedTransfer: Fetch = boundedFetchWithin(TRANSFER_DEADLINE_MS);
+
+// Single-pass bounded binary download: reads response.blob() directly inside
+// the transfer deadline without Response.clone().arrayBuffer(), avoiding a
+// second multi-megabyte allocation for large clipboard images.
+export async function boundedTransferBlob(
+  input: RequestInfo | URL,
+  init: RequestInit = {},
+  fetcher: Fetch = (request, options) => globalThis.fetch(request, options),
+  deadlineMs = TRANSFER_DEADLINE_MS,
+): Promise<Readonly<{ response: Response; blob: Blob }>> {
+  const controller = new AbortController();
+  const parent = init.signal !== undefined ? init.signal ?? undefined : input instanceof Request ? input.signal : undefined;
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true; controller.abort(); }, deadlineMs);
+  const relay = () => controller.abort(parent?.reason);
+  if (parent?.aborted) relay(); else parent?.addEventListener("abort", relay, { once: true });
+  try {
+    const response = await fetcher(input, { ...init, signal: controller.signal });
+    if (!response.ok) {
+      void response.body?.cancel?.().catch(() => undefined);
+      return Object.freeze({ response, blob: new Blob() });
+    }
+    const blob = await response.blob();
+    return Object.freeze({ response, blob });
+  } catch (error) {
+    throw timedOut ? new RequestTimeoutError() : error;
+  } finally {
+    clearTimeout(timer);
+    parent?.removeEventListener("abort", relay);
+  }
+}

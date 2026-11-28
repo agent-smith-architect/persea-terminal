@@ -717,6 +717,44 @@ async function main() {
 
       // Every curated theme paints the open composer and toolbar cleanly at
       // every required width in both engines with no new style node or overflow.
+      // Also verify that at phone-320, the composer header fits × + Code + Fix
+      // + Clear + ⊕ + ➤ on one row without clipping Fix or violating 44px height.
+      if (shape.width <= 320) {
+        const draftNode = page.locator(".attachment-page__composer-textarea");
+        const prevDraft = await draftNode.inputValue();
+        await draftNode.fill("\u201chello\u201d \u2014 world");
+        await page.locator(".attachment-page__composer-fix:not([hidden])").waitFor({ state: "visible" });
+        const narrowComposer = await page.evaluate(() => {
+          const panel = document.querySelector(".attachment-page__composer");
+          const pb = panel.getBoundingClientRect();
+          const visible = (sel) => [...panel.querySelectorAll(sel)].filter((el) => !el.hidden && el.getClientRects().length > 0);
+          const headerButtons = visible(".attachment-page__composer-header button");
+          const actionButtons = visible(".attachment-page__composer-actions button");
+          const buttons = [...headerButtons, ...actionButtons];
+          const spare = headerButtons.length > 0 && actionButtons.length > 0
+            ? actionButtons[0].getBoundingClientRect().left - headerButtons[headerButtons.length - 1].getBoundingClientRect().right
+            : 0;
+          return {
+            panel: { left: pb.left, right: pb.right, width: pb.width },
+            spareBetweenHeaderAndActions: spare,
+            buttons: buttons.map((el) => {
+              const r = el.getBoundingClientRect();
+              return {
+                label: el.getAttribute("aria-label") || el.textContent.trim(),
+                left: r.left, right: r.right, width: r.width, height: r.height,
+                clippedText: el.scrollWidth > el.clientWidth + 1,
+              };
+            }),
+          };
+        });
+        const hasFix = narrowComposer.buttons.some((b) => /smart punctuation/i.test(b.label));
+        const hasAttach = narrowComposer.buttons.some((b) => /attach|image/i.test(b.label));
+        assert(hasFix && narrowComposer.buttons.length >= 5
+          && (hasAttach || narrowComposer.spareBetweenHeaderAndActions >= 47)
+          && narrowComposer.buttons.every((b) => b.left >= narrowComposer.panel.left - 1 && b.right <= narrowComposer.panel.right + 1 && b.width >= 43.9 && b.height >= 43.9 && !b.clippedText),
+        `${shape.name}: composer top row clipped or squeezed buttons with Fix visible: ${JSON.stringify(narrowComposer)}`);
+        await draftNode.fill(prevDraft);
+      }
       caseEvidence.themeControls = [];
       for (const id of THEME_IDS) {
         await publishPreference({ theme: id });
@@ -727,6 +765,8 @@ async function main() {
           const textareaNode = document.querySelector(".attachment-page__composer-textarea");
           const modeBtn = document.querySelector(".attachment-page__composer-mode-toggle");
           const statusNode = document.querySelector(".attachment-page__composer-status");
+          const dashBtn = document.querySelector(".persea-unified-identity__dashboard");
+          const dashIcon = document.querySelector(".persea-unified-identity__dashboard-icon");
           const dockStyle = getComputedStyle(dock);
           const textStyle = getComputedStyle(textareaNode);
           const btnStyle = getComputedStyle(modeBtn);
@@ -742,6 +782,8 @@ async function main() {
             textBg: textStyle.backgroundColor,
             btnColor: btnStyle.color,
             btnBg: btnStyle.backgroundColor,
+            dashIconColor: dashIcon ? getComputedStyle(dashIcon).color : "",
+            dashBtnBg: dashBtn ? getComputedStyle(dashBtn).backgroundColor : "",
             normalStatusColor,
             guardStatusColor,
             overflow: document.documentElement.scrollWidth > window.innerWidth + 1,
@@ -753,10 +795,13 @@ async function main() {
           button: contrast(themeState.btnColor, themeState.btnBg),
           status: contrast(themeState.normalStatusColor, themeState.dockBg),
           guard: contrast(themeState.guardStatusColor, themeState.dockBg),
+          dashboardIcon: themeState.dashIconColor && themeState.dashBtnBg ? contrast(themeState.dashIconColor, themeState.dashBtnBg) : 99,
         };
+        const minDashIconContrast = id === "rose-pine-dawn" ? 4.5 : 3.0;
         assert(!themeState.overflow && themeContrast.textarea >= 4.5 && themeContrast.button >= 4.5
-          && themeContrast.status >= 4.5 && themeContrast.guard >= 4.5 && themeState.styles === styleCount,
-          `${shape.name}: ${id} composer theme contrast/containment failed: ${JSON.stringify({ themeState, themeContrast })}`);
+          && themeContrast.status >= 4.5 && themeContrast.guard >= 4.5
+          && themeContrast.dashboardIcon >= minDashIconContrast && themeState.styles === styleCount,
+        `${shape.name}: ${id} composer theme contrast/containment failed: ${JSON.stringify({ themeState, themeContrast })}`);
         themeState.contrast = themeContrast;
         caseEvidence.themeControls.push(themeState);
         await shot(`theme-${id}`);

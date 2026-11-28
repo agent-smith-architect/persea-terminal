@@ -146,6 +146,8 @@ type Server struct {
 	browserProofNow         func() time.Time
 	flowStallTimeout        time.Duration
 	receiptInterval         time.Duration
+	imageTransferTimeout    time.Duration
+	brokerImageStageTimeout time.Duration
 	upgrader                websocket.Upgrader
 	limiter                 operatorLimiter
 	previews                *previewStore

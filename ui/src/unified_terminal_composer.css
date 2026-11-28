@@ -331,6 +331,20 @@
   white-space: nowrap;
 }
 @media (max-width: 359px) {
+  .persea-unified-composer-dock .attachment-page__composer {
+    padding-inline: .25rem;
+    column-gap: .2rem;
+  }
+  .persea-unified-composer-dock .attachment-page__composer-header,
+  .persea-unified-composer-dock .attachment-page__composer:not([data-content="sent"]) .attachment-page__composer-actions {
+    gap: .2rem;
+  }
+  .persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-mode-toggle {
+    padding-inline: .3rem;
+  }
+  .persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-clear {
+    padding-inline: .25rem;
+  }
   .persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-fix,
   .persea-unified-composer-dock .attachment-page__composer .attachment-page__composer-restore { flex-shrink: 1; }
 }

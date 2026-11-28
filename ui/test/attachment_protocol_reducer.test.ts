@@ -12,9 +12,9 @@ import {
   MAX_ATTACHMENT_WIRE_BYTES, decodeBrowserFrame, decodeServerFrame, encodeBrowserFrame, encodeServerFrame,
 } from "../src/attachment_wire";
 import {
-  CLOSE_CLIENT_FAULT, CLOSE_CLIENT_PROTOCOL_FAULT, CLOSE_ORDERLY,
+  ADMISSION_DEADLINE_MS, CLOSE_CLIENT_FAULT, CLOSE_CLIENT_PROTOCOL_FAULT, CLOSE_ORDERLY,
   HISTORY_DEPTH_PENDING_TIMEOUT_MS, MAX_RECONNECT_ATTEMPTS, MAX_RECONNECT_ATTEMPT_MS, MAX_RECONNECT_ELAPSED_MS,
-  OFFLINE_EARLY_RETRY_MS, OFFLINE_EARLY_WINDOW_MS, OFFLINE_RETRY_MS, OFFLINE_WAKE_SPACING_MS, OPEN_DEADLINE_MS, STABLE_CONNECTION_MS, WebSocketAttachmentTransport,
+  OFFLINE_EARLY_RETRY_MS, OFFLINE_EARLY_WINDOW_MS, OFFLINE_RETRY_MS, OFFLINE_WAKE_JITTER_MS, OFFLINE_WAKE_SPACING_MS, OPEN_DEADLINE_MS, STABLE_CONNECTION_MS, WebSocketAttachmentTransport,
   type AttachmentWebSocket, type HistoryDepthOutcome, type ReconnectRuntime,
 } from "../src/websocket_attachment_transport";
 import {
@@ -179,6 +179,7 @@ class FakeLivenessClock {
   elapseWithoutTimers(milliseconds: number): void { this.clock += milliseconds; this.wallClock += milliseconds; }
   advanceWallOnly(milliseconds: number): void { this.wallClock += milliseconds; }
   rewindWall(milliseconds: number): void { this.wallClock -= milliseconds; }
+  rewindMonotonic(milliseconds: number): void { this.clock -= milliseconds; }
   wake(): void { for (const callback of [...this.wakes]) callback(); }
   invokeRetired(handle: number): void { this.retired.get(handle)?.(); }
   advance(milliseconds: number): void {
@@ -760,23 +761,53 @@ test("paired_observation_never_extends_the_existing_challenge_schedule", () => {
   transport.detach();
 });
 
-test("backwards_wall_clock_anomaly_fails_closed_before_input", () => {
+test("backwards_wall_clock_step_blocks_input_until_fresh_pong_without_dropping_connection", () => {
   const clock = new FakeLivenessClock();
   const socket = new TransportFakeSocket(1);
   const closed: string[] = [];
+  let nonceIndex = 0;
+  const nonces = [livenessNonce, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"];
   const transport = new WebSocketAttachmentTransport(
     "ws://example.test/ws", () => socket as unknown as AttachmentWebSocket, undefined, undefined, undefined, undefined,
-    clock.runtime, () => livenessNonce,
+    clock.runtime, () => nonces[nonceIndex++] ?? nonces.at(-1)!,
   );
   transport.bind({ openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: (_generation, reason) => { closed.push(reason); } });
-  const generation = transport.connect(); socket.emit("open", {}); socket.emit("message", { data: livenessPong() });
+  const generation = transport.connect(); socket.emit("open", {}); socket.emit("message", { data: livenessPong(nonces[0]) });
   clock.elapseWithoutTimers(100);
   clock.wake();
   equal(closed.length, 0, "forward clock observation closed a live generation");
-  clock.rewindWall(1);
-  equal(transport.trySend(generation, inputFrame("CLOCK-MUST-NOT-LEAK")), "TRANSPORT_LOST");
-  equal(closed.join(","), "liveness_clock_anomaly");
+  clock.rewindWall(500);
+  // INPUT must not be sent on unproved wall time, yet the healthy socket stays
+  // open and immediately sends a fresh nonce PING to re-anchor proof.
+  equal(transport.trySend(generation, inputFrame("CLOCK-MUST-NOT-LEAK")), "SATURATED");
+  equal(closed.length, 0, "backward NTP wall step needlessly dropped a healthy connection");
   equal(socket.sent.filter((value) => value.includes('"type":"INPUT"')).length, 0, "backwards-wall INPUT reached WebSocket.send");
+  equal(socket.sent.filter((value) => value === encodeBrowserLivenessPing(nonces[1])).length, 1, "backward wall step did not immediately issue a fresh nonce PING");
+  // Fresh PONG clears the re-proof gate and restores INPUT.
+  socket.emit("message", { data: livenessPong(nonces[1]) });
+  equal(transport.trySend(generation, inputFrame("AFTER-REPROOF")), "ACCEPTED");
+  equal(socket.sent.filter((value) => value.includes('"type":"INPUT"')).length, 1, "re-proved connection did not accept INPUT");
+  // If the wall clock steps backward while a PING is already in flight, the
+  // stale pre-step PONG must NOT reopen INPUT; it triggers a post-step PING,
+  // and only the post-step PONG reopens INPUT.
+  const preStepNonce = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+  const postStepNonce = "cccccccccccccccccccccccccccccccc";
+  nonces.push(preStepNonce, postStepNonce);
+  clock.advance(10_000);
+  equal(socket.sent.filter((value) => value === encodeBrowserLivenessPing(preStepNonce)).length, 1, "periodic challenge did not send pre-step PING");
+  clock.rewindWall(250);
+  equal(transport.trySend(generation, inputFrame("STALE-PONG-BLOCKED-1")), "SATURATED");
+  socket.emit("message", { data: livenessPong(preStepNonce) });
+  equal(socket.sent.filter((value) => value === encodeBrowserLivenessPing(postStepNonce)).length, 1, "stale pre-step PONG did not trigger post-step PING");
+  equal(transport.trySend(generation, inputFrame("STALE-PONG-BLOCKED-2")), "SATURATED");
+  socket.emit("message", { data: livenessPong(postStepNonce) });
+  equal(transport.trySend(generation, inputFrame("POST-STEP-ACCEPTED")), "ACCEPTED");
+  equal(socket.sent.filter((value) => value.includes('"type":"INPUT"')).length, 2, "only post-step PONG should reopen INPUT");
+  // Monotonic clock regression still fails closed immediately before INPUT.
+  clock.rewindMonotonic(1);
+  equal(transport.trySend(generation, inputFrame("MONO-MUST-NOT-LEAK")), "TRANSPORT_LOST");
+  equal(closed.join(","), "liveness_clock_anomaly");
+  equal(socket.sent.filter((value) => value.includes('"type":"INPUT"')).length, 2, "backwards-monotonic INPUT reached WebSocket.send");
   equal(clock.activeWakeSubscriptions(), 0, "clock anomaly retained wake work");
 });
 
@@ -996,15 +1027,15 @@ test("offline_wake_probes_at_once_and_a_hidden_page_waits_for_it", async () => {
   clock.visibleState = true;
   clock.wake();
   clock.wake();
-  await clock.advance(0);
-  equal(attempts, MAX_RECONNECT_ATTEMPTS + 2, "wake signals did not collapse into exactly one immediate probe");
+  await clock.advance(Math.round(0.5 * OFFLINE_WAKE_JITTER_MS));
+  equal(attempts, MAX_RECONNECT_ATTEMPTS + 2, "wake signals did not collapse into exactly one jittered probe");
   equal(sockets.length, 1, "the wake probe did not open one socket");
   transport.connectionCommitted(1);
   equal(statuses.at(-1), "CONNECTED:-");
   equal(clock.wakeSubscribers(), 0, "COMMIT kept the OFFLINE wake subscription");
   equal(clock.pending(), 0, "COMMIT left OFFLINE work armed");
   clock.wake();
-  await clock.advance(0);
+  await clock.advance(OFFLINE_WAKE_JITTER_MS);
   equal(sockets.length, 1, "a wake signal on a live connection opened another socket");
   transport.detach();
 });
@@ -1021,10 +1052,11 @@ test("offline_wake_bursts_are_spaced_from_the_previous_attempt", async () => {
   transport.attachAgain();
   await clock.advance(11_500);
   equal(attempts, MAX_RECONNECT_ATTEMPTS, "fast phase did not end in OFFLINE");
-  // A burst right after the last attempt collapses into one probe, spaced.
+  // A burst right after the last attempt collapses into one probe, spaced + jittered.
+  const wakeJitter = Math.round(0.5 * OFFLINE_WAKE_JITTER_MS);
   for (let signal = 0; signal < 20; signal += 1) clock.wake();
-  await clock.advance(OFFLINE_WAKE_SPACING_MS - 1);
-  equal(attempts, MAX_RECONNECT_ATTEMPTS, "a wake burst probed closer than the spacing to the previous attempt");
+  await clock.advance(OFFLINE_WAKE_SPACING_MS + wakeJitter - 1);
+  equal(attempts, MAX_RECONNECT_ATTEMPTS, "a wake burst probed closer than the spacing + jitter to the previous attempt");
   await clock.advance(1);
   equal(attempts, MAX_RECONNECT_ATTEMPTS + 1, "a wake burst did not bring the probe forward exactly once");
   // A sustained storm, one signal every 100 ms for 10 s, stays spaced.
@@ -1035,9 +1067,46 @@ test("offline_wake_bursts_are_spaced_from_the_previous_attempt", async () => {
     await clock.advance(100);
   }
   assert(attempts - before <= Math.ceil(window / OFFLINE_WAKE_SPACING_MS) + 1, `a wake storm produced ${attempts - before} probes in ${window} ms`);
-  assert(attempts - before >= Math.floor(window / OFFLINE_WAKE_SPACING_MS), "a wake storm stopped bringing probes forward");
+  assert(attempts - before >= Math.floor(window / (OFFLINE_WAKE_SPACING_MS + OFFLINE_WAKE_JITTER_MS)), "a wake storm stopped bringing probes forward");
   transport.detach();
   equal(clock.pending(), 0);
+});
+
+test("offline_wake_spreads_panes_and_burst_preserves_rolled_jitter", async () => {
+  const clock = new FakeReconnectClock();
+  const firedAt: number[] = [];
+  const seeds = [0.9, 0.1];
+  let seedIdx = 0;
+  const transportA = new WebSocketAttachmentTransport(
+    "ws://example.test/ws", () => { throw new Error("offline"); }, ["persea-handle.consumed"],
+    async () => { firedAt.push(clock.runtime.now()); throw new Error("offline"); },
+    () => seeds[seedIdx++ % seeds.length]!, clock.runtime,
+  );
+  const firedB: number[] = [];
+  const transportB = new WebSocketAttachmentTransport(
+    "ws://example.test/ws", () => { throw new Error("offline"); }, ["persea-handle.consumed"],
+    async () => { firedB.push(clock.runtime.now()); throw new Error("offline"); },
+    () => 0.2, clock.runtime,
+  );
+  for (const t of [transportA, transportB]) {
+    t.bind({ openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: () => {} });
+    bindTransportSource(t);
+    t.attachAgain();
+  }
+  await clock.advance(15_000);
+  const countA = firedAt.length;
+  const countB = firedB.length;
+  clock.suspend(60_000);
+  // First wake on A rolls 0.9 (~450ms); a burst of 10 subsequent wakes must
+  // NOT roll 0.1 and pull A earlier.
+  for (let i = 0; i < 10; i += 1) clock.wake();
+  await clock.advance(Math.round(0.2 * OFFLINE_WAKE_JITTER_MS));
+  equal(firedB.length, countB + 1, "pane B did not fire at its own jitter slot");
+  equal(firedAt.length, countA, "wake burst collapsed pane A's rolled jitter earlier");
+  await clock.advance(OFFLINE_WAKE_JITTER_MS);
+  equal(firedAt.length, countA + 1, "pane A did not fire after its jitter delay");
+  transportA.detach();
+  transportB.detach();
 });
 
 test("commit_then_immediate_loss_keeps_its_episode_and_settles_into_offline_probing", async () => {
@@ -1511,7 +1580,7 @@ test("waking_after_a_device_sleep_replaces_an_overdue_probe", async () => {
   // Ten minutes asleep: the clock moves on while the probe timer is paused.
   clock.suspend(10 * 60_000);
   clock.wake();
-  await clock.advance(0);
+  await clock.advance(Math.round(0.5 * OFFLINE_WAKE_JITTER_MS));
   equal(attempts, MAX_RECONNECT_ATTEMPTS + 1, "waking after a sleep waited for the paused probe");
   transport.detach();
 });
@@ -1794,7 +1863,7 @@ test("csrf_refresh_uses_the_cookie_and_bootstraps_an_expired_page_with_one_small
     equal(input, "/api/csrf");
     equal(init.cache, "no-store");
     equal(init.credentials, "same-origin");
-    assert(init.signal === controller.signal, "CSRF refresh lost cancellation ownership");
+    assert(init.signal instanceof AbortSignal && !init.signal.aborted, "CSRF refresh lost cancellation ownership");
     equal(init.method, undefined, "CSRF bootstrap was not a safe GET");
     assert(init.body === undefined && init.headers === undefined, "CSRF bootstrap carried mutation material");
     cookie = `fixture=1; __Host-persea-terminal-csrf=${token}`;
@@ -1806,6 +1875,56 @@ test("csrf_refresh_uses_the_cookie_and_bootstraps_an_expired_page_with_one_small
   equal(await refreshCSRFToken(controller.signal, fetcher, () => cookie), token);
   equal(calls, 1, "CSRF bootstrap issued duplicate safe requests");
   equal(parseCSRFCookie(`__Host-persea-terminal-csrf=${token}`), token);
+
+  // Single-flight coalescing: 6 concurrent callers with an expired cookie
+  // share one GET /api/csrf; aborting one caller detaches only that caller,
+  // while aborting all callers cancels the shared fetch.
+  cookie = "";
+  let sharedCalls = 0;
+  let sharedSignal: AbortSignal | undefined;
+  let resolveFetch!: (value: Readonly<{ ok: boolean }>) => void;
+  const sharedFetcher = (input: string, init: RequestInit) => {
+    sharedCalls += 1;
+    equal(input, "/api/csrf");
+    sharedSignal = init.signal ?? undefined;
+    return new Promise<Readonly<{ ok: boolean }>>((resolve) => { resolveFetch = resolve; });
+  };
+  const controllers = Array.from({ length: 6 }, () => new AbortController());
+  const pending = controllers.map((c) => refreshCSRFToken(c.signal, sharedFetcher, () => cookie));
+  equal(sharedCalls, 1, "concurrent CSRF refreshes did not coalesce into one flight");
+  controllers[0]!.abort();
+  let abortedFirst = false;
+  try { await pending[0]; } catch { abortedFirst = true; }
+  assert(abortedFirst, "aborted caller did not reject");
+  assert(sharedSignal !== undefined && !sharedSignal.aborted, "aborting 1 of 6 callers canceled the shared CSRF refresh");
+  cookie = `__Host-persea-terminal-csrf=${token}`;
+  resolveFetch(Object.freeze({ ok: true }));
+  const settled = await Promise.all(pending.slice(1));
+  assert(settled.every((value) => value === token), "remaining callers did not receive the single-flight CSRF token");
+
+  // Sole caller aborting cancels the underlying GET /api/csrf immediately and
+  // evicts the canceled flight so an immediate replacement starts fresh.
+  cookie = "";
+  let soleSignal: AbortSignal | undefined;
+  let replaceCalls = 0;
+  const soleFetcher = (_input: string, init: RequestInit) => {
+    replaceCalls += 1;
+    if (replaceCalls === 1) {
+      soleSignal = init.signal ?? undefined;
+      return new Promise<Readonly<{ ok: boolean }>>(() => {});
+    }
+    assert(init.signal != null && !init.signal.aborted, "replacement caller inherited canceled CSRF flight");
+    cookie = `__Host-persea-terminal-csrf=${token}`;
+    return Promise.resolve(Object.freeze({ ok: true }));
+  };
+  const soleController = new AbortController();
+  const solePromise = refreshCSRFToken(soleController.signal, soleFetcher, () => cookie);
+  soleController.abort();
+  const replacementToken = await refreshCSRFToken(new AbortController().signal, soleFetcher, () => cookie);
+  let soleAborted = false;
+  try { await solePromise; } catch { soleAborted = true; }
+  assert(soleAborted && soleSignal?.aborted === true && replacementToken === token && replaceCalls === 2,
+    "sole caller abort did not cancel and evict the underlying CSRF fetch");
 
   let rejected = false;
   cookie = "";
@@ -2057,7 +2176,10 @@ for (const socketState of [0, 1] as const) {
     });
     bindTransportSource(transport);
     transport.attachAgain();
-    await clock.advance(MAX_RECONNECT_ELAPSED_MS + MAX_RECONNECT_ATTEMPT_MS);
+    const limit = MAX_RECONNECT_ELAPSED_MS + Math.max(OPEN_DEADLINE_MS, ADMISSION_DEADLINE_MS);
+    for (let elapsed = 0; elapsed < limit && statuses.at(-1) !== "OFFLINE"; elapsed += 500) {
+      await clock.advance(500);
+    }
     assert(sockets.length > 0 && sockets.length <= MAX_RECONNECT_ATTEMPTS, "socket-to-COMMIT attempts were not bounded");
     // A browser refuses an invalid close code and leaves the socket open, so
     // the attempt would keep its server attachment and lease: each abandoned
@@ -2068,6 +2190,46 @@ for (const socketState of [0, 1] as const) {
     transport.detach();
   });
 }
+
+test("split_reconnect_phase_deadlines_allow_slow_high_rtt_recovery", async () => {
+  const clock = new FakeReconnectClock();
+  const liveness = new FakeLivenessClock();
+  const sockets: TransportFakeSocket[] = [];
+  const statuses: string[] = [];
+  let resolveEndpoint!: (value: Readonly<{ url: string; protocols: readonly string[] }>) => void;
+  const transport = new WebSocketAttachmentTransport(
+    "ws://example.test/ws", () => {
+      const socket = new TransportFakeSocket(0);
+      sockets.push(socket);
+      return socket as unknown as AttachmentWebSocket;
+    }, ["persea-handle.consumed"],
+    () => new Promise((resolve) => { resolveEndpoint = resolve; }),
+    () => 0.5, clock.runtime, liveness.runtime, () => livenessNonce,
+  );
+  transport.bind({
+    openTransport: () => {}, receiveDecoded: () => "ENQUEUED", transportClosed: () => {},
+    reconnectStatus: (status) => { statuses.push(status.state); },
+  });
+  bindTransportSource(transport);
+  transport.attachAgain();
+  await clock.advance(0);
+  // Phase 1: 3s to resolve endpoint (< MAX_RECONNECT_ATTEMPT_MS = 5s).
+  await clock.advance(3_000);
+  resolveEndpoint(Object.freeze({ url: "ws://example.test/ws", protocols: Object.freeze(["persea-handle.slow"]) }));
+  await clock.flush();
+  equal(sockets.length, 1, "slow endpoint resolution did not open a socket");
+  // Phase 2: 3s to complete TCP+TLS+WS handshake (cumulative 6s > 5s!).
+  await clock.advance(3_000);
+  equal(sockets[0]!.closes.length, 0, "phase 2 handshake was prematurely aborted by endpoint budget");
+  sockets[0]!.readyState = 1;
+  sockets[0]!.emit("open", {});
+  // Phase 3: 3s for PREPARE -> READY -> COMMIT (cumulative 9s > 5s!).
+  await clock.advance(3_000);
+  equal(sockets[0]!.closes.length, 0, "phase 3 admission was prematurely aborted by handshake budget");
+  transport.connectionCommitted(1);
+  equal(statuses.at(-1), "CONNECTED", "high-RTT 9s reconnect did not commit cleanly");
+  transport.detach();
+});
 
 test("late_endpoint_resolution_after_timeout_is_stale_and_cannot_create_a_socket", async () => {
   const clock = new FakeReconnectClock();
