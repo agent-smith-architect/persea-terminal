@@ -138,8 +138,8 @@ and may not live under `/var/lib/persea-terminal`, `/tmp`, or
 `/opt/persea-terminal`. The default is
 deliberately a sibling of the front's state directory, never inside it: the
 front's alias store refuses to start unless `/var/lib/persea-terminal` has
-mode exactly `0700` (its siblings, the operator preferences store
-`preferences.json` and the snippet/clip store `snippets.json`, are rendered
+mode exactly `0700` (its siblings — `preferences.json`, `dashboard-preferences.json`,
+`keyboard-v1.json`, `snippets.json`, and `workspaces.json` — are rendered
 into that same directory and answer 503 rather than start elsewhere), so the
 front unit gains nothing image-related and its
 `StateDirectoryMode` stays `0700` unconditionally (the front only relays
@@ -273,7 +273,7 @@ An installation missing that shape is unsupported and is refused before upgrade.
 Rollback restores the target host snapshot, exact unit inventory/bytes,
 symlinks, and requested lifecycle. Uninstall removes only the current manifest's
 application units and package pointers. Both preserve tmux state, the
-front's durable stores (aliases, preferences, snippets), and activation evidence:
+front's durable stores (aliases, preferences, favorites, keyboard defaults, snippets, workspaces), and activation evidence:
 
 ```sh
 sudo deploy/rollback.sh --activate-local
@@ -458,7 +458,9 @@ malformed values are denied. The hermetic loopback adapter instead requires
 exactly one `http` value.
 
 The protected main-node identity retains its existing routes, Tailscale SSH, and
-`/run/tailscale/tailscaled.sock`. Every sidecar command uses
+`/run/tailscale/tailscaled.sock`. The sidecar unit orders itself
+`After=persea-terminal-front.service network-online.target tailscaled.service`
+so the host daemon settles before the sidecar starts at boot. Every sidecar command uses
 `/run/persea-terminal-tailscale/tailscaled.sock` explicitly; preservation
 readbacks use the main socket explicitly. The sidecar's state and runtime roots
 are private root-owned directories. Tailscale's LocalAPI socket mode is not the

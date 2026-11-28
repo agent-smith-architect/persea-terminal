@@ -1,14 +1,19 @@
 # Dashboard and session discovery
 
-The dashboard opens on Sessions. Workspaces and Settings have separate views.
+The dashboard opens on Sessions. [Workspaces](workspaces.md) and Settings have separate views.
 The header has one New session action and the shared Clipboard. New session
 expands a single form above the list: choose the user/server explicitly when
 more than one is available, supply a required tmux name, and optionally supply
-a display alias. Creation uses the selected user's existing creation API. Its
+a display alias. Creation uses the selected user's existing creation API and
+offers an inline **Open** action once created. Its
 returned session ID locates the new session before a separate alias save; a
 failed alias save offers a retry that never repeats creation. A retry refreshes
 the inventory and refuses to bind a different incarnation or duplicate a save
 whose response was lost.
+
+Keyboard navigation on the Sessions tab keeps common actions fast: pressing `/`
+focuses the filter input, `Enter` in the filter opens a sole matching session,
+and `Escape` clears a non-empty filter or closes the New session form.
 
 Every available session has the same terminal icon and Open control. An open
 session follows a normal same-tab link. An adoptable session performs its one
@@ -113,7 +118,9 @@ foreground, and manual refresh as well as 409/507 failures. List request
 generations prevent an older response from undoing a later local mutation.
 Workspace deletion requires a confirmation naming the workspace, then uses the
 existing revision precondition. Deletion removes the saved layout; it does not
-close any terminal session. Phone workspace limitations are unchanged.
+close any terminal session. Phone workspace limitations are unchanged. See
+[Workspaces](workspaces.md) for the workspace runtime, editor, keyboard picker,
+and storage bounds.
 
 Filtering updates the matching count and offers a clear action for no results.
 A failed refresh retains the last good inventory and says when it was read.
@@ -145,8 +152,9 @@ share that capture. Inventory refresh, returning to the window, reopening
 information and enlarging the thumbnail reuse it. Only
 Refresh preview requests another capture. The old image stays visible while a
 refresh is pending or fails. The server may reuse a capture for three seconds.
-The modal shows capture time and dimensions, supports
-Escape and normal focus restoration, and closes when its session disappears.
+The modal shows capture time and dimensions, exposes a direct **Open** action
+for the previewed session, supports Escape and normal focus restoration, and
+closes when its session disappears.
 
 The broker's existing read-only `capture-pane` call includes SGR attributes.
 Plain `rows` remain compatible with older clients; additive `ansi_rows` preserve
