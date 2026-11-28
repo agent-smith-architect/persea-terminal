@@ -180,8 +180,10 @@ async function main() {
       phase = "transport-invalidated-choice";
       await button("key-group").click();
       await down(button("choose-group:Symbols"));
-      await control({ closeLive: "transport_lost" }); await delay(100); await page.mouse.up();
-      check(!await panel.isVisible(), "Transport loss closes and invalidates a held group choice");
+      await control({ closeLive: "transport_lost" });
+      await panel.waitFor({ state: "hidden", timeout: 2000 }).catch(() => {});
+      await page.mouse.up();
+      check(!await panel.isVisible() && await panel.getAttribute("data-group") === "Navigation", "Transport loss closes and invalidates a held group choice");
       const end = await control();
       check(end.attachments.flatMap(a => a.inputs).join("") === inputStart, "Chooser interactions emit no implicit terminal input");
       check(end.attachments.every(a => a.resizes === 0 && a.resizeRequests.length === 0), "Chooser and viewport interactions never resize the remote terminal");
