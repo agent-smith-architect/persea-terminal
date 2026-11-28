@@ -4,6 +4,27 @@ Notable user-facing changes are recorded here. Releases use [Semantic Versioning
 
 ## Unreleased
 
+## 0.1.27 — 2026-11-28
+
+### Changed
+
+- **Composer polish and theme parity:** Removed the redundant inline text-size popover and expand toggle (text size stays in Dashboard Settings → Appearance; height uses auto-grow and the top resize grip), renamed the mode pill to **Code** / **Prose**, gated the smart-punctuation **Fix** warning to **Code** mode only, renamed **Clear** and hid it when the draft and attachments are empty, centered the full-width dock with a zero-height inset hairline, and wired composer chrome and alert surfaces to active theme tokens across all eight themes (including Rosé Pine Dawn light-theme contrast).
+- **Phone toolbar and Quick Actions (`≡`):** Unified coarse-pointer toolbar controls to one shared typography and padding token with per-button widths so geometry readouts and **Copied** feedback never clip and the session tag stays visible down to 320px viewports. Removed duplicate actions from the Quick Actions sheet so it holds only unique terminal tools (**Keys**, conditional **Hide keyboard**, **Attach image**, **Keyboard settings**, **Help**, and **Scrollback**).
+- **In-terminal session switcher:** Collapsed session metadata and inline alias editing into a toggleable **Session info** drawer (expanded by default only in observe-only mode), compacted session rows to show name/alias and quiet relative output age (`now`, `3m`, `2h`, `2d`), synced operator favorites from `/api/dashboard-preferences` with gold `★` pins and an output-activity sort toggle (`⇅`), and moved switcher status below the list to eliminate vertical layout shift on open and refresh.
+- **Terminal keys and Keyboard settings:** Omitted visible key-bar keys from **All keys → Navigation** when no modifier is armed (restoring the full set when a modifier is armed or compact-strip mode hides the bar row), refreshed default **Favorites** to a balanced 12-key coding set (`Alt`, `⇧`, `Ctrl+c`, `Ctrl+d`, `↵`, `⇧+⇥`, `Ctrl+r`, `Ctrl+l`, `Home`, `End`, `Pg↑`, `Pg↓`), made the Keyboard settings body scrollable with unclipped bar preview chips on narrow phones, and removed unused legacy key-bar exports.
+- **Documentation, diagram, and screenshots:** Refreshed README architecture diagram, workspace guide (`ui/workspaces.md`), component docs (`ui/dashboard.md`, `ui/clipboard.md`, `ui/KEYBOARD_CONTROLS.md`), and desktop/phone screenshots (`docs/images/dashboard-desktop.png`, `docs/images/workspaces-dashboard.png`, `docs/images/clipboard-desktop.png`, `docs/images/terminal-phone.png`).
+
+### Fixed
+
+- **Workspace-pane session switcher width:** Anchored `.persea-unified-identity__details` cleanly inside narrow workspace cells so the switcher popover stays readable instead of shrinking to the narrow session chip.
+- **Session switcher favorites revision sync:** Guarded `/api/dashboard-preferences` loads against mid-flight revision bumps and unavailable responses so newly toggled favorites sync without dropping updates.
+- **Composer font-size scroll preservation:** Captured `scrollTop` and selection state before mutating `--persea-composer-font-size` in `Composer.applyFontSize()` so layout anchoring cannot shift the restored scroll position.
+- **Session info drawer generation fence:** Incremented `keyInteractionGeneration` when toggling **Session info** so held taps cannot cross drawer transitions.
+
+### Testing notes
+
+- Verified full Go race suite (`CGO_ENABLED=1 CC=/usr/bin/clang go test -race ./internal/... ./cmd/...` under `umask 0022` and `TMPDIR=/tmp`), `go vet ./...`, `go build ./...`, `python3 deploy/tests/host-config-test.py`, both UI causal mutant gates (`test:terminal-controls-mutants` 24/24 killed + 2/2 clean controls; `test:terminal-keys-mutants` 8/8 pass), and full `npm run test:ci` across Chromium and WebKit (unit/contract suites, Dashboard, Terminal, Controls, Workspace, and `test:width-refit-private-stack`). Not tested on a real iPhone; desktop browser emulation does not prove physical iOS software keyboard or dictation behavior.
+
 ## 0.1.26 — 2026-11-27
 
 ### Changed
