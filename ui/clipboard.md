@@ -5,6 +5,8 @@ opens it when no terminal text is selected; a selected range still turns that
 control into Copy. The terminal menu opens Clipboard, Keys, Composer, image
 attachment, session controls, and settings without duplicating raw key buttons.
 
+![Shared Clipboard dialog over a live terminal showing direct device paste and shared text and image items](../docs/images/clipboard-desktop.png)
+
 Action feedback floats below the dialog header without changing the list's
 bounds, scroll height or scroll position. A short fade and 4px translation
 smooth its appearance and dismissal; reduced-motion mode removes animation.

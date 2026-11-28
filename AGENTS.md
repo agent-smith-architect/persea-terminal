@@ -10,10 +10,15 @@ The broker refuses unconfigured servers and does not discover them automatically
 
 - `internal/frontdoor` — HTTP/WebSocket front door. Listens on AF_UNIX only.
 - `internal/broker` — one per realm, runs as that realm's unix user, speaks to tmux.
-- `internal/terminal`, `internal/attachmentwire`, `internal/proto` — the attachment protocol.
+- `internal/terminal`, `internal/attachmentwire`, `internal/proto` — the attachment protocol
+  ([internal/attachmentwire/README.md](internal/attachmentwire/README.md)) and
+  [docs/terminal-reconstruction.md](docs/terminal-reconstruction.md).
 - `ui/src` — TypeScript. `ui/dist` is generated; never edit or commit it.
-- Clipboard behavior and input ownership: [ui/clipboard.md](ui/clipboard.md);
-  retention, storage, and API contract: [internal/frontdoor/clipboard.md](internal/frontdoor/clipboard.md).
+  Component references: [ui/dashboard.md](ui/dashboard.md),
+  [ui/workspaces.md](ui/workspaces.md), [ui/clipboard.md](ui/clipboard.md)
+  (server contract: [internal/frontdoor/clipboard.md](internal/frontdoor/clipboard.md)),
+  [ui/scrollback.md](ui/scrollback.md), and
+  [ui/KEYBOARD_CONTROLS.md](ui/KEYBOARD_CONTROLS.md).
 - `deploy/` — production packaging. See [deploy/README.md](deploy/README.md).
 
 ## Current terminal
@@ -32,7 +37,7 @@ despite historical names.
 ```sh
 go build ./... && go vet ./... && go test ./...     # needs tmux installed
 (cd ui && npm ci && npx --no-install playwright install --with-deps chromium webkit)
-(cd ui && npm test && npm run test:browser)
+(cd ui && npm test && npm run test:browser)         # or npm run test:ci (adds CI reachability check)
 python3 deploy/tests/host-config-test.py
 ```
 
