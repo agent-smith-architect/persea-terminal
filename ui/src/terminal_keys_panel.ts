@@ -6,6 +6,7 @@ import { KeyboardSettings, keyboardIcon } from "./keyboard_settings";
 type PanelOptions = Readonly<{
   generation(): number; isLive(): boolean; dispatch(entry: TerminalActionEntry, event: Event): string;
   changed(): void; beforeChange(): void; preferencesChanged(): void;
+  barRowVisible?(): boolean;
   hideKeyboard(): void; keyboardOpen(): boolean; settingsReturnFocus(): HTMLElement;
   preferences?: KeyboardPreferencesService;
 }>;
@@ -91,6 +92,7 @@ export class TerminalKeysPanel {
     return entry;
   }
   keyboardChanged(): void { if (this.open) { this.render(); this.options.changed(); } }
+  barVisibilityChanged(): void { if (this.open && this.view === "All keys" && this.group === "Navigation" && !this.hasModifiers) this.render(); }
   disarmForNativeInput(): void { this.modifiers = NO_MODIFIERS; this.revision++; }
   takeNativeCharacter(character: string): TerminalActionEntry | undefined {
     if (!this.hasModifiers || !/^[a-zA-Z]$/.test(character)) return;
@@ -207,7 +209,15 @@ export class TerminalKeysPanel {
         } else { const entry = resolveAction(id); if (entry) grid.append(this.actionButton(entry)); }
       }
       if (!grid.children.length) { const empty = document.createElement("p"); empty.textContent = "Add favorites in Keyboard settings."; grid.append(empty); }
-    } else for (const key of KEY_GROUPS[this.group] ?? []) grid.append(this.actionButton(keyAction(key, this.modifiers), true));
+    } else {
+      const hideBarKeys = this.view === "All keys" && this.group === "Navigation" && !this.hasModifiers && this.options.barRowVisible?.() === true;
+      const barIds = hideBarKeys ? new Set(this.preferences.layout.bar) : undefined;
+      for (const key of KEY_GROUPS[this.group] ?? []) {
+        const entry = keyAction(key, this.modifiers);
+        if (barIds?.has(entry.id)) continue;
+        grid.append(this.actionButton(entry, true));
+      }
+    }
     body.append(grid);
     const status = document.createElement("div"); status.className = "persea-terminal-keys__status"; status.setAttribute("role", "status");
     const armed = Object.values(this.modifiers).some(Boolean);

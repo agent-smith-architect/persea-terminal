@@ -1,6 +1,6 @@
 import type { DashboardInventory, DashboardSession } from "./dashboard";
 import { bindTapActivation } from "./tap_activation";
-import { compareSessionNames, outputActivityLabel, SESSION_METADATA_HELP } from "./session_metadata";
+import { compareSessionNames, knownOutputTime, outputActivityLabel } from "./session_metadata";
 import { preserveFocus, reconcileChildren } from "./dashboard_dom";
 
 export function normalizeSessionFilter(query: string): string { return query.trim().toLowerCase(); }
@@ -47,18 +47,23 @@ export type SessionSwitcherGroup = Readonly<{
   server: string;
   sessions: readonly DashboardSession[];
 }>;
+export type SessionSwitcherSortMode = "default" | "output";
+
 export type SessionSwitcherInventory = Readonly<{
   sessions: readonly DashboardSession[];
   groups?: readonly SessionSwitcherGroup[];
   // The order of the read that produced this list (inventory_read_order.ts).
   readOrder?: number;
+  favoritesRevision?: number;
 }>;
 export type SessionSwitcherRow = Readonly<{
   session: DashboardSession;
   selectable: boolean;
   current: boolean;
+  favorite: boolean;
   reason: string;
   activityLabel: string;
+  compactActivityLabel: string;
   statusLabel: string;
   groupKey: string;
   realmLabel: string;
@@ -67,6 +72,16 @@ export type SessionSwitcherRow = Readonly<{
   geometryLabel: string;
   attachmentLabel: string;
 }>;
+
+export function compactOutputActivityLabel(activity: number | undefined, nowMs = Date.now()): string {
+  const known = knownOutputTime(activity, nowMs);
+  if (known === undefined) return "";
+  const seconds = Math.max(0, Math.floor(nowMs / 1000) - known);
+  if (seconds < 60) return "now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+  if (seconds < 86_400) return `${Math.floor(seconds / 3600)}h`;
+  return `${Math.floor(seconds / 86_400)}d`;
+}
 
 export function switcherInventory(inventory: DashboardInventory, readOrder: number): SessionSwitcherInventory {
   const groups = inventory.realms.flatMap((realm) => realm.servers.map((server) => Object.freeze({
@@ -80,6 +95,7 @@ export function switcherInventory(inventory: DashboardInventory, readOrder: numb
     sessions: Object.freeze(groups.flatMap((group) => group.sessions)),
     groups: Object.freeze(groups),
     readOrder,
+    ...(inventory.favoritesRevision === undefined ? {} : { favoritesRevision: inventory.favoritesRevision }),
   });
 }
 
@@ -89,24 +105,41 @@ export function sessionSwitcherRows(
   query: string,
   blockedMessage: (session: DashboardSession) => string,
   nowMs = Date.now(),
+  options?: Readonly<{ favorites?: ReadonlySet<string>; sort?: SessionSwitcherSortMode }>,
 ): readonly SessionSwitcherRow[] {
+  const favorites = options?.favorites;
+  const sortMode = options?.sort ?? "default";
   const groupByScope = new Map<string, SessionSwitcherGroup>();
   for (const group of inventory.groups ?? []) for (const session of group.sessions) groupByScope.set(session.draftScope, group);
   const groupOrder = new Map<string, number>();
   const groupKey = (session: DashboardSession): string => `${session.realm}\u0000${session.server}`;
   for (const session of inventory.sessions) if (!groupOrder.has(groupKey(session))) groupOrder.set(groupKey(session), groupOrder.size);
-  return Object.freeze([...filterSessionList(inventory.sessions, query)].sort((a, b) => (groupOrder.get(groupKey(a))! - groupOrder.get(groupKey(b))!) || compareSessionNames(a, b)).map((session) => {
+  const compareWithinGroup = (a: DashboardSession, b: DashboardSession): number => {
+    if (sortMode === "output") {
+      const timeA = knownOutputTime(a.outputActivity, nowMs) ?? -1;
+      const timeB = knownOutputTime(b.outputActivity, nowMs) ?? -1;
+      if (timeA !== timeB) return timeB - timeA;
+    } else if (favorites && favorites.size > 0) {
+      const favDiff = Number(favorites.has(b.draftScope)) - Number(favorites.has(a.draftScope));
+      if (favDiff !== 0) return favDiff;
+    }
+    return compareSessionNames(a, b);
+  };
+  return Object.freeze([...filterSessionList(inventory.sessions, query)].sort((a, b) => (groupOrder.get(groupKey(a))! - groupOrder.get(groupKey(b))!) || compareWithinGroup(a, b)).map((session) => {
     const selectable = session.unified?.state === "open" || session.unified?.state === "adoptable";
     const reason = selectable ? "" : session.unified ? blockedMessage(session) : "Unified terminal unavailable";
     const group = groupByScope.get(session.draftScope);
     const current = session.draftScope === currentDraftScope;
+    const favorite = favorites?.has(session.draftScope) === true;
     const activity = outputActivityLabel(session.outputActivity, nowMs);
     return Object.freeze({
       session,
       selectable,
       current,
+      favorite,
       reason,
       activityLabel: activity,
+      compactActivityLabel: compactOutputActivityLabel(session.outputActivity, nowMs),
       statusLabel: reason || activity,
       groupKey: group?.key ?? `${session.realm}\u0000${session.server}`,
       realmLabel: group?.realmLabel ?? session.realm,
@@ -149,6 +182,7 @@ function revealRow(row: HTMLElement, list: HTMLElement, surface: HTMLElement): v
 
 export class SessionSwitcherView {
   readonly search: HTMLInputElement;
+  readonly sortButton: HTMLButtonElement;
   readonly refresh: HTMLButtonElement;
   private readonly list: HTMLDivElement;
   // Set when the panel opens. The first render that shows the current session
@@ -156,6 +190,8 @@ export class SessionSwitcherView {
   // scrolling is kept.
   private revealPending = false;
   private inventory: SessionSwitcherInventory = Object.freeze({ sessions: Object.freeze([]) });
+  private favorites: ReadonlySet<string> = new Set();
+  private sortMode: SessionSwitcherSortMode = "default";
   private readonly rowNodes = new Map<string, { button: HTMLButtonElement; update(row: SessionSwitcherRow): void }>();
 
   constructor(private readonly options: SessionSwitcherViewOptions) {
@@ -164,6 +200,18 @@ export class SessionSwitcherView {
     this.search.className = "persea-session-switcher__search";
     this.search.placeholder = "Search sessions";
     this.search.setAttribute("aria-label", "Search sessions");
+    this.sortButton = document.createElement("button");
+    this.sortButton.type = "button";
+    this.sortButton.className = "persea-session-switcher__sort";
+    this.sortButton.textContent = "⇅";
+    this.sortButton.setAttribute("aria-pressed", "false");
+    this.sortButton.title = "Sort by recent output";
+    this.sortButton.setAttribute("aria-label", "Sort by recent output");
+    bindTapActivation(this.sortButton, () => {
+      this.sortMode = this.sortMode === "output" ? "default" : "output";
+      this.syncSortButton();
+      preserveFocus(() => this.render());
+    }, () => undefined, () => this.sortButton.isConnected, this.options.interactionGeneration);
     this.refresh = document.createElement("button");
     this.refresh.type = "button";
     this.refresh.className = "persea-session-switcher__refresh";
@@ -175,14 +223,26 @@ export class SessionSwitcherView {
     this.list.setAttribute("aria-label", "Available sessions");
     const controls = document.createElement("div");
     controls.className = "persea-session-switcher__controls";
-    controls.append(this.search, this.refresh);
+    controls.append(this.search, this.sortButton, this.refresh);
     options.root.classList.add("persea-session-switcher");
     options.root.append(controls, this.list);
     this.search.addEventListener("input", () => this.render());
   }
 
+  private syncSortButton(): void {
+    const byOutput = this.sortMode === "output";
+    this.sortButton.setAttribute("aria-pressed", String(byOutput));
+    this.sortButton.title = byOutput ? "Sorted by recent output (tap for default order)" : "Sort by recent output";
+    this.sortButton.setAttribute("aria-label", byOutput ? "Sort by default order" : "Sort by recent output");
+  }
+
   setInventory(inventory: SessionSwitcherInventory): void {
     this.inventory = inventory;
+    preserveFocus(() => this.render());
+  }
+
+  setFavorites(favorites: ReadonlySet<string>): void {
+    this.favorites = new Set(favorites);
     preserveFocus(() => this.render());
   }
 
@@ -194,7 +254,10 @@ export class SessionSwitcherView {
   }
 
   rows(): readonly SessionSwitcherRow[] {
-    return sessionSwitcherRows(this.inventory, this.options.currentDraftScope(), this.search.value, this.options.blockedMessage);
+    return sessionSwitcherRows(this.inventory, this.options.currentDraftScope(), this.search.value, this.options.blockedMessage, Date.now(), {
+      favorites: this.favorites,
+      sort: this.sortMode,
+    });
   }
 
   render(): void {
@@ -244,14 +307,20 @@ export class SessionSwitcherView {
       // follows it in a code face. Without an alias the tmux name leads.
       const name = document.createElement("span");
       name.className = "persea-session-switcher__name";
+      const star = document.createElement("span");
+      star.className = "persea-session-switcher__star";
+      star.setAttribute("aria-hidden", "true");
+      star.textContent = "★";
       const alias = document.createElement("span");
       alias.className = "persea-session-switcher__alias";
       const sessionName = document.createElement("span");
       sessionName.className = "persea-session-switcher__session-name";
+      const activity = document.createElement("span");
+      activity.className = "persea-session-switcher__activity";
       const currentChip = document.createElement("span");
       currentChip.className = "persea-session-switcher__current";
       currentChip.textContent = "Current";
-      name.append(alias, sessionName, currentChip);
+      name.append(star, alias, sessionName, activity, currentChip);
       const meta = document.createElement("span");
       meta.className = "persea-session-switcher__meta";
       button.append(name, meta);
@@ -263,15 +332,20 @@ export class SessionSwitcherView {
         current = next;
         button.disabled = !next.selectable || next.current;
         button.dataset.current = String(next.current);
+        button.dataset.favorite = String(next.favorite);
         button.setAttribute("aria-current", next.current ? "true" : "false");
         button.dataset.state = next.session.unified?.state ?? "unavailable";
-        button.setAttribute("aria-label", `${next.current ? "Current session " : "Switch to "}${next.session.name}${next.primaryAlias ? ` · ${next.primaryAlias}` : ""}`);
+        button.setAttribute("aria-label", `${next.current ? "Current session " : "Switch to "}${next.session.name}${next.primaryAlias ? ` · ${next.primaryAlias}` : ""}${next.favorite ? " · Favorite" : ""}`);
         button.dataset.alias = String(next.primaryAlias !== "");
+        button.title = `${next.geometryLabel} · ${next.attachmentLabel} · ${next.statusLabel}`;
+        star.hidden = !next.favorite;
         sessionName.textContent = next.session.name; sessionName.title = next.session.name;
         alias.textContent = next.primaryAlias; alias.title = next.primaryAlias; alias.hidden = !next.primaryAlias;
+        activity.textContent = next.compactActivityLabel;
+        activity.hidden = next.current || !next.selectable || next.compactActivityLabel === "";
         currentChip.hidden = !next.current;
-        meta.textContent = `${next.geometryLabel} · ${next.attachmentLabel} · ${next.statusLabel}`;
-        meta.title = SESSION_METADATA_HELP;
+        meta.hidden = next.selectable;
+        meta.textContent = next.selectable ? "" : next.reason;
       } };
       this.rowNodes.set(row.session.draftScope, entry);
       }

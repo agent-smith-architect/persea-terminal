@@ -17,7 +17,7 @@ export const DEFAULT_KEYBOARD_PREFERENCES: KeyboardPreferences = Object.freeze({
   version: 1,
   layout: Object.freeze({
     bar: Object.freeze(["key:escape:0", "key:tab:0", "modifier:ctrl", "key:arrow-left:0", "key:arrow-down:0", "key:arrow-up:0", "key:arrow-right:0"]),
-    favorites: Object.freeze(["modifier:alt", ...DEFAULT_KEY_PREFERENCES.favorites]),
+    favorites: Object.freeze(["modifier:alt", "modifier:shift", ...DEFAULT_KEY_PREFERENCES.favorites]),
   }),
   prefixes: Object.freeze({ ...DEFAULT_KEY_PREFERENCES.prefixes }),
 });

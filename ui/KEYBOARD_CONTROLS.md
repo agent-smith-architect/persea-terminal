@@ -11,13 +11,18 @@ encoder and control gates, and the next letter is unmodified. Other native
 editing is unaffected.
 
 All keys contains Navigation, Letters, Numbers, Symbols and Sequences; the
-adjacent Fn view exposes F1–F12. Ctrl, Alt and Shift apply to the next explicit
-panel or strip key, or a native terminal letter. Tap an armed modifier to cancel
-it. Composer, settings and clipboard editing never consume terminal modifiers.
-Favorites and its Terminal preset include Alt by default. An existing nonempty
-browser Favorites layout gains Alt once without resetting its other keys, bar
-or prefixes. Explicitly empty layouts and layouts at the 100-item limit remain
-unchanged. Later removal of Alt is retained.
+adjacent Fn view exposes F1–F12. While the accessory bar is visible and no
+modifier is armed, Navigation omits keys already present on the bar to avoid
+duplication; arming a modifier or hiding the bar restores the full Navigation
+set. Ctrl, Alt and Shift apply to the next explicit panel or strip key, or a
+native terminal letter. Tap an armed modifier to cancel it. Composer, settings
+and clipboard editing never consume terminal modifiers. Factory-default
+Favorites provide a balanced 12-key set (`Alt`, `Shift`, `Ctrl+C`, `Ctrl+D`,
+`Enter`, `Shift+Tab`, `Ctrl+R`, `Ctrl+L`, `Home`, `End`, `Pg↑`, `Pg↓`), and its
+Terminal preset includes Alt by default. An existing nonempty browser Favorites
+layout gains Alt once without resetting its other keys, bar or prefixes.
+Explicitly empty layouts and layouts at the 100-item limit remain unchanged.
+Later removal of Alt is retained.
 Classic aliases explain when combinations share bytes; unavailable encodings
 explain their limitation. Alt+Tab uses Escape-prefixed Tab. Keyboard
 focus stays on the same logical key after a one-shot modifier is consumed.

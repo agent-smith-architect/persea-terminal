@@ -38,9 +38,9 @@ assert(composerSource.includes("interactionGeneration(): number;")
   && composerSource.includes("this.options.interactionGeneration"), "Composer must require and consume owner interaction authority");
 assert(sessionSwitcherSource.includes("interactionGeneration(): number;")
   && sessionSwitcherSource.includes("this.options.interactionGeneration"), "SessionSwitcher must require and consume owner interaction authority");
-assert((source.match(/new SessionSwitcherView\(\{/g) ?? []).length === 2
-  && (source.match(/interactionGeneration: \(\) => this\.keyInteractionGeneration/g) ?? []).length >= 3,
-"both unified SessionSwitcher instances and Composer must receive page interaction authority");
+assert((source.match(/new SessionSwitcherView\(\{/g) ?? []).length === 1
+  && (source.match(/interactionGeneration: \(\) => this\.keyInteractionGeneration/g) ?? []).length >= 2,
+"the unified SessionSwitcher instance and Composer must receive page interaction authority");
 assert(/bindTapActivation\(\s*composerToggle,/.test(source), "toolbar Composer must use the scroll-safe generation fence");
 assert(tapActivationSource.includes("const armedPointers = new Map<number,")
   && tapActivationSource.includes("armedPointers.get(event.pointerId)")
@@ -52,19 +52,19 @@ assert(tapActivationSource.includes("const armedPointers = new Map<number,")
 assert(!source.includes('className = "persea-unified-session-switch"'), "top-bar session switch must be absent");
 assert(source.includes("controls.append(selectContext, paste, geometryReadout, quickActions, composerToggle)"), "the compact primary row must contain contextual Select/Copy, Paste, committed size, Quick actions and Composer in order");
 assert(source.includes('document.createElement("div");\n    identityDetails.className = "persea-unified-identity__details"'), "tag popover must be a neutral shell");
-assert(source.includes("currentDetails.append(currentSummary, identityFacts)")
-  && source.includes("identityDetails.append(currentDetails, identitySessionStatus, identitySessionList)"), "disclosed facts and switcher must have separate hosts");
+assert(source.includes("identityInfoDrawer.append(aliasEditor, identityFacts)")
+  && source.includes("identityDetails.append(identityBar, identityInfoDrawer, identitySessionList, identitySessionStatus)"), "disclosed facts and switcher must have separate hosts");
 assert(source.includes("private sessionInventoryRequest?: Promise<void>"), "inventory loading must be one shared single flight");
-assert(source.includes("this.identitySessionSwitcher?.setInventory(inventory)"), "tag and sheet must share the same inventory projection");
+assert(source.includes("this.identitySessionSwitcher?.setInventory(inventory)"), "tag switcher must consume the shared inventory projection");
 assert(/bindTapActivation\(\s*tag,/.test(source), "the tag opener must preserve terminal focus");
 assert(source.includes("bindTapActivation(dashboard,") && !source.includes("bindTapActivation(previous,") && !source.includes("bindTapActivation(next,"),
   "tag navigation must offer Dashboard without arbitrary Prev/Next cycling");
 assert(/bindTapActivation\(\s*switcher\.refresh,/.test(source), "tag Refresh must preserve terminal focus");
 
 // the capability-free root navigation exists only in a standalone pane.
-assert(/tile\("[^"]+", "Dashboard", "Open the dashboard"\)/.test(source), "the task menu must provide Dashboard");
+assert(source.includes('dashboard.append(dashboardIcon, "Dashboard")'), "the session menu must provide Dashboard");
 assert(source.includes('window.location.assign("/")'), "Dashboard must navigate to the clean root URL");
-assert(source.includes("if (!this.options.workspaceCell)"), "workspace cells must omit Dashboard rather than disable it");
+assert(source.includes("if (!options.workspaceCell)"), "workspace cells must omit Dashboard rather than disable it");
 
 // the committed geometry button is the one View & appearance disclosure
 // and the moved controllers have exactly one construction site.
@@ -91,8 +91,8 @@ assert(source.includes("private activateContextualSelection(): void") && source.
   && source.includes("private activatePasteSlot(event: Event): void") && source.includes("if (this.selectMode) this.exitSelectMode();"),
   "one trusted Select toggle must own enter and cancel; the Paste slot must own exact-range copy");
 // Clipboard list, editor and input behavior are exercised in the browser gate.
-assert(source.includes('"Clipboard", "Open shared clipboard"') && source.includes("this.openClipboard();"),
-  "The terminal menu must open the shared Clipboard owner");
+assert(source.includes("this.openClipboard();"),
+  "The Paste/Clipboard toolbar slot must open the shared Clipboard owner");
 assert(!source.includes('tile("‹", "Prev"') && !source.includes('tile("›", "Next"'), "quick actions must not expose arbitrary Prev/Next cycling");
 
 // both controls converge on one rows-only request constructor.
@@ -162,7 +162,7 @@ assert(source.includes("value !== this.selectSelectionValue") && source.includes
 // complete pane-local overlay owner set through one idempotent primitive.
 assert(source.includes("if (restoreDisclosureFocus) geometryReadout.focus({ preventScroll: true })"), "View Escape must not steal an xterm/helper-textarea focus owner");
 const closeOverlays = source.match(/private closePresentationOverlays\([^)]*\): void \{([\s\S]*?)\n  \}/)?.[1] ?? "";
-for (const required of ["setViewPopover(false, true)", "setIdentityDetails(false, true)", "setSheet(false, true)", "closeExplainer(true)", "this.composer?.closeTypographyPopover(true)", 'this.popoverOwner = "none"']) {
+for (const required of ["setViewPopover(false, true)", "setIdentityDetails(false, true)", "setSheet(false, true)", "closeExplainer(true)", 'this.popoverOwner = "none"']) {
   assert(closeOverlays.includes(required), `lifecycle overlay teardown is missing ${required}`);
 }
 // Offline and exhaustion render through the failure notice, which owns their

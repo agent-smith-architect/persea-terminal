@@ -7,7 +7,7 @@ export type CopyToClipsResult = Readonly<{
   store: "not-attempted" | "too-large" | "pending" | SnippetOutcome;
 }>;
 
-export type UnifiedPopoverOwner = "none" | "view" | "tag" | "sheet" | "explainer" | "typography";
+export type UnifiedPopoverOwner = "none" | "view" | "tag" | "sheet" | "explainer";
 
 export type UnifiedExplainerTopic = "copy" | "select" | "paste" | "fit" | "view" | "size" | "sessions";
 
@@ -25,12 +25,6 @@ export type ScrollAnchor = Readonly<{
 export type FontIntent = Readonly<{
   id: number;
   value: number | null;
-}>;
-
-export type ComposerFontIntent = Readonly<{
-  id: number;
-  value: number;
-  preview?: OperatorPreferencePreviewToken;
 }>;
 
 export type InputTraceEntry = Readonly<Record<string, unknown> & { t: number; kind: string }>;

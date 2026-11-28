@@ -703,6 +703,7 @@ async function main() {
                 name: row.querySelector(".persea-session-switcher__session-name")?.textContent?.trim() || "",
                 alias: row.querySelector(".persea-session-switcher__alias")?.textContent?.trim() || "",
                 meta: row.querySelector(".persea-session-switcher__meta")?.textContent?.trim() || "",
+                title: row.getAttribute("title") || "",
                 state: row.getAttribute("data-state") || "",
                 current: row.getAttribute("data-current") || "",
                 aria: row.getAttribute("aria-label") || "",
@@ -725,9 +726,9 @@ async function main() {
         `${shape.name}: session names/aliases are incomplete: ${JSON.stringify(rows)}`);
         // This older inventory fixture supplies interaction activity only.
         // Output activity must stay unknown rather than borrowing that timer.
-        assert(rows.every((row) => /\d+\s*[×x]\s*\d+/.test(row.meta) && /\d+ attached/.test(row.meta)
-          && row.meta.includes("Output time unknown") && row.state === "open")
-          && rows[0].meta.includes("1 attached") && rows[1].meta.includes("0 attached")
+        assert(rows.every((row) => /\d+\s*[×x]\s*\d+/.test(row.title) && /\d+ attached/.test(row.title)
+          && row.title.includes("Output time unknown") && row.meta === "" && row.state === "open")
+          && rows[0].title.includes("1 attached") && rows[1].title.includes("0 attached")
           && rows[0].aria === "Current session alpha · primary shell" && rows[1].aria === "Switch to beta · support shell",
         `${shape.name}: dimensions/attachment/activity/state metadata is dishonest: ${JSON.stringify(rows)}`);
         assert(!switcher.arbitrary && switcher.leakedSecrets.length === 0, `${shape.name}: switcher exposed arbitrary navigation or a capability: ${JSON.stringify(switcher)}`);

@@ -44,16 +44,19 @@ async function main() {
       }
       await page.locator('.persea-unified-tag').click();
       const menu = page.locator('.persea-unified-identity__details'); await menu.locator('.persea-session-switcher__row').last().waitFor();
-      assert(await menu.getByText('Current session details', { exact: true }).isVisible(), 'Current identity disclosure missing');
+      const infoToggle = menu.getByRole('button', { name: 'Session info', exact: true });
+      assert(await infoToggle.isVisible(), 'Session info disclosure missing');
       assert(await menu.locator('.persea-unified-identity__facts').isHidden(), 'Identity facts crowd the switcher before expansion');
       const names = await menu.locator('.persea-session-switcher__session-name').allTextContents();
       assert(names.indexOf('qt2') < names.indexOf('qt10'), 'Menu must sort numbers naturally');
-      assert((await menu.locator('.persea-session-switcher__meta').allTextContents()).some(text => text.includes('127×30 · 1 attached · Output 1m ago')), 'Menu lost the shared output metadata');
+      assert((await menu.locator('.persea-session-switcher__row').evaluateAll(rows => rows.map(r => r.title))).some(text => text.includes('127×30 · 1 attached · Output 1m ago')), 'Menu lost the shared output metadata');
+      assert((await menu.locator('.persea-session-switcher__activity:visible').allTextContents()).some(text => text.trim() === '1m'), 'Menu lost compact output time');
+      assert((await menu.locator('.persea-session-switcher__meta:visible').count()) === 0, 'Selectable rows must stay compact single-line');
       const geometry = await menu.evaluate(node => {
         const box = el => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width, height: r.height }; };
         const list = node.querySelector('.persea-session-switcher__list'), search = node.querySelector('.persea-session-switcher__search');
         const before = box(search); list.scrollTop = list.scrollHeight; const after = box(search);
-        const targets = [...node.querySelectorAll('button,input,summary')].filter(el => el.getClientRects().length && !el.closest('details:not([open]) :not(summary)'));
+        const targets = [...node.querySelectorAll('button,input,summary')].filter(el => el.getClientRects().length && !el.closest('[hidden]'));
         return { menu: box(node), list: box(list), searchBefore: before, searchAfter: after, scroll: list.scrollTop, scrollRange: list.scrollHeight - list.clientHeight, viewport: { width: innerWidth, height: innerHeight }, small: targets.filter(el => { const r = box(el); return r.width < 43.9 || r.height < 43.9; }).map(el => el.getAttribute('aria-label') || el.textContent) };
       });
       assert(geometry.menu.left >= 0 && geometry.menu.right <= width + 1 && geometry.menu.bottom <= height + 1, `Menu escaped viewport at ${width}: ${JSON.stringify(geometry)}`);
@@ -125,24 +128,17 @@ async function main() {
       state = await currentInView();
       assert(state.visible && state.scroll > 0, `A reopened panel waited for the network to show the current session: ${JSON.stringify(state)}`);
       await page.unroute('**/api/inventory');
+      // Toggle Output sort inside the session switcher without leaving the panel.
+      const sortBtn = menu.getByRole('button', { name: 'Sort by recent output', exact: true });
+      assert(await sortBtn.getAttribute('aria-pressed') === 'false', 'Sort toggle must start in default order');
+      await sortBtn.click();
+      assert(await menu.getByRole('button', { name: 'Sort by default order', exact: true }).getAttribute('aria-pressed') === 'true', 'Sort toggle did not switch to output order');
+      await menu.getByRole('button', { name: 'Sort by default order', exact: true }).click();
       await page.locator('.persea-unified-tag').click();
-      // In quick actions the list grows and the sheet around it scrolls: the
-      // sheet brings the row into view; nothing else on the page moves.
-      const sheet = page.locator('.persea-unified-sheet');
-      const otherScroll = () => page.evaluate(() => [...document.querySelectorAll('*')].filter(node => (node.scrollTop !== 0 || node.scrollLeft !== 0) && !node.closest('.persea-unified-sheet')).map(node => [node.className, node.scrollTop, node.scrollLeft]).concat([['page', scrollX, scrollY]]));
+      // Quick actions no longer duplicates the session switcher; it stays concise.
       await page.getByRole('button', { name: 'Quick actions', exact: true }).click();
-      const before = await otherScroll();
-      await page.getByRole('button', { name: 'Choose another session', exact: true }).click();
-      await sheet.locator('.persea-session-switcher__row[aria-current="true"]').waitFor();
-      await page.waitForTimeout(300);
-      const inSheet = await sheet.evaluate(node => {
-        const row = node.querySelector('.persea-session-switcher__row[aria-current="true"]');
-        const a = node.getBoundingClientRect(), b = row.getBoundingClientRect();
-        return { scroll: node.scrollTop, visible: b.top >= Math.max(a.top, 0) - 1 && b.bottom <= Math.min(a.bottom, innerHeight) + 1 };
-      });
-      assert(inSheet.visible && inSheet.scroll > 0, `Opening the session list in quick actions did not show the current session: ${JSON.stringify(inSheet)}`);
-      const after = await otherScroll();
-      assert(JSON.stringify(after) === JSON.stringify(before), `Showing the current session scrolled something outside the sheet: ${JSON.stringify({ before, after })}`);
+      assert(await page.getByRole('button', { name: 'Choose another session', exact: true }).count() === 0, 'Quick actions must not duplicate the session switcher');
+      await page.getByRole('button', { name: 'Close terminal menu', exact: true }).click();
       await context.close();
       // On a phone in landscape the tag panel scrolls as well as its list:
       // reopening it, from held rows while the read fails, shows the whole

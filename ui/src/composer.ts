@@ -19,7 +19,7 @@ import {
 } from "./composer_attachments";
 import type { InputDelivery } from "./input_results";
 import { bindKeyboardPreservingActivation } from "./keyboard_preserving_button";
-import { COMPOSER_FONT_SIZE_MAX, COMPOSER_FONT_SIZE_MIN, DEFAULT_COMPOSER_FONT_SIZE } from "./operator_preferences";
+import { DEFAULT_COMPOSER_FONT_SIZE } from "./operator_preferences";
 import type { ComposerDensity, ComposerMode, ComposerPanelSize, PreferencesV1 } from "./preferences";
 import { bindGenerationFencedClickActivation } from "./tap_activation";
 
@@ -68,20 +68,13 @@ export type ComposerFocusScrollEvent = Readonly<{
   kind: "composer-focus-trigger" | "composer-inset-publication";
 }>;
 
-export type ComposerTypographyState = Readonly<{
-  size: number;
-  status: "ready" | "saving" | "conflict" | "unavailable" | "refused";
-  message: string;
-  enabled: boolean;
-}>;
-
 export type ComposerOptions = Readonly<{
   page: HTMLElement;
   dock: HTMLElement;
   storageScope?: string;
-  // Presentation only: glyph labels for Insert/Clear/size, for hosts whose
+  // Presentation only: glyph labels for Insert/Attach, for hosts whose
   // chrome language is symbolic (the unified page). Accessible names are
-  // unchanged; the legacy page keeps its worded labels by default.
+  // unchanged.
   symbolicChrome?: boolean;
   interactionGeneration(): number;
   availability(): ComposerAvailability;
@@ -94,9 +87,6 @@ export type ComposerOptions = Readonly<{
   preferences(): PreferencesV1;
   updatePreferences(preferences: PreferencesV1): void;
   initialComposerFontSize?: number;
-  updateComposerFontSize?(size: number): void;
-  claimTypographyPopover?(): void;
-  releaseTypographyPopover?(): void;
   onOpenChange?(open: boolean): void;
   // Image staging, present exactly when the server advertised the capability
   // for this page's realm. Absent, no attach button, no file input, and no
@@ -161,20 +151,10 @@ export function normalizeComposedText(value: string): string {
 
 export class Composer {
   readonly panel: HTMLDivElement;
-  readonly tab: HTMLButtonElement;
   readonly textarea: HTMLTextAreaElement;
 
   private readonly headerLabel: HTMLSpanElement;
   private readonly modeButton: HTMLButtonElement;
-  private readonly sizeButton: HTMLButtonElement;
-  private readonly typographyRoot?: HTMLDivElement;
-  private readonly typographyTrigger?: HTMLButtonElement;
-  private readonly typographyPopover?: HTMLDivElement;
-  private readonly typographyMinus?: HTMLButtonElement;
-  private readonly typographyCurrent?: HTMLOutputElement;
-  private readonly typographyPlus?: HTMLButtonElement;
-  private readonly typographyReset?: HTMLButtonElement;
-  private readonly typographyStatus?: HTMLOutputElement;
   private readonly closeButton: HTMLButtonElement;
   private readonly grip: HTMLDivElement;
   private readonly status: HTMLOutputElement;
@@ -213,8 +193,6 @@ export class Composer {
   private measureFrame: number | undefined;
   private focusRevealFrame: number | undefined;
   private typographyRestoreFrame: number | undefined;
-  private typographyPositionFrame: number | undefined;
-  private typographyListenersCleanup: (() => void) | undefined;
   private typographyInteractionGeneration = 0;
   private readonly textareaPointers = new Set<number>();
   private readonly textareaTouches = new Set<number>();
@@ -245,8 +223,7 @@ export class Composer {
   private readonly focusScrollListeners = new Set<(event: ComposerFocusScrollEvent) => void>();
   private readonly activationCleanups: Array<() => void> = [];
   private readonly renderedActivationCleanups: Array<() => void> = [];
-  private typographyOpen = false;
-  private typographyState: ComposerTypographyState;
+  private fontSize: number;
 
   constructor(private readonly options: ComposerOptions) {
     if (!(options.page instanceof HTMLElement) || !(options.dock instanceof HTMLElement)) {
@@ -257,12 +234,7 @@ export class Composer {
     const labelId = `${panelId}-label`;
     const statusId = `${panelId}-status`;
     this.symbolic = options.symbolicChrome === true;
-    this.typographyState = Object.freeze({
-      size: options.initialComposerFontSize ?? DEFAULT_COMPOSER_FONT_SIZE,
-      status: "ready",
-      message: "",
-      enabled: options.updateComposerFontSize !== undefined,
-    });
+    this.fontSize = options.initialComposerFontSize ?? DEFAULT_COMPOSER_FONT_SIZE;
     this.stageImage = options.stageImage;
     this.storageKey = options.storageScope === undefined
       ? undefined
@@ -272,21 +244,6 @@ export class Composer {
     this.density = preferences.composer.density;
     this.mode = preferences.composer.mode;
     this.size = preferences.composer.panelSize;
-
-    this.tab = document.createElement("button");
-    this.tab.type = "button";
-    this.tab.className = "attachment-page__compose-tab";
-    this.tab.textContent = "\u270e";
-    this.tab.setAttribute("aria-expanded", "false");
-    this.tab.setAttribute("aria-controls", panelId);
-    this.tab.title = "Open composer";
-    bindKeyboardPreservingActivation(
-      this.tab,
-      this.onTabActivate,
-      () => this.restoreTextareaFocus(),
-      () => !this.destroyed,
-      options.interactionGeneration,
-    );
 
     this.panel = document.createElement("div");
     this.panel.id = panelId;
@@ -304,78 +261,24 @@ export class Composer {
     this.headerLabel.id = labelId;
     this.headerLabel.className = "attachment-page__composer-label";
     this.headerLabel.textContent = "Composer";
-    // ONE toggle showing the CURRENT mode — `>_` is Code input (autocorrect,
-    // autocapitalization and spellcheck off, the construction default); `Aa`
-    // is Prose writing mode (language assistance on). The accessible name
-    // names the current mode while aria-pressed retains the binary state.
+    // ONE toggle showing the CURRENT mode — `Code` (autocorrect,
+    // autocapitalization and spellcheck off, the construction default);
+    // `Prose` (language assistance on). The accessible name names the current
+    // mode while aria-pressed retains the binary state.
     const modeControl = document.createElement("div");
     modeControl.className = "attachment-page__composer-mode";
-    this.modeButton = this.button(">_", "Code input", this.onToggleMode, () => this.restoreTextareaFocus());
+    this.modeButton = this.button("Code", "Code input", this.onToggleMode, () => this.restoreTextareaFocus());
     this.modeButton.classList.add("attachment-page__composer-mode-toggle");
     modeControl.append(this.modeButton);
     const headerActions = document.createElement("div");
     headerActions.className = "attachment-page__composer-header-actions";
-    this.sizeButton = this.button("\u2922 Taller", "Expand composer", this.onToggleSize, () => this.restoreTextareaFocus());
-    this.sizeButton.classList.add("attachment-page__composer-size");
-    this.closeButton = this.button("\u2304", "Hide composer — draft stays here", this.onClose, options.refocusTerminal);
+    // Dismiss control kept on the far left away from Insert (➤) so a phone
+    // operator can close the composer or sent-receipt banner in place without
+    // reaching back to the top toolbar.
+    this.closeButton = this.button("\u00d7", "Hide composer — draft stays here", this.onClose, options.refocusTerminal);
     this.closeButton.classList.add("attachment-page__composer-close");
-    if (options.updateComposerFontSize !== undefined) {
-      this.typographyRoot = document.createElement("div");
-      this.typographyRoot.className = "attachment-page__composer-typography";
-      this.typographyTrigger = this.button(
-        String(this.typographyState.size),
-        `Composer options, text size ${this.typographyState.size} pixels`,
-        this.onToggleTypography,
-        () => undefined,
-      );
-      this.typographyTrigger.classList.add("attachment-page__composer-typography-trigger");
-      this.typographyTrigger.setAttribute("aria-haspopup", "dialog");
-      this.typographyTrigger.setAttribute("aria-expanded", "false");
-      const typographyId = `${panelId}-typography`;
-      const typographyLabelId = `${typographyId}-label`;
-      this.typographyTrigger.setAttribute("aria-controls", typographyId);
-
-      this.typographyPopover = document.createElement("div");
-      this.typographyPopover.id = typographyId;
-      this.typographyPopover.className = "attachment-page__composer-typography-popover";
-      this.typographyPopover.hidden = true;
-      this.typographyPopover.setAttribute("role", "dialog");
-      this.typographyPopover.setAttribute("aria-modal", "false");
-      this.typographyPopover.setAttribute("aria-labelledby", typographyLabelId);
-      const typographyLabel = document.createElement("span");
-      typographyLabel.id = typographyLabelId;
-      typographyLabel.className = "attachment-page__composer-typography-label";
-      typographyLabel.textContent = "Text size";
-      const typographyStepper = document.createElement("div");
-      typographyStepper.className = "attachment-page__composer-typography-stepper";
-      this.typographyMinus = this.button("−", "Decrease composer text size", this.onTypographyMinus, () => undefined);
-      this.typographyMinus.classList.add("attachment-page__composer-typography-step");
-      this.typographyCurrent = document.createElement("output");
-      this.typographyCurrent.className = "attachment-page__composer-typography-current";
-      this.typographyCurrent.setAttribute("aria-live", "polite");
-      this.typographyPlus = this.button("+", "Increase composer text size", this.onTypographyPlus, () => undefined);
-      this.typographyPlus.classList.add("attachment-page__composer-typography-step");
-      typographyStepper.append(this.typographyMinus, this.typographyCurrent, this.typographyPlus);
-      const typographyActions = document.createElement("div");
-      typographyActions.className = "attachment-page__composer-typography-actions";
-      this.typographyReset = this.button("Reset", `Reset composer text size to ${DEFAULT_COMPOSER_FONT_SIZE} pixels`, this.onTypographyReset, () => undefined);
-      this.typographyReset.classList.add("attachment-page__composer-typography-reset");
-      typographyActions.append(this.typographyReset, this.sizeButton);
-      this.typographyStatus = document.createElement("output");
-      this.typographyStatus.className = "attachment-page__composer-typography-status";
-      this.typographyStatus.setAttribute("role", "status");
-      this.typographyStatus.setAttribute("aria-live", "polite");
-      this.typographyPopover.append(typographyLabel, typographyStepper, typographyActions, this.typographyStatus);
-      this.typographyRoot.append(this.typographyTrigger);
-      // The dialog is a fixed, page-owned layer rather than a child of the
-      // height-constrained composer. It therefore cannot expand or escape the
-      // composer box, and positioning can be clamped to the visual viewport.
-      options.page.append(this.typographyPopover);
-      headerActions.append(this.typographyRoot, this.closeButton);
-    } else {
-      headerActions.append(this.sizeButton, this.closeButton);
-    }
-    header.append(this.headerLabel, modeControl, headerActions);
+    headerActions.append(this.closeButton);
+    header.append(this.headerLabel, headerActions, modeControl);
 
     this.grip = document.createElement("div");
     this.grip.className = "attachment-page__composer-grip";
@@ -445,7 +348,7 @@ export class Composer {
     this.fixButton.classList.add("attachment-page__composer-fix");
     this.restoreButton = this.button("Restore", "Restore the last cleared or inserted draft", this.onRestore, () => this.restoreTextareaFocus());
     this.restoreButton.classList.add("attachment-page__composer-restore");
-    this.clearButton = this.button(this.symbolic ? "\u232b" : "Clear", "Clear composer draft", this.onClear, () => this.restoreTextareaFocus());
+    this.clearButton = this.button("Clear", "Clear composer draft", this.onClear, () => this.restoreTextareaFocus());
     this.clearButton.classList.add("attachment-page__composer-clear");
     this.sendButton = this.button(this.symbolic ? "\u27a4" : "Insert \u25b8", "Insert into terminal without running it", this.onSend, options.refocusTerminal);
     this.sendButton.classList.add("attachment-page__composer-send");
@@ -483,16 +386,15 @@ export class Composer {
       this.textarea.addEventListener("paste", this.onPaste);
     }
     // The action buttons are grouped so a narrow layout can give the status
-    // its own full-width line above them. The group is `display: contents`
-    // by default, so the footer's flex layout (and the legacy page) is
-    // byte-identical.
+    // its own full-width line above them. Clear sits to the left of Attach so
+    // an accidental thumb tap beside Send cannot wipe a draft and staged images.
     const actions = document.createElement("div");
     actions.className = "attachment-page__composer-actions";
     actions.append(
       this.fixButton,
       this.restoreButton,
-      ...(this.attachButton ? [this.attachButton] : []),
       this.clearButton,
+      ...(this.attachButton ? [this.attachButton] : []),
       this.sendButton,
     );
     footer.append(this.status, actions);
@@ -505,13 +407,13 @@ export class Composer {
       footer,
       ...(this.fileInput ? [this.fileInput] : []),
     );
-    options.dock.prepend(this.tab, this.panel);
+    options.dock.prepend(this.panel);
 
     this.restoreStoredDraft();
     this.syncResizeTarget(options.preferences());
     this.applyMode();
-    this.applySize();
-    this.renderTypography();
+    this.options.page.style.setProperty("--persea-composer-font-size", `${this.fontSize}px`);
+    this.options.page.dataset.composerFont = String(this.fontSize);
     this.render();
 
     document.addEventListener("visibilitychange", this.onVisibilityChange);
@@ -520,11 +422,9 @@ export class Composer {
     this.resizeObserver = typeof ResizeObserver === "function"
       ? new ResizeObserver(() => {
         this.scheduleInsetPublication();
-        this.scheduleTypographyPosition();
       })
       : undefined;
     this.resizeObserver?.observe(this.panel);
-    if (this.typographyTrigger) this.resizeObserver?.observe(this.typographyTrigger);
   }
 
   /**
@@ -628,12 +528,15 @@ export class Composer {
   }
 
   /** Apply one document-global composer face without moving focus or selection. */
-  applyTypographyState(state: ComposerTypographyState): void {
+  applyFontSize(size: number): void {
     if (this.destroyed) return;
-    const sizeChanged = this.typographyState.size !== state.size;
-    this.typographyState = state;
-    this.renderTypography();
-    if (!sizeChanged) return;
+    const sizeChanged = this.fontSize !== size;
+    this.fontSize = size;
+    if (!sizeChanged) {
+      this.options.page.style.setProperty("--persea-composer-font-size", `${size}px`);
+      this.options.page.dataset.composerFont = String(size);
+      return;
+    }
     const selectionStart = this.textarea.selectionStart;
     const selectionEnd = this.textarea.selectionEnd;
     const selectionDirection = this.textarea.selectionDirection;
@@ -642,8 +545,8 @@ export class Composer {
     const value = this.textarea.value;
     const interactionGeneration = this.typographyInteractionGeneration;
     const gestureActive = this.textareaGestureActive();
-    this.options.page.style.setProperty("--persea-composer-font-size", `${state.size}px`);
-    this.options.page.dataset.composerFont = String(state.size);
+    this.options.page.style.setProperty("--persea-composer-font-size", `${size}px`);
+    this.options.page.dataset.composerFont = String(size);
     const restore = () => {
       if (this.destroyed) return;
       this.textarea.setSelectionRange(selectionStart, selectionEnd, selectionDirection);
@@ -652,18 +555,11 @@ export class Composer {
     };
     restore();
     this.remeasureInset();
-    this.scheduleTypographyPosition();
     // Auto-grow runs on the next layout frame and can make the browser reveal
     // the selection again. Restore the operator's scroll after that reflow too.
     if (this.typographyRestoreFrame !== undefined) window.cancelAnimationFrame(this.typographyRestoreFrame);
     this.typographyRestoreFrame = window.requestAnimationFrame(() => {
       this.typographyRestoreFrame = undefined;
-      // The frame belongs only to the exact draft posture captured above.
-      // Input, caret movement, pointer interaction, or manual scrolling after
-      // capture wins over this layout repair; stale state must never rewind
-      // the operator's newer interaction.
-      // Reflow can change the scroll offset without an interaction. Comparing
-      // that offset here would reject precisely the layout repair we owe.
       if (gestureActive || this.textareaGestureActive()
         || this.typographyInteractionGeneration !== interactionGeneration
         || this.textarea.value !== value
@@ -756,7 +652,6 @@ export class Composer {
 
   destroy(): void {
     if (this.destroyed) return;
-    this.setTypographyOpen(false);
     this.flushStoredDraft();
     this.removeInset(false);
     this.destroyed = true;
@@ -766,7 +661,6 @@ export class Composer {
     if (this.measureFrame !== undefined) window.cancelAnimationFrame(this.measureFrame);
     if (this.focusRevealFrame !== undefined) window.cancelAnimationFrame(this.focusRevealFrame);
     if (this.typographyRestoreFrame !== undefined) window.cancelAnimationFrame(this.typographyRestoreFrame);
-    if (this.typographyPositionFrame !== undefined) window.cancelAnimationFrame(this.typographyPositionFrame);
     this.resizeObserver?.disconnect();
     document.removeEventListener("visibilitychange", this.onVisibilityChange);
     window.removeEventListener("blur", this.endTextareaGestures);
@@ -796,8 +690,6 @@ export class Composer {
     this.grip.removeEventListener("pointercancel", this.onGripPointerEnd);
     this.grip.removeEventListener("keydown", this.onGripKeydown);
     this.panel.remove();
-    this.tab.remove();
-    this.typographyPopover?.remove();
   }
 
   remeasureInset(): void {
@@ -815,7 +707,6 @@ export class Composer {
     this.size = preferences.composer.panelSize;
     this.syncResizeTarget(preferences);
     if (modeChanged) this.applyMode();
-    if (sizeChanged) this.applySize();
     if (densityChanged || sizeChanged) this.scheduleAutoGrow();
     this.render();
   }
@@ -872,13 +763,10 @@ export class Composer {
     this.openState = open;
     this.panel.hidden = !open;
     this.panel.dataset.open = open ? "true" : "false";
-    this.tab.hidden = open;
-    this.tab.setAttribute("aria-expanded", open ? "true" : "false");
     if (!open) {
       delete this.panel.dataset.sentReopened;
-      this.setTypographyOpen(false);
+      this.flushStoredDraft();
     }
-    if (!open) this.flushStoredDraft();
     this.options.onOpenChange?.(open);
     this.render();
     if (open) this.scheduleInsetPublication();
@@ -946,8 +834,8 @@ export class Composer {
     this.contentState = "sent";
     this.delivery = "pending";
     this.sends += 1;
+    this.resizePercent = 0;
     this.size = "compact";
-    this.applySize();
     this.render();
     if (refocusTerminal) this.options.refocusTerminal();
   }
@@ -996,11 +884,8 @@ export class Composer {
     this.panel.dataset.content = this.contentState;
     this.panel.dataset.mode = this.mode;
     this.panel.dataset.size = this.size;
-    const receipt = this.contentState === "sent" && this.panel.dataset.sentReopened !== "true";
-    if (this.typographyRoot) this.typographyRoot.hidden = receipt;
-    if (receipt) this.setTypographyOpen(false);
     const storageHint = this.storageDegraded ? "Draft held in this tab only" : "";
-    const punctuationHint = SMART_PUNCTUATION.test(text) ? "Smart punctuation found" : "";
+    const punctuationHint = this.mode === "code" && SMART_PUNCTUATION.test(text) ? "Smart punctuation found" : "";
     const uploadHint = attachmentUploadBlockReason(this.attachments) ?? "";
     const failureHint = attachmentFailureStatus(this.attachments);
     const restoreHint = this.restoredWithoutImages ? "Restored text only \u2014 images were not restored" : "";
@@ -1015,9 +900,6 @@ export class Composer {
         ? `${verb} ${this.lastSentLength.toLocaleString()} ch \u00b7 ${this.lastSentImages.toLocaleString()} image${this.lastSentImages === 1 ? "" : "s"}${ellipsis}`
         : `${verb} ${this.lastSentLength.toLocaleString()} ch${ellipsis}`;
     }
-    // composer input \u00a716.1/\u00a716.2: no "not run" qualifier (the receipt says what
-    // happened; the no-Return law is explained in Help) and no persistent
-    // instruction line for the empty and draft states.
     const pendingHint = this.pendingInsert && this.contentState !== "sent" ? "Waiting for the last Insert to reach the terminal" : "";
     this.status.value = [this.deliveryNotice, stateStatus, pendingHint, uploadHint, failureHint, restoreHint, punctuationHint, storageHint].filter(Boolean).join(" \u00b7 ");
     this.status.hidden = this.status.value === "";
@@ -1025,151 +907,15 @@ export class Composer {
     this.joinButton.hidden = this.contentState !== "guard";
     this.overrideButton.hidden = this.contentState !== "guard";
     this.restoreButton.hidden = !(text.length === 0 && this.lastRestore.length > 0) || this.pendingInsert !== undefined;
-    this.clearButton.disabled = (text.length === 0 && this.attachments.length === 0) || this.pendingInsert !== undefined;
+    const hasClearable = text.length > 0 || this.attachments.length > 0;
+    this.clearButton.hidden = !hasClearable || this.pendingInsert !== undefined;
+    this.clearButton.disabled = !hasClearable || this.pendingInsert !== undefined;
     this.sendButton.disabled = !hasContent || !availability.canInject || this.contentState === "guard" || uploadHint !== "" || this.pendingInsert !== undefined;
     this.sendButton.setAttribute("aria-disabled", this.sendButton.disabled ? "true" : "false");
     if (this.sendButton.disabled) this.sendButton.setAttribute("aria-describedby", this.status.id);
     else this.sendButton.removeAttribute("aria-describedby");
-    this.tab.textContent = text.length === 0 ? "\u270e" : `\u270e ${text.length.toLocaleString()}`;
-    this.tab.setAttribute("aria-label", text.length === 0 ? "Open composer" : `Open composer, ${text.length.toLocaleString()} characters held`);
-    this.tab.title = this.tab.getAttribute("aria-label") ?? "Open composer";
     this.renderAttachments();
     this.scheduleAutoGrow();
-  }
-
-  private renderTypography(): void {
-    const trigger = this.typographyTrigger;
-    const minus = this.typographyMinus;
-    const current = this.typographyCurrent;
-    const plus = this.typographyPlus;
-    const reset = this.typographyReset;
-    const status = this.typographyStatus;
-    if (!trigger || !minus || !current || !plus || !reset || !status) return;
-    const state = this.typographyState;
-    const saving = state.status === "saving";
-    trigger.textContent = String(state.size);
-    trigger.setAttribute("aria-label", `Composer options, text size ${state.size} pixels`);
-    trigger.title = trigger.getAttribute("aria-label") ?? "Composer options";
-    current.value = `${state.size}px`;
-    const setUnavailable = (button: HTMLButtonElement, unavailable: boolean): void => {
-      // Native disabled drops keyboard focus in Chromium. aria-disabled keeps
-      // the honest focus destination mounted while requestTypography guards
-      // activation during save, outage, and bounds.
-      button.disabled = false;
-      button.setAttribute("aria-disabled", unavailable ? "true" : "false");
-    };
-    setUnavailable(minus, !state.enabled || saving || state.size <= COMPOSER_FONT_SIZE_MIN);
-    setUnavailable(plus, !state.enabled || saving || state.size >= COMPOSER_FONT_SIZE_MAX);
-    setUnavailable(reset, !state.enabled || saving || state.size === DEFAULT_COMPOSER_FONT_SIZE);
-    this.typographyPopover?.setAttribute("aria-busy", saving ? "true" : "false");
-    if (this.typographyPopover) this.typographyPopover.dataset.status = state.status;
-    status.value = state.message;
-    status.hidden = state.message === "";
-    if (this.typographyOpen) {
-      this.positionTypographyPopover();
-      this.scheduleTypographyPosition();
-    }
-  }
-
-  closeTypographyPopover(coordinated = false): void {
-    this.setTypographyOpen(false, coordinated);
-  }
-
-  private setTypographyOpen(open: boolean, coordinated = false): void {
-    if (!this.typographyTrigger || !this.typographyPopover) return;
-    if (this.typographyOpen === open) {
-      if (open) {
-        this.positionTypographyPopover();
-        this.scheduleTypographyPosition();
-      }
-      return;
-    }
-    if (open && !coordinated) this.options.claimTypographyPopover?.();
-    this.typographyOpen = open;
-    this.typographyPopover.hidden = !open;
-    this.typographyTrigger.setAttribute("aria-expanded", open ? "true" : "false");
-    if (open) {
-      // Only a visible popover owns global dismissal/position listeners.
-      // Capture the target so cleanup removes them from the exact viewport.
-      const viewport = window.visualViewport;
-      document.addEventListener("pointerdown", this.onDocumentPointerDown);
-      document.addEventListener("keydown", this.onDocumentKeydown, true);
-      window.addEventListener("resize", this.onTypographyViewportChange);
-      viewport?.addEventListener("resize", this.onTypographyViewportChange);
-      viewport?.addEventListener("scroll", this.onTypographyViewportChange);
-      this.typographyListenersCleanup = () => {
-        document.removeEventListener("pointerdown", this.onDocumentPointerDown);
-        document.removeEventListener("keydown", this.onDocumentKeydown, true);
-        window.removeEventListener("resize", this.onTypographyViewportChange);
-        viewport?.removeEventListener("resize", this.onTypographyViewportChange);
-        viewport?.removeEventListener("scroll", this.onTypographyViewportChange);
-      };
-      this.positionTypographyPopover();
-      this.scheduleTypographyPosition();
-    }
-    else {
-      this.typographyListenersCleanup?.();
-      this.typographyListenersCleanup = undefined;
-      if (this.typographyPositionFrame !== undefined) window.cancelAnimationFrame(this.typographyPositionFrame);
-      this.typographyPositionFrame = undefined;
-      this.typographyPopover.style.removeProperty("left");
-      this.typographyPopover.style.removeProperty("top");
-      this.typographyPopover.style.removeProperty("max-width");
-      this.typographyPopover.style.removeProperty("max-height");
-      delete this.typographyPopover.dataset.placement;
-      if (!coordinated) this.options.releaseTypographyPopover?.();
-    }
-  }
-
-  private positionTypographyPopover(): void {
-    const trigger = this.typographyTrigger;
-    const popover = this.typographyPopover;
-    if (!trigger || !popover || popover.hidden || this.destroyed) return;
-    const viewport = window.visualViewport;
-    const viewportLeft = viewport?.offsetLeft ?? 0;
-    const viewportTop = viewport?.offsetTop ?? 0;
-    const viewportWidth = viewport?.width ?? window.innerWidth;
-    const viewportHeight = viewport?.height ?? window.innerHeight;
-    const margin = 8;
-    const gap = 6;
-    const viewportRight = viewportLeft + viewportWidth;
-    const viewportBottom = viewportTop + viewportHeight;
-    const availableWidth = Math.max(1, viewportWidth - margin * 2);
-    const availableHeight = Math.max(1, viewportHeight - margin * 2);
-    popover.style.maxWidth = `${availableWidth}px`;
-    popover.style.maxHeight = `${availableHeight}px`;
-    const anchor = trigger.getBoundingClientRect();
-    const measured = popover.getBoundingClientRect();
-    const left = Math.min(
-      Math.max(anchor.left, viewportLeft + margin),
-      Math.max(viewportLeft + margin, viewportRight - margin - measured.width),
-    );
-    const roomAbove = anchor.top - gap - (viewportTop + margin);
-    const roomBelow = viewportBottom - margin - (anchor.bottom + gap);
-    const above = roomAbove >= measured.height || roomAbove > roomBelow;
-    const desiredTop = above ? anchor.top - gap - measured.height : anchor.bottom + gap;
-    const top = Math.min(
-      Math.max(desiredTop, viewportTop + margin),
-      Math.max(viewportTop + margin, viewportBottom - margin - measured.height),
-    );
-    popover.style.left = `${Math.round(left)}px`;
-    popover.style.top = `${Math.round(top)}px`;
-    popover.dataset.placement = above ? "top" : "bottom";
-  }
-
-  private scheduleTypographyPosition(): void {
-    if (this.destroyed || !this.typographyOpen || this.typographyPositionFrame !== undefined) return;
-    this.typographyPositionFrame = window.requestAnimationFrame(() => {
-      this.typographyPositionFrame = undefined;
-      this.positionTypographyPopover();
-    });
-  }
-
-  private requestTypography(size: number): void {
-    if (this.destroyed || !this.options.updateComposerFontSize || !this.typographyState.enabled || this.typographyState.status === "saving") return;
-    if (!Number.isInteger(size) || size < COMPOSER_FONT_SIZE_MIN || size > COMPOSER_FONT_SIZE_MAX) return;
-    if (size === this.typographyState.size) return;
-    this.options.updateComposerFontSize(size);
   }
 
   // Chip strip re-render, bounded by the 8-attachment cap. Height changes
@@ -1341,7 +1087,7 @@ export class Composer {
 
   private applyMode(): void {
     const prose = this.mode === "prose";
-    this.modeButton.textContent = prose ? "Aa" : ">_";
+    this.modeButton.textContent = prose ? "Prose" : "Code";
     this.modeButton.setAttribute("aria-pressed", prose ? "true" : "false");
     this.modeButton.setAttribute("aria-label", prose ? "Prose writing mode" : "Code input");
     this.modeButton.title = prose
@@ -1352,16 +1098,6 @@ export class Composer {
     this.textarea.spellcheck = prose;
     if (!prose) this.textarea.autocomplete = "off";
     else this.textarea.removeAttribute("autocomplete");
-  }
-
-  private applySize(): void {
-    this.panel.dataset.size = this.size;
-    this.sizeButton.setAttribute("aria-pressed", this.size === "expanded" ? "true" : "false");
-    this.sizeButton.setAttribute("aria-label", this.size === "expanded" ? "Compact composer" : "Expand composer");
-    this.sizeButton.title = this.sizeButton.getAttribute("aria-label") ?? "";
-    this.sizeButton.textContent = this.size === "expanded"
-      ? (this.symbolic ? "\u2921" : "\u2922 Shorter")
-      : (this.symbolic ? "\u2922" : "\u2922 Taller");
   }
 
   private scheduleAutoGrow(): void {
@@ -1404,10 +1140,6 @@ export class Composer {
       this.textarea.style.height = `${Math.max(24, height)}px`;
       this.textarea.scrollTop = scrollTop;
       this.textarea.scrollLeft = scrollLeft;
-      // Auto-grow moves the fixed portal's anchor without a window resize.
-      // Position it in the following layout frame, after the new panel and
-      // trigger geometry is observable.
-      this.scheduleTypographyPosition();
       void this.publishInset();
     });
   }
@@ -1576,6 +1308,8 @@ export class Composer {
 
   private setResizePercent(value: number): void {
     this.resizePercent = Math.max(10, Math.min(this.maximumResizePercent(), Math.round(value)));
+    this.size = this.resizePercent >= 25 ? "expanded" : "compact";
+    this.panel.dataset.size = this.size;
     this.grip.setAttribute("aria-valuemin", "10");
     this.grip.setAttribute("aria-valuemax", String(this.maximumResizePercent()));
     this.grip.setAttribute("aria-valuenow", String(this.resizePercent));
@@ -1583,11 +1317,6 @@ export class Composer {
     this.scheduleAutoGrow();
   }
 
-  private readonly onTabActivate = (event: Event): void => {
-    if (!event.isTrusted || this.destroyed) return;
-    if (this.contentState === "sent") this.panel.dataset.sentReopened = "true";
-    this.setOpen(true);
-  };
   private readonly onClose: EventListener = (event) => {
     if (!event.isTrusted || this.destroyed) return;
     event.preventDefault();
@@ -1728,62 +1457,6 @@ export class Composer {
     this.mode = this.mode === "prose" ? "code" : "prose";
     this.applyMode();
     this.persistComposer();
-    this.scheduleStoredDraft();
-    this.render();
-  };
-  private readonly onToggleTypography: EventListener = (event) => {
-    if (!event.isTrusted || this.destroyed) return;
-    event.preventDefault();
-    this.setTypographyOpen(!this.typographyOpen);
-  };
-  private readonly onTypographyMinus: EventListener = (event) => {
-    if (!event.isTrusted) return;
-    event.preventDefault();
-    this.requestTypography(this.typographyState.size - 1);
-  };
-  private readonly onTypographyPlus: EventListener = (event) => {
-    if (!event.isTrusted) return;
-    event.preventDefault();
-    this.requestTypography(this.typographyState.size + 1);
-  };
-  private readonly onTypographyReset: EventListener = (event) => {
-    if (!event.isTrusted) return;
-    event.preventDefault();
-    this.requestTypography(DEFAULT_COMPOSER_FONT_SIZE);
-  };
-  private readonly onDocumentPointerDown: EventListener = (value) => {
-    if (!this.typographyOpen || !this.typographyRoot) return;
-    const target = value.target;
-    if (target instanceof Node
-      && !this.typographyRoot.contains(target)
-      && this.typographyPopover?.contains(target) !== true) this.setTypographyOpen(false);
-  };
-  private readonly onDocumentKeydown: EventListener = (value) => {
-    const event = value as KeyboardEvent;
-    if (!event.isTrusted || !this.typographyOpen || event.key !== "Escape") return;
-    const focusWasInside = this.typographyPopover?.contains(document.activeElement) === true;
-    event.preventDefault();
-    event.stopPropagation();
-    this.setTypographyOpen(false);
-    if (focusWasInside) this.typographyTrigger?.focus({ preventScroll: true });
-  };
-  private readonly onTypographyViewportChange: EventListener = () => {
-    if (this.typographyOpen) this.positionTypographyPopover();
-    this.scheduleTypographyPosition();
-  };
-  private readonly onToggleSize: EventListener = (event) => {
-    if (!event.isTrusted || this.destroyed) return;
-    this.size = this.size === "compact" ? "expanded" : "compact";
-    const target = this.options.preferences().composer.heightPercent[this.density][this.size];
-    this.resizePercent = target ?? 0;
-    if (this.resizePercent === 0 && this.density === "standard") {
-      this.setResizePercent(this.size === "expanded" ? 45 : 25);
-    } else if (this.resizePercent === 0) {
-      this.setResizePercent(this.size === "expanded" ? 35 : 20);
-    }
-    else this.persistComposer();
-    this.applySize();
-    this.scheduleAutoGrow();
     this.scheduleStoredDraft();
     this.render();
   };

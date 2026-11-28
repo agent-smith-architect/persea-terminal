@@ -121,11 +121,7 @@ async function main() {
   };
   const tile = (name) => page.locator(".persea-unified-sheet__tile").filter({ has: page.locator(".persea-unified-sheet__label", { hasText: name }) }).first();
   const openSessions = async () => {
-    if (POINTER === "fine") await page.locator(".persea-unified-tag").click();
-    else {
-      await openSheet();
-      await tile("Switch").click();
-    }
+    await page.locator(".persea-unified-tag").click();
     await page.locator(".persea-session-switcher:visible .persea-session-switcher__row").first().waitFor();
   };
   const waitSession = async (text) => {
@@ -172,7 +168,7 @@ async function main() {
         await sheet.waitFor({ state: "visible" });
         assert(await opener.getAttribute("aria-expanded") === "true", "the opener did not report the sheet open");
         assert(await opener.getAttribute("aria-controls") === await sheet.getAttribute("id"), "the opener does not control the sheet it opens");
-        assert(await tile("Clipboard").isVisible(), "the sheet the opener opened has no visible Clipboard route");
+        assert(await tile("Clipboard").count() === 0 && await tile("Switch session").count() === 0, "the sheet duplicated primary toolbar routes");
         assert(await tile("Keys").isVisible() && await page.locator(".persea-unified-toolbar-paste").isVisible(), "the opened sheet is missing Keys or the primary Paste route");
         // The same control closes it: its own pointerdown must not be read as
         // an outside dismissal that the click would then immediately undo.
@@ -188,7 +184,7 @@ async function main() {
         await opener.click();
         await sheet.waitFor({ state: "visible" });
         assert(await opener.getAttribute("aria-expanded") === "true", "the coarse opener did not report the sheet open");
-        assert(await tile("Clipboard").isVisible(), "the sheet the coarse opener opened has no visible Clipboard route");
+        assert(await tile("Keys").isVisible() && await tile("Clipboard").count() === 0, "the coarse sheet does not expose concise Keys without duplicate Clipboard");
         await opener.click();
         await sheet.waitFor({ state: "hidden" });
 
@@ -417,11 +413,7 @@ async function main() {
       })}`, { waitUntil: "load" });
       await scenarioPage.waitForFunction(() => document.querySelector(".xterm-rows")?.textContent?.includes("fixture-live"), null, { timeout: 10_000 });
       const openList = async (target = "beta") => {
-        if (POINTER === "fine") await scenarioPage.locator(".persea-unified-tag").click();
-        else {
-          await scenarioPage.getByRole("button", { name: "Quick actions", exact: true }).click();
-          await scenarioPage.locator(".persea-unified-sheet__tile").filter({ has: scenarioPage.locator(".persea-unified-sheet__label", { hasText: "Switch" }) }).first().click();
-        }
+        await scenarioPage.locator(".persea-unified-tag").click();
         await scenarioPage.locator(".persea-session-switcher:visible").getByRole("button", { name: `Switch to ${target}` }).waitFor();
       };
       return { scenarioContext, scenarioPage, scenarioErrors, openList };
@@ -435,7 +427,7 @@ async function main() {
     const refusalBefore = await snapshot();
     await control({ sessionBState: "blocked_alt_screen" });
     await refused.scenarioPage.getByRole("button", { name: "Switch to beta" }).click();
-    await refused.scenarioPage.waitForFunction(() => document.querySelector(".persea-unified-sheet__status")?.textContent?.includes("full-screen"), null, { timeout: 5_000 });
+    await refused.scenarioPage.waitForFunction(() => document.querySelector(".persea-unified-identity__session-status")?.textContent?.includes("full-screen"), null, { timeout: 5_000 });
     const refusalAfter = await snapshot();
     assert(refusalAfter.counters.websockets === refusalBefore.counters.websockets, "pre-commit refusal opened a B socket");
     assert(refusalAfter.attachments.length === refusalBefore.attachments.length && refusalAfter.attachments[0].id === refusalBefore.attachments[0].id && refusalAfter.attachments[0].live, "pre-commit refusal changed A attachment");

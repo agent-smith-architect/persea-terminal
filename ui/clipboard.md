@@ -2,8 +2,10 @@
 
 Dashboard and the terminal expose the same Clipboard dialog. The clipboard icon
 opens it when no terminal text is selected; a selected range still turns that
-control into Copy. The terminal menu opens Clipboard, Keys, Composer, image
-attachment, session controls, and settings without duplicating raw key buttons.
+control into Copy. The terminal menu (`≡`) exposes secondary controls (Keys,
+Attach image, Keyboard settings, Help, Scrollback, and Hide keyboard while a
+keyboard is active) without duplicating primary top-bar routes (Clipboard,
+Composer, Session switcher) or raw key buttons.
 
 ![Shared Clipboard dialog over a live terminal showing direct device paste and shared text and image items](../docs/images/clipboard-desktop.png)
 
@@ -17,8 +19,11 @@ while hovered with a mouse or focused. Errors and progress remain until dismisse
 replaced or a view change. Every message has a 44px dismiss control; keyboard
 dismissal returns focus to the dialog's Close control. Older timers cannot clear
 newer messages. The polite status region announces feedback without taking focus.
-Closing the dialog clears its message and timers. Composer insertion receipts show the
-result and hide control; font options return when editing a new draft.
+Closing the dialog clears its message and timers. Composer insertion receipts
+show the result and hide control; composer font size is configured in Dashboard
+Settings → Appearance. In the composer itself, a **Code**/**Prose** toggle gates
+smart-punctuation detection and the **Fix** helper to Code mode, while **Clear**
+appears only when a draft or staged image is present.
 
 The floating, dismissible message follows [Carbon's toast guidance](https://carbondesignsystem.com/components/notification/usage/).
 Announcements follow the [W3C status message guidance](https://www.w3.org/WAI/WCAG22/Understanding/status-messages.html).

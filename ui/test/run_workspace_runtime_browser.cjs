@@ -1346,16 +1346,15 @@ async function main() {
       const cellNow = async (session) => (await tab.state()).cells.find((c) => c.session === session);
       const openSnippetList = async (session) => {
         if ((await clipboardState()).count) await clipboardAction("Close clipboard");
-        let cell = await cellNow(session);
-        if (!cell.sheetOpen) {
-          assert(cell.openerPoint, `${id}: pane ${session} has no sheet opener`);
-          await tab.tap(cell.openerPoint);
-          await delay(200);
-          cell = await cellNow(session);
-        }
-        const tile = await tilePoint(session, "Clipboard");
-        assert(tile, `${id}: pane ${session} has no Clipboard route`);
-        await tab.tap(tile); await delay(250);
+        const button = await tab.evaluate(`(() => {
+          const cell = document.querySelector('.ws-cell[data-ws-session=' + ${JSON.stringify(JSON.stringify(session))} + ']');
+          const el = cell && cell.querySelector('.persea-unified-toolbar-paste');
+          if (!el) return null;
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 ? { x: r.x + r.width / 2, y: r.y + r.height / 2 } : null;
+        })()`);
+        assert(button, `${id}: pane ${session} has no Clipboard route`);
+        await tab.tap(button); await delay(250);
       };
 
       // --- clipboard-shared-polling (six panes, ONE poll loop) -------------------------------

@@ -205,13 +205,6 @@ button[data-copy-state="failed"] {
   color: var(--persea-chrome-muted-fg, #c5d5ec);
 }
 .persea-unified-identity__sessions[hidden] { display: none; }
-.persea-unified-identity__session-actions {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 0.3rem;
-  margin-block: 0.35rem;
-}
-.persea-unified-identity__session-actions button { min-height: 44px; }
 .persea-unified-identity__row {
   display: flex;
   gap: 0.6rem;
@@ -425,15 +418,14 @@ button[data-copy-state="failed"] {
   .persea-unified-toolbar__secondary button { min-height: 40px; }
 }
 
-/* The floor under the phone rule above. Below about 320 CSS px — narrower than
-   any phone this ships to, and the width the scroll-geometry suite uses to
-   prove the key row scrolls inside itself — the row's fixed 44 px targets and
+/* The floor under the phone rule above. Below 300 CSS px content width
+   (< 308px viewport — narrower than any 320px phone, where the 309px row
+   budget fits with the tag visible) — the row's fixed 44 px targets and
    the geometry readout already consume the viewport, and adding a 44 px chip
    makes the PAGE scroll sideways. That is the harder failure: horizontal
    overflow breaks the terminal's whole geometry contract, while a missing chip
-   costs a name that the reconnect strip, the failure notice and the sheet still
-   carry. So the tag stands down here, and only here. */
-@container (max-width: 319px) {
+   costs a name that the reconnect strip and failure notice still carry. */
+@container (max-width: 300px) {
   .persea-unified-identity { display: none; }
 }
 
@@ -455,37 +447,50 @@ button[data-copy-state="failed"] {
   @container (max-width: 719px) {
     .persea-unified-toolbar {
       gap: 4px;
-      padding-inline: 0.75rem;
+      padding-inline: 0.25rem;
     }
     .persea-unified-toolbar__controls { gap: 4px; }
-    /* row budget at phone-360: 24 padding + 88 tag + 4 gap +
-       (48 + 48 + 44 + 44 + 44 + 4×4 gaps) = 360. The tag gives 8px so the two
-       word-bearing controls can hold "Select", "Copied" and "Failed" as words
-       without truncation. The padding is one token for
-       every control in the row (terminal touch law); the widths are per control. */
+    /* row budget at phone-320: 8 padding + 44 tag + 20 gaps +
+       (50 + 53 + 46 + 44 + 44) = 309 <= 320. The tag flexes to fill all
+       remaining width at 360/390+. All five ordinary controls share one
+       typography and padding token at (0,3,1); each button keeps only its own
+       horizontal box width so 110x33 never clips and Copy/Copied never shift
+       neighbors. */
     .persea-unified-toolbar button.persea-unified-tag {
-      min-width: 76px;
+      min-width: 44px;
       max-width: none;
       flex: 1 1 auto;
     }
-    /* Specificity (0,3,1): the shared control token further down the sheet
-       (`.persea-unified-toolbar button.persea-unified-copy`, (0,2,1)) sets
-       padding 0.35rem and would otherwise win by source order. */
     .persea-unified-toolbar .persea-unified-toolbar__controls > button:not(.persea-unified-fit-hint) {
       box-sizing: border-box;
+      padding: 0.3rem 0.2rem;
+      font-size: 0.68rem;
+    }
+    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-quick-actions,
+    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-composer-toggle,
+    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-toolbar__more,
+    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-phone-view,
+    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-fit-height {
       width: 44px;
       min-width: 44px;
       max-width: 44px;
-      padding-inline: 0.1rem;
     }
-    /* 54px: the Linux phone faces set "Copied" at ~46.5px (iOS's is narrower);
-       the row budget on a 360px phone is 24 + 76 (tag) + 4 + (54 + 54 + 44 +
-       44 + 44 + 16 gaps). */
-    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-copy,
+    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-view-disclosure {
+      width: auto;
+      min-width: 44px;
+      max-width: none;
+    }
+    .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-copy {
+      inline-size: 50px;
+      width: 50px;
+      min-width: 50px;
+      max-width: 50px;
+    }
     .persea-unified-toolbar .persea-unified-toolbar__controls > button.persea-unified-toolbar-paste {
-      width: 54px;
-      min-width: 54px;
-      max-width: 54px;
+      inline-size: 53px;
+      width: 53px;
+      min-width: 53px;
+      max-width: 53px;
     }
     .persea-unified-toolbar button.persea-unified-fit-height { margin-right: 0; }
     .persea-unified-toolbar button.persea-unified-fit-hint { display: none; }

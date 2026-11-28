@@ -174,7 +174,13 @@ body.ws-document[data-ws-theme="catppuccin-mocha"] {
   .ws-cell__mount .persea-unified-geometry { display: none; }
   .ws-cell__mount .persea-unified-toolbar button.persea-unified-fit-hint { display: none; }
   @container (min-width: 16rem) {
-    .ws-cell__mount .persea-unified-identity { display: flex; position: relative; z-index: 1; }
+    .ws-cell__mount .persea-unified-identity { display: flex; position: static; z-index: 1; }
+  }
+  .ws-cell__mount .persea-unified-identity__details {
+    left: auto;
+    right: 0;
+    width: min(24rem, calc(100vw - 1.5rem));
+    max-width: calc(100vw - 1.5rem);
   }
   .ws-cell__mount .persea-unified-toolbar button.persea-unified-tag { flex: 0 1 auto; min-width: 2.5rem; max-width: 7rem; }
   .ws-cell__mount .persea-unified-tag__alias { display: none; }

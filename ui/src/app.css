@@ -24,7 +24,7 @@ body,
 body[data-persea-theme="rose-pine"],
 .persea-unified-terminal[data-theme="rose-pine"] { --persea-page-bg: #12101c; --persea-terminal-bg: #191724; --persea-chrome-bg: #26233a; --persea-chrome-fg: #e0def4; --persea-accent: #c4a7e7; }
 body[data-persea-theme="rose-pine-dawn"],
-.persea-unified-terminal[data-theme="rose-pine-dawn"] { --persea-page-bg: #f2e9e1; --persea-terminal-bg: #faf4ed; --persea-chrome-bg: #fffaf3; --persea-chrome-fg: #575279; --persea-accent: #286983; }
+.persea-unified-terminal[data-theme="rose-pine-dawn"] { --persea-page-bg: #f2e9e1; --persea-terminal-bg: #faf4ed; --persea-chrome-bg: #fffaf3; --persea-chrome-fg: #575279; --persea-accent: #286983; --persea-chrome-danger-fg: #a61e34; }
 body[data-persea-theme="solarized-dark"],
 .persea-unified-terminal[data-theme="solarized-dark"] { --persea-page-bg: #001f27; --persea-terminal-bg: #002b36; --persea-chrome-bg: #073642; --persea-chrome-fg: #eee8d5; --persea-accent: #2aa198; }
 body[data-persea-theme="gruvbox-dark"],

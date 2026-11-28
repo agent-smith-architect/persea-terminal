@@ -64,7 +64,7 @@ func defaultKeyboardPreferences() KeyboardPreferenceRecord {
 		Version: 1,
 		Layout: KeyboardLayout{
 			Bar:       []string{"key:escape:0", "key:tab:0", "modifier:ctrl", "key:arrow-left:0", "key:arrow-down:0", "key:arrow-up:0", "key:arrow-right:0"},
-			Favorites: []string{"modifier:alt", "key:c:1", "key:d:1", "key:enter:0", "key:home:0", "key:end:0", "key:page-up:0", "key:page-down:0", "key:f1:0"},
+			Favorites: []string{"modifier:alt", "modifier:shift", "key:c:1", "key:d:1", "key:enter:0", "key:tab:4", "key:r:1", "key:l:1", "key:home:0", "key:end:0", "key:page-up:0", "key:page-down:0"},
 		},
 		Prefixes: map[string]string{"tmux": "key:b:1", "screen": "key:a:1"},
 	}}

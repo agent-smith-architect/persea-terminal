@@ -1,6 +1,7 @@
 declare const process: { stdout: { write(value: string): void } };
 
 import {
+  compactOutputActivityLabel,
   sessionSwitcherRows,
   switcherInventory,
   type SessionSwitcherInventory,
@@ -97,5 +98,35 @@ const inventory: SessionSwitcherInventory = Object.freeze({
   const active = { ...alpha, activity: 1, outputActivity: now / 1000 - 10 };
   assert.equal(sessionSwitcherRows({ sessions: [active] }, null, "", () => "", now)[0]?.activityLabel, "Output just now", "session interaction must not mask recent output");
   assert.deepEqual(["qt10", "qt2", "qt1"].map(name => ({ name })).sort(compareSessionNames).map(item => item.name), ["qt1", "qt2", "qt10"]);
+}
+
+{
+  // Favorites lead within each group in default sort; output sort puts latest output first.
+  const favored = sessionSwitcherRows(inventory, "scope-a", "", () => "blocked reason", 4_200_000, {
+    favorites: new Set(["scope-b"]),
+  });
+  assert.deepEqual(favored.map((row) => [row.session.name, row.favorite]), [
+    ["beta", true],
+    ["alpha", false],
+    ["blocked", false],
+    ["legacy", false],
+  ], "favorites must sort ahead of non-favorites in default order");
+
+  const byOutput = sessionSwitcherRows(inventory, "scope-a", "", () => "blocked reason", 4_200_000, {
+    favorites: new Set(["scope-b"]),
+    sort: "output",
+  });
+  assert.deepEqual(byOutput.map((row) => row.session.name), ["legacy", "blocked", "beta", "alpha"], "output sort must order by latest output descending");
+  assert.equal(compactOutputActivityLabel(undefined, 200_000_000), "");
+  assert.equal(compactOutputActivityLabel(200_000 - 10, 200_000_000), "now");
+  assert.equal(compactOutputActivityLabel(200_000 - 180, 200_000_000), "3m");
+  assert.equal(compactOutputActivityLabel(200_000 - 7200, 200_000_000), "2h");
+  assert.equal(compactOutputActivityLabel(200_000 - 2 * 86_400, 200_000_000), "2d");
+  const withRevision = switcherInventory({
+    realms: [],
+    detachedAliases: [],
+    favoritesRevision: 9,
+  } satisfies DashboardInventory, 11);
+  assert.equal(withRevision.favoritesRevision, 9, "switcherInventory must retain favoritesRevision");
 }
 process.stdout.write("session_switcher.test: PASS\n");

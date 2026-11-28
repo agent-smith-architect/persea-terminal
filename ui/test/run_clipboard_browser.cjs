@@ -298,11 +298,13 @@ async function main(){
           assert(await terminal.getByRole("button",{name:/Remove image/}).count()===0,"Remove clears composer image");
           assert((await inputs()).length===5,"Removing a staged image sends no input");
         });
-        await check("terminal menu opens the same Clipboard",async()=>{
+        await check("terminal toolbar opens the same Clipboard without duplicating it in Quick actions",async()=>{
           await terminal.getByRole("button",{name:"Hide composer — draft stays here",exact:true}).click();
           await terminal.getByRole("button",{name:"Quick actions",exact:true}).click();
-          await terminal.getByRole("group",{name:"Terminal menu",exact:true}).getByRole("button",{name:"Open shared clipboard",exact:true}).click();
-          await chooseText(terminal,"Shared across devices");await button(terminal,"Cancel").click();assert((await inputs()).length===5,"Menu preview cancellation sends nothing");await button(terminal,"Close clipboard").click();
+          assert(await terminal.getByRole("group",{name:"Terminal menu",exact:true}).getByRole("button",{name:"Open shared clipboard",exact:true}).count()===0,"Quick actions must not duplicate Clipboard");
+          await terminal.getByRole("button",{name:"Quick actions",exact:true}).click();
+          await terminal.locator(".persea-unified-toolbar-paste").click();
+          await chooseText(terminal,"Shared across devices");await button(terminal,"Cancel").click();assert((await inputs()).length===5,"Preview cancellation sends nothing");await button(terminal,"Close clipboard").click();
         });
         if(width===390){
           const nativeCopy=async(field,body,wanted,stale)=>{
@@ -325,7 +327,7 @@ async function main(){
           });
           await check("trusted browser Copy from edited preview shares only its substring after frozen selection",async()=>{
             await terminal.getByRole("button",{name:"Select terminal text",exact:true}).click();await terminal.locator(".persea-unified-select__body").waitFor({state:"visible"});
-            await terminal.getByRole("button",{name:"Quick actions",exact:true}).click();await terminal.getByRole("group",{name:"Terminal menu",exact:true}).getByRole("button",{name:"Open shared clipboard",exact:true}).click();await chooseText(terminal,"Shared across devices");
+            await terminal.locator(".persea-unified-toolbar-paste").click();await chooseText(terminal,"Shared across devices");
             await nativeCopy(terminal.getByLabel("Clipboard text",{exact:true}),"before PREVIEW_NATIVE_SELECTION after","PREVIEW_NATIVE_SELECTION",true);await button(terminal,"Cancel").click();await button(terminal,"Close clipboard").click();
             const leave=terminal.getByRole("button",{name:"Leave selection without copying",exact:true});if(await leave.count())await leave.click();
           });
@@ -345,10 +347,10 @@ async function main(){
         if(width===390)await check("session switch during pending image download never attaches to the new target",async()=>{
           await openTerminal();await imageControl({delayReadMs:1500});const stages=(await get("/__clipboard/control")).stages.length;
           await clipboard(terminal).locator('[data-clipboard-item^="image:"]').getByRole("button",{name:"Insert image",exact:true}).click();await terminal.keyboard.press("Escape");
-          await terminal.getByRole("button",{name:"Quick actions",exact:true}).click();await terminal.getByRole("button",{name:"Choose another session",exact:true}).click();await terminal.getByRole("button",{name:"Switch to beta",exact:true}).click();
+          await terminal.locator(".persea-unified-tag").click();await terminal.getByRole("button",{name:"Switch to beta",exact:true}).click();
           await until(async()=>(await get("/__fixture/control")).attachments.some(a=>a.session==="B"&&a.mode==="CONTROL"),"new session control");await pause(1700);
           assert((await get("/__clipboard/control")).stages.length===stages,"Old image completion cannot stage for new target");assert(await terminal.getByRole("button",{name:/Remove image/}).count()===0,"New target composer has no old image");assert((await inputs()).length===5,"Switch sends no stale terminal input");await imageControl({delayReadMs:0});
-          await terminal.getByRole("button",{name:"Quick actions",exact:true}).click();await terminal.getByRole("button",{name:"Choose another session",exact:true}).click();await terminal.getByRole("button",{name:"Switch to alpha",exact:true}).click();
+          await terminal.locator(".persea-unified-tag").click();await terminal.getByRole("button",{name:"Switch to alpha",exact:true}).click();
           await until(async()=>(await get("/__fixture/control")).attachments.at(-1)?.session==="A"&&(await get("/__fixture/control")).attachments.at(-1)?.mode==="CONTROL","return to alpha");
         });
         await check("retention preferences persist across devices and duplicates keep identity",async()=>{
@@ -395,15 +397,17 @@ async function main(){
           const receipt=terminal.locator('.attachment-page__composer[data-content="sent"]');await receipt.waitFor({state:"visible"});
           // "Inserting" until the terminal reports the input written.
           await until(async()=>/Inserted.*1 image/.test(await receipt.innerText()),"Image insertion receipt is visible");
-          assert(!await receipt.locator('.attachment-page__composer-typography').isVisible(),"Receipt has no font control");
-          assert(!await terminal.locator('.attachment-page__composer-typography-popover').isVisible(),"Receipt has no font popover");
+          assert(!await receipt.locator('.attachment-page__composer-mode-toggle').isVisible(),"Receipt hides mode toggle");
+          assert(!await receipt.locator('.attachment-page__composer-clear').isVisible(),"Receipt hides clear button");
           await until(async()=>(await inputs()).length===before.length+1,"Image path sent exactly once");
           assert(!(await inputs()).at(-1).includes("\n"),"Image insertion does not run the path");await shot(terminal,"image-receipt");
           await receipt.locator('.attachment-page__composer-close').click();
           await terminal.getByRole("button",{name:/^Open composer/}).click();
           await terminal.locator('.attachment-page__composer-textarea').fill("next draft");
-          assert(await terminal.locator('.attachment-page__composer-typography').isVisible(),"Draft restores font control");
+          assert(await terminal.locator('.attachment-page__composer-mode-toggle').isVisible(),"Draft restores mode toggle");
+          assert(await terminal.locator('.attachment-page__composer-clear').isVisible(),"Non-empty draft shows clear button");
           await terminal.locator('.attachment-page__composer-textarea').fill("");
+          assert(!await terminal.locator('.attachment-page__composer-clear').isVisible(),"Empty draft hides clear button");
           await terminal.locator('.attachment-page__composer-close').click();
         });
         await check("disconnect invalidates an already open row Paste action",async()=>{
